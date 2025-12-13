@@ -1,0 +1,127 @@
+import { useState } from "react";
+import { 
+  Menu, 
+  Search, 
+  Library, 
+  Bot, 
+  Plus, 
+  MessageSquare, 
+  MoreHorizontal,
+  Settings,
+  PanelLeftClose,
+  ChevronDown
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+
+interface SidebarProps {
+  className?: string;
+}
+
+export function Sidebar({ className }: SidebarProps) {
+  const [activeChat, setActiveChat] = useState<string | null>(null);
+
+  const recentChats = [
+    { id: "1", title: "hola", time: "Just now" },
+    { id: "2", title: "que haces ahora?", time: "6h ago" },
+    { id: "3", title: "que es la gestion ad...", time: "6h ago" },
+    { id: "4", title: "Chat with Prueba", time: "7h ago" },
+    { id: "5", title: "que es la gestion ad...", time: "9h ago" },
+    { id: "6", title: "Educacion ) propón ...", time: "23h ago" },
+    { id: "7", title: "crea un word", time: "23h ago" },
+    { id: "8", title: "Chat with INTRODU...", time: "23h ago" },
+    { id: "9", title: "crea una grafica de ...", time: "Yesterday" },
+  ];
+
+  return (
+    <div className={cn("flex h-screen w-[260px] flex-col border-r bg-sidebar text-sidebar-foreground", className)}>
+      <div className="flex h-14 items-center justify-between px-4 py-2">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/5">
+             <Bot className="h-5 w-5" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold leading-none">Sira GPT</span>
+            <span className="text-[10px] text-muted-foreground">AI Platform</span>
+          </div>
+        </div>
+        <Button variant="ghost" size="icon" className="h-8 w-8">
+          <PanelLeftClose className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="px-2 py-2">
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+        >
+          <Plus className="h-4 w-4" />
+          New Chat
+        </Button>
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+        >
+          <Search className="h-4 w-4" />
+          Search chats
+        </Button>
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+        >
+          <Library className="h-4 w-4" />
+          Library
+        </Button>
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+        >
+          <Bot className="h-4 w-4" />
+          GPTs
+        </Button>
+      </div>
+
+      <Separator className="mx-4 my-2 w-auto opacity-50" />
+
+      <div className="px-4 py-2">
+        <h3 className="mb-2 text-xs font-medium text-muted-foreground/70">Recent Chats</h3>
+      </div>
+
+      <ScrollArea className="flex-1 px-2">
+        <div className="flex flex-col gap-0.5 pb-4">
+          {recentChats.map((chat) => (
+            <Button
+              key={chat.id}
+              variant="ghost"
+              className={cn(
+                "group flex w-full flex-col items-start justify-center gap-0.5 px-2 py-6 text-left hover:bg-sidebar-accent",
+                activeChat === chat.id && "bg-sidebar-accent"
+              )}
+              onClick={() => setActiveChat(chat.id)}
+            >
+              <div className="flex w-full items-center justify-between">
+                <span className="truncate text-sm font-medium">{chat.title}</span>
+              </div>
+              <span className="text-[10px] text-muted-foreground">{chat.time}</span>
+            </Button>
+          ))}
+        </div>
+      </ScrollArea>
+
+      <div className="mt-auto border-t p-4">
+        <div className="flex items-center gap-3">
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className="bg-orange-100 text-orange-600">A</AvatarFallback>
+          </Avatar>
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <span className="truncate text-sm font-medium">Admin</span>
+            <span className="truncate text-xs text-muted-foreground">ENTERPRISE</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
