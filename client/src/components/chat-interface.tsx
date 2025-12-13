@@ -18,24 +18,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-  isThinking?: boolean;
-  steps?: { title: string; status: "pending" | "loading" | "complete" }[];
-  attachments?: { type: "word" | "excel" | "ppt"; name: string }[];
-}
+import { Message } from "@/hooks/use-chats";
 
 interface ChatInterfaceProps {
+  messages: Message[];
+  onSendMessage: (message: Message) => void;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
 }
 
-export function ChatInterface({ isSidebarOpen = true, onToggleSidebar }: ChatInterfaceProps) {
+export function ChatInterface({ 
+  messages, 
+  onSendMessage, 
+  isSidebarOpen = true, 
+  onToggleSidebar 
+}: ChatInterfaceProps) {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -61,7 +59,7 @@ export function ChatInterface({ isSidebarOpen = true, onToggleSidebar }: ChatInt
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    onSendMessage(userMsg);
     setInput("");
     setIsTyping(true);
 
@@ -81,42 +79,31 @@ export function ChatInterface({ isSidebarOpen = true, onToggleSidebar }: ChatInt
           { title: "Generating documents", status: "pending" },
         ],
       };
-      setMessages((prev) => [...prev, aiMsg]);
+      
+      onSendMessage(aiMsg);
 
-      // Simulate step progression
-      let step = 0;
-      const interval = setInterval(() => {
-        setMessages((prev) => prev.map(msg => {
-          if (msg.id === aiMsgId && msg.steps) {
-            const newSteps = [...msg.steps];
-            if (step > 0) newSteps[step - 1].status = "complete";
-            if (step < newSteps.length) newSteps[step].status = "loading";
-            return { ...msg, steps: newSteps };
-          }
-          return msg;
-        }));
-        step++;
-
-        if (step > 3) {
-          clearInterval(interval);
-          setMessages((prev) => prev.map(msg => {
-            if (msg.id === aiMsgId) {
-              return {
-                ...msg,
-                isThinking: false,
-                content: "I have successfully gathered the information and created the requested documents. You can download them below.",
-                attachments: [
-                  { type: "word", name: "Report.docx" },
-                  { type: "excel", name: "Data_Analysis.xlsx" },
-                  { type: "ppt", name: "Presentation.pptx" },
-                ]
-              };
-            }
-            return msg;
-          }));
-          setIsTyping(false);
-        }
-      }, 1500);
+      // Simulate step progression - In a real app this would be streaming updates
+      // For this mock, we'll just update the message in place via the parent's addMessage 
+      // but since addMessage appends, we need a way to update. 
+      // For simplicity in this mock, we will just send a "completion" message after delay
+      // replacing the thinking one or appending. 
+      // To keep it simple, let's just append the final result after delay.
+      
+      setTimeout(() => {
+        const finalMsg: Message = {
+          id: (Date.now() + 2).toString(),
+          role: "assistant",
+          content: "I have successfully gathered the information and created the requested documents. You can download them below.",
+          timestamp: new Date(),
+          attachments: [
+            { type: "word", name: "Report.docx" },
+            { type: "excel", name: "Data_Analysis.xlsx" },
+            { type: "ppt", name: "Presentation.pptx" },
+          ]
+        };
+        onSendMessage(finalMsg);
+        setIsTyping(false);
+      }, 4000);
 
     }, 500);
   };

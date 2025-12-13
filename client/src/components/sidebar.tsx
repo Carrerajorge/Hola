@@ -17,27 +17,25 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
+import { Chat } from "@/hooks/use-chats";
+
 interface SidebarProps {
   className?: string;
+  chats: Chat[];
+  activeChatId: string | null;
+  onSelectChat: (id: string) => void;
   onNewChat?: () => void;
   onToggle?: () => void;
 }
 
-export function Sidebar({ className, onNewChat, onToggle }: SidebarProps) {
-  const [activeChat, setActiveChat] = useState<string | null>(null);
-
-  const recentChats = [
-    { id: "1", title: "hola", time: "Just now" },
-    { id: "2", title: "que haces ahora?", time: "6h ago" },
-    { id: "3", title: "que es la gestion ad...", time: "6h ago" },
-    { id: "4", title: "Chat with Prueba", time: "7h ago" },
-    { id: "5", title: "que es la gestion ad...", time: "9h ago" },
-    { id: "6", title: "Educacion ) propón ...", time: "23h ago" },
-    { id: "7", title: "crea un word", time: "23h ago" },
-    { id: "8", title: "Chat with INTRODU...", time: "23h ago" },
-    { id: "9", title: "crea una grafica de ...", time: "Yesterday" },
-  ];
-
+export function Sidebar({ 
+  className, 
+  chats, 
+  activeChatId, 
+  onSelectChat, 
+  onNewChat, 
+  onToggle 
+}: SidebarProps) {
   return (
     <div className={cn("flex h-screen w-[260px] flex-col border-r bg-sidebar text-sidebar-foreground", className)}>
       <div className="flex h-14 items-center justify-between px-4 py-2">
@@ -95,20 +93,20 @@ export function Sidebar({ className, onNewChat, onToggle }: SidebarProps) {
 
       <ScrollArea className="flex-1 px-2">
         <div className="flex flex-col gap-0.5 pb-4">
-          {recentChats.map((chat) => (
+          {chats.map((chat) => (
             <Button
               key={chat.id}
               variant="ghost"
               className={cn(
                 "group flex w-full flex-col items-start justify-center gap-0.5 px-2 py-6 text-left hover:bg-sidebar-accent",
-                activeChat === chat.id && "bg-sidebar-accent"
+                activeChatId === chat.id && "bg-sidebar-accent"
               )}
-              onClick={() => setActiveChat(chat.id)}
+              onClick={() => onSelectChat(chat.id)}
             >
               <div className="flex w-full items-center justify-between">
                 <span className="truncate text-sm font-medium">{chat.title}</span>
               </div>
-              <span className="text-[10px] text-muted-foreground">{chat.time}</span>
+              <span className="text-[10px] text-muted-foreground">{chat.date}</span>
             </Button>
           ))}
         </div>

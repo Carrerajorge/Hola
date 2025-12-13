@@ -1,25 +1,35 @@
 import { Sidebar } from "@/components/sidebar";
 import { ChatInterface } from "@/components/chat-interface";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { useChats } from "@/hooks/use-chats";
 
 export default function Home() {
   const isMobile = useIsMobile();
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
-  const [chatId, setChatId] = useState(Date.now());
-
-  const handleNewChat = () => {
-    setChatId(Date.now());
-  };
+  
+  const { 
+    chats, 
+    activeChat, 
+    setActiveChatId, 
+    createChat, 
+    addMessage 
+  } = useChats();
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <div className={isSidebarOpen ? "hidden md:block" : "hidden"}>
-        <Sidebar onNewChat={handleNewChat} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
+        <Sidebar 
+          chats={chats} 
+          activeChatId={activeChat?.id || null} 
+          onSelectChat={setActiveChatId} 
+          onNewChat={createChat} 
+          onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
+        />
       </div>
 
       {/* Mobile Sidebar */}
@@ -31,18 +41,28 @@ export default function Home() {
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="p-0 w-[260px]">
-            <Sidebar onNewChat={handleNewChat} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
+            <Sidebar 
+              chats={chats} 
+              activeChatId={activeChat?.id || null} 
+              onSelectChat={setActiveChatId} 
+              onNewChat={createChat} 
+              onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
+            />
           </SheetContent>
         </Sheet>
       </div>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full w-full">
-        <ChatInterface 
-          key={chatId} 
-          isSidebarOpen={isSidebarOpen} 
-          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} 
-        />
+        {activeChat && (
+          <ChatInterface 
+            key={activeChat.id} 
+            messages={activeChat.messages}
+            onSendMessage={(msg) => addMessage(activeChat.id, msg)}
+            isSidebarOpen={isSidebarOpen} 
+            onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} 
+          />
+        )}
       </main>
     </div>
   );
