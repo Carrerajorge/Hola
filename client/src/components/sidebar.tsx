@@ -19,9 +19,10 @@ import { Separator } from "@/components/ui/separator";
 
 interface SidebarProps {
   className?: string;
+  onNewChat?: () => void;
 }
 
-export function Sidebar({ className }: SidebarProps) {
+export function Sidebar({ className, onNewChat }: SidebarProps) {
   const [activeChat, setActiveChat] = useState<string | null>(null);
 
   const recentChats = [
@@ -57,6 +58,7 @@ export function Sidebar({ className }: SidebarProps) {
         <Button 
           variant="ghost" 
           className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+          onClick={onNewChat}
         >
           <Plus className="h-4 w-4" />
           New Chat

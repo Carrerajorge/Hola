@@ -9,12 +9,17 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 export default function Home() {
   const isMobile = useIsMobile();
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
+  const [chatId, setChatId] = useState(Date.now());
+
+  const handleNewChat = () => {
+    setChatId(Date.now());
+  };
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <div className="hidden md:block">
-        <Sidebar />
+        <Sidebar onNewChat={handleNewChat} />
       </div>
 
       {/* Mobile Sidebar */}
@@ -26,14 +31,14 @@ export default function Home() {
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="p-0 w-[260px]">
-            <Sidebar />
+            <Sidebar onNewChat={handleNewChat} />
           </SheetContent>
         </Sheet>
       </div>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full w-full">
-        <ChatInterface />
+        <ChatInterface key={chatId} />
       </main>
     </div>
   );
