@@ -17,8 +17,9 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
-import { Chat, useChats } from "@/hooks/use-chats";
+import { Chat } from "@/hooks/use-chats";
 import { Trash2 } from "lucide-react";
+import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 
 interface SidebarProps {
   className?: string;
@@ -27,6 +28,7 @@ interface SidebarProps {
   onSelectChat: (id: string) => void;
   onNewChat?: () => void;
   onToggle?: () => void;
+  onDeleteChat?: (id: string, e: React.MouseEvent) => void;
 }
 
 export function Sidebar({ 
@@ -35,43 +37,33 @@ export function Sidebar({
   activeChatId, 
   onSelectChat, 
   onNewChat, 
-  onToggle 
+  onToggle,
+  onDeleteChat
 }: SidebarProps) {
-  // We need the helper function from useChats to format dates
-  // Since we can't easily pass the function itself if it's not in props,
-  // we'll just instantiate the hook here solely for the helper or move the helper out.
-  // Better: Move helper out of the hook or just use the hook here for the helper.
-  // Since useChats manages state, we don't want to duplicate state.
-  // Let's just import the hook to get the helper if we can, OR better:
-  // Refactor: We can just recreate the helper here or receive it as a prop.
-  // To keep it clean, I'll assume the parent passes the formatted date or we do it here.
-  // Actually, I'll just use date-fns here directly to group them.
   
-  // Group chats by date label
+  const getChatDateLabel = (timestamp: number) => {
+    const date = new Date(timestamp);
+    if (isToday(date)) return "Today";
+    if (isYesterday(date)) return "Yesterday";
+    if (isThisWeek(date)) return "Previous 7 Days";
+    if (isThisYear(date)) return format(date, "MMM d");
+    return format(date, "yyyy");
+  };
+
+  // Group chats
   const groupedChats = chats.reduce((groups, chat) => {
-    const { getChatDateLabel } = useChats(); // This creates a new state instance, not ideal but works for accessing the helper if it doesn't have side effects on mount.
-    // Wait, useChats has side effects (reading localStorage). 
-    // Let's NOT call useChats here. 
-    // I will modify Home.tsx to pass the grouped structure or just handle simple rendering here.
-    
-    // Simple approach: Just use a local helper.
-    const getLabel = (timestamp: number) => {
-      const date = new Date(timestamp);
-      const now = new Date();
-      // Simple logic to match the hook's intent without importing date-fns everywhere
-      if (date.toDateString() === now.toDateString()) return "Today";
-      // ... actually let's just use the hook in the parent and pass a formatted object?
-      // No, let's just make the sidebar smarter.
-      return "Recent"; 
-    };
-    
-    // actually, let's just modify the Sidebar to accept a `getLabel` prop or similar?
-    // Or just import date-fns here.
+    const label = getChatDateLabel(chat.timestamp);
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(chat);
     return groups;
   }, {} as Record<string, Chat[]>);
 
-  // Let's just use a simple grouping approach directly in the render
-  // I will assume the chats are already sorted.
+  // Order of groups
+  const groupOrder = ["Today", "Yesterday", "Previous 7 Days"];
+  // Add other dynamic keys that might appear
+  Object.keys(groupedChats).forEach(key => {
+    if (!groupOrder.includes(key)) groupOrder.push(key);
+  });
   
   return (
     <div className={cn("flex h-screen w-[260px] flex-col border-r bg-sidebar text-sidebar-foreground", className)}>
