@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 
 export interface Message {
   id: string;
@@ -13,8 +14,7 @@ export interface Message {
 export interface Chat {
   id: string;
   title: string;
-  date: string; // specialized string for display like "Just now", "Yesterday"
-  timestamp: number; // for sorting
+  timestamp: number;
   messages: Message[];
 }
 
@@ -24,7 +24,6 @@ const DEFAULT_CHATS: Chat[] = [
   { 
     id: "1", 
     title: "Welcome to Sira GPT", 
-    date: "Just now", 
     timestamp: Date.now(),
     messages: [
       {
@@ -69,7 +68,6 @@ export function useChats() {
     const newChat: Chat = {
       id: Date.now().toString(),
       title: "New Chat",
-      date: "Just now",
       timestamp: Date.now(),
       messages: []
     };
@@ -91,22 +89,47 @@ export function useChats() {
           ...chat,
           messages: updatedMessages,
           title: title,
-          timestamp: Date.now(),
-          date: "Just now" // Simplified for now
+          timestamp: Date.now()
         };
       }
       return chat;
     }));
   };
 
+  const deleteChat = (chatId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setChats(prev => {
+      const newChats = prev.filter(c => c.id !== chatId);
+      if (activeChatId === chatId) {
+        setActiveChatId(newChats[0]?.id || null);
+      }
+      return newChats;
+    });
+  };
+
   const activeChat = chats.find(c => c.id === activeChatId) || null;
 
+  // Sort chats by timestamp descending
+  const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp);
+
+  // Helper to format date label
+  const getChatDateLabel = (timestamp: number) => {
+    const date = new Date(timestamp);
+    if (isToday(date)) return "Today";
+    if (isYesterday(date)) return "Yesterday";
+    if (isThisWeek(date)) return "Previous 7 Days";
+    if (isThisYear(date)) return format(date, "MMM d");
+    return format(date, "yyyy");
+  };
+
   return {
-    chats,
+    chats: sortedChats,
     activeChatId,
     activeChat,
     setActiveChatId,
     createChat,
-    addMessage
+    addMessage,
+    deleteChat,
+    getChatDateLabel
   };
 }

@@ -16,7 +16,8 @@ export default function Home() {
     activeChat, 
     setActiveChatId, 
     createChat, 
-    addMessage 
+    addMessage,
+    deleteChat
   } = useChats();
 
   return (
@@ -29,6 +30,7 @@ export default function Home() {
           onSelectChat={setActiveChatId} 
           onNewChat={createChat} 
           onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
+          onDeleteChat={deleteChat}
         />
       </div>
 
@@ -47,6 +49,7 @@ export default function Home() {
               onSelectChat={setActiveChatId} 
               onNewChat={createChat} 
               onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
+              onDeleteChat={deleteChat}
             />
           </SheetContent>
         </Sheet>
