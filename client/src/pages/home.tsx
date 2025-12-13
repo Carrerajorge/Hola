@@ -18,8 +18,8 @@ export default function Home() {
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
       {/* Desktop Sidebar */}
-      <div className="hidden md:block">
-        <Sidebar onNewChat={handleNewChat} />
+      <div className={isSidebarOpen ? "hidden md:block" : "hidden"}>
+        <Sidebar onNewChat={handleNewChat} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
       </div>
 
       {/* Mobile Sidebar */}
@@ -31,14 +31,18 @@ export default function Home() {
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="p-0 w-[260px]">
-            <Sidebar onNewChat={handleNewChat} />
+            <Sidebar onNewChat={handleNewChat} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
           </SheetContent>
         </Sheet>
       </div>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full w-full">
-        <ChatInterface key={chatId} />
+        <ChatInterface 
+          key={chatId} 
+          isSidebarOpen={isSidebarOpen} 
+          onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} 
+        />
       </main>
     </div>
   );

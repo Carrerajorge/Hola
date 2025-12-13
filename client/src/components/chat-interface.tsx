@@ -10,7 +10,8 @@ import {
   FileIcon,
   CheckCircle2,
   Loader2,
-  MoreHorizontal
+  MoreHorizontal,
+  PanelLeftOpen
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,7 +28,12 @@ interface Message {
   attachments?: { type: "word" | "excel" | "ppt"; name: string }[];
 }
 
-export function ChatInterface() {
+interface ChatInterfaceProps {
+  isSidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
+}
+
+export function ChatInterface({ isSidebarOpen = true, onToggleSidebar }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
@@ -119,9 +125,16 @@ export function ChatInterface() {
     <div className="flex h-full flex-col bg-background relative">
       {/* Header */}
       <header className="flex h-14 items-center justify-between px-4 border-b bg-background/50 backdrop-blur-sm z-10 sticky top-0">
-        <div className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 px-2 py-1 rounded-md transition-colors">
-          <span className="font-semibold text-sm">xAI: Grok 4.1 Fast</span>
-          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+        <div className="flex items-center gap-2">
+          {!isSidebarOpen && (
+            <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="h-8 w-8 mr-2 text-muted-foreground">
+              <PanelLeftOpen className="h-4 w-4" />
+            </Button>
+          )}
+          <div className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 px-2 py-1 rounded-md transition-colors">
+            <span className="font-semibold text-sm">xAI: Grok 4.1 Fast</span>
+            <ChevronDown className="h-3 w-3 text-muted-foreground" />
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon">

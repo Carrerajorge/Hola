@@ -20,9 +20,10 @@ import { Separator } from "@/components/ui/separator";
 interface SidebarProps {
   className?: string;
   onNewChat?: () => void;
+  onToggle?: () => void;
 }
 
-export function Sidebar({ className, onNewChat }: SidebarProps) {
+export function Sidebar({ className, onNewChat, onToggle }: SidebarProps) {
   const [activeChat, setActiveChat] = useState<string | null>(null);
 
   const recentChats = [
@@ -49,7 +50,7 @@ export function Sidebar({ className, onNewChat }: SidebarProps) {
             <span className="text-[10px] text-muted-foreground">AI Platform</span>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onToggle}>
           <PanelLeftClose className="h-4 w-4" />
         </Button>
       </div>
