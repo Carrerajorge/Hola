@@ -232,61 +232,42 @@ export function ChatInterface({
         <div ref={bottomRef} />
       </div>
 
-      {/* Virtual Browser Panel - Small floating above input */}
+      {/* Input Area with Browser */}
+      {/* Floating Mini Browser - Tiny 5x5cm positioned left above input */}
       {(isBrowserOpen || input.trim().length > 0) && (
         <div className={cn(
-          "mx-auto border rounded-lg overflow-hidden shadow-md bg-card transition-all duration-200",
+          "absolute left-4 border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200",
           isBrowserMaximized 
-            ? "fixed inset-4 z-50 max-w-none" 
-            : "w-full max-w-3xl mb-2 mx-4 sm:mx-auto"
+            ? "fixed inset-4 z-50" 
+            : "w-[120px] bottom-24"
         )}>
-          {/* Browser Header - Compact */}
-          <div className="flex items-center gap-1 px-2 py-1 bg-muted/50 border-b">
-            <span className="text-[10px] font-medium text-muted-foreground mr-1">webview</span>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground">
-              <ArrowLeft className="h-2.5 w-2.5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground">
-              <ArrowRight className="h-2.5 w-2.5" />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground">
-              <RefreshCw className="h-2.5 w-2.5" />
-            </Button>
-            
-            {/* URL Bar - Compact */}
-            <div className="flex-1 flex items-center gap-1 bg-background rounded px-2 py-0.5 border text-[10px]">
-              <Globe className="h-2.5 w-2.5 text-muted-foreground" />
-              <input 
-                type="text" 
-                value={browserUrl}
-                onChange={(e) => setBrowserUrl(e.target.value)}
-                className="flex-1 bg-transparent text-[10px] outline-none"
-                placeholder="Enter URL..."
-              />
+          {/* Browser Header - Ultra Compact */}
+          <div className="flex items-center justify-between px-1 py-0.5 bg-muted/50 border-b">
+            <span className="text-[8px] font-medium text-muted-foreground">web</span>
+            <div className="flex items-center">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-4 w-4 text-muted-foreground hover:text-foreground"
+                onClick={() => setIsBrowserMaximized(!isBrowserMaximized)}
+              >
+                {isBrowserMaximized ? <Minimize2 className="h-2 w-2" /> : <Maximize2 className="h-2 w-2" />}
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-4 w-4 text-muted-foreground hover:text-foreground"
+                onClick={() => setIsBrowserOpen(false)}
+              >
+                <X className="h-2 w-2" />
+              </Button>
             </div>
-            
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-5 w-5 text-muted-foreground hover:text-foreground"
-              onClick={() => setIsBrowserMaximized(!isBrowserMaximized)}
-            >
-              {isBrowserMaximized ? <Minimize2 className="h-2.5 w-2.5" /> : <Maximize2 className="h-2.5 w-2.5" />}
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-5 w-5 text-muted-foreground hover:text-foreground"
-              onClick={() => setIsBrowserOpen(false)}
-            >
-              <X className="h-2.5 w-2.5" />
-            </Button>
           </div>
           
-          {/* Browser Content - Much smaller */}
+          {/* Browser Content - Tiny */}
           <div className={cn(
             "bg-white relative",
-            isBrowserMaximized ? "h-[calc(100%-28px)]" : "h-32"
+            isBrowserMaximized ? "h-[calc(100%-20px)]" : "h-[100px]"
           )}>
             <iframe 
               src={browserUrl}
@@ -295,11 +276,8 @@ export function ChatInterface({
               title="Virtual Browser"
             />
             {isTyping && (
-              <div className="absolute inset-0 bg-black/10 backdrop-blur-[1px] flex items-center justify-center">
-                <div className="bg-card px-2 py-1 rounded-md shadow-lg flex items-center gap-1">
-                  <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
-                  <span className="text-[10px] font-medium">AI browsing...</span>
-                </div>
+              <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
               </div>
             )}
           </div>
