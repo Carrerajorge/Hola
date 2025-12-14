@@ -3,6 +3,39 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ========================================
+   LIQUID UI / LIQUID DESIGN SYSTEM
+   - Organic shapes, soft edges
+   - Dynamic gradients
+   - Glassmorphism effects
+   - Fluid animations
+======================================== */
+
+/* Liquid Gradient Animations */
+@keyframes gradientFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes blobMorph {
+  0%, 100% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+  25% { border-radius: 30% 60% 70% 40% / 50% 60% 30% 60%; }
+  50% { border-radius: 40% 60% 60% 40% / 40% 50% 60% 50%; }
+  75% { border-radius: 60% 40% 50% 50% / 50% 40% 60% 50%; }
+}
+
+@keyframes floatBlob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -30px) scale(1.05); }
+  66% { transform: translate(-20px, 20px) scale(0.95); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.6; filter: blur(60px); }
+  50% { opacity: 0.8; filter: blur(80px); }
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -207,4 +240,222 @@
 
 .prose input[type="checkbox"] {
   @apply mt-1 h-4 w-4 rounded border-border accent-primary;
+}
+
+/* ========================================
+   LIQUID UI UTILITY CLASSES
+======================================== */
+
+/* Liquid Background with animated gradient */
+.liquid-bg {
+  background: linear-gradient(-45deg, #0f0f23, #1a1a3e, #0d1b2a, #1b263b);
+  background-size: 400% 400%;
+  animation: gradientFlow 15s ease infinite;
+}
+
+.liquid-bg-light {
+  background: linear-gradient(-45deg, #f8fafc, #e2e8f0, #f1f5f9, #e0f2fe);
+  background-size: 400% 400%;
+  animation: gradientFlow 20s ease infinite;
+}
+
+/* Glassmorphism Card */
+.glass-card {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.glass-card-light {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 24px;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Liquid Sidebar */
+.liquid-sidebar {
+  background: linear-gradient(180deg, 
+    rgba(15, 15, 35, 0.95) 0%,
+    rgba(26, 26, 62, 0.9) 50%,
+    rgba(13, 27, 42, 0.95) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.liquid-sidebar-light {
+  background: linear-gradient(180deg, 
+    rgba(248, 250, 252, 0.95) 0%,
+    rgba(241, 245, 249, 0.9) 50%,
+    rgba(226, 232, 240, 0.95) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* Animated Blob Background Elements */
+.liquid-blob {
+  position: absolute;
+  border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
+  filter: blur(60px);
+  opacity: 0.5;
+  animation: floatBlob 20s ease-in-out infinite, blobMorph 12s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.liquid-blob-1 {
+  width: 400px;
+  height: 400px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  top: -100px;
+  left: -100px;
+}
+
+.liquid-blob-2 {
+  width: 300px;
+  height: 300px;
+  background: linear-gradient(225deg, #f093fb, #f5576c);
+  bottom: -50px;
+  right: -50px;
+  animation-delay: -7s;
+}
+
+.liquid-blob-3 {
+  width: 250px;
+  height: 250px;
+  background: linear-gradient(45deg, #4facfe, #00f2fe);
+  top: 50%;
+  right: 20%;
+  animation-delay: -14s;
+}
+
+/* Liquid Button */
+.liquid-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 16px;
+  padding: 12px 24px;
+  color: white;
+  font-weight: 500;
+  box-shadow: 
+    0 4px 15px rgba(102, 126, 234, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: all 0.3s ease;
+}
+
+.liquid-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    0 8px 25px rgba(102, 126, 234, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* Liquid Input */
+.liquid-input {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.liquid-input:focus {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(102, 126, 234, 0.5);
+  box-shadow: 0 0 20px rgba(102, 126, 234, 0.2);
+}
+
+.liquid-input-light {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.liquid-input-light:focus {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(102, 126, 234, 0.4);
+  box-shadow: 0 0 20px rgba(102, 126, 234, 0.15);
+}
+
+/* Liquid Message Bubbles */
+.liquid-message-user {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 20px 20px 4px 20px;
+  color: white;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.liquid-message-ai {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px 20px 20px 4px;
+}
+
+.liquid-message-ai-light {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 20px 20px 20px 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+/* Liquid Hover Effects */
+.liquid-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.liquid-hover:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateX(4px);
+}
+
+/* Smooth scrollbar for liquid feel */
+.liquid-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.liquid-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.liquid-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.liquid-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Glow effects */
+.liquid-glow {
+  box-shadow: 
+    0 0 20px rgba(102, 126, 234, 0.3),
+    0 0 40px rgba(102, 126, 234, 0.2),
+    0 0 60px rgba(102, 126, 234, 0.1);
+}
+
+/* Gradient text */
+.liquid-text-gradient {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
