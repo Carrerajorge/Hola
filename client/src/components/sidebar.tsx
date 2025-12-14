@@ -13,7 +13,14 @@ import {
   User,
   CreditCard,
   Shield,
-  LogOut
+  LogOut,
+  Trash2,
+  Pencil,
+  Archive,
+  EyeOff,
+  Eye,
+  Check,
+  X
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -21,30 +28,61 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 
 import { Chat } from "@/hooks/use-chats";
-import { Trash2 } from "lucide-react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 
 interface SidebarProps {
   className?: string;
   chats: Chat[];
+  hiddenChats?: Chat[];
   activeChatId: string | null;
   onSelectChat: (id: string) => void;
   onNewChat?: () => void;
   onToggle?: () => void;
   onDeleteChat?: (id: string, e: React.MouseEvent) => void;
+  onEditChat?: (id: string, newTitle: string) => void;
+  onArchiveChat?: (id: string, e: React.MouseEvent) => void;
+  onHideChat?: (id: string, e: React.MouseEvent) => void;
 }
 
 export function Sidebar({ 
   className, 
   chats, 
+  hiddenChats = [],
   activeChatId, 
   onSelectChat, 
   onNewChat, 
   onToggle,
-  onDeleteChat
+  onDeleteChat,
+  onEditChat,
+  onArchiveChat,
+  onHideChat
 }: SidebarProps) {
+  const [editingChatId, setEditingChatId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [showHidden, setShowHidden] = useState(false);
+  
+  const handleStartEdit = (chat: Chat, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingChatId(chat.id);
+    setEditTitle(chat.title);
+  };
+  
+  const handleSaveEdit = (chatId: string) => {
+    if (onEditChat && editTitle.trim()) {
+      onEditChat(chatId, editTitle.trim());
+    }
+    setEditingChatId(null);
+    setEditTitle("");
+  };
+  
+  const handleCancelEdit = () => {
+    setEditingChatId(null);
+    setEditTitle("");
+  };
   
   const getChatDateLabel = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -133,33 +171,150 @@ export function Sidebar({
                   <h3 className="text-xs font-medium text-muted-foreground/70">{group}</h3>
                 </div>
                 {groupChats.map((chat) => (
-                  <Button
+                  <div
                     key={chat.id}
-                    variant="ghost"
                     className={cn(
-                      "group flex w-full flex-col items-start justify-center gap-0.5 px-2 py-3 text-left hover:bg-sidebar-accent",
-                      activeChatId === chat.id && "bg-sidebar-accent"
+                      "group flex w-full items-center justify-between px-2 py-2.5 rounded-md cursor-pointer hover:bg-sidebar-accent transition-colors",
+                      activeChatId === chat.id && "bg-sidebar-accent",
+                      chat.archived && "opacity-60"
                     )}
-                    onClick={() => onSelectChat(chat.id)}
+                    onClick={() => !editingChatId && onSelectChat(chat.id)}
+                    data-testid={`chat-item-${chat.id}`}
                   >
-                    <div className="flex w-full items-center justify-between">
-                      <span className="truncate text-sm font-medium">{chat.title}</span>
-                      {onDeleteChat && (
-                        <div 
-                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-black/5 rounded"
-                          onClick={(e) => onDeleteChat(chat.id, e)}
+                    {editingChatId === chat.id ? (
+                      <div className="flex w-full items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <Input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="h-7 text-sm flex-1"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSaveEdit(chat.id);
+                            if (e.key === "Escape") handleCancelEdit();
+                          }}
+                          data-testid={`input-edit-chat-${chat.id}`}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => handleSaveEdit(chat.id)}
+                          data-testid={`button-save-edit-${chat.id}`}
                         >
-                          <Trash2 className="h-3 w-3 text-muted-foreground" />
+                          <Check className="h-3 w-3 text-green-500" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={handleCancelEdit}
+                          data-testid={`button-cancel-edit-${chat.id}`}
+                        >
+                          <X className="h-3 w-3 text-red-500" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {chat.archived && <Archive className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
+                          <span className="truncate text-sm font-medium">{chat.title}</span>
                         </div>
-                      )}
-                    </div>
-                  </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <div
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-black/10 rounded"
+                              onClick={(e) => e.stopPropagation()}
+                              data-testid={`button-chat-menu-${chat.id}`}
+                            >
+                              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem
+                              onClick={(e) => handleStartEdit(chat, e as unknown as React.MouseEvent)}
+                              data-testid={`menu-edit-${chat.id}`}
+                            >
+                              <Pencil className="h-4 w-4 mr-2" />
+                              Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={(e) => onArchiveChat?.(chat.id, e as unknown as React.MouseEvent)}
+                              data-testid={`menu-archive-${chat.id}`}
+                            >
+                              <Archive className="h-4 w-4 mr-2" />
+                              {chat.archived ? "Desarchivar" : "Archivar"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={(e) => onHideChat?.(chat.id, e as unknown as React.MouseEvent)}
+                              data-testid={`menu-hide-${chat.id}`}
+                            >
+                              <EyeOff className="h-4 w-4 mr-2" />
+                              Ocultar
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={(e) => onDeleteChat?.(chat.id, e as unknown as React.MouseEvent)}
+                              className="text-red-500 focus:text-red-500"
+                              data-testid={`menu-delete-${chat.id}`}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Eliminar
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
             );
           })}
         </div>
       </ScrollArea>
+
+      {/* Hidden Chats Section */}
+      {hiddenChats.length > 0 && (
+        <div className="px-2 border-t">
+          <Button
+            variant="ghost"
+            className="w-full justify-between px-2 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent"
+            onClick={() => setShowHidden(!showHidden)}
+            data-testid="button-toggle-hidden"
+          >
+            <div className="flex items-center gap-2">
+              <EyeOff className="h-4 w-4" />
+              <span>Ocultos ({hiddenChats.length})</span>
+            </div>
+            <ChevronDown className={cn("h-4 w-4 transition-transform", showHidden && "rotate-180")} />
+          </Button>
+          {showHidden && (
+            <div className="flex flex-col gap-0.5 pb-2">
+              {hiddenChats.map((chat) => (
+                <div
+                  key={chat.id}
+                  className="group flex w-full items-center justify-between px-2 py-2 rounded-md cursor-pointer hover:bg-sidebar-accent transition-colors opacity-60"
+                  onClick={() => onSelectChat(chat.id)}
+                  data-testid={`hidden-chat-item-${chat.id}`}
+                >
+                  <span className="truncate text-sm">{chat.title}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onHideChat?.(chat.id, e);
+                    }}
+                    data-testid={`button-unhide-${chat.id}`}
+                  >
+                    <Eye className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-auto border-t p-4">
         <Popover>

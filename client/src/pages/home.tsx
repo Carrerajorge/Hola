@@ -13,11 +13,15 @@ export default function Home() {
   
   const { 
     chats, 
+    hiddenChats,
     activeChat, 
     setActiveChatId, 
     createChat, 
     addMessage,
-    deleteChat
+    deleteChat,
+    editChatTitle,
+    archiveChat,
+    hideChat
   } = useChats();
 
   return (
@@ -26,11 +30,15 @@ export default function Home() {
       <div className={isSidebarOpen ? "hidden md:block" : "hidden"}>
         <Sidebar 
           chats={chats} 
+          hiddenChats={hiddenChats}
           activeChatId={activeChat?.id || null} 
           onSelectChat={setActiveChatId} 
           onNewChat={createChat} 
           onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
           onDeleteChat={deleteChat}
+          onEditChat={editChatTitle}
+          onArchiveChat={archiveChat}
+          onHideChat={hideChat}
         />
       </div>
 
@@ -45,11 +53,15 @@ export default function Home() {
           <SheetContent side="left" className="p-0 w-[260px]">
             <Sidebar 
               chats={chats} 
+              hiddenChats={hiddenChats}
               activeChatId={activeChat?.id || null} 
               onSelectChat={setActiveChatId} 
               onNewChat={createChat} 
               onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
               onDeleteChat={deleteChat}
+              onEditChat={editChatTitle}
+              onArchiveChat={archiveChat}
+              onHideChat={hideChat}
             />
           </SheetContent>
         </Sheet>

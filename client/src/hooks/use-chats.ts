@@ -16,6 +16,8 @@ export interface Chat {
   title: string;
   timestamp: number;
   messages: Message[];
+  archived?: boolean;
+  hidden?: boolean;
 }
 
 const STORAGE_KEY = "sira-gpt-chats";
@@ -107,10 +109,39 @@ export function useChats() {
     });
   };
 
+  const editChatTitle = (chatId: string, newTitle: string) => {
+    setChats(prev => prev.map(chat => 
+      chat.id === chatId ? { ...chat, title: newTitle } : chat
+    ));
+  };
+
+  const archiveChat = (chatId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setChats(prev => prev.map(chat => 
+      chat.id === chatId ? { ...chat, archived: !chat.archived } : chat
+    ));
+  };
+
+  const hideChat = (chatId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setChats(prev => prev.map(chat => 
+      chat.id === chatId ? { ...chat, hidden: !chat.hidden } : chat
+    ));
+  };
+
   const activeChat = chats.find(c => c.id === activeChatId) || null;
 
   // Sort chats by timestamp descending
   const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp);
+  
+  // Filter visible chats (not hidden)
+  const visibleChats = sortedChats.filter(c => !c.hidden);
+  
+  // Get archived chats
+  const archivedChats = sortedChats.filter(c => c.archived && !c.hidden);
+  
+  // Get hidden chats
+  const hiddenChats = sortedChats.filter(c => c.hidden);
 
   // Helper to format date label
   const getChatDateLabel = (timestamp: number) => {
@@ -123,13 +154,19 @@ export function useChats() {
   };
 
   return {
-    chats: sortedChats,
+    chats: visibleChats,
+    allChats: sortedChats,
+    archivedChats,
+    hiddenChats,
     activeChatId,
     activeChat,
     setActiveChatId,
     createChat,
     addMessage,
     deleteChat,
+    editChatTitle,
+    archiveChat,
+    hideChat,
     getChatDateLabel
   };
 }
