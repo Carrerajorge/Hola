@@ -27,7 +27,8 @@ import {
   Volume2,
   VolumeX,
   Flag,
-  MessageSquare
+  MessageSquare,
+  Square
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -91,6 +92,21 @@ export function ChatInterface({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleStopChat = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
+    }
+    setAiState("idle");
+    setStreamingContent("");
+  };
 
   const handleCopyMessage = (content: string, msgId?: string) => {
     navigator.clipboard.writeText(content);
@@ -396,6 +412,8 @@ export function ChatInterface({
     setStreamingContent("");
 
     try {
+      abortControllerRef.current = new AbortController();
+      
       const chatHistory = [...messages, userMsg].map(m => ({
         role: m.role,
         content: m.attachments && m.attachments.length > 0 
@@ -406,7 +424,8 @@ export function ChatInterface({
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chatHistory })
+        body: JSON.stringify({ messages: chatHistory }),
+        signal: abortControllerRef.current.signal
       });
 
       const data = await response.json();
@@ -421,13 +440,16 @@ export function ChatInterface({
       const responseSources = data.sources || [];
       let currentIndex = 0;
       
-      const streamInterval = setInterval(() => {
+      streamIntervalRef.current = setInterval(() => {
         if (currentIndex < fullContent.length) {
           const chunkSize = Math.floor(Math.random() * 3) + 1;
           setStreamingContent(fullContent.slice(0, currentIndex + chunkSize));
           currentIndex += chunkSize;
         } else {
-          clearInterval(streamInterval);
+          if (streamIntervalRef.current) {
+            clearInterval(streamIntervalRef.current);
+            streamIntervalRef.current = null;
+          }
           const aiMsg: Message = {
             id: (Date.now() + 1).toString(),
             role: "assistant",
@@ -438,10 +460,14 @@ export function ChatInterface({
           onSendMessage(aiMsg);
           setStreamingContent("");
           setAiState("idle");
+          abortControllerRef.current = null;
         }
       }, 15);
       
     } catch (error: any) {
+      if (error.name === "AbortError") {
+        return;
+      }
       console.error("Chat error:", error);
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -451,6 +477,7 @@ export function ChatInterface({
       };
       onSendMessage(errorMsg);
       setAiState("idle");
+      abortControllerRef.current = null;
     }
   };
 
@@ -1026,17 +1053,29 @@ export function ChatInterface({
             <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground">
               <Mic className="h-5 w-5" />
             </Button>
-            <Button 
-              onClick={handleSubmit}
-              disabled={!input.trim()}
-              size="icon" 
-              className={cn(
-                "h-9 w-9 rounded-full transition-all duration-300",
-                input.trim() ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
-              )}
-            >
-              <ArrowUp className="h-5 w-5" />
-            </Button>
+            {aiState !== "idle" ? (
+              <Button 
+                onClick={handleStopChat}
+                size="icon" 
+                className="h-9 w-9 rounded-full bg-red-500 hover:bg-red-600 text-white transition-all duration-300"
+                data-testid="button-stop-chat"
+              >
+                <Square className="h-4 w-4 fill-current" />
+              </Button>
+            ) : (
+              <Button 
+                onClick={handleSubmit}
+                disabled={!input.trim() && uploadedFiles.length === 0}
+                size="icon" 
+                className={cn(
+                  "h-9 w-9 rounded-full transition-all duration-300",
+                  (input.trim() || uploadedFiles.length > 0) ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
+                )}
+                data-testid="button-send-message"
+              >
+                <ArrowUp className="h-5 w-5" />
+              </Button>
+            )}
           </div>
         </div>
         <div className="text-center text-xs text-muted-foreground mt-3">
