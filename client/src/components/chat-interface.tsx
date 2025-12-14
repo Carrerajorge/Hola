@@ -33,6 +33,14 @@ import rehypeHighlight from "rehype-highlight";
 
 import { Message } from "@/hooks/use-chats";
 
+const processLatex = (content: string): string => {
+  return content
+    .replace(/\\\[/g, '$$')
+    .replace(/\\\]/g, '$$')
+    .replace(/\\\(/g, '$')
+    .replace(/\\\)/g, '$');
+};
+
 interface ChatInterfaceProps {
   messages: Message[];
   onSendMessage: (message: Message) => void;
@@ -211,7 +219,7 @@ export function ChatInterface({
                          remarkPlugins={[remarkGfm, remarkMath]}
                          rehypePlugins={[rehypeKatex, rehypeHighlight]}
                        >
-                         {msg.content}
+                         {processLatex(msg.content)}
                        </ReactMarkdown>
                      </div>
                   )}
