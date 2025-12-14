@@ -341,10 +341,7 @@ export function ChatInterface({
   const hasMessages = messages.length > 0;
 
   return (
-    <div className={cn(
-      "flex h-full flex-col bg-transparent relative",
-      !hasMessages && "justify-center"
-    )}>
+    <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
       <header className="flex h-14 items-center justify-between px-4 border-b border-white/20 glass-card-light rounded-none z-10 sticky top-0 flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -646,21 +643,20 @@ export function ChatInterface({
         </div>
       )}
 
-      {/* Welcome message when no messages */}
+      {/* Centered content when no messages */}
       {!hasMessages && (
-        <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
-          <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
-            <BotIcon className="h-6 w-6 text-muted-foreground" />
+        <div className="flex-1 flex flex-col items-center justify-center">
+          <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
+            <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
+              <BotIcon className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <p className="text-muted-foreground">How can I help you today?</p>
           </div>
-          <p className="text-muted-foreground">How can I help you today?</p>
         </div>
       )}
 
       {/* Input Area */}
-      <div className={cn(
-        "p-4 sm:p-6 w-full max-w-3xl mx-auto relative",
-        !hasMessages && "flex-shrink-0"
-      )}>
+      <div className="p-4 sm:p-6 w-full max-w-3xl mx-auto relative">
         {/* Floating Mini Browser - positioned above the + button */}
         {(isBrowserOpen || input.trim().length > 0) && !isBrowserMaximized && (
           <div className="absolute left-4 sm:left-6 bottom-[calc(100%-16px)] w-[120px] border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200">
