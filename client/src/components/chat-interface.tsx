@@ -557,7 +557,7 @@ export function ChatInterface({
                           {msg.content}
                         </div>
                       )}
-                      <div className="flex items-center justify-end gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-1 mt-1">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -654,7 +654,7 @@ export function ChatInterface({
                   {/* Message Actions Toolbar */}
                   {msg.content && !msg.isThinking && (
                     <TooltipProvider delayDuration={300}>
-                      <div className="flex items-center gap-1 mt-1 opacity-0 group-hover/ai:opacity-100 transition-opacity" data-testid={`message-actions-${msg.id}`}>
+                      <div className="flex items-center gap-1 mt-2" data-testid={`message-actions-${msg.id}`}>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
