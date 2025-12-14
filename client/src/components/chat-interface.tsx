@@ -17,7 +17,10 @@ import {
   ArrowLeft,
   ArrowRight,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Copy,
+  Pencil,
+  Send
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -68,9 +71,38 @@ export function ChatInterface({
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCopyMessage = (content: string) => {
+    navigator.clipboard.writeText(content);
+  };
+
+  const handleStartEdit = (msg: Message) => {
+    setEditingMessageId(msg.id);
+    setEditContent(msg.content);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditContent("");
+  };
+
+  const handleSendEdit = (msgId: string) => {
+    if (!editContent.trim()) return;
+    const editedMsg: Message = {
+      id: msgId,
+      role: "user",
+      content: editContent,
+      timestamp: new Date(),
+    };
+    onSendMessage(editedMsg);
+    setEditingMessageId(null);
+    setEditContent("");
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -253,8 +285,63 @@ export function ChatInterface({
               msg.role === "user" ? "items-end" : "items-start"
             )}>
               {msg.role === "user" ? (
-                <div className="liquid-message-user px-4 py-2.5 text-sm">
-                  {msg.content}
+                <div className="flex flex-col items-end gap-1">
+                  {editingMessageId === msg.id ? (
+                    <>
+                      <Textarea
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        className="liquid-message-user px-4 py-2.5 text-sm min-h-[60px] resize-none"
+                        autoFocus
+                      />
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={handleCancelEdit}
+                        >
+                          <X className="h-3 w-3 mr-1" />
+                          Cancelar
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => handleSendEdit(msg.id)}
+                        >
+                          <Send className="h-3 w-3 mr-1" />
+                          Enviar
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="liquid-message-user px-4 py-2.5 text-sm">
+                        {msg.content}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => handleCopyMessage(msg.content)}
+                        >
+                          <Copy className="h-3 w-3 mr-1" />
+                          Copiar
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => handleStartEdit(msg)}
+                        >
+                          <Pencil className="h-3 w-3 mr-1" />
+                          Editar
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-4 w-full">
