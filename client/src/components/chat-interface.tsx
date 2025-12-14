@@ -105,6 +105,18 @@ export function ChatInterface({
       clearInterval(streamIntervalRef.current);
       streamIntervalRef.current = null;
     }
+    
+    // Save the partial content as a message if there's any
+    if (streamingContent.trim()) {
+      const partialMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: streamingContent + "\n\n*[Respuesta detenida]*",
+        timestamp: new Date(),
+      };
+      onSendMessage(partialMsg);
+    }
+    
     setAiState("idle");
     setStreamingContent("");
   };
