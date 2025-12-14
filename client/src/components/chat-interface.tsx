@@ -367,30 +367,40 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() && uploadedFiles.length === 0) return;
 
-    const fileInfo = uploadedFiles.length > 0 
-      ? `\n\n[Archivos adjuntos: ${uploadedFiles.map(f => f.name).join(", ")}]` 
-      : "";
+    const attachments = uploadedFiles
+      .filter(f => f.status === "ready" || f.status === "processing")
+      .map(f => ({
+        type: f.type.includes("word") || f.type.includes("document") ? "word" as const :
+              f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
+              f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
+              "word" as const,
+        name: f.name
+      }));
     
     const userMsg: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input + fileInfo,
+      content: input,
       timestamp: new Date(),
+      attachments: attachments.length > 0 ? attachments : undefined,
     };
 
     onSendMessage(userMsg);
     const userInput = input;
     const currentFiles = [...uploadedFiles];
     setInput("");
+    setUploadedFiles([]);
     setAiState("thinking");
     setStreamingContent("");
 
     try {
       const chatHistory = [...messages, userMsg].map(m => ({
         role: m.role,
-        content: m.content
+        content: m.attachments && m.attachments.length > 0 
+          ? `${m.content}\n\n[Archivos adjuntos: ${m.attachments.map(a => a.name).join(", ")}]`
+          : m.content
       }));
 
       const response = await fetch("/api/chat", {
@@ -428,7 +438,6 @@ export function ChatInterface({
           onSendMessage(aiMsg);
           setStreamingContent("");
           setAiState("idle");
-          setUploadedFiles((prev) => prev.filter((f) => f.status !== "ready"));
         }
       }, 15);
       
@@ -518,9 +527,36 @@ export function ChatInterface({
                     </div>
                   ) : (
                     <div className="group">
-                      <div className="liquid-message-user px-4 py-2.5 text-sm">
-                        {msg.content}
-                      </div>
+                      {msg.attachments && msg.attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-2 justify-end">
+                          {msg.attachments.map((file, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                            >
+                              <div className={cn(
+                                "flex items-center justify-center w-8 h-8 rounded-lg",
+                                file.type === "word" ? "bg-blue-600" :
+                                file.type === "excel" ? "bg-green-600" :
+                                file.type === "ppt" ? "bg-orange-500" :
+                                "bg-gray-500"
+                              )}>
+                                <span className="text-white text-xs font-bold">
+                                  {file.type === "word" ? "W" :
+                                   file.type === "excel" ? "X" :
+                                   file.type === "ppt" ? "P" : "F"}
+                                </span>
+                              </div>
+                              <span className="max-w-[200px] truncate font-medium">{file.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {msg.content && (
+                        <div className="liquid-message-user px-4 py-2.5 text-sm">
+                          {msg.content}
+                        </div>
+                      )}
                       <div className="flex items-center justify-end gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button
                           variant="ghost"
