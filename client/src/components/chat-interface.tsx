@@ -22,6 +22,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { Message } from "@/hooks/use-chats";
@@ -307,18 +309,49 @@ export function ChatInterface({
       {/* Input Area */}
       <div className="p-4 sm:p-6 w-full max-w-3xl mx-auto">
         <div className="relative flex items-end gap-2 rounded-3xl border bg-background shadow-sm p-2 focus-within:ring-1 focus-within:ring-ring transition-shadow">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className={cn(
-              "h-10 w-10 rounded-full text-muted-foreground hover:text-foreground",
-              isBrowserOpen && "bg-blue-100 text-blue-600"
-            )}
-            onClick={() => setIsBrowserOpen(!isBrowserOpen)}
-            title="Toggle virtual browser"
-          >
-            <Plus className="h-5 w-5" />
-          </Button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-10 w-10 rounded-full text-muted-foreground hover:text-foreground"
+              >
+                <Plus className="h-5 w-5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-1" align="start" side="top">
+              <div className="flex flex-col">
+                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                  <Upload className="h-4 w-4" />
+                  Upload Files
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  className="justify-start gap-2 text-sm h-9"
+                  onClick={() => setIsBrowserOpen(!isBrowserOpen)}
+                >
+                  <Search className="h-4 w-4" />
+                  Web Search
+                </Button>
+                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                  <Image className="h-4 w-4" />
+                  Image Generation
+                </Button>
+                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                  <Video className="h-4 w-4" />
+                  Video Generation
+                </Button>
+                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                  <Bot className="h-4 w-4" />
+                  Agente
+                </Button>
+                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                  <Plug className="h-4 w-4" />
+                  Connectors MPC
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
           
           <Textarea
             ref={textareaRef}
