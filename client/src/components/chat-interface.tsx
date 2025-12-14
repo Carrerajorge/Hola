@@ -28,7 +28,10 @@ import {
   VolumeX,
   Flag,
   MessageSquare,
-  Square
+  Square,
+  Paperclip,
+  PanelRightOpen,
+  PanelRightClose
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -90,6 +93,7 @@ export function ChatInterface({
   const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [isAttachmentPanelOpen, setIsAttachmentPanelOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -518,6 +522,100 @@ export function ChatInterface({
 
   const hasMessages = messages.length > 0;
 
+  const renderAttachmentsPanel = () => (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
+        <span className="font-semibold text-sm">Archivos adjuntos</span>
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="h-7 w-7 md:hidden"
+          onClick={() => setIsAttachmentPanelOpen(false)}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {uploadedFiles.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4">
+            <Paperclip className="h-8 w-8 mb-2 opacity-50" />
+            <p className="text-sm">No hay archivos adjuntos</p>
+            <p className="text-xs mt-1">Sube archivos usando el botón +</p>
+          </div>
+        ) : (
+          uploadedFiles.map((file, index) => (
+            <div
+              key={index}
+              className={cn(
+                "relative rounded-xl border overflow-hidden",
+                file.status === "error" 
+                  ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
+                  : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+              )}
+              data-testid={`panel-file-${index}`}
+            >
+              <button
+                className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 rounded-full p-1 text-white z-10 transition-colors"
+                onClick={() => removeFile(index)}
+                data-testid={`button-panel-remove-file-${index}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+              {file.type.startsWith("image/") && file.dataUrl ? (
+                <div className="relative">
+                  <img 
+                    src={file.dataUrl} 
+                    alt={file.name}
+                    className="w-full h-32 object-cover"
+                  />
+                  {(file.status === "uploading" || file.status === "processing") && (
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                      <Loader2 className="h-5 w-5 animate-spin text-white" />
+                    </div>
+                  )}
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                    <span className="text-white text-xs truncate block">{file.name}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 p-3 pr-10">
+                  <div className={cn(
+                    "flex items-center justify-center w-10 h-10 rounded-lg flex-shrink-0",
+                    file.type.includes("pdf") ? "bg-red-500" :
+                    file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
+                    file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
+                    file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
+                    "bg-gray-500"
+                  )}>
+                    <span className="text-white text-xs font-bold">
+                      {file.type.includes("pdf") ? "PDF" :
+                       file.type.includes("word") || file.type.includes("document") ? "DOC" :
+                       file.type.includes("sheet") || file.type.includes("excel") ? "XLS" :
+                       file.type.includes("presentation") || file.type.includes("powerpoint") ? "PPT" :
+                       "FILE"}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium truncate block">{file.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {file.status === "uploading" ? "Subiendo..." :
+                       file.status === "processing" ? "Procesando..." :
+                       file.status === "error" ? "Error" :
+                       formatFileSize(file.size)}
+                    </span>
+                  </div>
+                  {(file.status === "uploading" || file.status === "processing") && (
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-500 flex-shrink-0" />
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
@@ -534,6 +632,19 @@ export function ChatInterface({
           </div>
         </div>
         <div className="flex items-center gap-4">
+          {uploadedFiles.length > 0 && (
+            <Button 
+              variant="ghost" 
+              size="icon"
+              className="md:hidden relative"
+              onClick={() => setIsAttachmentPanelOpen(!isAttachmentPanelOpen)}
+            >
+              <Paperclip className="h-5 w-5 text-muted-foreground" />
+              <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                {uploadedFiles.length}
+              </span>
+            </Button>
+          )}
           <Button variant="ghost" size="icon">
             <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
           </Button>
