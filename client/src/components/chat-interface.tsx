@@ -28,10 +28,7 @@ import {
   VolumeX,
   Flag,
   MessageSquare,
-  Square,
-  Paperclip,
-  PanelRightOpen,
-  PanelRightClose
+  Square
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -40,7 +37,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -93,7 +90,6 @@ export function ChatInterface({
   const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [isAttachmentPanelOpen, setIsAttachmentPanelOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -425,6 +421,8 @@ export function ChatInterface({
               "word" as const,
         name: f.name,
         imageUrl: f.dataUrl,
+        storagePath: f.storagePath,
+        fileId: f.id,
       }));
     
     const userMsg: Message = {
@@ -522,99 +520,6 @@ export function ChatInterface({
 
   const hasMessages = messages.length > 0;
 
-  const renderAttachmentsPanel = () => (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
-        <span className="font-semibold text-sm">Archivos adjuntos</span>
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="h-7 w-7 md:hidden"
-          onClick={() => setIsAttachmentPanelOpen(false)}
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {uploadedFiles.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-4">
-            <Paperclip className="h-8 w-8 mb-2 opacity-50" />
-            <p className="text-sm">No hay archivos adjuntos</p>
-            <p className="text-xs mt-1">Sube archivos usando el botón +</p>
-          </div>
-        ) : (
-          uploadedFiles.map((file, index) => (
-            <div
-              key={index}
-              className={cn(
-                "relative rounded-xl border overflow-hidden",
-                file.status === "error" 
-                  ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
-                  : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
-              )}
-              data-testid={`panel-file-${index}`}
-            >
-              <button
-                className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 rounded-full p-1 text-white z-10 transition-colors"
-                onClick={() => removeFile(index)}
-                data-testid={`button-panel-remove-file-${index}`}
-              >
-                <X className="h-3 w-3" />
-              </button>
-              {file.type.startsWith("image/") && file.dataUrl ? (
-                <div className="relative">
-                  <img 
-                    src={file.dataUrl} 
-                    alt={file.name}
-                    className="w-full h-32 object-cover"
-                  />
-                  {(file.status === "uploading" || file.status === "processing") && (
-                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                      <Loader2 className="h-5 w-5 animate-spin text-white" />
-                    </div>
-                  )}
-                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                    <span className="text-white text-xs truncate block">{file.name}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 p-3 pr-10">
-                  <div className={cn(
-                    "flex items-center justify-center w-10 h-10 rounded-lg flex-shrink-0",
-                    file.type.includes("pdf") ? "bg-red-500" :
-                    file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
-                    file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
-                    file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
-                    "bg-gray-500"
-                  )}>
-                    <span className="text-white text-xs font-bold">
-                      {file.type.includes("pdf") ? "PDF" :
-                       file.type.includes("word") || file.type.includes("document") ? "DOC" :
-                       file.type.includes("sheet") || file.type.includes("excel") ? "XLS" :
-                       file.type.includes("presentation") || file.type.includes("powerpoint") ? "PPT" :
-                       "FILE"}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium truncate block">{file.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {file.status === "uploading" ? "Subiendo..." :
-                       file.status === "processing" ? "Procesando..." :
-                       file.status === "error" ? "Error" :
-                       formatFileSize(file.size)}
-                    </span>
-                  </div>
-                  {(file.status === "uploading" || file.status === "processing") && (
-                    <Loader2 className="h-4 w-4 animate-spin text-blue-500 flex-shrink-0" />
-                  )}
-                </div>
-              )}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
 
   return (
     <div className="flex h-full flex-col bg-transparent relative">
@@ -632,19 +537,6 @@ export function ChatInterface({
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {uploadedFiles.length > 0 && (
-            <Button 
-              variant="ghost" 
-              size="icon"
-              className="md:hidden relative"
-              onClick={() => setIsAttachmentPanelOpen(!isAttachmentPanelOpen)}
-            >
-              <Paperclip className="h-5 w-5 text-muted-foreground" />
-              <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                {uploadedFiles.length}
-              </span>
-            </Button>
-          )}
           <Button variant="ghost" size="icon">
             <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
           </Button>
@@ -985,7 +877,7 @@ export function ChatInterface({
           </div>
         )}
         
-        <div ref={bottomRef} />
+              <div ref={bottomRef} />
             </div>
           )}
 
@@ -1003,229 +895,275 @@ export function ChatInterface({
 
           {/* Sticky Input Area */}
           <div className="flex-shrink-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background/80 backdrop-blur-sm">
-        {/* Floating Mini Browser - positioned above the + button */}
-        {(isBrowserOpen || input.trim().length > 0) && !isBrowserMaximized && (
-          <div className="absolute left-4 sm:left-6 bottom-[calc(100%-16px)] w-[120px] border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200">
-            <div className="flex items-center justify-between px-1 py-0.5 bg-muted/50 border-b">
-              <span className="text-[8px] font-medium text-muted-foreground">web</span>
-              <div className="flex items-center">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-4 w-4 text-muted-foreground hover:text-foreground"
-                  onClick={() => setIsBrowserMaximized(true)}
-                >
-                  <Maximize2 className="h-2 w-2" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-4 w-4 text-muted-foreground hover:text-foreground"
-                  onClick={() => setIsBrowserOpen(false)}
-                >
-                  <X className="h-2 w-2" />
-                </Button>
-              </div>
-            </div>
-            <div className="bg-white relative h-[100px]">
-              <iframe 
-                src={browserUrl}
-                className="w-full h-full border-0"
-                sandbox="allow-scripts allow-same-origin allow-forms"
-                title="Virtual Browser"
-              />
-              {aiState !== "idle" && (
-                <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                  <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+            {/* Floating Mini Browser - positioned above the + button */}
+            {(isBrowserOpen || input.trim().length > 0) && !isBrowserMaximized && (
+              <div className="absolute left-4 sm:left-6 bottom-[calc(100%-16px)] w-[120px] border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200">
+                <div className="flex items-center justify-between px-1 py-0.5 bg-muted/50 border-b">
+                  <span className="text-[8px] font-medium text-muted-foreground">web</span>
+                  <div className="flex items-center">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-4 w-4 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsBrowserMaximized(true)}
+                    >
+                      <Maximize2 className="h-2 w-2" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-4 w-4 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsBrowserOpen(false)}
+                    >
+                      <X className="h-2 w-2" />
+                    </Button>
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
-        )}
-        
-        {/* Maximized Browser */}
-        {isBrowserMaximized && (
-          <div className="fixed inset-4 z-50 border rounded-lg overflow-hidden shadow-lg bg-card">
-            <div className="flex items-center justify-between px-2 py-1 bg-muted/50 border-b">
-              <span className="text-xs font-medium text-muted-foreground">web</span>
-              <div className="flex items-center gap-1">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                  onClick={() => setIsBrowserMaximized(false)}
-                >
-                  <Minimize2 className="h-3 w-3" />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                  onClick={() => { setIsBrowserOpen(false); setIsBrowserMaximized(false); }}
-                >
-                  <X className="h-3 w-3" />
-                </Button>
-              </div>
-            </div>
-            <div className="bg-white relative h-[calc(100%-28px)]">
-              <iframe 
-                src={browserUrl}
-                className="w-full h-full border-0"
-                sandbox="allow-scripts allow-same-origin allow-forms"
-                title="Virtual Browser"
-              />
-              {aiState !== "idle" && (
-                <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                <div className="bg-white relative h-[100px]">
+                  <iframe 
+                    src={browserUrl}
+                    className="w-full h-full border-0"
+                    sandbox="allow-scripts allow-same-origin allow-forms"
+                    title="Virtual Browser"
+                  />
+                  {aiState !== "idle" && (
+                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
-        )}
-        
-        {/* Hidden file input */}
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileUpload}
-          className="hidden"
-          multiple
-          accept="*/*"
-          data-testid="input-file-upload"
-        />
-        
-        <div className="relative flex items-end gap-2 rounded-3xl liquid-input-light p-2 focus-within:shadow-lg transition-all duration-300">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-10 w-10 rounded-full text-muted-foreground hover:text-foreground"
-              >
-                <Plus className="h-5 w-5" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-48 p-1" align="start" side="top">
-              <div className="flex flex-col">
-                <Button 
-                  variant="ghost" 
-                  className="justify-start gap-2 text-sm h-9"
-                  onClick={() => fileInputRef.current?.click()}
-                  data-testid="button-upload-files"
-                >
-                  <Upload className="h-4 w-4" />
-                  Upload Files
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  className="justify-start gap-2 text-sm h-9"
-                  onClick={() => setIsBrowserOpen(!isBrowserOpen)}
-                >
-                  <Search className="h-4 w-4" />
-                  Web Search
-                </Button>
-                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
-                  <Image className="h-4 w-4" />
-                  Image Generation
-                </Button>
-                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
-                  <Video className="h-4 w-4" />
-                  Video Generation
-                </Button>
-                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
-                  <Bot className="h-4 w-4" />
-                  Agente
-                </Button>
-                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
-                  <Plug className="h-4 w-4" />
-                  Connectors MPC
-                </Button>
               </div>
-            </PopoverContent>
-          </Popover>
-          
-          <Textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit();
-              }
-            }}
-            placeholder="Type your message here..."
-            className="min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-0 text-base"
-            rows={1}
-          />
-
-          <div className="flex items-center gap-1 pb-1">
-            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground">
-              <Mic className="h-5 w-5" />
-            </Button>
-            {aiState !== "idle" ? (
-              <Button 
-                onClick={handleStopChat}
-                size="icon" 
-                className="h-9 w-9 rounded-full bg-red-500 hover:bg-red-600 text-white transition-all duration-300"
-                data-testid="button-stop-chat"
-              >
-                <Square className="h-4 w-4 fill-current" />
-              </Button>
-            ) : (
-              <Button 
-                onClick={handleSubmit}
-                disabled={!input.trim() && uploadedFiles.length === 0}
-                size="icon" 
-                className={cn(
-                  "h-9 w-9 rounded-full transition-all duration-300",
-                  (input.trim() || uploadedFiles.length > 0) ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
-                )}
-                data-testid="button-send-message"
-              >
-                <ArrowUp className="h-5 w-5" />
-              </Button>
             )}
-          </div>
-        </div>
+            
+            {/* Maximized Browser */}
+            {isBrowserMaximized && (
+              <div className="fixed inset-4 z-50 border rounded-lg overflow-hidden shadow-lg bg-card">
+                <div className="flex items-center justify-between px-2 py-1 bg-muted/50 border-b">
+                  <span className="text-xs font-medium text-muted-foreground">web</span>
+                  <div className="flex items-center gap-1">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsBrowserMaximized(false)}
+                    >
+                      <Minimize2 className="h-3 w-3" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                      onClick={() => { setIsBrowserOpen(false); setIsBrowserMaximized(false); }}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="bg-white relative h-[calc(100%-28px)]">
+                  <iframe 
+                    src={browserUrl}
+                    className="w-full h-full border-0"
+                    sandbox="allow-scripts allow-same-origin allow-forms"
+                    title="Virtual Browser"
+                  />
+                  {aiState !== "idle" && (
+                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                      <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* Hidden file input */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              className="hidden"
+              multiple
+              accept="*/*"
+              data-testid="input-file-upload"
+            />
+
+            {/* Inline Attachments Preview */}
+            {uploadedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3" data-testid="inline-attachments-container">
+                {uploadedFiles.map((file, index) => (
+                  <div
+                    key={file.id || index}
+                    className={cn(
+                      "relative group rounded-lg border overflow-hidden",
+                      file.status === "error" 
+                        ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
+                        : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                    )}
+                    data-testid={`inline-file-${index}`}
+                  >
+                    <button
+                      className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white z-10 transition-colors opacity-0 group-hover:opacity-100"
+                      onClick={() => removeFile(index)}
+                      data-testid={`button-remove-file-${index}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                    {file.type.startsWith("image/") && file.dataUrl ? (
+                      <div className="relative w-16 h-16">
+                        <img 
+                          src={file.dataUrl} 
+                          alt={file.name}
+                          className="w-full h-full object-cover"
+                        />
+                        {(file.status === "uploading" || file.status === "processing") && (
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                            <Loader2 className="h-4 w-4 animate-spin text-white" />
+                          </div>
+                        )}
+                        {file.status === "ready" && (
+                          <div className="absolute bottom-0 right-0 bg-green-500 rounded-tl-md p-0.5">
+                            <CheckCircle2 className="h-2.5 w-2.5 text-white" />
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 px-2 py-1.5 pr-6 max-w-[180px]">
+                        <div className={cn(
+                          "flex items-center justify-center w-8 h-8 rounded flex-shrink-0",
+                          file.type.includes("pdf") ? "bg-red-500" :
+                          file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
+                          file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
+                          file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
+                          "bg-gray-500"
+                        )}>
+                          <span className="text-white text-[10px] font-bold">
+                            {file.type.includes("pdf") ? "PDF" :
+                             file.type.includes("word") || file.type.includes("document") ? "DOC" :
+                             file.type.includes("sheet") || file.type.includes("excel") ? "XLS" :
+                             file.type.includes("presentation") || file.type.includes("powerpoint") ? "PPT" :
+                             "FILE"}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs font-medium truncate block">{file.name}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {file.status === "uploading" ? "Subiendo..." :
+                             file.status === "processing" ? "Procesando..." :
+                             file.status === "error" ? "Error" :
+                             formatFileSize(file.size)}
+                          </span>
+                        </div>
+                        {(file.status === "uploading" || file.status === "processing") && (
+                          <Loader2 className="h-3 w-3 animate-spin text-blue-500 flex-shrink-0" />
+                        )}
+                        {file.status === "ready" && (
+                          <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            <div className="relative flex items-end gap-2 rounded-3xl liquid-input-light p-2 focus-within:shadow-lg transition-all duration-300">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-10 w-10 rounded-full text-muted-foreground hover:text-foreground"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-1" align="start" side="top">
+                  <div className="flex flex-col">
+                    <Button 
+                      variant="ghost" 
+                      className="justify-start gap-2 text-sm h-9"
+                      onClick={() => fileInputRef.current?.click()}
+                      data-testid="button-upload-files"
+                    >
+                      <Upload className="h-4 w-4" />
+                      Upload Files
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      className="justify-start gap-2 text-sm h-9"
+                      onClick={() => setIsBrowserOpen(!isBrowserOpen)}
+                    >
+                      <Search className="h-4 w-4" />
+                      Web Search
+                    </Button>
+                    <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                      <Image className="h-4 w-4" />
+                      Image Generation
+                    </Button>
+                    <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                      <Video className="h-4 w-4" />
+                      Video Generation
+                    </Button>
+                    <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                      <Bot className="h-4 w-4" />
+                      Agente
+                    </Button>
+                    <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                      <Plug className="h-4 w-4" />
+                      Connectors MPC
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+              
+              <Textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
+                placeholder="Type your message here..."
+                className="min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-0 text-base"
+                rows={1}
+              />
+
+              <div className="flex items-center gap-1 pb-1">
+                <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground">
+                  <Mic className="h-5 w-5" />
+                </Button>
+                {aiState !== "idle" ? (
+                  <Button 
+                    onClick={handleStopChat}
+                    size="icon" 
+                    className="h-9 w-9 rounded-full bg-red-500 hover:bg-red-600 text-white transition-all duration-300"
+                    data-testid="button-stop-chat"
+                  >
+                    <Square className="h-4 w-4 fill-current" />
+                  </Button>
+                ) : (
+                  <Button 
+                    onClick={handleSubmit}
+                    disabled={!input.trim() && uploadedFiles.length === 0}
+                    size="icon" 
+                    className={cn(
+                      "h-9 w-9 rounded-full transition-all duration-300",
+                      (input.trim() || uploadedFiles.length > 0) ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
+                    )}
+                    data-testid="button-send-message"
+                  >
+                    <ArrowUp className="h-5 w-5" />
+                  </Button>
+                )}
+              </div>
+            </div>
             <div className="text-center text-xs text-muted-foreground mt-3">
               Sira GPT can make mistakes. Check important info.
             </div>
           </div>
         </div>
-
-        {/* Desktop Side Panel - always visible on md+ screens */}
-        {uploadedFiles.length > 0 && (
-          <div className="hidden md:block w-72 border-l border-gray-200 dark:border-gray-700 bg-muted/30 flex-shrink-0">
-            {renderAttachmentsPanel()}
-          </div>
-        )}
-
-        {/* Mobile Overlay Panel */}
-        <AnimatePresence>
-          {isAttachmentPanelOpen && (
-            <motion.div 
-              className="fixed inset-0 z-50 md:hidden"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <div 
-                className="absolute inset-0 bg-black/50" 
-                onClick={() => setIsAttachmentPanelOpen(false)} 
-              />
-              <motion.div 
-                className="absolute right-0 top-0 bottom-0 w-80 bg-background shadow-xl"
-                initial={{ x: "100%" }}
-                animate={{ x: 0 }}
-                exit={{ x: "100%" }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              >
-                {renderAttachmentsPanel()}
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     </div>
   );
