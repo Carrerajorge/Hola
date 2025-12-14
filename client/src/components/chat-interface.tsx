@@ -804,10 +804,9 @@ export function ChatInterface({
             <div className="flex flex-col gap-2 items-start">
               {aiState === "thinking" && (
                 <div className="liquid-message-ai-light px-4 py-3 text-sm">
-                  <div className="flex items-center gap-1">
-                    <span className="thinking-dot"></span>
-                    <span className="thinking-dot"></span>
-                    <span className="thinking-dot"></span>
+                  <div className="flex items-center">
+                    <span className="thinking-wave">Thinking</span>
+                    <span className="thinking-cursor">|</span>
                   </div>
                 </div>
               )}
