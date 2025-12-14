@@ -178,3 +178,33 @@
 .prose .katex {
   font-size: 1.1em;
 }
+
+/* List styles */
+.prose ul {
+  @apply list-disc pl-6 my-2;
+}
+
+.prose ol {
+  @apply list-decimal pl-6 my-2;
+}
+
+.prose li {
+  @apply my-1;
+}
+
+.prose ul ul, .prose ol ul, .prose ul ol, .prose ol ol {
+  @apply ml-4 my-1;
+}
+
+/* Checklist styles (GFM task lists) */
+.prose ul.contains-task-list {
+  @apply list-none pl-0;
+}
+
+.prose li.task-list-item {
+  @apply flex items-start gap-2;
+}
+
+.prose input[type="checkbox"] {
+  @apply mt-1 h-4 w-4 rounded border-border accent-primary;
+}
