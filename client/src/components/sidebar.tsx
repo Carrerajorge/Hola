@@ -9,13 +9,18 @@ import {
   MoreHorizontal,
   Settings,
   PanelLeftClose,
-  ChevronDown
+  ChevronDown,
+  User,
+  CreditCard,
+  Shield,
+  LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 import { Chat } from "@/hooks/use-chats";
 import { Trash2 } from "lucide-react";
@@ -157,15 +162,48 @@ export function Sidebar({
       </ScrollArea>
 
       <div className="mt-auto border-t p-4">
-        <div className="flex items-center gap-3">
-          <Avatar className="h-8 w-8">
-            <AvatarFallback className="bg-orange-100 text-orange-600">A</AvatarFallback>
-          </Avatar>
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <span className="truncate text-sm font-medium">Admin</span>
-            <span className="truncate text-xs text-muted-foreground">ENTERPRISE</span>
-          </div>
-        </div>
+        <Popover>
+          <PopoverTrigger asChild>
+            <button className="flex w-full items-center gap-3 rounded-lg p-2 hover:bg-sidebar-accent transition-colors cursor-pointer" data-testid="button-user-menu">
+              <Avatar className="h-10 w-10">
+                <AvatarFallback className="bg-muted text-muted-foreground">A</AvatarFallback>
+              </Avatar>
+              <div className="flex flex-1 flex-col overflow-hidden text-left">
+                <span className="truncate text-sm font-medium">Admin</span>
+                <span className="truncate text-xs text-muted-foreground">ENTERPRISE</span>
+              </div>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-2" align="start" side="top">
+            <div className="flex flex-col">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-profile">
+                <User className="h-4 w-4" />
+                Profile
+              </Button>
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-billing">
+                <CreditCard className="h-4 w-4" />
+                Billing
+              </Button>
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-settings">
+                <Settings className="h-4 w-4" />
+                Settings
+              </Button>
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-privacy">
+                <Shield className="h-4 w-4" />
+                Privacy Policy
+              </Button>
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-admin-panel">
+                <Settings className="h-4 w-4" />
+                Admin Panel
+              </Button>
+              <Separator className="my-1" />
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50" data-testid="button-logout">
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
     </div>
   );
