@@ -338,10 +338,15 @@ export function ChatInterface({
     }
   };
 
+  const hasMessages = messages.length > 0;
+
   return (
-    <div className="flex h-full flex-col bg-transparent relative">
+    <div className={cn(
+      "flex h-full flex-col bg-transparent relative",
+      !hasMessages && "justify-center"
+    )}>
       {/* Header */}
-      <header className="flex h-14 items-center justify-between px-4 border-b border-white/20 glass-card-light rounded-none z-10 sticky top-0">
+      <header className="flex h-14 items-center justify-between px-4 border-b border-white/20 glass-card-light rounded-none z-10 sticky top-0 flex-shrink-0">
         <div className="flex items-center gap-2">
           {!isSidebarOpen && (
             <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="h-8 w-8 mr-2 text-muted-foreground">
@@ -360,16 +365,9 @@ export function ChatInterface({
         </div>
       </header>
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
-        {messages.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center text-center space-y-4 opacity-50">
-            <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
-              <BotIcon className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <p className="text-muted-foreground">How can I help you today?</p>
-          </div>
-        )}
+      {/* Messages Area - only show when there are messages */}
+      {hasMessages && (
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
         
         {messages.map((msg, msgIndex) => (
           <div
@@ -645,10 +643,24 @@ export function ChatInterface({
         )}
         
         <div ref={bottomRef} />
-      </div>
+        </div>
+      )}
+
+      {/* Welcome message when no messages */}
+      {!hasMessages && (
+        <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
+          <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
+            <BotIcon className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <p className="text-muted-foreground">How can I help you today?</p>
+        </div>
+      )}
 
       {/* Input Area */}
-      <div className="p-4 sm:p-6 w-full max-w-3xl mx-auto relative">
+      <div className={cn(
+        "p-4 sm:p-6 w-full max-w-3xl mx-auto relative",
+        !hasMessages && "flex-shrink-0"
+      )}>
         {/* Floating Mini Browser - positioned above the + button */}
         {(isBrowserOpen || input.trim().length > 0) && !isBrowserMaximized && (
           <div className="absolute left-4 sm:left-6 bottom-[calc(100%-16px)] w-[120px] border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200">
