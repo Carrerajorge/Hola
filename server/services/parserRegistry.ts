@@ -5,6 +5,7 @@ import { XlsxParser } from "../parsers/xlsxParser";
 import { PptxParser } from "../parsers/pptxParser";
 import { TextParser } from "../parsers/textParser";
 import { FallbackParser } from "../parsers/fallbackParser";
+import { ImageParser } from "../parsers/imageParser";
 
 class ParserRegistry {
   private parsers: FileParser[] = [];
@@ -17,6 +18,7 @@ class ParserRegistry {
     this.registerParser(new XlsxParser());
     this.registerParser(new PptxParser());
     this.registerParser(new TextParser());
+    this.registerParser(new ImageParser());
   }
 
   registerParser(parser: FileParser): void {

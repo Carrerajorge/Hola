@@ -21,6 +21,14 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   html: "text/html",
   htm: "text/html",
   json: "application/json",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  webp: "image/webp",
+  tiff: "image/tiff",
+  tif: "image/tiff",
 };
 
 function isZipSignature(content: Buffer): boolean {

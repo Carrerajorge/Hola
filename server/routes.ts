@@ -23,6 +23,13 @@ const ALLOWED_MIME_TYPES = [
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.ms-powerpoint",
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/gif",
+  "image/bmp",
+  "image/webp",
+  "image/tiff",
 ];
 
 export async function registerRoutes(
