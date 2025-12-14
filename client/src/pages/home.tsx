@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/sidebar";
+import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -29,7 +30,8 @@ export default function Home() {
       <div className="liquid-blob liquid-blob-1 opacity-30"></div>
       <div className="liquid-blob liquid-blob-2 opacity-20"></div>
       <div className="liquid-blob liquid-blob-3 opacity-25"></div>
-      {/* Desktop Sidebar */}
+      
+      {/* Desktop Sidebar - Full */}
       <div className={isSidebarOpen ? "hidden md:block" : "hidden"}>
         <Sidebar 
           chats={chats} 
@@ -37,7 +39,7 @@ export default function Home() {
           activeChatId={activeChat?.id || null} 
           onSelectChat={setActiveChatId} 
           onNewChat={createChat} 
-          onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
+          onToggle={() => setIsSidebarOpen(false)} 
           onDeleteChat={deleteChat}
           onEditChat={editChatTitle}
           onArchiveChat={archiveChat}
@@ -45,11 +47,19 @@ export default function Home() {
         />
       </div>
 
+      {/* Desktop Sidebar - Mini (collapsed) */}
+      <div className={!isSidebarOpen ? "hidden md:block" : "hidden"}>
+        <MiniSidebar 
+          onNewChat={createChat}
+          onExpand={() => setIsSidebarOpen(true)}
+        />
+      </div>
+
       {/* Mobile Sidebar */}
       <div className="md:hidden absolute top-4 left-4 z-50">
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon">
+            <Button variant="ghost" size="icon" className="glass-card-light">
               <Menu className="h-6 w-6" />
             </Button>
           </SheetTrigger>
@@ -78,7 +88,7 @@ export default function Home() {
             messages={activeChat.messages}
             onSendMessage={(msg) => addMessage(activeChat.id, msg)}
             isSidebarOpen={isSidebarOpen} 
-            onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} 
+            onToggleSidebar={() => setIsSidebarOpen(true)} 
           />
         )}
       </main>
