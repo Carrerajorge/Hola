@@ -98,6 +98,27 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/files/:id/content", async (req, res) => {
+    try {
+      const file = await storage.getFile(req.params.id);
+      if (!file) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      if (file.status !== "ready") {
+        return res.status(202).json({ status: file.status, content: null });
+      }
+      const chunks = await storage.getFileChunks(req.params.id);
+      const content = chunks
+        .sort((a, b) => a.chunkIndex - b.chunkIndex)
+        .map(c => c.content)
+        .join("\n");
+      res.json({ status: "ready", content, fileName: file.name });
+    } catch (error: any) {
+      console.error("Error getting file content:", error);
+      res.status(500).json({ error: "Failed to get file content" });
+    }
+  });
+
   app.get("/objects/:objectPath(*)", async (req, res) => {
     try {
       const objectFile = await objectStorageService.getObjectEntityFile(req.path);

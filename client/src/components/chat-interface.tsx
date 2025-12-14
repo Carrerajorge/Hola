@@ -69,6 +69,7 @@ interface UploadedFile {
   dataUrl?: string;
   storagePath?: string;
   status?: string;
+  content?: string;
 }
 
 export function ChatInterface({ 
@@ -322,22 +323,29 @@ export function ChatInterface({
 
     const checkStatus = async () => {
       try {
-        const res = await fetch("/api/files");
-        const files = await res.json();
-        const file = files.find((f: any) => f.id === fileId);
+        const contentRes = await fetch(`/api/files/${fileId}/content`);
+        
+        if (!contentRes.ok && contentRes.status !== 202) {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
+        }
+        
+        const contentData = await contentRes.json();
 
-        if (file) {
-          if (file.status === "ready") {
-            setUploadedFiles((prev) =>
-              prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "ready" } : f))
-            );
-            return;
-          } else if (file.status === "error") {
-            setUploadedFiles((prev) =>
-              prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
-            );
-            return;
-          }
+        if (contentData.status === "ready") {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId 
+              ? { ...f, id: fileId, status: "ready", content: contentData.content } 
+              : f))
+          );
+          return;
+        } else if (contentData.status === "error") {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
         }
 
         attempts++;
@@ -421,11 +429,18 @@ export function ChatInterface({
     try {
       abortControllerRef.current = new AbortController();
       
-      const chatHistory = [...messages, userMsg].map(m => ({
+      const fileContents = currentFiles
+        .filter(f => f.content && f.status === "ready")
+        .map(f => `Contenido del archivo "${f.name}":\n${f.content}`)
+        .join("\n\n");
+      
+      const messageWithFiles = fileContents 
+        ? `${userInput}\n\n${fileContents}`
+        : userInput;
+
+      const chatHistory = [...messages, { ...userMsg, content: messageWithFiles }].map(m => ({
         role: m.role,
-        content: m.attachments && m.attachments.length > 0 
-          ? `${m.content}\n\n[Archivos adjuntos: ${m.attachments.map(a => a.name).join(", ")}]`
-          : m.content
+        content: m.content
       }));
 
       const response = await fetch("/api/chat", {
@@ -943,48 +958,61 @@ export function ChatInterface({
         
         {/* Uploaded files preview */}
         {uploadedFiles.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-2">
+          <div className="flex flex-col gap-2 mb-2">
             {uploadedFiles.map((file, index) => (
               <div
                 key={index}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded-xl text-sm border",
+                  "relative rounded-xl border overflow-hidden",
                   file.status === "error" 
                     ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
                     : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
                 )}
                 data-testid={`file-preview-${index}`}
               >
-                <div className={cn(
-                  "flex items-center justify-center w-8 h-8 rounded-lg",
-                  file.type.includes("pdf") ? "bg-red-500" :
-                  file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
-                  file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
-                  file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
-                  "bg-gray-500"
-                )}>
-                  <span className="text-white text-xs font-bold">
-                    {file.type.includes("pdf") ? "PDF" :
-                     file.type.includes("word") || file.type.includes("document") ? "W" :
-                     file.type.includes("sheet") || file.type.includes("excel") ? "X" :
-                     file.type.includes("presentation") || file.type.includes("powerpoint") ? "P" :
-                     "F"}
-                  </span>
-                </div>
-                <span className="max-w-[200px] truncate font-medium">{file.name}</span>
-                {file.status === "uploading" && (
-                  <Loader2 className="h-4 w-4 animate-spin text-blue-500 ml-1" />
-                )}
-                {file.status === "processing" && (
-                  <Loader2 className="h-4 w-4 animate-spin text-orange-500 ml-1" />
-                )}
                 <button
-                  className="ml-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 z-10"
                   onClick={() => removeFile(index)}
                   data-testid={`button-remove-file-${index}`}
                 >
                   <X className="h-4 w-4" />
                 </button>
+                {file.content ? (
+                  <div className="p-3 pr-8 max-h-32 overflow-y-auto">
+                    <div className="text-xs text-gray-500 mb-1">{file.name}:</div>
+                    <div className="text-sm whitespace-pre-wrap break-words">
+                      {file.content.slice(0, 500)}{file.content.length > 500 ? "..." : ""}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 px-3 py-2">
+                    <div className={cn(
+                      "flex items-center justify-center w-8 h-8 rounded-lg",
+                      file.type.includes("pdf") ? "bg-red-500" :
+                      file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
+                      file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
+                      file.type.includes("image") ? "bg-purple-500" :
+                      file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
+                      "bg-gray-500"
+                    )}>
+                      <span className="text-white text-xs font-bold">
+                        {file.type.includes("pdf") ? "PDF" :
+                         file.type.includes("word") || file.type.includes("document") ? "W" :
+                         file.type.includes("sheet") || file.type.includes("excel") ? "X" :
+                         file.type.includes("image") ? "IMG" :
+                         file.type.includes("presentation") || file.type.includes("powerpoint") ? "P" :
+                         "F"}
+                      </span>
+                    </div>
+                    <span className="max-w-[200px] truncate font-medium text-sm">{file.name}</span>
+                    {file.status === "uploading" && (
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-500 ml-1" />
+                    )}
+                    {file.status === "processing" && (
+                      <Loader2 className="h-4 w-4 animate-spin text-orange-500 ml-1" />
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
