@@ -35,7 +35,7 @@ export async function registerRoutes(
       };
 
       const response = await openai.chat.completions.create({
-        model: "grok-2-1212",
+        model: "grok-3-fast",
         messages: [systemMessage, ...formattedMessages],
       });
 
