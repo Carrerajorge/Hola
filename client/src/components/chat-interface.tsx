@@ -135,14 +135,16 @@ export function ChatInterface({
 
   const handleRegenerate = async (msgIndex: number) => {
     const prevMessages = messages.slice(0, msgIndex);
-    const lastUserMsg = [...prevMessages].reverse().find(m => m.role === "user");
-    if (!lastUserMsg) return;
+    const lastUserMsgIndex = [...prevMessages].reverse().findIndex(m => m.role === "user");
+    if (lastUserMsgIndex === -1) return;
+    
+    const contextUpToUser = prevMessages.slice(0, prevMessages.length - lastUserMsgIndex);
     
     setAiState("thinking");
     setStreamingContent("");
     
     try {
-      const chatHistory = prevMessages.map(m => ({
+      const chatHistory = contextUpToUser.map(m => ({
         role: m.role,
         content: m.content
       }));
