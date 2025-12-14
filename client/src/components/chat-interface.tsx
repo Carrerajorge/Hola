@@ -274,12 +274,6 @@ export function ChatInterface({
               msg.role === "user" ? "justify-end" : "justify-start"
             )}
           >
-            {msg.role === "assistant" && (
-              <div className="h-8 w-8 rounded-full bg-black/5 flex items-center justify-center flex-shrink-0 mt-1">
-                <BotIcon className="h-5 w-5" />
-              </div>
-            )}
-            
             <div className={cn(
               "flex flex-col gap-2 max-w-[85%]",
               msg.role === "user" ? "items-end" : "items-start"
@@ -405,9 +399,6 @@ export function ChatInterface({
         {/* Thinking/Responding State */}
         {aiState !== "idle" && (
           <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-violet-500/20 to-purple-600/20 flex items-center justify-center flex-shrink-0 mt-1">
-              <BotIcon className="h-5 w-5 text-violet-600" />
-            </div>
             <div className="flex flex-col gap-2 items-start">
               {aiState === "thinking" && (
                 <div className="liquid-message-ai-light px-4 py-3 text-sm">
