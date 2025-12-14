@@ -186,9 +186,9 @@ export function ChatInterface({
   };
 
   return (
-    <div className="flex h-full flex-col bg-background relative">
+    <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
-      <header className="flex h-14 items-center justify-between px-4 border-b bg-background/50 backdrop-blur-sm z-10 sticky top-0">
+      <header className="flex h-14 items-center justify-between px-4 border-b border-white/20 glass-card-light rounded-none z-10 sticky top-0">
         <div className="flex items-center gap-2">
           {!isSidebarOpen && (
             <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="h-8 w-8 mr-2 text-muted-foreground">
@@ -237,7 +237,7 @@ export function ChatInterface({
               msg.role === "user" ? "items-end" : "items-start"
             )}>
               {msg.role === "user" ? (
-                <div className="rounded-2xl bg-muted px-4 py-2.5 text-sm">
+                <div className="liquid-message-user px-4 py-2.5 text-sm">
                   {msg.content}
                 </div>
               ) : (
@@ -270,7 +270,7 @@ export function ChatInterface({
                   )}
                   
                   {msg.content && !msg.isThinking && (
-                     <div className="text-sm leading-relaxed text-foreground prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:border prose-code:before:content-none prose-code:after:content-none">
+                     <div className="liquid-message-ai-light px-4 py-3 text-sm leading-relaxed text-foreground prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:border prose-code:before:content-none prose-code:after:content-none">
                        <ReactMarkdown
                          remarkPlugins={[remarkGfm, remarkMath]}
                          rehypePlugins={[rehypeKatex, rehypeHighlight]}
@@ -422,7 +422,7 @@ export function ChatInterface({
           </div>
         )}
         
-        <div className="relative flex items-end gap-2 rounded-3xl border bg-background shadow-sm p-2 focus-within:ring-1 focus-within:ring-ring transition-shadow">
+        <div className="relative flex items-end gap-2 rounded-3xl liquid-input-light p-2 focus-within:shadow-lg transition-all duration-300">
           <Popover>
             <PopoverTrigger asChild>
               <Button 
@@ -496,8 +496,8 @@ export function ChatInterface({
               disabled={!input.trim()}
               size="icon" 
               className={cn(
-                "h-9 w-9 rounded-full transition-all",
-                input.trim() ? "bg-black text-white hover:bg-black/90" : "bg-muted text-muted-foreground"
+                "h-9 w-9 rounded-full transition-all duration-300",
+                input.trim() ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
               )}
             >
               <ArrowUp className="h-5 w-5" />

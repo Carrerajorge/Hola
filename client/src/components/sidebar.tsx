@@ -109,14 +109,14 @@ export function Sidebar({
   });
   
   return (
-    <div className={cn("flex h-screen w-[260px] flex-col border-r bg-sidebar text-sidebar-foreground", className)}>
+    <div className={cn("flex h-screen w-[260px] flex-col liquid-sidebar-light text-sidebar-foreground", className)}>
       <div className="flex h-14 items-center justify-between px-4 py-2">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/5">
-             <Bot className="h-5 w-5" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-violet-500/20 to-purple-600/20 backdrop-blur-sm">
+             <Bot className="h-5 w-5 text-violet-600" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold leading-none">Sira GPT</span>
+            <span className="text-sm font-semibold leading-none liquid-text-gradient">Sira GPT</span>
             <span className="text-[10px] text-muted-foreground">AI Platform</span>
           </div>
         </div>
@@ -159,7 +159,7 @@ export function Sidebar({
 
       <Separator className="mx-4 my-2 w-auto opacity-50" />
 
-      <ScrollArea className="flex-1 px-2">
+      <ScrollArea className="flex-1 px-2 liquid-scroll">
         <div className="flex flex-col gap-4 pb-4">
           {groupOrder.map((group) => {
             const groupChats = groupedChats[group];
@@ -174,8 +174,8 @@ export function Sidebar({
                   <div
                     key={chat.id}
                     className={cn(
-                      "group flex w-full items-center justify-between px-2 py-2.5 rounded-md cursor-pointer hover:bg-sidebar-accent transition-colors",
-                      activeChatId === chat.id && "bg-sidebar-accent",
+                      "group flex w-full items-center justify-between px-2 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-white/50 transition-all duration-300",
+                      activeChatId === chat.id && "bg-white/60 shadow-sm",
                       chat.archived && "opacity-60"
                     )}
                     onClick={() => !editingChatId && onSelectChat(chat.id)}

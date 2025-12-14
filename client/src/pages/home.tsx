@@ -25,7 +25,10 @@ export default function Home() {
   } = useChats();
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="flex h-screen w-full overflow-hidden liquid-bg-light relative">
+      <div className="liquid-blob liquid-blob-1 opacity-30"></div>
+      <div className="liquid-blob liquid-blob-2 opacity-20"></div>
+      <div className="liquid-blob liquid-blob-3 opacity-25"></div>
       {/* Desktop Sidebar */}
       <div className={isSidebarOpen ? "hidden md:block" : "hidden"}>
         <Sidebar 
