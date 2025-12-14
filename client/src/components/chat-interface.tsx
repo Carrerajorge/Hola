@@ -244,6 +244,13 @@ export function ChatInterface({
       "application/vnd.ms-excel",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/vnd.ms-powerpoint",
+      "image/png",
+      "image/jpeg",
+      "image/jpg",
+      "image/gif",
+      "image/bmp",
+      "image/webp",
+      "image/tiff",
     ];
 
     for (const file of Array.from(files)) {
