@@ -316,31 +316,29 @@ export function ChatInterface({
                       </div>
                     </>
                   ) : (
-                    <>
+                    <div className="group">
                       <div className="liquid-message-user px-4 py-2.5 text-sm">
                         {msg.content}
                       </div>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button
                           variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground"
                           onClick={() => handleCopyMessage(msg.content)}
                         >
-                          <Copy className="h-3 w-3 mr-1" />
-                          Copiar
+                          <Copy className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-foreground"
                           onClick={() => handleStartEdit(msg)}
                         >
-                          <Pencil className="h-3 w-3 mr-1" />
-                          Editar
+                          <Pencil className="h-4 w-4" />
                         </Button>
                       </div>
-                    </>
+                    </div>
                   )}
                 </div>
               ) : (
