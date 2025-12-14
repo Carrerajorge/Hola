@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import OpenAI from "openai";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { extractText } from "./documentParser";
-import { chunkText, generateEmbedding } from "./embeddingService";
+import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
 
 const openai = new OpenAI({ 
   baseURL: "https://api.x.ai/v1", 
@@ -180,20 +180,19 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
     const content = await objectStorageService.getFileContent(objectFile);
     
     const text = await extractText(content, mimeType);
-    const chunks = chunkText(text);
+    const chunks = chunkText(text, 1500, 150);
     
-    const chunksWithEmbeddings = [];
-    for (const chunk of chunks) {
-      const embedding = await generateEmbedding(chunk.content);
-      chunksWithEmbeddings.push({
-        fileId,
-        content: chunk.content,
-        embedding,
-        chunkIndex: chunk.chunkIndex,
-        pageNumber: chunk.pageNumber || null,
-        metadata: null,
-      });
-    }
+    const texts = chunks.map(c => c.content);
+    const embeddings = await generateEmbeddingsBatch(texts);
+    
+    const chunksWithEmbeddings = chunks.map((chunk, i) => ({
+      fileId,
+      content: chunk.content,
+      embedding: embeddings[i],
+      chunkIndex: chunk.chunkIndex,
+      pageNumber: chunk.pageNumber || null,
+      metadata: null,
+    }));
     
     await storage.createFileChunks(chunksWithEmbeddings);
     await storage.updateFileStatus(fileId, "ready");

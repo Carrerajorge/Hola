@@ -62,11 +62,33 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   }
 }
 
-export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
-  const embeddings: number[][] = [];
-  for (const text of texts) {
-    const embedding = await generateEmbedding(text);
-    embeddings.push(embedding);
+export async function generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  
+  const BATCH_SIZE = 20;
+  const allEmbeddings: number[][] = [];
+  
+  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+    const batch = texts.slice(i, i + BATCH_SIZE).map(t => t.slice(0, 8000));
+    
+    try {
+      const response = await openai.embeddings.create({
+        model: "text-embedding-3-small",
+        input: batch,
+      });
+      
+      const batchEmbeddings = response.data
+        .sort((a, b) => a.index - b.index)
+        .map(d => d.embedding);
+      
+      allEmbeddings.push(...batchEmbeddings);
+    } catch (error) {
+      console.error("Batch embedding error:", error);
+      for (let j = 0; j < batch.length; j++) {
+        allEmbeddings.push(new Array(1536).fill(0));
+      }
+    }
   }
-  return embeddings;
+  
+  return allEmbeddings;
 }
