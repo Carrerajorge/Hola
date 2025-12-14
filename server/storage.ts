@@ -24,6 +24,17 @@ export interface IStorage {
   createFileChunks(chunks: InsertFileChunk[]): Promise<FileChunk[]>;
   getFileChunks(fileId: string): Promise<FileChunk[]>;
   searchSimilarChunks(embedding: number[], limit?: number): Promise<FileChunk[]>;
+  // Agent CRUD operations
+  createAgentRun(run: InsertAgentRun): Promise<AgentRun>;
+  getAgentRun(id: string): Promise<AgentRun | undefined>;
+  updateAgentRunStatus(id: string, status: string, error?: string): Promise<AgentRun | undefined>;
+  createAgentStep(step: InsertAgentStep): Promise<AgentStep>;
+  getAgentSteps(runId: string): Promise<AgentStep[]>;
+  updateAgentStepStatus(id: string, success: string, error?: string): Promise<AgentStep | undefined>;
+  createAgentAsset(asset: InsertAgentAsset): Promise<AgentAsset>;
+  getAgentAssets(runId: string): Promise<AgentAsset[]>;
+  getDomainPolicy(domain: string): Promise<DomainPolicy | undefined>;
+  createDomainPolicy(policy: InsertDomainPolicy): Promise<DomainPolicy>;
 }
 
 export class MemStorage implements IStorage {

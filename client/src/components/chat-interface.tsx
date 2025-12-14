@@ -45,6 +45,8 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 
 import { Message } from "@/hooks/use-chats";
+import { useAgent } from "@/hooks/use-agent";
+import { AgentObserver } from "@/components/agent-observer";
 
 const processLatex = (content: string): string => {
   return content
@@ -95,6 +97,7 @@ export function ChatInterface({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const agent = useAgent();
 
   const handleStopChat = () => {
     if (abortControllerRef.current) {
@@ -483,6 +486,11 @@ export function ChatInterface({
         throw new Error(data.error || "Failed to get response");
       }
 
+      // Check if this was an agent task - subscribe to WebSocket updates
+      if (data.wasAgentTask && data.agentRunId) {
+        agent.subscribe(data.agentRunId, userInput);
+      }
+
       setAiState("responding");
       
       const fullContent = data.content;
@@ -509,6 +517,7 @@ export function ChatInterface({
           onSendMessage(aiMsg);
           setStreamingContent("");
           setAiState("idle");
+          agent.complete(); // Mark agent as complete when streaming ends
           abortControllerRef.current = null;
         }
       }, 15);
@@ -862,8 +871,20 @@ export function ChatInterface({
           </div>
         ))}
         
+        {/* Agent Observer - Show when agent is running */}
+        {agent.state.status !== "idle" && (
+          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+            <AgentObserver
+              steps={agent.state.steps}
+              objective={agent.state.objective}
+              status={agent.state.status}
+              onCancel={agent.cancel}
+            />
+          </div>
+        )}
+
         {/* Thinking/Responding State */}
-        {aiState !== "idle" && (
+        {aiState !== "idle" && agent.state.status === "idle" && (
           <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
             <div className="flex flex-col gap-2 items-start">
               {aiState === "thinking" && (
