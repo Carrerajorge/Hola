@@ -986,86 +986,87 @@ export function ChatInterface({
               data-testid="input-file-upload"
             />
 
-            {/* Inline Attachments Preview */}
-            {uploadedFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-3" data-testid="inline-attachments-container">
-                {uploadedFiles.map((file, index) => (
-                  <div
-                    key={file.id || index}
-                    className={cn(
-                      "relative group rounded-lg border overflow-hidden",
-                      file.status === "error" 
-                        ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
-                        : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
-                    )}
-                    data-testid={`inline-file-${index}`}
-                  >
-                    <button
-                      className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white z-10 transition-colors opacity-0 group-hover:opacity-100"
-                      onClick={() => removeFile(index)}
-                      data-testid={`button-remove-file-${index}`}
+            <div className="relative flex flex-col rounded-3xl liquid-input-light p-2 focus-within:shadow-lg transition-all duration-300">
+              {/* Inline Attachments Preview - inside input container */}
+              {uploadedFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2 px-1" data-testid="inline-attachments-container">
+                  {uploadedFiles.map((file, index) => (
+                    <div
+                      key={file.id || index}
+                      className={cn(
+                        "relative group rounded-lg border overflow-hidden",
+                        file.status === "error" 
+                          ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
+                          : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                      )}
+                      data-testid={`inline-file-${index}`}
                     >
-                      <X className="h-3 w-3" />
-                    </button>
-                    {file.type.startsWith("image/") && file.dataUrl ? (
-                      <div className="relative w-16 h-16">
-                        <img 
-                          src={file.dataUrl} 
-                          alt={file.name}
-                          className="w-full h-full object-cover"
-                        />
-                        {(file.status === "uploading" || file.status === "processing") && (
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                            <Loader2 className="h-4 w-4 animate-spin text-white" />
-                          </div>
-                        )}
-                        {file.status === "ready" && (
-                          <div className="absolute bottom-0 right-0 bg-green-500 rounded-tl-md p-0.5">
-                            <CheckCircle2 className="h-2.5 w-2.5 text-white" />
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 px-2 py-1.5 pr-6 max-w-[180px]">
-                        <div className={cn(
-                          "flex items-center justify-center w-8 h-8 rounded flex-shrink-0",
-                          file.type.includes("pdf") ? "bg-red-500" :
-                          file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
-                          file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
-                          file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
-                          "bg-gray-500"
-                        )}>
-                          <span className="text-white text-[10px] font-bold">
-                            {file.type.includes("pdf") ? "PDF" :
-                             file.type.includes("word") || file.type.includes("document") ? "DOC" :
-                             file.type.includes("sheet") || file.type.includes("excel") ? "XLS" :
-                             file.type.includes("presentation") || file.type.includes("powerpoint") ? "PPT" :
-                             "FILE"}
-                          </span>
+                      <button
+                        className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white z-10 transition-colors opacity-0 group-hover:opacity-100"
+                        onClick={() => removeFile(index)}
+                        data-testid={`button-remove-file-${index}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                      {file.type.startsWith("image/") && file.dataUrl ? (
+                        <div className="relative w-16 h-16">
+                          <img 
+                            src={file.dataUrl} 
+                            alt={file.name}
+                            className="w-full h-full object-cover rounded-lg"
+                          />
+                          {(file.status === "uploading" || file.status === "processing") && (
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center rounded-lg">
+                              <Loader2 className="h-4 w-4 animate-spin text-white" />
+                            </div>
+                          )}
+                          {file.status === "ready" && (
+                            <div className="absolute bottom-0 right-0 bg-green-500 rounded-tl-md p-0.5">
+                              <CheckCircle2 className="h-2.5 w-2.5 text-white" />
+                            </div>
+                          )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-xs font-medium truncate block">{file.name}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {file.status === "uploading" ? "Subiendo..." :
-                             file.status === "processing" ? "Procesando..." :
-                             file.status === "error" ? "Error" :
-                             formatFileSize(file.size)}
-                          </span>
+                      ) : (
+                        <div className="flex items-center gap-2 px-2 py-1.5 pr-6 max-w-[180px]">
+                          <div className={cn(
+                            "flex items-center justify-center w-8 h-8 rounded flex-shrink-0",
+                            file.type.includes("pdf") ? "bg-red-500" :
+                            file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
+                            file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
+                            file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
+                            "bg-gray-500"
+                          )}>
+                            <span className="text-white text-[10px] font-bold">
+                              {file.type.includes("pdf") ? "PDF" :
+                               file.type.includes("word") || file.type.includes("document") ? "DOC" :
+                               file.type.includes("sheet") || file.type.includes("excel") ? "XLS" :
+                               file.type.includes("presentation") || file.type.includes("powerpoint") ? "PPT" :
+                               "FILE"}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs font-medium truncate block">{file.name}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {file.status === "uploading" ? "Subiendo..." :
+                               file.status === "processing" ? "Procesando..." :
+                               file.status === "error" ? "Error" :
+                               formatFileSize(file.size)}
+                            </span>
+                          </div>
+                          {(file.status === "uploading" || file.status === "processing") && (
+                            <Loader2 className="h-3 w-3 animate-spin text-blue-500 flex-shrink-0" />
+                          )}
+                          {file.status === "ready" && (
+                            <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
+                          )}
                         </div>
-                        {(file.status === "uploading" || file.status === "processing") && (
-                          <Loader2 className="h-3 w-3 animate-spin text-blue-500 flex-shrink-0" />
-                        )}
-                        {file.status === "ready" && (
-                          <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            <div className="relative flex items-end gap-2 rounded-3xl liquid-input-light p-2 focus-within:shadow-lg transition-all duration-300">
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              <div className="flex items-end gap-2">
               <Popover>
                 <PopoverTrigger asChild>
                   <Button 
@@ -1157,6 +1158,7 @@ export function ChatInterface({
                     <ArrowUp className="h-5 w-5" />
                   </Button>
                 )}
+              </div>
               </div>
             </div>
             <div className="text-center text-xs text-muted-foreground mt-3">
