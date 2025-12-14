@@ -48,6 +48,13 @@ interface ChatInterfaceProps {
   onToggleSidebar?: () => void;
 }
 
+interface UploadedFile {
+  name: string;
+  type: string;
+  size: number;
+  dataUrl?: string;
+}
+
 export function ChatInterface({ 
   messages, 
   onSendMessage, 
@@ -59,8 +66,51 @@ export function ChatInterface({
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const newFile: UploadedFile = {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          dataUrl: reader.result as string,
+        };
+        setUploadedFiles((prev) => [...prev, newFile]);
+      };
+      reader.readAsDataURL(file);
+    });
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const getFileIcon = (type: string) => {
+    if (type.includes("pdf")) return <FileText className="h-4 w-4 text-red-500" />;
+    if (type.includes("word") || type.includes("document")) return <FileText className="h-4 w-4 text-blue-600" />;
+    if (type.includes("sheet") || type.includes("excel")) return <FileSpreadsheet className="h-4 w-4 text-green-600" />;
+    if (type.includes("image")) return <Image className="h-4 w-4 text-purple-500" />;
+    return <FileIcon className="h-4 w-4 text-gray-500" />;
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  };
 
   const adjustTextareaHeight = () => {
     if (textareaRef.current) {
@@ -76,15 +126,20 @@ export function ChatInterface({
   const handleSubmit = async () => {
     if (!input.trim()) return;
 
+    const fileInfo = uploadedFiles.length > 0 
+      ? `\n\n[Archivos adjuntos: ${uploadedFiles.map(f => f.name).join(", ")}]` 
+      : "";
+    
     const userMsg: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input,
+      content: input + fileInfo,
       timestamp: new Date(),
     };
 
     onSendMessage(userMsg);
     const userInput = input;
+    const currentFiles = [...uploadedFiles];
     setInput("");
     setIsTyping(true);
 
@@ -115,6 +170,7 @@ export function ChatInterface({
       };
       
       onSendMessage(aiMsg);
+      setUploadedFiles([]);
     } catch (error: any) {
       console.error("Chat error:", error);
       const errorMsg: Message = {
@@ -329,6 +385,43 @@ export function ChatInterface({
           </div>
         )}
         
+        {/* Hidden file input */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileUpload}
+          className="hidden"
+          multiple
+          accept="*/*"
+          data-testid="input-file-upload"
+        />
+        
+        {/* Uploaded files preview */}
+        {uploadedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {uploadedFiles.map((file, index) => (
+              <div
+                key={index}
+                className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg text-sm group"
+                data-testid={`file-preview-${index}`}
+              >
+                {getFileIcon(file.type)}
+                <span className="max-w-[120px] truncate">{file.name}</span>
+                <span className="text-xs text-muted-foreground">({formatFileSize(file.size)})</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-4 w-4 opacity-50 hover:opacity-100"
+                  onClick={() => removeFile(index)}
+                  data-testid={`button-remove-file-${index}`}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        
         <div className="relative flex items-end gap-2 rounded-3xl border bg-background shadow-sm p-2 focus-within:ring-1 focus-within:ring-ring transition-shadow">
           <Popover>
             <PopoverTrigger asChild>
@@ -342,7 +435,12 @@ export function ChatInterface({
             </PopoverTrigger>
             <PopoverContent className="w-48 p-1" align="start" side="top">
               <div className="flex flex-col">
-                <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                <Button 
+                  variant="ghost" 
+                  className="justify-start gap-2 text-sm h-9"
+                  onClick={() => fileInputRef.current?.click()}
+                  data-testid="button-upload-files"
+                >
                   <Upload className="h-4 w-4" />
                   Upload Files
                 </Button>
