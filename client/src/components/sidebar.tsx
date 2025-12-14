@@ -121,8 +121,9 @@ export function Sidebar({
           </div>
         </div>
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onToggle}>
-          <svg className="h-5 w-5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="4" ry="4" />
+          <svg className="h-5 w-5 text-muted-foreground" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="3" width="18" height="18" rx="6" stroke="currentColor" strokeWidth="1.5" />
+            <line x1="12" y1="7" x2="12" y2="17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </Button>
       </div>
