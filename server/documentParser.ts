@@ -4,6 +4,7 @@ import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse");
+const officeParser = require("officeparser");
 
 export async function extractText(content: Buffer, mimeType: string): Promise<string> {
   if (mimeType === "text/plain") {
@@ -72,16 +73,14 @@ export async function extractText(content: Buffer, mimeType: string): Promise<st
   if (mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
       mimeType === "application/vnd.ms-powerpoint") {
     try {
-      const workbook = XLSX.read(content, { type: "buffer" });
-      let text = "";
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName];
-        text += XLSX.utils.sheet_to_csv(sheet) + "\n";
+      const text = await officeParser.parseOfficeAsync(content);
+      if (!text || text.trim().length === 0) {
+        throw new Error("No text extracted from PowerPoint");
       }
-      return text.trim() || "PowerPoint content extracted";
+      return text;
     } catch (error) {
       console.error("Error parsing PowerPoint:", error);
-      return "PowerPoint file - text extraction limited";
+      throw new Error("Failed to parse PowerPoint");
     }
   }
 
