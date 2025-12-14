@@ -8,7 +8,7 @@ export interface Message {
   timestamp: Date;
   isThinking?: boolean;
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
-  attachments?: { type: "word" | "excel" | "ppt"; name: string }[];
+  attachments?: { type: "word" | "excel" | "ppt" | "image"; name: string; imageUrl?: string }[];
   sources?: { fileName: string; content: string }[];
 }
 

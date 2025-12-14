@@ -261,12 +261,23 @@ export function ChatInterface({
       }
 
       const tempId = `temp-${Date.now()}-${Math.random()}`;
+      
+      let dataUrl: string | undefined;
+      if (file.type.startsWith("image/")) {
+        dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+      
       const tempFile: UploadedFile = {
         id: tempId,
         name: file.name,
         type: file.type,
         size: file.size,
         status: "uploading",
+        dataUrl,
       };
       setUploadedFiles((prev) => [...prev, tempFile]);
 
@@ -403,11 +414,13 @@ export function ChatInterface({
     const attachments = uploadedFiles
       .filter(f => f.status === "ready" || f.status === "processing")
       .map(f => ({
-        type: f.type.includes("word") || f.type.includes("document") ? "word" as const :
+        type: f.type.startsWith("image/") ? "image" as const :
+              f.type.includes("word") || f.type.includes("document") ? "word" as const :
               f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
               f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
               "word" as const,
-        name: f.name
+        name: f.name,
+        imageUrl: f.dataUrl,
       }));
     
     const userMsg: Message = {
@@ -579,25 +592,35 @@ export function ChatInterface({
                       {msg.attachments && msg.attachments.length > 0 && (
                         <div className="flex flex-wrap gap-2 mb-2 justify-end">
                           {msg.attachments.map((file, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
-                            >
-                              <div className={cn(
-                                "flex items-center justify-center w-8 h-8 rounded-lg",
-                                file.type === "word" ? "bg-blue-600" :
-                                file.type === "excel" ? "bg-green-600" :
-                                file.type === "ppt" ? "bg-orange-500" :
-                                "bg-gray-500"
-                              )}>
-                                <span className="text-white text-xs font-bold">
-                                  {file.type === "word" ? "W" :
-                                   file.type === "excel" ? "X" :
-                                   file.type === "ppt" ? "P" : "F"}
-                                </span>
+                            file.type === "image" && file.imageUrl ? (
+                              <div key={idx} className="relative max-w-[280px] rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+                                <img 
+                                  src={file.imageUrl} 
+                                  alt={file.name}
+                                  className="w-full h-auto max-h-[200px] object-cover"
+                                />
                               </div>
-                              <span className="max-w-[200px] truncate font-medium">{file.name}</span>
-                            </div>
+                            ) : (
+                              <div
+                                key={idx}
+                                className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                              >
+                                <div className={cn(
+                                  "flex items-center justify-center w-8 h-8 rounded-lg",
+                                  file.type === "word" ? "bg-blue-600" :
+                                  file.type === "excel" ? "bg-green-600" :
+                                  file.type === "ppt" ? "bg-orange-500" :
+                                  "bg-gray-500"
+                                )}>
+                                  <span className="text-white text-xs font-bold">
+                                    {file.type === "word" ? "W" :
+                                     file.type === "excel" ? "X" :
+                                     file.type === "ppt" ? "P" : "F"}
+                                  </span>
+                                </div>
+                                <span className="max-w-[200px] truncate font-medium">{file.name}</span>
+                              </div>
+                            )
                           ))}
                         </div>
                       )}
@@ -977,7 +1000,20 @@ export function ChatInterface({
                 >
                   <X className="h-4 w-4" />
                 </button>
-                {file.content ? (
+                {file.type.startsWith("image/") && file.dataUrl ? (
+                  <div className="relative">
+                    <img 
+                      src={file.dataUrl} 
+                      alt={file.name}
+                      className="w-full max-h-40 object-cover"
+                    />
+                    {(file.status === "uploading" || file.status === "processing") && (
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                        <Loader2 className="h-6 w-6 animate-spin text-white" />
+                      </div>
+                    )}
+                  </div>
+                ) : file.content ? (
                   <div className="p-3 pr-8 max-h-32 overflow-y-auto">
                     <div className="text-xs text-gray-500 mb-1">{file.name}:</div>
                     <div className="text-sm whitespace-pre-wrap break-words">
@@ -991,7 +1027,6 @@ export function ChatInterface({
                       file.type.includes("pdf") ? "bg-red-500" :
                       file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
                       file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
-                      file.type.includes("image") ? "bg-purple-500" :
                       file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
                       "bg-gray-500"
                     )}>
@@ -999,7 +1034,6 @@ export function ChatInterface({
                         {file.type.includes("pdf") ? "PDF" :
                          file.type.includes("word") || file.type.includes("document") ? "W" :
                          file.type.includes("sheet") || file.type.includes("excel") ? "X" :
-                         file.type.includes("image") ? "IMG" :
                          file.type.includes("presentation") || file.type.includes("powerpoint") ? "P" :
                          "F"}
                       </span>
