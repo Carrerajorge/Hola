@@ -230,64 +230,61 @@ export function ChatInterface({
         <div ref={bottomRef} />
       </div>
 
-      {/* Virtual Browser Panel */}
-      {isBrowserOpen && (
+      {/* Virtual Browser Panel - Small floating above input */}
+      {(isBrowserOpen || input.trim().length > 0) && (
         <div className={cn(
-          "mx-auto border rounded-xl overflow-hidden shadow-lg bg-card transition-all duration-300",
+          "mx-auto border rounded-lg overflow-hidden shadow-md bg-card transition-all duration-200",
           isBrowserMaximized 
             ? "fixed inset-4 z-50 max-w-none" 
-            : "w-full max-w-3xl mb-4 mx-4 sm:mx-auto"
+            : "w-full max-w-3xl mb-2 mx-4 sm:mx-auto"
         )}>
-          {/* Browser Header */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 border-b">
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground">
-                <ArrowLeft className="h-3 w-3" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground">
-                <ArrowRight className="h-3 w-3" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground">
-                <RefreshCw className="h-3 w-3" />
-              </Button>
-            </div>
+          {/* Browser Header - Compact */}
+          <div className="flex items-center gap-1 px-2 py-1 bg-muted/50 border-b">
+            <span className="text-[10px] font-medium text-muted-foreground mr-1">webview</span>
+            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="h-2.5 w-2.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground">
+              <ArrowRight className="h-2.5 w-2.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground">
+              <RefreshCw className="h-2.5 w-2.5" />
+            </Button>
             
-            {/* URL Bar */}
-            <div className="flex-1 flex items-center gap-2 bg-background rounded-md px-3 py-1.5 border">
-              <Globe className="h-3 w-3 text-muted-foreground" />
+            {/* URL Bar - Compact */}
+            <div className="flex-1 flex items-center gap-1 bg-background rounded px-2 py-0.5 border text-[10px]">
+              <Globe className="h-2.5 w-2.5 text-muted-foreground" />
               <input 
                 type="text" 
                 value={browserUrl}
                 onChange={(e) => setBrowserUrl(e.target.value)}
-                className="flex-1 bg-transparent text-xs outline-none"
+                className="flex-1 bg-transparent text-[10px] outline-none"
                 placeholder="Enter URL..."
               />
             </div>
             
-            <div className="flex items-center gap-1">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                onClick={() => setIsBrowserMaximized(!isBrowserMaximized)}
-              >
-                {isBrowserMaximized ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                onClick={() => setIsBrowserOpen(false)}
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+              onClick={() => setIsBrowserMaximized(!isBrowserMaximized)}
+            >
+              {isBrowserMaximized ? <Minimize2 className="h-2.5 w-2.5" /> : <Maximize2 className="h-2.5 w-2.5" />}
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+              onClick={() => setIsBrowserOpen(false)}
+            >
+              <X className="h-2.5 w-2.5" />
+            </Button>
           </div>
           
-          {/* Browser Content */}
+          {/* Browser Content - Much smaller */}
           <div className={cn(
             "bg-white relative",
-            isBrowserMaximized ? "h-[calc(100%-40px)]" : "h-64"
+            isBrowserMaximized ? "h-[calc(100%-28px)]" : "h-32"
           )}>
             <iframe 
               src={browserUrl}
@@ -295,12 +292,11 @@ export function ChatInterface({
               sandbox="allow-scripts allow-same-origin allow-forms"
               title="Virtual Browser"
             />
-            {/* Overlay when AI is browsing */}
             {isTyping && (
               <div className="absolute inset-0 bg-black/10 backdrop-blur-[1px] flex items-center justify-center">
-                <div className="bg-card px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                  <span className="text-sm font-medium">AI is browsing...</span>
+                <div className="bg-card px-2 py-1 rounded-md shadow-lg flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                  <span className="text-[10px] font-medium">AI browsing...</span>
                 </div>
               </div>
             )}
