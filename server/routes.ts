@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import OpenAI from "openai";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
-import { extractText } from "./documentParser";
+import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
 
 const openai = new OpenAI({ 
@@ -72,7 +72,7 @@ export async function registerRoutes(
         userId: null,
       });
 
-      processFileAsync(file.id, storagePath, type);
+      processFileAsync(file.id, storagePath, type, name);
 
       res.json(file);
     } catch (error: any) {
@@ -173,14 +173,14 @@ export async function registerRoutes(
   return httpServer;
 }
 
-async function processFileAsync(fileId: string, storagePath: string, mimeType: string) {
+async function processFileAsync(fileId: string, storagePath: string, mimeType: string, filename?: string) {
   try {
     const objectStorageService = new ObjectStorageService();
     const objectFile = await objectStorageService.getObjectEntityFile(storagePath);
     const content = await objectStorageService.getFileContent(objectFile);
     
-    const text = await extractText(content, mimeType);
-    const chunks = chunkText(text, 1500, 150);
+    const result = await processDocument(content, mimeType, filename);
+    const chunks = chunkText(result.text, 1500, 150);
     
     const texts = chunks.map(c => c.content);
     const embeddings = await generateEmbeddingsBatch(texts);
