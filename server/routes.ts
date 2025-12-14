@@ -37,8 +37,8 @@ export async function registerRoutes(
 
   app.post("/api/objects/upload", async (req, res) => {
     try {
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-      res.json({ uploadURL });
+      const { uploadURL, storagePath } = await objectStorageService.getObjectEntityUploadURLWithPath();
+      res.json({ uploadURL, storagePath });
     } catch (error: any) {
       console.error("Error getting upload URL:", error);
       res.status(500).json({ error: "Failed to get upload URL" });

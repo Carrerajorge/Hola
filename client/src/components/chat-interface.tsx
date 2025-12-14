@@ -61,10 +61,13 @@ interface ChatInterfaceProps {
 }
 
 interface UploadedFile {
+  id?: string;
   name: string;
   type: string;
   size: number;
   dataUrl?: string;
+  storagePath?: string;
+  status?: string;
 }
 
 export function ChatInterface({ 
@@ -209,27 +212,123 @@ export function ChatInterface({
     setEditContent("");
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
 
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const newFile: UploadedFile = {
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          dataUrl: reader.result as string,
-        };
-        setUploadedFiles((prev) => [...prev, newFile]);
+    const ALLOWED_TYPES = [
+      "text/plain",
+      "text/markdown", 
+      "text/csv",
+      "text/html",
+      "application/json",
+    ];
+
+    for (const file of Array.from(files)) {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        console.warn(`Tipo de archivo no soportado: ${file.type}`);
+        continue;
+      }
+
+      const tempId = `temp-${Date.now()}-${Math.random()}`;
+      const tempFile: UploadedFile = {
+        id: tempId,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        status: "uploading",
       };
-      reader.readAsDataURL(file);
-    });
-    
+      setUploadedFiles((prev) => [...prev, tempFile]);
+
+      try {
+        const urlRes = await fetch("/api/objects/upload", { method: "POST" });
+        const { uploadURL, storagePath } = await urlRes.json();
+        if (!uploadURL || !storagePath) throw new Error("No upload URL received");
+
+        const uploadRes = await fetch(uploadURL, {
+          method: "PUT",
+          headers: { "Content-Type": file.type },
+          body: file,
+        });
+        if (!uploadRes.ok) throw new Error("Upload failed");
+
+        const registerRes = await fetch("/api/files", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            storagePath,
+          }),
+        });
+        const registeredFile = await registerRes.json();
+        if (!registerRes.ok) throw new Error(registeredFile.error);
+
+        setUploadedFiles((prev) =>
+          prev.map((f) =>
+            f.id === tempId
+              ? { ...f, id: registeredFile.id, storagePath, status: "processing" }
+              : f
+          )
+        );
+
+        pollFileStatus(registeredFile.id, tempId);
+      } catch (error) {
+        console.error("File upload error:", error);
+        setUploadedFiles((prev) =>
+          prev.map((f) => (f.id === tempId ? { ...f, status: "error" } : f))
+        );
+      }
+    }
+
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  };
+
+  const pollFileStatus = async (fileId: string, trackingId: string) => {
+    const maxAttempts = 30;
+    let attempts = 0;
+
+    const checkStatus = async () => {
+      try {
+        const res = await fetch("/api/files");
+        const files = await res.json();
+        const file = files.find((f: any) => f.id === fileId);
+
+        if (file) {
+          if (file.status === "ready") {
+            setUploadedFiles((prev) =>
+              prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "ready" } : f))
+            );
+            return;
+          } else if (file.status === "error") {
+            setUploadedFiles((prev) =>
+              prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+            );
+            return;
+          }
+        }
+
+        attempts++;
+        if (attempts >= maxAttempts) {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+          );
+          console.warn(`File ${fileId} processing timed out`);
+          return;
+        }
+        setTimeout(checkStatus, 2000);
+      } catch (error) {
+        console.error("Error polling file status:", error);
+        setUploadedFiles((prev) =>
+          prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+        );
+      }
+    };
+
+    setTimeout(checkStatus, 2000);
   };
 
   const removeFile = (index: number) => {
@@ -303,6 +402,7 @@ export function ChatInterface({
       setAiState("responding");
       
       const fullContent = data.content;
+      const responseSources = data.sources || [];
       let currentIndex = 0;
       
       const streamInterval = setInterval(() => {
@@ -317,11 +417,12 @@ export function ChatInterface({
             role: "assistant",
             content: fullContent,
             timestamp: new Date(),
+            sources: responseSources.length > 0 ? responseSources : undefined,
           };
           onSendMessage(aiMsg);
           setStreamingContent("");
           setAiState("idle");
-          setUploadedFiles([]);
+          setUploadedFiles((prev) => prev.filter((f) => f.status !== "ready"));
         }
       }, 15);
       
@@ -488,6 +589,23 @@ export function ChatInterface({
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="mt-3 p-3 rounded-lg bg-muted/50 border border-muted">
+                      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground mb-2">
+                        <FileText className="h-3 w-3" />
+                        Fuentes ({msg.sources.length})
+                      </div>
+                      <div className="space-y-2">
+                        {msg.sources.map((source, idx) => (
+                          <div key={idx} className="text-xs text-muted-foreground">
+                            <span className="font-medium text-foreground">{source.fileName}:</span>{" "}
+                            {source.content}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -754,12 +872,25 @@ export function ChatInterface({
             {uploadedFiles.map((file, index) => (
               <div
                 key={index}
-                className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg text-sm group"
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm group",
+                  file.status === "error" ? "bg-red-100 dark:bg-red-900/30" : "bg-muted"
+                )}
                 data-testid={`file-preview-${index}`}
               >
-                {getFileIcon(file.type)}
+                {file.status === "uploading" && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+                {file.status === "processing" && <Loader2 className="h-4 w-4 animate-spin text-orange-500" />}
+                {file.status === "ready" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                {file.status === "error" && <X className="h-4 w-4 text-red-500" />}
+                {!file.status && getFileIcon(file.type)}
                 <span className="max-w-[120px] truncate">{file.name}</span>
-                <span className="text-xs text-muted-foreground">({formatFileSize(file.size)})</span>
+                <span className="text-xs text-muted-foreground">
+                  {file.status === "uploading" && "Subiendo..."}
+                  {file.status === "processing" && "Procesando..."}
+                  {file.status === "ready" && "Listo"}
+                  {file.status === "error" && "Error"}
+                  {!file.status && `(${formatFileSize(file.size)})`}
+                </span>
                 <Button
                   variant="ghost"
                   size="icon"

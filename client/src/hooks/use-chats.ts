@@ -9,6 +9,7 @@ export interface Message {
   isThinking?: boolean;
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
   attachments?: { type: "word" | "excel" | "ppt"; name: string }[];
+  sources?: { fileName: string; content: string }[];
 }
 
 export interface Chat {
