@@ -368,13 +368,26 @@
   font-weight: 300;
   font-size: 0.95em;
   letter-spacing: 0.5px;
+  position: relative;
   color: #667eea;
-  background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #667eea 100%);
-  background-size: 200% 100%;
+  background: linear-gradient(
+    90deg, 
+    #667eea 0%, 
+    #764ba2 25%, 
+    #fff 50%, 
+    #764ba2 75%, 
+    #667eea 100%
+  );
+  background-size: 300% 100%;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: waveGradient 2s ease-in-out infinite;
+  animation: shimmerWave 2.5s ease-in-out infinite;
+}
+
+@keyframes shimmerWave {
+  0% { background-position: 100% 50%; }
+  100% { background-position: -100% 50%; }
 }
 
 @keyframes waveGradient {
