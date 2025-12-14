@@ -1,4 +1,13 @@
-import { type User, type InsertUser, type File, type InsertFile, type FileChunk, type InsertFileChunk, files, fileChunks } from "@shared/schema";
+import { 
+  type User, type InsertUser, 
+  type File, type InsertFile, 
+  type FileChunk, type InsertFileChunk,
+  type AgentRun, type InsertAgentRun,
+  type AgentStep, type InsertAgentStep,
+  type AgentAsset, type InsertAgentAsset,
+  type DomainPolicy, type InsertDomainPolicy,
+  files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies
+} from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
 import { eq, sql, desc } from "drizzle-orm";
@@ -89,6 +98,65 @@ export class MemStorage implements IStorage {
       LIMIT ${limit}
     `);
     return result.rows as FileChunk[];
+  }
+
+  async createAgentRun(run: InsertAgentRun): Promise<AgentRun> {
+    const [result] = await db.insert(agentRuns).values(run).returning();
+    return result;
+  }
+
+  async getAgentRun(id: string): Promise<AgentRun | undefined> {
+    const [result] = await db.select().from(agentRuns).where(eq(agentRuns.id, id));
+    return result;
+  }
+
+  async updateAgentRunStatus(id: string, status: string, error?: string): Promise<AgentRun | undefined> {
+    const updates: Partial<AgentRun> = { status };
+    if (status === "completed" || status === "failed" || status === "cancelled") {
+      updates.completedAt = new Date();
+    }
+    if (error) {
+      updates.error = error;
+    }
+    const [result] = await db.update(agentRuns).set(updates).where(eq(agentRuns.id, id)).returning();
+    return result;
+  }
+
+  async createAgentStep(step: InsertAgentStep): Promise<AgentStep> {
+    const [result] = await db.insert(agentSteps).values(step).returning();
+    return result;
+  }
+
+  async getAgentSteps(runId: string): Promise<AgentStep[]> {
+    return db.select().from(agentSteps).where(eq(agentSteps.runId, runId)).orderBy(agentSteps.stepIndex);
+  }
+
+  async updateAgentStepStatus(id: string, success: string, error?: string): Promise<AgentStep | undefined> {
+    const updates: Partial<AgentStep> = { success, completedAt: new Date() };
+    if (error) {
+      updates.error = error;
+    }
+    const [result] = await db.update(agentSteps).set(updates).where(eq(agentSteps.id, id)).returning();
+    return result;
+  }
+
+  async createAgentAsset(asset: InsertAgentAsset): Promise<AgentAsset> {
+    const [result] = await db.insert(agentAssets).values(asset).returning();
+    return result;
+  }
+
+  async getAgentAssets(runId: string): Promise<AgentAsset[]> {
+    return db.select().from(agentAssets).where(eq(agentAssets.runId, runId));
+  }
+
+  async getDomainPolicy(domain: string): Promise<DomainPolicy | undefined> {
+    const [result] = await db.select().from(domainPolicies).where(eq(domainPolicies.domain, domain));
+    return result;
+  }
+
+  async createDomainPolicy(policy: InsertDomainPolicy): Promise<DomainPolicy> {
+    const [result] = await db.insert(domainPolicies).values(policy).returning();
+    return result;
   }
 }
 

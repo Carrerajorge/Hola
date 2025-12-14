@@ -66,3 +66,109 @@ export const insertFileChunkSchema = createInsertSchema(fileChunks).omit({
 
 export type InsertFileChunk = z.infer<typeof insertFileChunkSchema>;
 export type FileChunk = typeof fileChunks.$inferSelect;
+
+// Agent Web Navigation Tables
+export const agentRuns = pgTable("agent_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id"),
+  status: text("status").notNull().default("pending"), // pending, running, completed, failed, cancelled
+  routerDecision: text("router_decision"), // llm, agent, hybrid
+  objective: text("objective"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  error: text("error"),
+}, (table) => [
+  index("agent_runs_conversation_idx").on(table.conversationId),
+  index("agent_runs_status_idx").on(table.status),
+]);
+
+export const insertAgentRunSchema = createInsertSchema(agentRuns).omit({
+  id: true,
+  startedAt: true,
+});
+
+export type InsertAgentRun = z.infer<typeof insertAgentRunSchema>;
+export type AgentRun = typeof agentRuns.$inferSelect;
+
+export const agentSteps = pgTable("agent_steps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => agentRuns.id, { onDelete: "cascade" }),
+  stepType: text("step_type").notNull(), // navigate, extract, click, input, screenshot, document
+  url: text("url"),
+  detail: jsonb("detail"),
+  screenshot: text("screenshot"), // storage path
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  success: text("success").default("pending"), // pending, success, failed
+  error: text("error"),
+  stepIndex: integer("step_index").notNull().default(0),
+}, (table) => [
+  index("agent_steps_run_idx").on(table.runId),
+]);
+
+export const insertAgentStepSchema = createInsertSchema(agentSteps).omit({
+  id: true,
+  startedAt: true,
+});
+
+export type InsertAgentStep = z.infer<typeof insertAgentStepSchema>;
+export type AgentStep = typeof agentSteps.$inferSelect;
+
+export const agentAssets = pgTable("agent_assets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => agentRuns.id, { onDelete: "cascade" }),
+  stepId: varchar("step_id").references(() => agentSteps.id, { onDelete: "set null" }),
+  assetType: text("asset_type").notNull(), // screenshot, document, extracted_content
+  storagePath: text("storage_path"),
+  content: text("content"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("agent_assets_run_idx").on(table.runId),
+]);
+
+export const insertAgentAssetSchema = createInsertSchema(agentAssets).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAgentAsset = z.infer<typeof insertAgentAssetSchema>;
+export type AgentAsset = typeof agentAssets.$inferSelect;
+
+export const cachedPages = pgTable("cached_pages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  urlHash: text("url_hash").notNull().unique(),
+  url: text("url").notNull(),
+  title: text("title"),
+  content: text("content"),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at"),
+}, (table) => [
+  index("cached_pages_url_hash_idx").on(table.urlHash),
+]);
+
+export const insertCachedPageSchema = createInsertSchema(cachedPages).omit({
+  id: true,
+  fetchedAt: true,
+});
+
+export type InsertCachedPage = z.infer<typeof insertCachedPageSchema>;
+export type CachedPage = typeof cachedPages.$inferSelect;
+
+export const domainPolicies = pgTable("domain_policies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  domain: text("domain").notNull().unique(),
+  allowNavigation: text("allow_navigation").notNull().default("true"),
+  cookiePolicy: text("cookie_policy").default("accept"), // accept, reject, essential
+  rateLimit: integer("rate_limit").default(10), // requests per minute
+  customHeaders: jsonb("custom_headers"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertDomainPolicySchema = createInsertSchema(domainPolicies).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertDomainPolicy = z.infer<typeof insertDomainPolicySchema>;
+export type DomainPolicy = typeof domainPolicies.$inferSelect;

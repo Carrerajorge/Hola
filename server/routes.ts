@@ -1,15 +1,19 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import OpenAI from "openai";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
+import { routeMessage, extractUrls, agentOrchestrator, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, StepUpdate } from "./agent";
 
 const openai = new OpenAI({ 
   baseURL: "https://api.x.ai/v1", 
   apiKey: process.env.XAI_API_KEY 
 });
+
+const agentClients: Map<string, Set<WebSocket>> = new Map();
 
 const ALLOWED_MIME_TYPES = [
   "text/plain",
@@ -134,7 +138,7 @@ export async function registerRoutes(
 
   app.post("/api/chat", async (req, res) => {
     try {
-      const { messages, useRag = true } = req.body;
+      const { messages, useRag = true, conversationId } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -145,30 +149,94 @@ export async function registerRoutes(
         content: msg.content
       }));
 
+      const lastUserMessage = formattedMessages.filter((m: { role: string }) => m.role === "user").pop();
+      
+      if (lastUserMessage) {
+        const routeResult = await routeMessage(lastUserMessage.content);
+        
+        if (routeResult.decision === "agent" || routeResult.decision === "hybrid") {
+          const urls = routeResult.urls.length > 0 ? routeResult.urls : [];
+          
+          for (const url of urls) {
+            try {
+              const sanitizedUrl = sanitizeUrl(url);
+              const securityCheck = await checkDomainPolicy(sanitizedUrl);
+              
+              if (!securityCheck.allowed) {
+                return res.json({
+                  content: `No puedo acceder a ${url}: ${securityCheck.reason}`,
+                  role: "assistant"
+                });
+              }
+              
+              const domain = new URL(sanitizedUrl).hostname;
+              if (!checkRateLimit(domain, securityCheck.rateLimit)) {
+                return res.json({
+                  content: `Límite de solicitudes alcanzado para ${domain}. Intenta de nuevo en un minuto.`,
+                  role: "assistant"
+                });
+              }
+            } catch (e) {
+              console.error("URL validation error:", e);
+            }
+          }
+          
+          if (!isValidObjective(routeResult.objective || lastUserMessage.content)) {
+            return res.json({
+              content: "No puedo procesar solicitudes que involucren información sensible o actividades no permitidas.",
+              role: "assistant"
+            });
+          }
+          
+          const agentRun = await storage.createAgentRun({
+            conversationId,
+            status: "pending",
+            routerDecision: routeResult.decision,
+            objective: routeResult.objective || lastUserMessage.content
+          });
+          
+          const onStepUpdate = (update: StepUpdate) => {
+            broadcastAgentUpdate(agentRun.id, update);
+          };
+          
+          const result = await agentOrchestrator.executeTask({
+            runId: agentRun.id,
+            objective: routeResult.objective || lastUserMessage.content,
+            urls,
+            conversationId
+          }, onStepUpdate);
+          
+          return res.json({
+            content: result.content,
+            role: "assistant",
+            sources: result.sources.length > 0 ? result.sources : undefined,
+            agentRunId: agentRun.id,
+            wasAgentTask: true
+          });
+        }
+      }
+
       let contextInfo = "";
       let sources: { fileName: string; content: string }[] = [];
 
-      if (useRag && formattedMessages.length > 0) {
-        const lastUserMessage = formattedMessages.filter((m: { role: string }) => m.role === "user").pop();
-        if (lastUserMessage) {
-          try {
-            const queryEmbedding = await generateEmbedding(lastUserMessage.content);
-            const similarChunks = await storage.searchSimilarChunks(queryEmbedding, 5);
+      if (useRag && lastUserMessage) {
+        try {
+          const queryEmbedding = await generateEmbedding(lastUserMessage.content);
+          const similarChunks = await storage.searchSimilarChunks(queryEmbedding, 5);
+          
+          if (similarChunks.length > 0) {
+            sources = similarChunks.map((chunk: any) => ({
+              fileName: chunk.file_name || "Documento",
+              content: chunk.content.slice(0, 200) + "..."
+            }));
             
-            if (similarChunks.length > 0) {
-              sources = similarChunks.map((chunk: any) => ({
-                fileName: chunk.file_name || "Documento",
-                content: chunk.content.slice(0, 200) + "..."
-              }));
-              
-              contextInfo = "\n\nContexto de documentos relevantes:\n" + 
-                similarChunks.map((chunk: any, i: number) => 
-                  `[${i + 1}] ${chunk.file_name || "Documento"}: ${chunk.content}`
-                ).join("\n\n");
-            }
-          } catch (error) {
-            console.error("RAG search error:", error);
+            contextInfo = "\n\nContexto de documentos relevantes:\n" + 
+              similarChunks.map((chunk: any, i: number) => 
+                `[${i + 1}] ${chunk.file_name || "Documento"}: ${chunk.content}`
+              ).join("\n\n");
           }
+        } catch (error) {
+          console.error("RAG search error:", error);
         }
       }
 
@@ -198,7 +266,79 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/agent/runs/:id", async (req, res) => {
+    try {
+      const run = await storage.getAgentRun(req.params.id);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      const steps = await storage.getAgentSteps(req.params.id);
+      const assets = await storage.getAgentAssets(req.params.id);
+      res.json({ run, steps, assets });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to get agent run" });
+    }
+  });
+
+  app.post("/api/agent/runs/:id/cancel", async (req, res) => {
+    try {
+      const success = agentOrchestrator.cancelRun(req.params.id);
+      if (success) {
+        res.json({ success: true });
+      } else {
+        res.status(404).json({ error: "Run not found or already completed" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to cancel run" });
+    }
+  });
+
+  const wss = new WebSocketServer({ server: httpServer, path: "/ws/agent" });
+  
+  wss.on("connection", (ws) => {
+    let subscribedRunId: string | null = null;
+    
+    ws.on("message", (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        if (data.type === "subscribe" && data.runId) {
+          subscribedRunId = data.runId;
+          if (!agentClients.has(data.runId)) {
+            agentClients.set(data.runId, new Set());
+          }
+          agentClients.get(data.runId)!.add(ws);
+        }
+      } catch (e) {
+        console.error("WS message parse error:", e);
+      }
+    });
+    
+    ws.on("close", () => {
+      if (subscribedRunId) {
+        const clients = agentClients.get(subscribedRunId);
+        if (clients) {
+          clients.delete(ws);
+          if (clients.size === 0) {
+            agentClients.delete(subscribedRunId);
+          }
+        }
+      }
+    });
+  });
+
   return httpServer;
+}
+
+function broadcastAgentUpdate(runId: string, update: StepUpdate) {
+  const clients = agentClients.get(runId);
+  if (!clients) return;
+  
+  const message = JSON.stringify({ type: "step_update", ...update });
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
 }
 
 async function processFileAsync(fileId: string, storagePath: string, mimeType: string, filename?: string) {
