@@ -894,7 +894,7 @@ export function ChatInterface({
           )}
 
           {/* Sticky Input Area */}
-          <div className="flex-shrink-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background/80 backdrop-blur-sm">
+          <div className="flex-shrink-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative">
             {/* Floating Mini Browser - positioned above the + button */}
             {(isBrowserOpen || input.trim().length > 0) && !isBrowserMaximized && (
               <div className="absolute left-4 sm:left-6 bottom-[calc(100%-16px)] w-[120px] border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200">
