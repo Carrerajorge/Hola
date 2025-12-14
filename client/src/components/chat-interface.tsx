@@ -20,12 +20,21 @@ import {
   Minimize2,
   Copy,
   Pencil,
-  Send
+  Send,
+  ThumbsUp,
+  ThumbsDown,
+  Share2,
+  Volume2,
+  VolumeX,
+  Flag,
+  MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -73,12 +82,106 @@ export function ChatInterface({
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleCopyMessage = (content: string) => {
+  const handleCopyMessage = (content: string, msgId?: string) => {
     navigator.clipboard.writeText(content);
+    if (msgId) {
+      setCopiedMessageId(msgId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    }
+  };
+
+  const handleFeedback = (msgId: string, value: "up" | "down") => {
+    setMessageFeedback(prev => ({
+      ...prev,
+      [msgId]: prev[msgId] === value ? null : value
+    }));
+  };
+
+  const handleShare = async (content: string) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Sira GPT Response",
+          text: content
+        });
+      } catch (e) {
+        navigator.clipboard.writeText(content);
+      }
+    } else {
+      navigator.clipboard.writeText(content);
+    }
+  };
+
+  const handleReadAloud = (msgId: string, content: string) => {
+    if (speakingMessageId === msgId) {
+      speechSynthesis.cancel();
+      setSpeakingMessageId(null);
+    } else {
+      speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(content);
+      utterance.onend = () => setSpeakingMessageId(null);
+      utterance.onerror = () => setSpeakingMessageId(null);
+      speechSynthesis.speak(utterance);
+      setSpeakingMessageId(msgId);
+    }
+  };
+
+  const handleRegenerate = async (msgIndex: number) => {
+    const prevMessages = messages.slice(0, msgIndex);
+    const lastUserMsg = [...prevMessages].reverse().find(m => m.role === "user");
+    if (!lastUserMsg) return;
+    
+    setAiState("thinking");
+    setStreamingContent("");
+    
+    try {
+      const chatHistory = prevMessages.map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: chatHistory })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+
+      setAiState("responding");
+      const fullContent = data.content;
+      let currentIndex = 0;
+      
+      const streamInterval = setInterval(() => {
+        if (currentIndex < fullContent.length) {
+          const chunkSize = Math.floor(Math.random() * 3) + 1;
+          setStreamingContent(fullContent.slice(0, currentIndex + chunkSize));
+          currentIndex += chunkSize;
+        } else {
+          clearInterval(streamInterval);
+          const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: fullContent,
+            timestamp: new Date(),
+          };
+          onSendMessage(aiMsg);
+          setStreamingContent("");
+          setAiState("idle");
+        }
+      }, 15);
+    } catch (error) {
+      console.error("Regenerate error:", error);
+      setAiState("idle");
+    }
   };
 
   const handleStartEdit = (msg: Message) => {
@@ -266,7 +369,7 @@ export function ChatInterface({
           </div>
         )}
         
-        {messages.map((msg) => (
+        {messages.map((msg, msgIndex) => (
           <div
             key={msg.id}
             className={cn(
@@ -336,7 +439,7 @@ export function ChatInterface({
                   )}
                 </div>
               ) : (
-                <div className="space-y-4 w-full">
+                <div className="space-y-4 w-full group/ai">
                   {msg.isThinking && msg.steps && (
                     <div className="rounded-lg border bg-card p-4 space-y-3 w-full animate-in fade-in slide-in-from-bottom-2">
                       <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
@@ -389,6 +492,121 @@ export function ChatInterface({
                         </div>
                       ))}
                     </div>
+                  )}
+
+                  {/* Message Actions Toolbar */}
+                  {msg.content && !msg.isThinking && (
+                    <TooltipProvider delayDuration={300}>
+                      <div className="flex items-center gap-1 mt-1 opacity-0 group-hover/ai:opacity-100 transition-opacity" data-testid={`message-actions-${msg.id}`}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => handleCopyMessage(msg.content, msg.id)}
+                              data-testid={`button-copy-${msg.id}`}
+                            >
+                              {copiedMessageId === msg.id ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom"><p>Copiar</p></TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={cn("h-7 w-7", messageFeedback[msg.id] === "up" ? "text-green-500" : "text-muted-foreground hover:text-foreground")}
+                              onClick={() => handleFeedback(msg.id, "up")}
+                              data-testid={`button-like-${msg.id}`}
+                            >
+                              <ThumbsUp className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom"><p>Me gusta</p></TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={cn("h-7 w-7", messageFeedback[msg.id] === "down" ? "text-red-500" : "text-muted-foreground hover:text-foreground")}
+                              onClick={() => handleFeedback(msg.id, "down")}
+                              data-testid={`button-dislike-${msg.id}`}
+                            >
+                              <ThumbsDown className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom"><p>No me gusta</p></TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => handleRegenerate(msgIndex)}
+                              disabled={aiState !== "idle"}
+                              data-testid={`button-regenerate-${msg.id}`}
+                            >
+                              <RefreshCw className={cn("h-4 w-4", aiState !== "idle" && "animate-spin")} />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom"><p>Regenerar</p></TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => handleShare(msg.content)}
+                              data-testid={`button-share-${msg.id}`}
+                            >
+                              <Share2 className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom"><p>Compartir</p></TooltipContent>
+                        </Tooltip>
+
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                  data-testid={`button-more-${msg.id}`}
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom"><p>Más opciones</p></TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent align="start" side="bottom">
+                            <DropdownMenuItem onClick={() => handleReadAloud(msg.id, msg.content)} data-testid={`menu-read-aloud-${msg.id}`}>
+                              {speakingMessageId === msg.id ? <VolumeX className="h-4 w-4 mr-2" /> : <Volume2 className="h-4 w-4 mr-2" />}
+                              {speakingMessageId === msg.id ? "Detener lectura" : "Leer en voz alta"}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem data-testid={`menu-create-thread-${msg.id}`}>
+                              <MessageSquare className="h-4 w-4 mr-2" />
+                              Crear hilo desde aquí
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="text-red-500" data-testid={`menu-report-${msg.id}`}>
+                              <Flag className="h-4 w-4 mr-2" />
+                              Reportar mensaje
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </TooltipProvider>
                   )}
                 </div>
               )}
