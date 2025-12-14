@@ -239,7 +239,7 @@ export function ChatInterface({
           "absolute left-4 border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200",
           isBrowserMaximized 
             ? "fixed inset-4 z-50" 
-            : "w-[120px] bottom-[140px]"
+            : "w-[120px] bottom-[118px]"
         )}>
           {/* Browser Header - Ultra Compact */}
           <div className="flex items-center justify-between px-1 py-0.5 bg-muted/50 border-b">
