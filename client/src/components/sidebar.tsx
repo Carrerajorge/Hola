@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { 
   Menu, 
   Search, 
@@ -30,6 +30,7 @@ import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { SearchModal } from "@/components/search-modal";
 
 import { Chat } from "@/hooks/use-chats";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
@@ -64,8 +65,8 @@ export function Sidebar({
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [showHidden, setShowHidden] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
   
   const handleStartEdit = (chat: Chat, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -95,20 +96,8 @@ export function Sidebar({
     return format(date, "yyyy");
   };
 
-  // Filter chats based on search query
-  const filteredChats = searchQuery.trim() 
-    ? chats.filter(chat => {
-        const query = searchQuery.toLowerCase();
-        const titleMatch = chat.title.toLowerCase().includes(query);
-        const messageMatch = chat.messages.some(msg => 
-          msg.content.toLowerCase().includes(query)
-        );
-        return titleMatch || messageMatch;
-      })
-    : chats;
-
   // Group chats
-  const groupedChats = filteredChats.reduce((groups, chat) => {
+  const groupedChats = chats.reduce((groups, chat) => {
     const label = getChatDateLabel(chat.timestamp);
     if (!groups[label]) groups[label] = [];
     groups[label].push(chat);
@@ -152,41 +141,16 @@ export function Sidebar({
           <Plus className="h-4 w-4" />
           New Chat
         </Button>
-        {isSearching ? (
-          <div className="flex items-center gap-1 px-2">
-            <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-            <Input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar conversaciones..."
-              className="h-8 text-sm flex-1 bg-white/50 border-white/30"
-              autoFocus
-              data-testid="input-search-chats"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 flex-shrink-0"
-              onClick={() => {
-                setIsSearching(false);
-                setSearchQuery("");
-              }}
-              data-testid="button-close-search"
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-        ) : (
-          <Button 
-            variant="ghost" 
-            className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
-            onClick={() => setIsSearching(true)}
-            data-testid="button-search-chats"
-          >
-            <Search className="h-4 w-4" />
-            Search chats
-          </Button>
-        )}
+        <Button 
+          ref={searchButtonRef}
+          variant="ghost" 
+          className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+          onClick={() => setIsSearchModalOpen(true)}
+          data-testid="button-search-chats"
+        >
+          <Search className="h-4 w-4" />
+          Buscar chats
+        </Button>
         <Button 
           variant="ghost" 
           className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
@@ -406,6 +370,14 @@ export function Sidebar({
           </PopoverContent>
         </Popover>
       </div>
+
+      <SearchModal
+        open={isSearchModalOpen}
+        onOpenChange={setIsSearchModalOpen}
+        chats={chats}
+        onSelectChat={onSelectChat}
+        triggerRef={searchButtonRef}
+      />
     </div>
   );
 }
