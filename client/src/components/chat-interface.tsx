@@ -879,33 +879,43 @@ export function ChatInterface({
               <div
                 key={index}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm group",
-                  file.status === "error" ? "bg-red-100 dark:bg-red-900/30" : "bg-muted"
+                  "flex items-center gap-2 px-3 py-2 rounded-xl text-sm border",
+                  file.status === "error" 
+                    ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
+                    : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
                 )}
                 data-testid={`file-preview-${index}`}
               >
-                {file.status === "uploading" && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
-                {file.status === "processing" && <Loader2 className="h-4 w-4 animate-spin text-orange-500" />}
-                {file.status === "ready" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
-                {file.status === "error" && <X className="h-4 w-4 text-red-500" />}
-                {!file.status && getFileIcon(file.type)}
-                <span className="max-w-[120px] truncate">{file.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {file.status === "uploading" && "Subiendo..."}
-                  {file.status === "processing" && "Procesando..."}
-                  {file.status === "ready" && "Listo"}
-                  {file.status === "error" && "Error"}
-                  {!file.status && `(${formatFileSize(file.size)})`}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-4 w-4 opacity-50 hover:opacity-100"
+                <div className={cn(
+                  "flex items-center justify-center w-8 h-8 rounded-lg",
+                  file.type.includes("pdf") ? "bg-red-500" :
+                  file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
+                  file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
+                  file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
+                  "bg-gray-500"
+                )}>
+                  <span className="text-white text-xs font-bold">
+                    {file.type.includes("pdf") ? "PDF" :
+                     file.type.includes("word") || file.type.includes("document") ? "W" :
+                     file.type.includes("sheet") || file.type.includes("excel") ? "X" :
+                     file.type.includes("presentation") || file.type.includes("powerpoint") ? "P" :
+                     "F"}
+                  </span>
+                </div>
+                <span className="max-w-[200px] truncate font-medium">{file.name}</span>
+                {file.status === "uploading" && (
+                  <Loader2 className="h-4 w-4 animate-spin text-blue-500 ml-1" />
+                )}
+                {file.status === "processing" && (
+                  <Loader2 className="h-4 w-4 animate-spin text-orange-500 ml-1" />
+                )}
+                <button
+                  className="ml-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                   onClick={() => removeFile(index)}
                   data-testid={`button-remove-file-${index}`}
                 >
-                  <X className="h-3 w-3" />
-                </Button>
+                  <X className="h-4 w-4" />
+                </button>
               </div>
             ))}
           </div>
