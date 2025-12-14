@@ -71,52 +71,49 @@ export function ChatInterface({
     };
 
     onSendMessage(userMsg);
+    const userInput = input;
     setInput("");
     setIsTyping(true);
 
-    // Simulate AI processing with sub-objectives
-    setTimeout(() => {
-      const aiMsgId = (Date.now() + 1).toString();
+    try {
+      // Build message history for context
+      const chatHistory = [...messages, userMsg].map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: chatHistory })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to get response");
+      }
+
       const aiMsg: Message = {
-        id: aiMsgId,
+        id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: "I'll help you with that. I'm starting the process now.",
+        content: data.content,
         timestamp: new Date(),
-        isThinking: true,
-        steps: [
-          { title: "Analyzing request parameters", status: "loading" },
-          { title: "Searching relevant sources", status: "pending" },
-          { title: "Compiling data", status: "pending" },
-          { title: "Generating documents", status: "pending" },
-        ],
       };
       
       onSendMessage(aiMsg);
-
-      // Simulate step progression - In a real app this would be streaming updates
-      // For this mock, we'll just update the message in place via the parent's addMessage 
-      // but since addMessage appends, we need a way to update. 
-      // For simplicity in this mock, we will just send a "completion" message after delay
-      // replacing the thinking one or appending. 
-      // To keep it simple, let's just append the final result after delay.
-      
-      setTimeout(() => {
-        const finalMsg: Message = {
-          id: (Date.now() + 2).toString(),
-          role: "assistant",
-          content: "I have successfully gathered the information and created the requested documents. You can download them below.",
-          timestamp: new Date(),
-          attachments: [
-            { type: "word", name: "Report.docx" },
-            { type: "excel", name: "Data_Analysis.xlsx" },
-            { type: "ppt", name: "Presentation.pptx" },
-          ]
-        };
-        onSendMessage(finalMsg);
-        setIsTyping(false);
-      }, 4000);
-
-    }, 500);
+    } catch (error: any) {
+      console.error("Chat error:", error);
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: `Lo siento, hubo un error al procesar tu mensaje. Por favor intenta de nuevo.`,
+        timestamp: new Date(),
+      };
+      onSendMessage(errorMsg);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   return (
