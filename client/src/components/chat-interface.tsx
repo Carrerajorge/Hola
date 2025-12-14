@@ -651,9 +651,13 @@ export function ChatInterface({
         </div>
       </header>
 
-      {/* Messages Area - only show when there are messages */}
-      {hasMessages && (
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
+      {/* Main Content Area with Side Panel */}
+      <div className="flex-1 flex flex-row overflow-hidden">
+        {/* Left: Messages + Input */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Messages Area - only show when there are messages */}
+          {hasMessages && (
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
         
         {messages.map((msg, msgIndex) => (
           <div
@@ -982,23 +986,23 @@ export function ChatInterface({
         )}
         
         <div ref={bottomRef} />
-        </div>
-      )}
-
-      {/* Centered content when no messages */}
-      {!hasMessages && (
-        <div className="flex-1 flex flex-col items-center justify-center">
-          <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
-            <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
-              <BotIcon className="h-6 w-6 text-muted-foreground" />
             </div>
-            <p className="text-muted-foreground">How can I help you today?</p>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* Input Area */}
-      <div className="p-4 sm:p-6 w-full max-w-3xl mx-auto relative">
+          {/* Centered content when no messages */}
+          {!hasMessages && (
+            <div className="flex-1 flex flex-col items-center justify-center">
+              <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
+                <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
+                  <BotIcon className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <p className="text-muted-foreground">How can I help you today?</p>
+              </div>
+            </div>
+          )}
+
+          {/* Sticky Input Area */}
+          <div className="flex-shrink-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background/80 backdrop-blur-sm">
         {/* Floating Mini Browser - positioned above the + button */}
         {(isBrowserOpen || input.trim().length > 0) && !isBrowserMaximized && (
           <div className="absolute left-4 sm:left-6 bottom-[calc(100%-16px)] w-[120px] border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200">
@@ -1089,79 +1093,6 @@ export function ChatInterface({
           accept="*/*"
           data-testid="input-file-upload"
         />
-        
-        {/* Uploaded files preview */}
-        {uploadedFiles.length > 0 && (
-          <div className="flex flex-col gap-2 mb-2">
-            {uploadedFiles.map((file, index) => (
-              <div
-                key={index}
-                className={cn(
-                  "relative rounded-xl border overflow-hidden",
-                  file.status === "error" 
-                    ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
-                    : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
-                )}
-                data-testid={`file-preview-${index}`}
-              >
-                <button
-                  className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 z-10"
-                  onClick={() => removeFile(index)}
-                  data-testid={`button-remove-file-${index}`}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-                {file.type.startsWith("image/") && file.dataUrl ? (
-                  <div className="relative">
-                    <img 
-                      src={file.dataUrl} 
-                      alt={file.name}
-                      className="w-full max-h-40 object-cover"
-                    />
-                    {(file.status === "uploading" || file.status === "processing") && (
-                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                        <Loader2 className="h-6 w-6 animate-spin text-white" />
-                      </div>
-                    )}
-                  </div>
-                ) : file.content ? (
-                  <div className="p-3 pr-8 max-h-32 overflow-y-auto">
-                    <div className="text-xs text-gray-500 mb-1">{file.name}:</div>
-                    <div className="text-sm whitespace-pre-wrap break-words">
-                      {file.content.slice(0, 500)}{file.content.length > 500 ? "..." : ""}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 px-3 py-2">
-                    <div className={cn(
-                      "flex items-center justify-center w-8 h-8 rounded-lg",
-                      file.type.includes("pdf") ? "bg-red-500" :
-                      file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
-                      file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
-                      file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
-                      "bg-gray-500"
-                    )}>
-                      <span className="text-white text-xs font-bold">
-                        {file.type.includes("pdf") ? "PDF" :
-                         file.type.includes("word") || file.type.includes("document") ? "W" :
-                         file.type.includes("sheet") || file.type.includes("excel") ? "X" :
-                         file.type.includes("presentation") || file.type.includes("powerpoint") ? "P" :
-                         "F"}
-                      </span>
-                    </div>
-                    <span className="max-w-[200px] truncate font-medium text-sm">{file.name}</span>
-                    {file.status === "uploading" && (
-                      <Loader2 className="h-4 w-4 animate-spin text-blue-500 ml-1" />
-                    )}
-                    {file.status === "processing" && (
-                      <Loader2 className="h-4 w-4 animate-spin text-orange-500 ml-1" />
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
         
         <div className="relative flex items-end gap-2 rounded-3xl liquid-input-light p-2 focus-within:shadow-lg transition-all duration-300">
           <Popover>
@@ -1257,9 +1188,44 @@ export function ChatInterface({
             )}
           </div>
         </div>
-        <div className="text-center text-xs text-muted-foreground mt-3">
-          Sira GPT can make mistakes. Check important info.
+            <div className="text-center text-xs text-muted-foreground mt-3">
+              Sira GPT can make mistakes. Check important info.
+            </div>
+          </div>
         </div>
+
+        {/* Desktop Side Panel - always visible on md+ screens */}
+        {uploadedFiles.length > 0 && (
+          <div className="hidden md:block w-72 border-l border-gray-200 dark:border-gray-700 bg-muted/30 flex-shrink-0">
+            {renderAttachmentsPanel()}
+          </div>
+        )}
+
+        {/* Mobile Overlay Panel */}
+        <AnimatePresence>
+          {isAttachmentPanelOpen && (
+            <motion.div 
+              className="fixed inset-0 z-50 md:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div 
+                className="absolute inset-0 bg-black/50" 
+                onClick={() => setIsAttachmentPanelOpen(false)} 
+              />
+              <motion.div 
+                className="absolute right-0 top-0 bottom-0 w-80 bg-background shadow-xl"
+                initial={{ x: "100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "100%" }}
+                transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              >
+                {renderAttachmentsPanel()}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
