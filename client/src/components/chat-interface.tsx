@@ -287,34 +287,34 @@ export function ChatInterface({
               {msg.role === "user" ? (
                 <div className="flex flex-col items-end gap-1">
                   {editingMessageId === msg.id ? (
-                    <>
+                    <div className="w-full min-w-[300px] max-w-[500px]">
                       <Textarea
                         value={editContent}
                         onChange={(e) => setEditContent(e.target.value)}
-                        className="liquid-message-user px-4 py-2.5 text-sm min-h-[60px] resize-none"
+                        className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-gray-200 bg-white focus:border-primary focus:ring-1 focus:ring-primary"
                         autoFocus
                       />
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center justify-end gap-2 mt-2">
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          className="h-8 px-3 text-sm text-muted-foreground hover:text-foreground"
                           onClick={handleCancelEdit}
                         >
-                          <X className="h-3 w-3 mr-1" />
+                          <X className="h-4 w-4 mr-1" />
                           Cancelar
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          className="h-8 px-3 text-sm text-muted-foreground hover:text-foreground"
                           onClick={() => handleSendEdit(msg.id)}
                         >
-                          <Send className="h-3 w-3 mr-1" />
+                          <Send className="h-4 w-4 mr-1" />
                           Enviar
                         </Button>
                       </div>
-                    </>
+                    </div>
                   ) : (
                     <div className="group">
                       <div className="liquid-message-user px-4 py-2.5 text-sm">
