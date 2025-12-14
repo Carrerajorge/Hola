@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
-import { routeMessage, extractUrls, agentOrchestrator, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, StepUpdate } from "./agent";
+import { routeMessage, extractUrls, agentOrchestrator, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, StepUpdate, runPipeline, initializePipeline, ProgressUpdate } from "./agent";
 
 const openai = new OpenAI({ 
   baseURL: "https://api.x.ai/v1", 
@@ -188,30 +188,29 @@ export async function registerRoutes(
             });
           }
           
-          const agentRun = await storage.createAgentRun({
-            conversationId,
-            status: "pending",
-            routerDecision: routeResult.decision,
-            objective: routeResult.objective || lastUserMessage.content
-          });
+          const objective = routeResult.objective || lastUserMessage.content;
           
-          const onStepUpdate = (update: StepUpdate) => {
-            broadcastAgentUpdate(agentRun.id, update);
+          const onProgress = (update: ProgressUpdate) => {
+            broadcastAgentUpdate(update.runId, update as any);
           };
           
-          const result = await agentOrchestrator.executeTask({
-            runId: agentRun.id,
-            objective: routeResult.objective || lastUserMessage.content,
-            urls,
-            conversationId
-          }, onStepUpdate);
+          const pipelineResult = await runPipeline({
+            objective,
+            conversationId,
+            onProgress
+          });
           
           return res.json({
-            content: result.content,
+            content: pipelineResult.summary || "Tarea completada.",
             role: "assistant",
-            sources: result.sources.length > 0 ? result.sources : undefined,
-            agentRunId: agentRun.id,
-            wasAgentTask: true
+            sources: pipelineResult.artifacts
+              .filter(a => a.type === "text" && a.name)
+              .slice(0, 5)
+              .map(a => ({ fileName: a.name, content: a.content?.slice(0, 200) || "" })),
+            agentRunId: pipelineResult.runId,
+            wasAgentTask: true,
+            pipelineSteps: pipelineResult.steps.length,
+            pipelineSuccess: pipelineResult.success
           });
         }
       }
