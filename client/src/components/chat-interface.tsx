@@ -11,7 +11,13 @@ import {
   CheckCircle2,
   Loader2,
   MoreHorizontal,
-  PanelLeftOpen
+  PanelLeftOpen,
+  X,
+  RefreshCw,
+  ArrowLeft,
+  ArrowRight,
+  Maximize2,
+  Minimize2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,6 +41,9 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [isBrowserOpen, setIsBrowserOpen] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
+  const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -221,11 +230,98 @@ export function ChatInterface({
         <div ref={bottomRef} />
       </div>
 
+      {/* Virtual Browser Panel */}
+      {isBrowserOpen && (
+        <div className={cn(
+          "mx-auto border rounded-xl overflow-hidden shadow-lg bg-card transition-all duration-300",
+          isBrowserMaximized 
+            ? "fixed inset-4 z-50 max-w-none" 
+            : "w-full max-w-3xl mb-4 mx-4 sm:mx-auto"
+        )}>
+          {/* Browser Header */}
+          <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 border-b">
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground">
+                <ArrowLeft className="h-3 w-3" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground">
+                <ArrowRight className="h-3 w-3" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground">
+                <RefreshCw className="h-3 w-3" />
+              </Button>
+            </div>
+            
+            {/* URL Bar */}
+            <div className="flex-1 flex items-center gap-2 bg-background rounded-md px-3 py-1.5 border">
+              <Globe className="h-3 w-3 text-muted-foreground" />
+              <input 
+                type="text" 
+                value={browserUrl}
+                onChange={(e) => setBrowserUrl(e.target.value)}
+                className="flex-1 bg-transparent text-xs outline-none"
+                placeholder="Enter URL..."
+              />
+            </div>
+            
+            <div className="flex items-center gap-1">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                onClick={() => setIsBrowserMaximized(!isBrowserMaximized)}
+              >
+                {isBrowserMaximized ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                onClick={() => setIsBrowserOpen(false)}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+          
+          {/* Browser Content */}
+          <div className={cn(
+            "bg-white relative",
+            isBrowserMaximized ? "h-[calc(100%-40px)]" : "h-64"
+          )}>
+            <iframe 
+              src={browserUrl}
+              className="w-full h-full border-0"
+              sandbox="allow-scripts allow-same-origin allow-forms"
+              title="Virtual Browser"
+            />
+            {/* Overlay when AI is browsing */}
+            {isTyping && (
+              <div className="absolute inset-0 bg-black/10 backdrop-blur-[1px] flex items-center justify-center">
+                <div className="bg-card px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                  <span className="text-sm font-medium">AI is browsing...</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="p-4 sm:p-6 w-full max-w-3xl mx-auto">
         <div className="relative flex items-end gap-2 rounded-3xl border bg-background shadow-sm p-2 focus-within:ring-1 focus-within:ring-ring transition-shadow">
-          <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full text-muted-foreground hover:text-foreground">
-            <Plus className="h-5 w-5" />
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className={cn(
+              "h-10 w-10 rounded-full text-muted-foreground hover:text-foreground",
+              isBrowserOpen && "bg-blue-100 text-blue-600"
+            )}
+            onClick={() => setIsBrowserOpen(!isBrowserOpen)}
+            title="Toggle virtual browser"
+          >
+            <Globe className="h-5 w-5" />
           </Button>
           
           <Textarea
