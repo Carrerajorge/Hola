@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
 
 import { Message } from "@/hooks/use-chats";
 
@@ -201,8 +202,8 @@ export function ChatInterface({
                   )}
                   
                   {msg.content && !msg.isThinking && (
-                     <div className="text-sm leading-relaxed text-foreground">
-                       {msg.content}
+                     <div className="text-sm leading-relaxed text-foreground prose prose-sm dark:prose-invert max-w-none">
+                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                      </div>
                   )}
 
