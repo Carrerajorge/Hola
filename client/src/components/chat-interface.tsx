@@ -317,7 +317,7 @@ export function ChatInterface({
             onClick={() => setIsBrowserOpen(!isBrowserOpen)}
             title="Toggle virtual browser"
           >
-            <Globe className="h-5 w-5" />
+            <Plus className="h-5 w-5" />
           </Button>
           
           <Textarea
