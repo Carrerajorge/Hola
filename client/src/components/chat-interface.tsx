@@ -320,7 +320,7 @@ export function ChatInterface({
                       <div className="liquid-message-user px-4 py-2.5 text-sm">
                         {msg.content}
                       </div>
-                      <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button
                           variant="ghost"
                           size="icon"
