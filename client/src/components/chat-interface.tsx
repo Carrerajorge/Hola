@@ -341,7 +341,7 @@ export function ChatInterface({
                   >
                     {processLatex(streamingContent)}
                   </ReactMarkdown>
-                  <span className="inline-block w-2 h-4 bg-violet-500 animate-pulse ml-0.5"></span>
+                  <span className="typing-cursor">|</span>
                 </div>
               )}
             </div>
