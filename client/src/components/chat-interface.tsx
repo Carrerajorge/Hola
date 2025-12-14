@@ -62,7 +62,8 @@ export function ChatInterface({
   onToggleSidebar 
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
+  const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
+  const [streamingContent, setStreamingContent] = useState("");
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
@@ -141,10 +142,10 @@ export function ChatInterface({
     const userInput = input;
     const currentFiles = [...uploadedFiles];
     setInput("");
-    setIsTyping(true);
+    setAiState("thinking");
+    setStreamingContent("");
 
     try {
-      // Build message history for context
       const chatHistory = [...messages, userMsg].map(m => ({
         role: m.role,
         content: m.content
@@ -162,15 +163,31 @@ export function ChatInterface({
         throw new Error(data.error || "Failed to get response");
       }
 
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: data.content,
-        timestamp: new Date(),
-      };
+      setAiState("responding");
       
-      onSendMessage(aiMsg);
-      setUploadedFiles([]);
+      const fullContent = data.content;
+      let currentIndex = 0;
+      
+      const streamInterval = setInterval(() => {
+        if (currentIndex < fullContent.length) {
+          const chunkSize = Math.floor(Math.random() * 3) + 1;
+          setStreamingContent(fullContent.slice(0, currentIndex + chunkSize));
+          currentIndex += chunkSize;
+        } else {
+          clearInterval(streamInterval);
+          const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: fullContent,
+            timestamp: new Date(),
+          };
+          onSendMessage(aiMsg);
+          setStreamingContent("");
+          setAiState("idle");
+          setUploadedFiles([]);
+        }
+      }, 15);
+      
     } catch (error: any) {
       console.error("Chat error:", error);
       const errorMsg: Message = {
@@ -180,8 +197,7 @@ export function ChatInterface({
         timestamp: new Date(),
       };
       onSendMessage(errorMsg);
-    } finally {
-      setIsTyping(false);
+      setAiState("idle");
     }
   };
 
@@ -300,6 +316,38 @@ export function ChatInterface({
             </div>
           </div>
         ))}
+        
+        {/* Thinking/Responding State */}
+        {aiState !== "idle" && (
+          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-violet-500/20 to-purple-600/20 flex items-center justify-center flex-shrink-0 mt-1">
+              <BotIcon className="h-5 w-5 text-violet-600" />
+            </div>
+            <div className="flex flex-col gap-2 items-start">
+              {aiState === "thinking" && (
+                <div className="liquid-message-ai-light px-4 py-3 text-sm">
+                  <div className="flex items-center gap-1">
+                    <span className="thinking-dot"></span>
+                    <span className="thinking-dot"></span>
+                    <span className="thinking-dot"></span>
+                  </div>
+                </div>
+              )}
+              {aiState === "responding" && streamingContent && (
+                <div className="liquid-message-ai-light px-4 py-3 text-sm leading-relaxed text-foreground prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                  >
+                    {processLatex(streamingContent)}
+                  </ReactMarkdown>
+                  <span className="inline-block w-2 h-4 bg-violet-500 animate-pulse ml-0.5"></span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
         <div ref={bottomRef} />
       </div>
 
@@ -336,7 +384,7 @@ export function ChatInterface({
                 sandbox="allow-scripts allow-same-origin allow-forms"
                 title="Virtual Browser"
               />
-              {isTyping && (
+              {aiState !== "idle" && (
                 <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
                   <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
                 </div>
@@ -376,7 +424,7 @@ export function ChatInterface({
                 sandbox="allow-scripts allow-same-origin allow-forms"
                 title="Virtual Browser"
               />
-              {isTyping && (
+              {aiState !== "idle" && (
                 <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
                   <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
                 </div>
