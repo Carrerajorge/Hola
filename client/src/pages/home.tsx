@@ -7,6 +7,7 @@ import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useChats } from "@/hooks/use-chats";
+import { toast } from "sonner";
 
 export default function Home() {
   const isMobile = useIsMobile();
@@ -25,6 +26,13 @@ export default function Home() {
     hideChat
   } = useChats();
 
+  const handleNewChat = () => {
+    const created = createChat();
+    if (!created) {
+      toast.info("Escribe un mensaje primero antes de crear un nuevo chat");
+    }
+  };
+
   return (
     <div className="flex h-screen w-full overflow-hidden liquid-bg-light relative">
       <div className="liquid-blob liquid-blob-1 opacity-30"></div>
@@ -38,7 +46,7 @@ export default function Home() {
           hiddenChats={hiddenChats}
           activeChatId={activeChat?.id || null} 
           onSelectChat={setActiveChatId} 
-          onNewChat={createChat} 
+          onNewChat={handleNewChat} 
           onToggle={() => setIsSidebarOpen(false)} 
           onDeleteChat={deleteChat}
           onEditChat={editChatTitle}
@@ -50,7 +58,7 @@ export default function Home() {
       {/* Desktop Sidebar - Mini (collapsed) */}
       <div className={!isSidebarOpen ? "hidden md:block" : "hidden"}>
         <MiniSidebar 
-          onNewChat={createChat}
+          onNewChat={handleNewChat}
           onExpand={() => setIsSidebarOpen(true)}
         />
       </div>
@@ -69,7 +77,7 @@ export default function Home() {
               hiddenChats={hiddenChats}
               activeChatId={activeChat?.id || null} 
               onSelectChat={setActiveChatId} 
-              onNewChat={createChat} 
+              onNewChat={handleNewChat} 
               onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
               onDeleteChat={deleteChat}
               onEditChat={editChatTitle}

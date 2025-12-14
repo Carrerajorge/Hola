@@ -67,6 +67,12 @@ export function useChats() {
   }, [chats]);
 
   const createChat = () => {
+    const currentActiveChat = chats.find(c => c.id === activeChatId);
+    const hasUserMessages = currentActiveChat?.messages.some(msg => msg.role === "user");
+    if (currentActiveChat && !hasUserMessages) {
+      return false;
+    }
+    
     const newChat: Chat = {
       id: Date.now().toString(),
       title: "New Chat",
@@ -75,6 +81,7 @@ export function useChats() {
     };
     setChats(prev => [newChat, ...prev]);
     setActiveChatId(newChat.id);
+    return true;
   };
 
   const addMessage = (chatId: string, message: Message) => {
