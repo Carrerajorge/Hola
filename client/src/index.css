@@ -312,6 +312,18 @@
   border: none;
   border-radius: 0;
   line-height: 1.5;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+
+.liquid-message-ai-light a {
+  word-break: break-all;
+}
+
+.liquid-message-ai-light pre {
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 /* Liquid Hover Effects */

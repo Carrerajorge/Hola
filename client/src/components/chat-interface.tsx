@@ -722,7 +722,7 @@ export function ChatInterface({
                   )}
                   
                   {msg.content && !msg.isThinking && (
-                     <div className="liquid-message-ai-light px-4 py-3 text-sm leading-relaxed text-foreground prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:border prose-code:before:content-none prose-code:after:content-none">
+                     <div className="liquid-message-ai-light px-4 py-3 text-sm leading-relaxed text-foreground prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:border prose-code:before:content-none prose-code:after:content-none overflow-hidden break-words">
                        <ReactMarkdown
                          remarkPlugins={[remarkGfm, remarkMath]}
                          rehypePlugins={[rehypeKatex, rehypeHighlight]}
