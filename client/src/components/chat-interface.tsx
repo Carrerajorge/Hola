@@ -952,7 +952,7 @@ export function ChatInterface({
             {(isBrowserOpen || input.trim().length > 0) && !isBrowserMaximized && (
               <div className="absolute left-4 sm:left-6 bottom-[calc(100%-16px)] w-[120px] border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200">
                 <div className="flex items-center justify-between px-1 py-0.5 bg-muted/50 border-b">
-                  <span className="text-[8px] font-medium text-muted-foreground">web</span>
+                  <span className="text-[8px] font-medium text-muted-foreground">Computadora Virtual</span>
                   <div className="flex items-center">
                     <Button 
                       variant="ghost" 
@@ -992,7 +992,7 @@ export function ChatInterface({
             {isBrowserMaximized && (
               <div className="fixed inset-4 z-50 border rounded-lg overflow-hidden shadow-lg bg-card">
                 <div className="flex items-center justify-between px-2 py-1 bg-muted/50 border-b">
-                  <span className="text-xs font-medium text-muted-foreground">web</span>
+                  <span className="text-xs font-medium text-muted-foreground">Computadora Virtual</span>
                   <div className="flex items-center gap-1">
                     <Button 
                       variant="ghost" 
