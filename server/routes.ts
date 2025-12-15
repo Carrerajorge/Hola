@@ -478,7 +478,7 @@ export async function registerRoutes(
   browserWss.on("connection", (ws) => {
     let subscribedSessionId: string | null = null;
     
-    ws.on("message", (message) => {
+    ws.on("message", async (message) => {
       try {
         const data = JSON.parse(message.toString());
         if (data.type === "subscribe" && data.sessionId) {
@@ -489,6 +489,22 @@ export async function registerRoutes(
           browserClients.get(data.sessionId)!.add(ws);
           
           ws.send(JSON.stringify({ type: "subscribed", sessionId: data.sessionId }));
+          
+          // Send current screenshot immediately if session exists
+          try {
+            const screenshot = await browserSessionManager.getScreenshot(data.sessionId);
+            if (screenshot && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                messageType: "browser_event",
+                eventType: "observation",
+                sessionId: data.sessionId,
+                timestamp: new Date(),
+                data: { type: "screenshot", screenshot }
+              }));
+            }
+          } catch (e) {
+            // Session may not exist yet, that's ok
+          }
         }
       } catch (e) {
         console.error("Browser WS message parse error:", e);
