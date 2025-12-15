@@ -162,6 +162,7 @@ export function ChatInterface({
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [previewDocument, setPreviewDocument] = useState<DocumentBlock | null>(null);
+  const [editedDocumentContent, setEditedDocumentContent] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -211,18 +212,24 @@ export function ChatInterface({
 
   const handleOpenDocumentPreview = (doc: DocumentBlock) => {
     setPreviewDocument(doc);
+    setEditedDocumentContent(doc.content);
   };
 
   const handleCloseDocumentPreview = () => {
     setPreviewDocument(null);
+    setEditedDocumentContent("");
   };
 
   const handleDownloadDocument = async (doc: DocumentBlock) => {
     try {
+      const documentToDownload = {
+        ...doc,
+        content: editedDocumentContent || doc.content
+      };
       const response = await fetch("/api/documents/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(doc),
+        body: JSON.stringify(documentToDownload),
       });
       
       if (!response.ok) {
@@ -686,7 +693,7 @@ export function ChatInterface({
       {/* Main Content Area with Side Panel */}
       <div className="flex-1 flex flex-row overflow-hidden">
         {/* Left: Messages + Input */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className={cn("flex flex-col min-w-0 transition-all duration-300", previewDocument ? "w-1/2" : "flex-1")}>
           {/* Messages Area - only show when there are messages */}
           {hasMessages && (
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
@@ -1359,72 +1366,73 @@ export function ChatInterface({
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Document Preview Panel */}
-      {previewDocument && (
-        <div className="fixed inset-y-0 right-0 w-1/2 bg-background border-l shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
-          <div className="flex items-center justify-between p-4 border-b bg-muted/30">
-            <div className="flex items-center gap-3">
-              {previewDocument.type === "word" && <FileText className="h-6 w-6 text-blue-600" />}
-              {previewDocument.type === "excel" && <FileSpreadsheet className="h-6 w-6 text-green-600" />}
-              {previewDocument.type === "ppt" && <FileIcon className="h-6 w-6 text-orange-600" />}
-              <div>
-                <h3 className="font-semibold">{previewDocument.title}</h3>
-                <span className="text-xs text-muted-foreground">
-                  {previewDocument.type === "word" ? "Documento Word" : previewDocument.type === "excel" ? "Hoja de Excel" : "Presentación PowerPoint"}
-                </span>
+        {/* Right: Document Editor Panel */}
+        {previewDocument && (
+          <div className="w-1/2 bg-background border-l flex flex-col animate-in slide-in-from-right duration-300">
+            <div className="flex items-center justify-between p-3 border-b bg-muted/30">
+              <div className="flex items-center gap-3">
+                {previewDocument.type === "word" && <FileText className="h-5 w-5 text-blue-600" />}
+                {previewDocument.type === "excel" && <FileSpreadsheet className="h-5 w-5 text-green-600" />}
+                {previewDocument.type === "ppt" && <FileIcon className="h-5 w-5 text-orange-600" />}
+                <div>
+                  <h3 className="font-medium text-sm">{previewDocument.title}</h3>
+                  <span className="text-xs text-muted-foreground">
+                    {previewDocument.type === "word" ? "Documento Word" : previewDocument.type === "excel" ? "Hoja de Excel" : "PowerPoint"} - Editable
+                  </span>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="default"
-                size="sm"
-                className="gap-2"
-                onClick={() => handleDownloadDocument(previewDocument)}
-                data-testid="button-download-preview"
-              >
-                <Download className="h-4 w-4" />
-                Descargar
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleCloseDocumentPreview}
-                data-testid="button-close-preview"
-              >
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-auto p-6 bg-white dark:bg-gray-900">
-            <div className="max-w-3xl mx-auto bg-white dark:bg-gray-800 shadow-lg rounded-lg p-8 min-h-full border">
-              <h1 className="text-2xl font-bold mb-6 text-center border-b pb-4">{previewDocument.title}</h1>
-              <div className="prose dark:prose-invert max-w-none">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                  components={{
-                    p: ({children}) => <p className="mb-4 leading-relaxed">{children}</p>,
-                    h1: ({children}) => <h1 className="text-2xl font-bold mt-6 mb-4">{children}</h1>,
-                    h2: ({children}) => <h2 className="text-xl font-bold mt-5 mb-3">{children}</h2>,
-                    h3: ({children}) => <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>,
-                    ul: ({children}) => <ul className="list-disc list-inside mb-4 space-y-2">{children}</ul>,
-                    ol: ({children}) => <ol className="list-decimal list-inside mb-4 space-y-2">{children}</ol>,
-                    li: ({children}) => <li className="ml-4">{children}</li>,
-                    blockquote: ({children}) => <blockquote className="border-l-4 border-blue-500 pl-4 italic my-4 bg-muted/50 py-2">{children}</blockquote>,
-                    table: ({children}) => <table className="w-full border-collapse border border-gray-300 my-4">{children}</table>,
-                    th: ({children}) => <th className="border border-gray-300 px-4 py-2 bg-muted font-semibold">{children}</th>,
-                    td: ({children}) => <td className="border border-gray-300 px-4 py-2">{children}</td>,
-                  }}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => handleDownloadDocument(previewDocument)}
+                  data-testid="button-download-preview"
                 >
-                  {previewDocument.content}
-                </ReactMarkdown>
+                  <Download className="h-4 w-4" />
+                  Descargar
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={handleCloseDocumentPreview}
+                  data-testid="button-close-preview"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4 bg-white dark:bg-gray-900">
+              <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-lg rounded-lg border min-h-full">
+                <div className="p-6 border-b">
+                  <h1 className="text-xl font-bold text-center">{previewDocument.title}</h1>
+                </div>
+                <div className="p-6">
+                  <textarea
+                    value={editedDocumentContent}
+                    onChange={(e) => setEditedDocumentContent(e.target.value)}
+                    className="w-full min-h-[500px] p-4 text-sm leading-relaxed bg-transparent border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                    placeholder="Edita el contenido del documento aquí..."
+                    data-testid="textarea-document-editor"
+                  />
+                  <div className="mt-4 text-xs text-muted-foreground">
+                    <p className="mb-2 font-medium">Formato soportado:</p>
+                    <ul className="space-y-1 text-xs">
+                      <li>## Título = Encabezado</li>
+                      <li>**texto** = Negrita</li>
+                      <li>*texto* = Cursiva</li>
+                      <li>- item = Lista con viñetas</li>
+                      <li>1. item = Lista numerada</li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
