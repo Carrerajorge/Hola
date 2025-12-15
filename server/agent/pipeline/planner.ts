@@ -90,8 +90,10 @@ Respond in JSON format:
 
 // Detect URLs in text
 function detectUrls(text: string): string[] {
-  const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
-  return text.match(urlRegex) || [];
+  const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]()]+/gi;
+  const urls = text.match(urlRegex) || [];
+  // Clean up any trailing punctuation
+  return urls.map(url => url.replace(/[.,;:!?]+$/, ''));
 }
 
 // Detect search intent

@@ -29,17 +29,22 @@ export const webNavigateTool: ToolDefinition = {
   async execute(context: ExecutionContext, params: Record<string, any>): Promise<ToolResult> {
     const { url, takeScreenshot = true, waitForSelector, timeout = 30000 } = params;
     
+    console.log("WEB_NAVIGATE: Starting with URL:", url);
+    
     let sessionId: string | null = null;
     const artifacts: Artifact[] = [];
     
     try {
+      console.log("WEB_NAVIGATE: Creating browser session...");
       sessionId = await browserSessionManager.createSession(
         `Navigate to ${url}`,
         { timeout },
         undefined
       );
+      console.log("WEB_NAVIGATE: Session created:", sessionId);
       
       browserSessionManager.startScreenshotStreaming(sessionId, 1500);
+      console.log("WEB_NAVIGATE: Screenshot streaming started");
       
       context.onProgress({
         runId: context.runId,
@@ -142,6 +147,7 @@ export const webNavigateTool: ToolDefinition = {
         }
       };
     } catch (error: any) {
+      console.error("WEB_NAVIGATE: Error:", error.message, error.stack);
       return {
         success: false,
         error: error.message
