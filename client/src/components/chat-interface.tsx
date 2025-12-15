@@ -717,8 +717,26 @@ export function ChatInterface({
                   )}
                   
                   {msg.content && !msg.isThinking && (
-                     <div className="px-4 py-3 text-sm leading-relaxed text-foreground whitespace-pre-wrap">
-                       {msg.content}
+                     <div className="px-4 py-3 text-sm leading-relaxed text-foreground liquid-message-ai-light">
+                       <ReactMarkdown
+                         remarkPlugins={[remarkGfm, remarkMath]}
+                         rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                         components={{
+                           p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
+                           a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
+                           pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
+                           code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
+                           ul: ({children}) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
+                           ol: ({children}) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
+                           li: ({children}) => <li className="ml-2">{children}</li>,
+                           h1: ({children}) => <h1 className="text-xl font-bold mb-3">{children}</h1>,
+                           h2: ({children}) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
+                           h3: ({children}) => <h3 className="text-base font-semibold mb-2">{children}</h3>,
+                           blockquote: ({children}) => <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-3">{children}</blockquote>,
+                         }}
+                       >
+                         {processLatex(msg.content)}
+                       </ReactMarkdown>
                      </div>
                   )}
 
