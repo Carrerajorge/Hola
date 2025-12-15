@@ -183,27 +183,6 @@ export function DocumentEditor({
 
   return (
     <div className="document-editor-container flex h-full bg-gray-100 dark:bg-gray-900">
-      {/* Sidebar - Plantilla seleccionada */}
-      <div className="sidebar w-[380px] flex-shrink-0 bg-white dark:bg-gray-800 border-r overflow-y-auto">
-        <div className="p-6">
-          <h2 className="text-xl font-bold mb-4">Plantilla seleccionada</h2>
-          <ul className="space-y-3 text-sm text-gray-600 dark:text-gray-400">
-            <li className="flex items-start gap-2">
-              <span className="text-gray-400">•</span>
-              <span>Has elegido una plantilla para empezar</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="text-gray-400">•</span>
-              <span>Dime qué cambios o personalizaciones te gustaría hacer</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="text-gray-400">•</span>
-              <span>Te ayudaré a modificar el contenido para que se ajuste a tus necesidades</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-
       {/* Workspace */}
       <div className="workspace flex-1 flex flex-col overflow-hidden">
         {/* Top Action Bar */}
