@@ -32,12 +32,9 @@ export function VirtualComputer({ state, onClose, onCancel, className }: Virtual
   const [isMinimized, setIsMinimized] = useState(false);
   const [isTimelineExpanded, setIsTimelineExpanded] = useState(true);
 
-  if (state.status === "idle") {
-    return null;
-  }
-
   const getStatusColor = () => {
     switch (state.status) {
+      case "idle": return "text-gray-400";
       case "connecting": return "text-yellow-500";
       case "active": return "text-green-500";
       case "completed": return "text-blue-500";
@@ -49,11 +46,24 @@ export function VirtualComputer({ state, onClose, onCancel, className }: Virtual
 
   const getStatusIcon = () => {
     switch (state.status) {
+      case "idle": return <Monitor className="h-3 w-3" />;
       case "connecting": return <Loader2 className="h-3 w-3 animate-spin" />;
       case "active": return <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />;
       case "completed": return <CheckCircle2 className="h-3 w-3" />;
       case "error": return <XCircle className="h-3 w-3" />;
       default: return null;
+    }
+  };
+
+  const getStatusText = () => {
+    switch (state.status) {
+      case "idle": return "En espera";
+      case "connecting": return "Conectando";
+      case "active": return "Activo";
+      case "completed": return "Completado";
+      case "error": return "Error";
+      case "cancelled": return "Cancelado";
+      default: return state.status;
     }
   };
 
@@ -108,7 +118,7 @@ export function VirtualComputer({ state, onClose, onCancel, className }: Virtual
             <span className="text-sm font-medium">Computadora Virtual</span>
             <div className={cn("flex items-center gap-1", getStatusColor())}>
               {getStatusIcon()}
-              <span className="text-xs capitalize">{state.status}</span>
+              <span className="text-xs">{getStatusText()}</span>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -132,17 +142,6 @@ export function VirtualComputer({ state, onClose, onCancel, className }: Virtual
             >
               {isMinimized ? <Maximize2 className="h-3 w-3" /> : <Minimize2 className="h-3 w-3" />}
             </Button>
-            {(state.status === "completed" || state.status === "error" || state.status === "cancelled") && onClose && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={onClose}
-                data-testid="button-close-computer"
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            )}
           </div>
         </div>
 
