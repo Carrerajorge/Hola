@@ -40,11 +40,90 @@ const initialState: BrowserSessionState = {
 export function useBrowserSession() {
   const [state, setState] = useState<BrowserSessionState>(initialState);
   const wsRef = useRef<WebSocket | null>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  const fetchScreenshot = useCallback(async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/browser/session/${sessionId}/screenshot`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.screenshot) {
+          setState(prev => {
+            if (prev.sessionId === sessionId) {
+              return { ...prev, screenshot: data.screenshot };
+            }
+            return prev;
+          });
+        }
+      }
+    } catch (e) {
+      // Silently ignore polling errors
+    }
+  }, []);
+
+  const fetchSessionState = useCallback(async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/browser/session/${sessionId}`);
+      if (response.ok) {
+        const session = await response.json();
+        setState(prev => {
+          if (prev.sessionId === sessionId) {
+            let newStatus = prev.status;
+            if (session.status === "completed") newStatus = "completed";
+            else if (session.status === "error") newStatus = "error";
+            else if (session.status === "cancelled") newStatus = "cancelled";
+            else if (session.status === "active" || session.status === "running") newStatus = "active";
+            
+            return { 
+              ...prev, 
+              status: newStatus,
+              currentUrl: session.currentUrl || prev.currentUrl,
+              currentTitle: session.currentTitle || prev.currentTitle,
+            };
+          }
+          return prev;
+        });
+        return session;
+      }
+    } catch (e) {
+      // Silently ignore
+    }
+    return null;
+  }, []);
+
+  const startPolling = useCallback((sessionId: string) => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+    }
+    
+    fetchScreenshot(sessionId);
+    fetchSessionState(sessionId);
+    
+    pollingRef.current = setInterval(async () => {
+      const session = await fetchSessionState(sessionId);
+      if (session && (session.status === "completed" || session.status === "error" || session.status === "cancelled")) {
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+      } else {
+        fetchScreenshot(sessionId);
+      }
+    }, 1500);
+  }, [fetchScreenshot, fetchSessionState]);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
 
   const subscribeToSession = useCallback((sessionId: string, objective: string) => {
     if (wsRef.current) {
       wsRef.current.close();
     }
+    stopPolling();
 
     setState({
       ...initialState,
@@ -52,6 +131,9 @@ export function useBrowserSession() {
       status: "connecting",
       objective,
     });
+
+    startPolling(sessionId);
+    setState(prev => ({ ...prev, status: "active" }));
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/browser`);
@@ -101,11 +183,14 @@ export function useBrowserSession() {
 
             if (eventType === "completed") {
               newState.status = "completed";
+              stopPolling();
             } else if (eventType === "error") {
               newState.status = "error";
               newState.error = browserEvent.data?.error || "Unknown error";
+              stopPolling();
             } else if (eventType === "cancelled") {
               newState.status = "cancelled";
+              stopPolling();
             }
 
             return newState;
@@ -117,14 +202,14 @@ export function useBrowserSession() {
     };
 
     ws.onerror = (error) => {
-      console.error("Browser WebSocket error:", error, "readyState:", ws.readyState, "url:", ws.url);
+      console.error("Browser WebSocket error, using polling fallback:", error);
     };
     
     ws.onclose = (event) => {
-      console.log("Browser WebSocket closed:", event.code, event.reason, event.wasClean);
+      console.log("Browser WebSocket closed, polling continues:", event.code);
       wsRef.current = null;
     };
-  }, []);
+  }, [startPolling, stopPolling]);
 
   const createSession = useCallback(async (objective: string, config?: any) => {
     try {
@@ -232,17 +317,19 @@ export function useBrowserSession() {
     
     try {
       await fetch(`/api/browser/session/${state.sessionId}/cancel`, { method: "POST" });
+      stopPolling();
       setState(prev => ({ ...prev, status: "cancelled" }));
     } catch (error) {
       console.error("Cancel error:", error);
     }
-  }, [state.sessionId]);
+  }, [state.sessionId, stopPolling]);
 
   const close = useCallback(async () => {
     if (!state.sessionId) return;
     
     try {
       await fetch(`/api/browser/session/${state.sessionId}`, { method: "DELETE" });
+      stopPolling();
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -251,23 +338,25 @@ export function useBrowserSession() {
     } catch (error) {
       console.error("Close error:", error);
     }
-  }, [state.sessionId]);
+  }, [state.sessionId, stopPolling]);
 
   const reset = useCallback(() => {
+    stopPolling();
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
     setState(initialState);
-  }, []);
+  }, [stopPolling]);
 
   useEffect(() => {
     return () => {
+      stopPolling();
       if (wsRef.current) {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [stopPolling]);
 
   return {
     state,
