@@ -35,10 +35,7 @@ import {
   X,
   Download,
   Sparkles,
-  ChevronDown,
-  RotateCcw,
   Send,
-  Mic,
 } from 'lucide-react';
 
 interface DocumentEditorProps {
@@ -384,91 +381,53 @@ export function DocumentEditor({
         </div>
       </div>
 
-      {/* AI Rewrite Panel - Portal to body, positioned near selection */}
+      {/* AI Rewrite Bar - Minimalist floating bar at bottom */}
       {showAIRewrite && createPortal(
         <div
           ref={aiPanelRef}
-          className="fixed z-[1000] animate-in fade-in duration-200"
+          className="fixed z-[1000] animate-in slide-in-from-bottom duration-200"
           style={{
-            top: selectionRect 
-              ? Math.min(Math.max(selectionRect.bottom + 8, 60), window.innerHeight - 340)
-              : 'auto',
-            left: selectionRect 
-              ? Math.max(Math.min(selectionRect.left, window.innerWidth - 420), 20)
-              : 24,
-            bottom: selectionRect ? 'auto' : 24,
-            width: '400px',
+            bottom: '100px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 'min(600px, 90vw)',
           }}
         >
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50 dark:bg-gray-900">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-teal-600" />
-                <span className="font-semibold text-sm">AI Rewrite</span>
-              </div>
+          <div className="bg-white dark:bg-gray-800 rounded-full shadow-2xl border px-4 py-2 flex items-center gap-3">
+            <Sparkles className="h-4 w-4 text-teal-500 flex-shrink-0" />
+            <input
+              type="text"
+              value={rewriteText}
+              onChange={(e) => setRewriteText(e.target.value)}
+              className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-gray-400"
+              placeholder="Describe cómo mejorar el texto seleccionado..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleApplyRewrite();
+                }
+                if (e.key === 'Escape') {
+                  handleCancelRewrite();
+                }
+              }}
+              autoFocus
+            />
+            <div className="flex items-center gap-1 flex-shrink-0">
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6"
+                className="h-8 w-8 text-gray-400 hover:text-gray-600"
                 onClick={handleCancelRewrite}
               >
                 <X className="h-4 w-4" />
               </Button>
-            </div>
-            <div className="p-4">
-              {/* Original text preview */}
-              <div className="text-sm text-gray-700 dark:text-gray-300 mb-3 p-3 bg-gray-100 dark:bg-gray-900 rounded-lg border max-h-20 overflow-auto">
-                {selectedText}
-              </div>
-              
-              {/* Editable textarea */}
-              <div className="relative">
-                <textarea
-                  value={rewriteText}
-                  onChange={(e) => setRewriteText(e.target.value)}
-                  className="w-full min-h-[80px] p-3 pr-16 text-sm border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white dark:bg-gray-900"
-                  placeholder="Pedir a Genspark que mejore la escritura..."
-                />
-                <div className="absolute bottom-2 right-2 flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
-                    <Mic className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-teal-600 hover:text-teal-700"
-                    onClick={handleApplyRewrite}
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex items-center justify-between mt-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleRevert}
-                  disabled={rewriteText === selectedText}
-                  className="text-muted-foreground gap-1"
-                >
-                  <RotateCcw className="h-3 w-3" />
-                  Revertir
-                </Button>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={handleCancelRewrite}>
-                    Cancelar
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={handleApplyRewrite}
-                    className="bg-teal-600 hover:bg-teal-700 text-white"
-                  >
-                    Aplicar cambios
-                  </Button>
-                </div>
-              </div>
+              <Button
+                size="icon"
+                className="h-8 w-8 rounded-full bg-teal-500 hover:bg-teal-600 text-white"
+                onClick={handleApplyRewrite}
+              >
+                <Send className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         </div>,
