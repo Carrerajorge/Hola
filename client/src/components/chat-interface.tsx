@@ -499,6 +499,11 @@ export function ChatInterface({
       if (data.wasAgentTask && data.agentRunId) {
         agent.subscribe(data.agentRunId, userInput);
       }
+      
+      // Subscribe to browser session if available
+      if (data.browserSessionId) {
+        browserSession.subscribeToSession(data.browserSessionId, userInput);
+      }
 
       setAiState("responding");
       

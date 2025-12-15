@@ -149,7 +149,10 @@ export const webNavigateTool: ToolDefinition = {
     } finally {
       if (sessionId) {
         browserSessionManager.stopScreenshotStreaming(sessionId);
-        await browserSessionManager.closeSession(sessionId).catch(() => {});
+        // Delay closing to allow frontend to receive final screenshot
+        setTimeout(async () => {
+          await browserSessionManager.closeSession(sessionId!).catch(() => {});
+        }, 5000);
       }
     }
   }

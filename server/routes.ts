@@ -197,8 +197,14 @@ export async function registerRoutes(
           
           const objective = routeResult.objective || lastUserMessage.content;
           
+          let lastBrowserSessionId: string | null = null;
+          
           const onProgress = (update: ProgressUpdate) => {
             broadcastAgentUpdate(update.runId, update as any);
+            // Capture browserSessionId from progress updates
+            if (update.detail?.browserSessionId) {
+              lastBrowserSessionId = update.detail.browserSessionId;
+            }
           };
           
           const pipelineResult = await runPipeline({
@@ -217,7 +223,8 @@ export async function registerRoutes(
             agentRunId: pipelineResult.runId,
             wasAgentTask: true,
             pipelineSteps: pipelineResult.steps.length,
-            pipelineSuccess: pipelineResult.success
+            pipelineSuccess: pipelineResult.success,
+            browserSessionId: lastBrowserSessionId
           });
         }
       }

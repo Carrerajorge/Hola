@@ -58,7 +58,8 @@ export const searchWebTool: ToolDefinition = {
         stepId: `search_${context.stepIndex}`,
         status: "progress",
         message: `Searching for: ${query}`,
-        progress: 30
+        progress: 30,
+        detail: { browserSessionId: sessionId, query }
       });
 
       const navResult = await browserSessionManager.navigate(sessionId, searchUrl);
@@ -109,7 +110,10 @@ export const searchWebTool: ToolDefinition = {
     } finally {
       if (sessionId) {
         browserSessionManager.stopScreenshotStreaming(sessionId);
-        await browserSessionManager.closeSession(sessionId).catch(() => {});
+        // Delay closing to allow frontend to receive final screenshot
+        setTimeout(async () => {
+          await browserSessionManager.closeSession(sessionId!).catch(() => {});
+        }, 5000);
       }
     }
   }
