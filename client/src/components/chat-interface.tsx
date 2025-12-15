@@ -677,9 +677,9 @@ export function ChatInterface({
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                          onClick={() => handleCopyMessage(msg.content)}
+                          onClick={() => handleCopyMessage(msg.content, msg.id)}
                         >
-                          <Copy className="h-4 w-4" />
+                          {copiedMessageId === msg.id ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                         </Button>
                         <Button
                           variant="ghost"

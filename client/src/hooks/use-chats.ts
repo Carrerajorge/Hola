@@ -22,6 +22,10 @@ export interface Chat {
 }
 
 const STORAGE_KEY = "sira-gpt-chats";
+const PENDING_CHAT_PREFIX = "pending-";
+const pendingToRealIdMap = new Map<string, string>();
+const pendingMessageQueue = new Map<string, Message[]>();
+const chatCreationInProgress = new Set<string>();
 
 export function useChats() {
   const [chats, setChats] = useState<Chat[]>([]);
@@ -109,73 +113,121 @@ export function useChats() {
     }
   }, [chats, isLoading]);
 
-  const createChat = useCallback(async () => {
-    try {
-      const res = await fetch("/api/chats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New Chat" })
-      });
+  const createChat = useCallback(() => {
+    const pendingId = `${PENDING_CHAT_PREFIX}${Date.now()}`;
+    const pendingChat: Chat = {
+      id: pendingId,
+      title: "Nuevo Chat",
+      timestamp: Date.now(),
+      messages: []
+    };
+    setChats(prev => [pendingChat, ...prev]);
+    setActiveChatId(pendingId);
+    return true;
+  }, []);
+
+  const flushPendingMessages = async (pendingId: string, realChatId: string) => {
+    while (pendingMessageQueue.has(pendingId) && pendingMessageQueue.get(pendingId)!.length > 0) {
+      const queuedMessages = [...(pendingMessageQueue.get(pendingId) || [])];
+      pendingMessageQueue.set(pendingId, []);
       
-      if (!res.ok) throw new Error("Failed to create chat");
-      const newChat = await res.json();
-      
-      const chat: Chat = {
-        id: newChat.id,
-        title: newChat.title,
-        timestamp: new Date(newChat.createdAt).getTime(),
-        messages: []
-      };
-      
-      setChats(prev => [chat, ...prev]);
-      setActiveChatId(chat.id);
-      return true;
-    } catch (error) {
-      console.error("Error creating chat:", error);
-      const newChat: Chat = {
-        id: Date.now().toString(),
-        title: "New Chat",
-        timestamp: Date.now(),
-        messages: []
-      };
-      setChats(prev => [newChat, ...prev]);
-      setActiveChatId(newChat.id);
-      return true;
+      for (const msg of queuedMessages) {
+        try {
+          await fetch(`/api/chats/${realChatId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              role: msg.role,
+              content: msg.content,
+              attachments: msg.attachments,
+              sources: msg.sources
+            })
+          });
+        } catch (error) {
+          console.error("Error flushing queued message:", error);
+        }
+      }
     }
-  }, [chats, activeChatId]);
+    pendingMessageQueue.delete(pendingId);
+  };
 
   const addMessage = useCallback(async (chatId: string, message: Message) => {
+    const resolvedChatId = pendingToRealIdMap.get(chatId) || chatId;
+    const isPending = resolvedChatId.startsWith(PENDING_CHAT_PREFIX);
+    const isCreatingChat = chatCreationInProgress.has(chatId) || chatCreationInProgress.has(resolvedChatId);
+    
+    const title = message.role === "user" && message.content
+      ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
+      : "Nuevo Chat";
+
     setChats(prev => prev.map(chat => {
-      if (chat.id === chatId) {
-        const updatedMessages = [...chat.messages, message];
-        let title = chat.title;
-        if (chat.messages.length === 0 && message.role === "user") {
-          title = message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "");
-        }
-        
+      const matchId = chat.id === chatId || chat.id === resolvedChatId;
+      if (matchId) {
+        const isFirstMessage = chat.messages.length === 0;
         return {
           ...chat,
-          messages: updatedMessages,
-          title: title,
+          messages: [...chat.messages, message],
+          title: isFirstMessage && message.role === "user" ? title : chat.title,
           timestamp: Date.now()
         };
       }
       return chat;
     }));
 
-    try {
-      await fetch(`/api/chats/${chatId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          role: message.role,
-          content: message.content,
-          attachments: message.attachments,
-          sources: message.sources
-        })
-      });
-    } catch (error) {
-      console.error("Error saving message to server:", error);
+    if (isPending && message.role === "user" && !isCreatingChat) {
+      chatCreationInProgress.add(chatId);
+      const queue = pendingMessageQueue.get(chatId) || [];
+      queue.push(message);
+      pendingMessageQueue.set(chatId, queue);
+      
+      try {
+        const res = await fetch("/api/chats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title })
+        });
+        
+        if (res.ok) {
+          const newChat = await res.json();
+          const realChatId = newChat.id;
+          
+          pendingToRealIdMap.set(chatId, realChatId);
+          
+          setChats(prev => prev.map(chat => {
+            if (chat.id === chatId) {
+              return { ...chat, id: realChatId };
+            }
+            return chat;
+          }));
+          setActiveChatId(realChatId);
+
+          await flushPendingMessages(chatId, realChatId);
+        }
+      } catch (error) {
+        console.error("Error creating chat on first message:", error);
+      } finally {
+        chatCreationInProgress.delete(chatId);
+      }
+    } else if (isPending || isCreatingChat) {
+      const queueKey = chatCreationInProgress.has(chatId) ? chatId : resolvedChatId;
+      const queue = pendingMessageQueue.get(queueKey) || [];
+      queue.push(message);
+      pendingMessageQueue.set(queueKey, queue);
+    } else {
+      try {
+        await fetch(`/api/chats/${resolvedChatId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            role: message.role,
+            content: message.content,
+            attachments: message.attachments,
+            sources: message.sources
+          })
+        });
+      } catch (error) {
+        console.error("Error saving message to server:", error);
+      }
     }
   }, []);
 
