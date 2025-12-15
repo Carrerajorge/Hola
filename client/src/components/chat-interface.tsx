@@ -51,6 +51,7 @@ import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
 import { VirtualComputer } from "@/components/virtual-computer";
+import { DocumentEditor } from "@/components/document-editor";
 
 const processLatex = (content: string): string => {
   return content
@@ -1778,163 +1779,17 @@ export function ChatInterface({
           </div>
         </div>
 
-        {/* Right: Document Editor Panel */}
+        {/* Right: Document Editor Panel - Full TipTap WYSIWYG */}
         {previewDocument && (
-          <div className="w-1/2 bg-background border-l flex flex-col animate-in slide-in-from-right duration-300">
-            <div className="flex items-center justify-between p-3 border-b bg-muted/30">
-              <div className="flex items-center gap-3">
-                {previewDocument.type === "word" && <FileText className="h-5 w-5 text-blue-600" />}
-                {previewDocument.type === "excel" && <FileSpreadsheet className="h-5 w-5 text-green-600" />}
-                {previewDocument.type === "ppt" && <FileIcon className="h-5 w-5 text-orange-600" />}
-                <div>
-                  <h3 className="font-medium text-sm">{previewDocument.title}</h3>
-                  <span className="text-xs text-muted-foreground">
-                    {previewDocument.type === "word" ? "Documento Word" : previewDocument.type === "excel" ? "Hoja de Excel" : "PowerPoint"} - Editable
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="gap-2"
-                  onClick={() => handleDownloadDocument(previewDocument)}
-                  data-testid="button-download-preview"
-                >
-                  <Download className="h-4 w-4" />
-                  Descargar
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={handleCloseDocumentPreview}
-                  data-testid="button-close-preview"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            {/* Formatting Toolbar */}
-            <div className="border-b bg-white dark:bg-gray-800 px-4 py-2">
-              <div className="flex items-center gap-1 flex-wrap">
-                <div className="flex items-center gap-1 pr-3 border-r">
-                  <select className="text-xs border rounded px-2 py-1 bg-transparent">
-                    <option>Normal Text</option>
-                    <option>Heading 1</option>
-                    <option>Heading 2</option>
-                    <option>Heading 3</option>
-                  </select>
-                  <select className="text-xs border rounded px-2 py-1 bg-transparent">
-                    <option>Inter</option>
-                    <option>Georgia</option>
-                    <option>Arial</option>
-                  </select>
-                  <select className="text-xs border rounded px-2 py-1 bg-transparent w-14">
-                    <option>12</option>
-                    <option>14</option>
-                    <option>16</option>
-                    <option>18</option>
-                  </select>
-                </div>
-                <div className="flex items-center gap-0.5 px-2 border-r">
-                  <Button variant="ghost" size="icon" className="h-7 w-7"><span className="font-bold text-sm">B</span></Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7"><span className="italic text-sm">I</span></Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7"><span className="underline text-sm">U</span></Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7"><span className="line-through text-sm">S</span></Button>
-                </div>
-                <div className="flex items-center gap-0.5 px-2 border-r">
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">≡</Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">≡</Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">≡</Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">≡</Button>
-                </div>
-                <div className="flex items-center gap-0.5 px-2">
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">•</Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">1.</Button>
-                </div>
-              </div>
-            </div>
-            
-            {/* Document Content Area */}
-            <div className="flex-1 overflow-auto bg-[#f8f9fa] dark:bg-gray-900 relative">
-              <div className="max-w-3xl mx-auto my-6 bg-white dark:bg-gray-800 shadow-lg min-h-[calc(100vh-280px)]" style={{ aspectRatio: '8.5/11' }}>
-                <div className="p-16" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
-                  <EditableDocumentPreview 
-                    content={editedDocumentContent}
-                    onChange={setEditedDocumentContent}
-                    onSelectionChange={handleSelectionChange}
-                  />
-                </div>
-              </div>
-              
-              {/* AI Rewrite Panel - Fixed at bottom left */}
-              {textSelection && (
-                <div className="fixed bottom-6 left-6 w-96 z-50 animate-in slide-in-from-bottom duration-200">
-                  <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-3 border-b">
-                      <span className="font-semibold text-sm">AI Rewrite</span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={handleCancelSelectionEdit}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div className="p-4">
-                      <div className="text-sm text-gray-700 dark:text-gray-300 mb-4 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border max-h-24 overflow-auto">
-                        {editingSelectionText}
-                      </div>
-                      <div className="relative">
-                        <textarea
-                          value={editingSelectionText}
-                          onChange={(e) => setEditingSelectionText(e.target.value)}
-                          className="w-full min-h-[60px] p-3 pr-20 text-sm border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white dark:bg-gray-900"
-                          placeholder="Escribe el nuevo texto o pide a la IA que lo mejore..."
-                          data-testid="textarea-selection-edit"
-                        />
-                        <div className="absolute bottom-2 right-2 flex items-center gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
-                            <Mic className="h-4 w-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-7 w-7 text-teal-600"
-                            onClick={handleApplySelectionEdit}
-                            data-testid="button-apply-selection"
-                          >
-                            <ArrowRight className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 mt-3">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleCancelSelectionEdit}
-                          className="flex-1"
-                          data-testid="button-cancel-selection"
-                        >
-                          Cancelar
-                        </Button>
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={handleApplySelectionEdit}
-                          className="flex-1 bg-teal-600 hover:bg-teal-700"
-                          data-testid="button-apply-selection-2"
-                        >
-                          Aplicar cambios
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+          <div className="w-1/2 h-full animate-in slide-in-from-right duration-300">
+            <DocumentEditor
+              title={previewDocument.title}
+              content={editedDocumentContent}
+              onChange={setEditedDocumentContent}
+              onClose={handleCloseDocumentPreview}
+              onDownload={() => handleDownloadDocument(previewDocument)}
+              documentType={previewDocument.type}
+            />
           </div>
         )}
       </div>
