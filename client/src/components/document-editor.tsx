@@ -35,7 +35,6 @@ import {
   X,
   Download,
   Sparkles,
-  Send,
 } from 'lucide-react';
 
 interface DocumentEditorProps {
@@ -412,23 +411,14 @@ export function DocumentEditor({
               }}
               autoFocus
             />
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-gray-400 hover:text-gray-600"
-                onClick={handleCancelRewrite}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-              <Button
-                size="icon"
-                className="h-8 w-8 rounded-full bg-teal-500 hover:bg-teal-600 text-white"
-                onClick={handleApplyRewrite}
-              >
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-gray-400 hover:text-gray-600 flex-shrink-0"
+              onClick={handleCancelRewrite}
+            >
+              <X className="h-4 w-4" />
+            </Button>
           </div>
         </div>,
         document.body
