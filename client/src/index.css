@@ -442,3 +442,92 @@
   margin-left: 1px;
   vertical-align: baseline;
 }
+
+/* ========================================
+   LIQUID BUTTON EFFECTS
+======================================== */
+
+.liquid-button {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
+}
+
+.liquid-button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: radial-gradient(circle, rgba(102, 126, 234, 0.3) 0%, transparent 70%);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.4s ease, height 0.4s ease;
+  pointer-events: none;
+}
+
+.liquid-button:hover::before {
+  width: 200%;
+  height: 200%;
+}
+
+.liquid-button:hover {
+  transform: scale(1.02) translateY(-1px);
+  background: rgba(102, 126, 234, 0.08) !important;
+}
+
+.liquid-button:active {
+  transform: scale(0.97);
+  transition: transform 0.08s ease;
+}
+
+.liquid-button:active::before {
+  background: radial-gradient(circle, rgba(102, 126, 234, 0.5) 0%, transparent 60%);
+  width: 250%;
+  height: 250%;
+}
+
+/* Ripple effect on click */
+@keyframes liquidRipple {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.5);
+    opacity: 0;
+  }
+}
+
+.liquid-button::after {
+  content: '';
+  position: absolute;
+  top: var(--ripple-y, 50%);
+  left: var(--ripple-x, 50%);
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle, rgba(102, 126, 234, 0.4) 0%, transparent 50%);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.liquid-button.rippling::after {
+  animation: liquidRipple 0.5s ease-out forwards;
+}
+
+/* Icon animation on hover */
+.liquid-button svg {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.liquid-button:hover svg {
+  transform: scale(1.1);
+}
+
+.liquid-button:active svg {
+  transform: scale(0.9);
+}

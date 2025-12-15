@@ -123,7 +123,7 @@ export function Sidebar({
             <span className="text-[10px] text-muted-foreground">AI Platform</span>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-white/50 transition-all duration-200" onClick={onToggle}>
+        <Button variant="ghost" size="icon" className="h-8 w-8 liquid-button" onClick={onToggle}>
           <svg className="h-5 w-5 text-muted-foreground" viewBox="0 0 24 24" fill="none">
             <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.5" />
             <line x1="9" y1="3" x2="9" y2="21" stroke="currentColor" strokeWidth="1.5" />
@@ -135,16 +135,17 @@ export function Sidebar({
       <div className="px-2 py-2">
         <Button 
           variant="ghost" 
-          className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
           onClick={onNewChat}
+          data-testid="button-new-chat"
         >
           <Plus className="h-4 w-4" />
-          New Chat
+          Nuevo Chat
         </Button>
         <Button 
           ref={searchButtonRef}
           variant="ghost" 
-          className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
           onClick={() => setIsSearchModalOpen(true)}
           data-testid="button-search-chats"
         >
@@ -153,14 +154,16 @@ export function Sidebar({
         </Button>
         <Button 
           variant="ghost" 
-          className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          data-testid="button-library"
         >
           <Library className="h-4 w-4" />
-          Library
+          Biblioteca
         </Button>
         <Button 
           variant="ghost" 
-          className="w-full justify-start gap-2 px-2 text-sm font-medium hover:bg-sidebar-accent"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          data-testid="button-gpts"
         >
           <Bot className="h-4 w-4" />
           GPTs
@@ -287,7 +290,7 @@ export function Sidebar({
         <div className="px-2 border-t">
           <Button
             variant="ghost"
-            className="w-full justify-between px-2 py-2 text-sm font-medium text-muted-foreground hover:bg-sidebar-accent"
+            className="w-full justify-between px-2 py-2 text-sm font-medium text-muted-foreground liquid-button"
             onClick={() => setShowHidden(!showHidden)}
             data-testid="button-toggle-hidden"
           >
@@ -329,7 +332,7 @@ export function Sidebar({
       <div className="mt-auto border-t p-4">
         <Popover>
           <PopoverTrigger asChild>
-            <button className="flex w-full items-center gap-3 rounded-lg p-2 hover:bg-sidebar-accent transition-colors cursor-pointer" data-testid="button-user-menu">
+            <button className="flex w-full items-center gap-3 rounded-lg p-2 liquid-button cursor-pointer" data-testid="button-user-menu">
               <Avatar className="h-10 w-10">
                 <AvatarFallback className="bg-muted text-muted-foreground">A</AvatarFallback>
               </Avatar>
@@ -341,30 +344,30 @@ export function Sidebar({
           </PopoverTrigger>
           <PopoverContent className="w-56 p-2" align="start" side="top">
             <div className="flex flex-col">
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-profile">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-profile">
                 <User className="h-4 w-4" />
-                Profile
+                Perfil
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-billing">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-billing">
                 <CreditCard className="h-4 w-4" />
-                Billing
+                Facturación
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-settings">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-settings">
                 <Settings className="h-4 w-4" />
-                Settings
+                Configuración
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-privacy">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-privacy">
                 <Shield className="h-4 w-4" />
-                Privacy Policy
+                Privacidad
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal" data-testid="button-admin-panel">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-admin-panel">
                 <Settings className="h-4 w-4" />
                 Admin Panel
               </Button>
               <Separator className="my-1" />
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50" data-testid="button-logout">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
-                Logout
+                Cerrar sesión
               </Button>
             </div>
           </PopoverContent>
