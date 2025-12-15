@@ -1,9 +1,5 @@
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  baseURL: "https://api.x.ai/v1",
-  apiKey: process.env.XAI_API_KEY,
-});
+import { openai, MODELS } from "./lib/openai";
+import { LIMITS } from "./lib/constants";
 
 export interface TextChunk {
   content: string;
@@ -11,7 +7,7 @@ export interface TextChunk {
   pageNumber?: number;
 }
 
-export function chunkText(text: string, chunkSize: number = 1000, overlap: number = 200): TextChunk[] {
+export function chunkText(text: string, chunkSize = 1000, overlap = 200): TextChunk[] {
   const chunks: TextChunk[] = [];
   const cleanedText = text.replace(/\s+/g, " ").trim();
   
@@ -34,16 +30,12 @@ export function chunkText(text: string, chunkSize: number = 1000, overlap: numbe
 
     const chunkContent = cleanedText.slice(startIndex, endIndex).trim();
     if (chunkContent.length > 0) {
-      chunks.push({
-        content: chunkContent,
-        chunkIndex,
-      });
+      chunks.push({ content: chunkContent, chunkIndex });
       chunkIndex++;
     }
 
     startIndex = endIndex - overlap;
-    if (startIndex >= cleanedText.length) break;
-    if (endIndex >= cleanedText.length) break;
+    if (startIndex >= cleanedText.length || endIndex >= cleanedText.length) break;
   }
 
   return chunks;
@@ -52,8 +44,8 @@ export function chunkText(text: string, chunkSize: number = 1000, overlap: numbe
 export async function generateEmbedding(text: string): Promise<number[]> {
   try {
     const response = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: text.slice(0, 8000),
+      model: MODELS.EMBEDDING,
+      input: text.slice(0, LIMITS.MAX_EMBEDDING_INPUT),
     });
     return response.data[0].embedding;
   } catch (error) {
@@ -65,15 +57,15 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 export async function generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   
-  const BATCH_SIZE = 20;
   const allEmbeddings: number[][] = [];
   
-  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-    const batch = texts.slice(i, i + BATCH_SIZE).map(t => t.slice(0, 8000));
+  for (let i = 0; i < texts.length; i += LIMITS.EMBEDDING_BATCH_SIZE) {
+    const batch = texts.slice(i, i + LIMITS.EMBEDDING_BATCH_SIZE)
+      .map(t => t.slice(0, LIMITS.MAX_EMBEDDING_INPUT));
     
     try {
       const response = await openai.embeddings.create({
-        model: "text-embedding-3-small",
+        model: MODELS.EMBEDDING,
         input: batch,
       });
       
@@ -84,9 +76,7 @@ export async function generateEmbeddingsBatch(texts: string[]): Promise<number[]
       allEmbeddings.push(...batchEmbeddings);
     } catch (error) {
       console.error("Batch embedding error:", error);
-      for (let j = 0; j < batch.length; j++) {
-        allEmbeddings.push(new Array(1536).fill(0));
-      }
+      allEmbeddings.push(...batch.map(() => new Array(1536).fill(0)));
     }
   }
   

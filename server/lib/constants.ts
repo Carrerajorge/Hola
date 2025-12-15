@@ -1,0 +1,40 @@
+export const ALLOWED_MIME_TYPES = [
+  "text/plain",
+  "text/markdown",
+  "text/csv",
+  "text/html",
+  "application/json",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-powerpoint",
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/gif",
+  "image/bmp",
+  "image/webp",
+  "image/tiff",
+] as const;
+
+export const HTTP_HEADERS = {
+  USER_AGENT: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  ACCEPT_HTML: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  ACCEPT_LANGUAGE: "es-ES,es;q=0.9,en;q=0.8"
+} as const;
+
+export const TIMEOUTS = {
+  PAGE_FETCH: 8000,
+  SCREENSHOT_INTERVAL: 1500,
+  MAX_CONTENT_LENGTH: 2000
+} as const;
+
+export const LIMITS = {
+  MAX_SEARCH_RESULTS: 5,
+  MAX_CONTENT_FETCH: 3,
+  EMBEDDING_BATCH_SIZE: 20,
+  MAX_EMBEDDING_INPUT: 8000,
+  RAG_SIMILAR_CHUNKS: 5
+} as const;
