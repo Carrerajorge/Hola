@@ -717,7 +717,7 @@ export function ChatInterface({
                   )}
                   
                   {msg.content && !msg.isThinking && (
-                     <div className="px-4 py-3 text-sm text-foreground liquid-message-ai-light" style={{ fontFamily: "'Times New Roman', Times, serif", lineHeight: "2" }}>
+                     <div className="px-4 py-3 text-foreground liquid-message-ai-light" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
                        <ReactMarkdown
                          remarkPlugins={[remarkGfm, remarkMath]}
                          rehypePlugins={[rehypeKatex, rehypeHighlight]}
@@ -914,7 +914,7 @@ export function ChatInterface({
                 </div>
               )}
               {aiState === "responding" && streamingContent && (
-                <div className="px-4 py-3 text-sm text-foreground" style={{ fontFamily: "'Times New Roman', Times, serif", lineHeight: "2" }}>
+                <div className="px-4 py-3 text-foreground" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm, remarkMath]}
                     rehypePlugins={[rehypeKatex, rehypeHighlight]}
