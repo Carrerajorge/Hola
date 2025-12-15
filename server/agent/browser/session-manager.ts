@@ -395,66 +395,73 @@ class BrowserSessionManager {
     if (!session) return null;
 
     try {
-      const state = await session.page.evaluate(() => {
-        const getVisibleText = () => {
-          const walker = document.createTreeWalker(
+      const state = await session.page.evaluate(`
+        (function() {
+          var walker = document.createTreeWalker(
             document.body,
             NodeFilter.SHOW_TEXT,
             null
           );
-          let text = "";
-          let node;
+          var visibleText = "";
+          var node;
           while (node = walker.nextNode()) {
-            const parent = node.parentElement;
+            var parent = node.parentElement;
             if (parent && getComputedStyle(parent).display !== "none") {
-              text += node.textContent?.trim() + " ";
+              var txt = node.textContent;
+              if (txt) visibleText += txt.trim() + " ";
             }
           }
-          return text.slice(0, 10000);
-        };
+          visibleText = visibleText.slice(0, 10000);
 
-        const links = Array.from(document.querySelectorAll("a[href]")).slice(0, 50).map(a => ({
-          text: (a as HTMLAnchorElement).textContent?.trim() || "",
-          href: (a as HTMLAnchorElement).href
-        }));
+          var links = Array.from(document.querySelectorAll("a[href]")).slice(0, 50).map(function(a) {
+            return {
+              text: a.textContent ? a.textContent.trim() : "",
+              href: a.href
+            };
+          });
 
-        const forms = Array.from(document.querySelectorAll("form")).slice(0, 10).map(f => ({
-          action: (f as HTMLFormElement).action,
-          inputs: Array.from(f.querySelectorAll("input, textarea, select")).map(i => 
-            (i as HTMLInputElement).name || (i as HTMLInputElement).id || ""
-          ).filter(Boolean)
-        }));
+          var forms = Array.from(document.querySelectorAll("form")).slice(0, 10).map(function(f) {
+            return {
+              action: f.action,
+              inputs: Array.from(f.querySelectorAll("input, textarea, select")).map(function(i) {
+                return i.name || i.id || "";
+              }).filter(Boolean)
+            };
+          });
 
-        const images = Array.from(document.querySelectorAll("img[src]")).slice(0, 20).map(i => ({
-          src: (i as HTMLImageElement).src,
-          alt: (i as HTMLImageElement).alt
-        }));
+          var images = Array.from(document.querySelectorAll("img[src]")).slice(0, 20).map(function(i) {
+            return {
+              src: i.src,
+              alt: i.alt
+            };
+          });
 
-        const metaTags: Record<string, string> = {};
-        document.querySelectorAll("meta[name], meta[property]").forEach(m => {
-          const name = m.getAttribute("name") || m.getAttribute("property") || "";
-          const content = m.getAttribute("content") || "";
-          if (name && content) metaTags[name] = content;
-        });
+          var metaTags = {};
+          document.querySelectorAll("meta[name], meta[property]").forEach(function(m) {
+            var name = m.getAttribute("name") || m.getAttribute("property") || "";
+            var content = m.getAttribute("content") || "";
+            if (name && content) metaTags[name] = content;
+          });
 
-        const jsonLd: any[] = [];
-        document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
-          try {
-            jsonLd.push(JSON.parse(s.textContent || ""));
-          } catch {}
-        });
+          var jsonLd = [];
+          document.querySelectorAll('script[type="application/ld+json"]').forEach(function(s) {
+            try {
+              jsonLd.push(JSON.parse(s.textContent || ""));
+            } catch(e) {}
+          });
 
-        return {
-          url: window.location.href,
-          title: document.title,
-          visibleText: getVisibleText(),
-          links,
-          forms,
-          images,
-          metaTags,
-          jsonLd
-        };
-      });
+          return {
+            url: window.location.href,
+            title: document.title,
+            visibleText: visibleText,
+            links: links,
+            forms: forms,
+            images: images,
+            metaTags: metaTags,
+            jsonLd: jsonLd
+          };
+        })()
+      `);
 
       const observation: Observation = {
         sessionId,
@@ -471,7 +478,7 @@ class BrowserSessionManager {
         data: { type: "state", state }
       });
 
-      return state;
+      return state as PageState;
     } catch (error) {
       console.error("Failed to get page state:", error);
       return null;
