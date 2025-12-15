@@ -103,6 +103,10 @@ export function VirtualComputer({ state, onClose, onCancel, className, compact =
   };
 
   if (compact && !isExpanded) {
+    if (state.status === "idle" && !state.sessionId) {
+      return null;
+    }
+    
     return (
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
