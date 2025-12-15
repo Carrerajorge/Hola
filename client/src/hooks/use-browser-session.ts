@@ -117,11 +117,11 @@ export function useBrowserSession() {
     };
 
     ws.onerror = (error) => {
-      console.error("Browser WebSocket error:", error);
-      setState(prev => ({ ...prev, status: "error", error: "WebSocket connection error" }));
+      console.error("Browser WebSocket error:", error, "readyState:", ws.readyState, "url:", ws.url);
     };
-
-    ws.onclose = () => {
+    
+    ws.onclose = (event) => {
+      console.log("Browser WebSocket closed:", event.code, event.reason, event.wasClean);
       wsRef.current = null;
     };
   }, []);
