@@ -1,5 +1,11 @@
 import Tesseract from "tesseract.js";
+import OpenAI from "openai";
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
+
+const openai = new OpenAI({ 
+  baseURL: "https://api.x.ai/v1", 
+  apiKey: process.env.XAI_API_KEY 
+});
 
 export class ImageParser implements FileParser {
   name = "image";
@@ -14,6 +20,49 @@ export class ImageParser implements FileParser {
   ];
 
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
+    // Try AI Vision first for better accuracy
+    try {
+      const base64Image = content.toString("base64");
+      const mimeType = type.mimeType || "image/png";
+      
+      const response = await openai.chat.completions.create({
+        model: "grok-2-vision-1212",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mimeType};base64,${base64Image}`,
+                },
+              },
+              {
+                type: "text",
+                text: "Extrae TODO el texto visible en esta imagen. Si hay tablas, mantenlas formateadas. Si hay fórmulas matemáticas, escríbelas en formato LaTeX. Devuelve SOLO el texto extraído, sin comentarios adicionales.",
+              },
+            ],
+          },
+        ],
+        max_tokens: 4096,
+      });
+
+      const text = response.choices[0]?.message?.content?.trim() || "";
+      
+      if (text && text.length > 0) {
+        return {
+          text,
+          metadata: {
+            method: "ai-vision",
+            model: "grok-2-vision-1212",
+          },
+        };
+      }
+    } catch (error) {
+      console.error("AI Vision OCR failed, falling back to Tesseract:", error);
+    }
+
+    // Fallback to Tesseract
     try {
       const result = await Tesseract.recognize(content, "spa+eng", {
         logger: () => {},
@@ -31,6 +80,7 @@ export class ImageParser implements FileParser {
       return {
         text,
         metadata: {
+          method: "tesseract",
           confidence: result.data.confidence,
         },
       };
