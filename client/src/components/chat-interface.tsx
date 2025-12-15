@@ -880,15 +880,6 @@ export function ChatInterface({
           </div>
         ))}
         
-        {/* Virtual Computer - Always visible, fixed small size */}
-        <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
-          <VirtualComputer
-            state={browserSession.state}
-            onCancel={browserSession.cancel}
-            className="w-[2cm] h-[2cm]"
-            compact={true}
-          />
-        </div>
 
         {/* Agent Observer - Show when agent is running */}
         {agent.state.status !== "idle" && (
@@ -947,6 +938,14 @@ export function ChatInterface({
 
           {/* Sticky Input Area */}
           <div className="flex-shrink-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative">
+            {/* Virtual Computer - Always visible above input */}
+            <div className="absolute left-4 sm:left-6 bottom-[calc(100%+8px)] z-20">
+              <VirtualComputer
+                state={browserSession.state}
+                onCancel={browserSession.cancel}
+                compact={true}
+              />
+            </div>
             {/* Floating Mini Browser - positioned above the + button */}
             {(isBrowserOpen || input.trim().length > 0) && !isBrowserMaximized && (
               <div className="absolute left-4 sm:left-6 bottom-[calc(100%-16px)] w-[120px] border rounded-lg overflow-hidden shadow-lg bg-card z-20 transition-all duration-200">
