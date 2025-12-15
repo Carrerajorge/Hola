@@ -1,5 +1,5 @@
 import { ToolDefinition, ExecutionContext, ToolResult, Artifact } from "../types";
-import { browserWorker } from "../../browser-worker";
+import { browserSessionManager } from "../../browser";
 import { extractWithReadability } from "../../extractor";
 import { ObjectStorageService } from "../../../objectStorage";
 import crypto from "crypto";
@@ -33,7 +33,13 @@ export const webNavigateTool: ToolDefinition = {
     const artifacts: Artifact[] = [];
     
     try {
-      sessionId = await browserWorker.createSession();
+      sessionId = await browserSessionManager.createSession(
+        `Navigate to ${url}`,
+        { timeout },
+        undefined
+      );
+      
+      browserSessionManager.startScreenshotStreaming(sessionId, 1500);
       
       context.onProgress({
         runId: context.runId,
@@ -43,7 +49,7 @@ export const webNavigateTool: ToolDefinition = {
         progress: 30
       });
       
-      const result = await browserWorker.navigate(sessionId, url, takeScreenshot);
+      const result = await browserSessionManager.navigate(sessionId, url);
       
       if (!result.success) {
         return {
@@ -52,13 +58,35 @@ export const webNavigateTool: ToolDefinition = {
         };
       }
 
-      if (result.screenshot) {
+      if (waitForSelector) {
+        const waitScript = `
+          new Promise((resolve, reject) => {
+            const selector = ${JSON.stringify(waitForSelector)};
+            const timeout = ${Math.min(timeout, 10000)};
+            const start = Date.now();
+            const check = () => {
+              if (document.querySelector(selector)) {
+                resolve(true);
+              } else if (Date.now() - start > timeout) {
+                resolve(false);
+              } else {
+                requestAnimationFrame(check);
+              }
+            };
+            check();
+          })
+        `;
+        await browserSessionManager.evaluate(sessionId, waitScript);
+      }
+
+      if (takeScreenshot && result.screenshot) {
         try {
+          const screenshotBuffer = Buffer.from(result.screenshot.replace(/^data:image\/png;base64,/, ""), "base64");
           const { uploadURL, storagePath } = await objectStorage.getObjectEntityUploadURLWithPath();
           await fetch(uploadURL, {
             method: "PUT",
             headers: { "Content-Type": "image/png" },
-            body: result.screenshot
+            body: screenshotBuffer
           });
           
           artifacts.push({
@@ -67,47 +95,49 @@ export const webNavigateTool: ToolDefinition = {
             name: `screenshot_${new URL(url).hostname}.png`,
             storagePath,
             mimeType: "image/png",
-            metadata: { url, title: result.title }
+            metadata: { url, title: result.data?.title }
           });
         } catch (e) {
           console.error("Failed to save screenshot:", e);
         }
       }
 
+      const pageState = await browserSessionManager.getPageState(sessionId);
+      
       let extractedContent: any = null;
-      if (result.html) {
-        extractedContent = extractWithReadability(result.html, url);
+      if (pageState?.visibleText) {
+        extractedContent = {
+          textContent: pageState.visibleText,
+          title: pageState.title,
+          links: pageState.links
+        };
         
-        if (extractedContent) {
-          artifacts.push({
-            id: crypto.randomUUID(),
-            type: "text",
-            name: `content_${new URL(url).hostname}.txt`,
-            content: extractedContent.textContent.slice(0, 50000),
-            metadata: {
-              title: extractedContent.title,
-              byline: extractedContent.byline,
-              length: extractedContent.length
-            }
-          });
-        }
+        artifacts.push({
+          id: crypto.randomUUID(),
+          type: "text",
+          name: `content_${new URL(url).hostname}.txt`,
+          content: pageState.visibleText.slice(0, 50000),
+          metadata: {
+            title: pageState.title,
+            linksCount: pageState.links?.length || 0
+          }
+        });
       }
 
       return {
         success: true,
         data: {
-          url: result.url,
-          title: result.title,
-          html: result.html?.slice(0, 100000),
+          url: result.data?.url || url,
+          title: result.data?.title || pageState?.title,
           textContent: extractedContent?.textContent?.slice(0, 50000),
           links: extractedContent?.links?.slice(0, 50),
-          timing: result.timing
+          duration: result.duration
         },
         artifacts,
         metadata: {
-          finalUrl: result.url,
-          title: result.title,
-          timing: result.timing
+          finalUrl: result.data?.url || url,
+          title: result.data?.title || pageState?.title,
+          duration: result.duration
         }
       };
     } catch (error: any) {
@@ -117,7 +147,8 @@ export const webNavigateTool: ToolDefinition = {
       };
     } finally {
       if (sessionId) {
-        await browserWorker.destroySession(sessionId).catch(() => {});
+        browserSessionManager.stopScreenshotStreaming(sessionId);
+        await browserSessionManager.closeSession(sessionId).catch(() => {});
       }
     }
   }

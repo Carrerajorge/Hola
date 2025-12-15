@@ -44,6 +44,11 @@ export async function registerRoutes(
 ): Promise<Server> {
   const objectStorageService = new ObjectStorageService();
 
+  // Register global event listener for ALL browser sessions (including pipeline-created ones)
+  browserSessionManager.addGlobalEventListener((event: SessionEvent) => {
+    broadcastBrowserEvent(event.sessionId, event);
+  });
+
   app.get("/api/files", async (req, res) => {
     try {
       const files = await storage.getFiles();

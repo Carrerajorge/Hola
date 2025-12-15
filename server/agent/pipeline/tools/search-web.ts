@@ -1,5 +1,5 @@
 import { ToolDefinition, ExecutionContext, ToolResult } from "../types";
-import { browserWorker } from "../../browser-worker";
+import { browserSessionManager } from "../../browser";
 import { extractWithReadability } from "../../extractor";
 
 export const searchWebTool: ToolDefinition = {
@@ -37,7 +37,13 @@ export const searchWebTool: ToolDefinition = {
     let sessionId: string | null = null;
     
     try {
-      sessionId = await browserWorker.createSession();
+      sessionId = await browserSessionManager.createSession(
+        `Search: ${query}`,
+        { timeout: 30000 },
+        undefined
+      );
+      
+      browserSessionManager.startScreenshotStreaming(sessionId, 1500);
       
       const searchUrls: Record<string, string> = {
         google: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
@@ -55,54 +61,28 @@ export const searchWebTool: ToolDefinition = {
         progress: 30
       });
 
-      const result = await browserWorker.navigate(sessionId, searchUrl, false);
+      const navResult = await browserSessionManager.navigate(sessionId, searchUrl);
       
-      if (!result.success || !result.html) {
+      if (!navResult.success) {
         return {
           success: false,
-          error: result.error || "Failed to load search results"
+          error: navResult.error || "Failed to load search results"
         };
       }
 
+      const pageState = await browserSessionManager.getPageState(sessionId);
+      
       const results: { title: string; url: string; snippet: string }[] = [];
       
-      if (engine === "duckduckgo") {
-        const linkRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi;
-        const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>([^<]*)<\/a>/gi;
-        
-        let match;
-        const titles: string[] = [];
-        const urls: string[] = [];
-        const snippets: string[] = [];
-        
-        while ((match = linkRegex.exec(result.html)) !== null && titles.length < maxResults) {
-          urls.push(match[1]);
-          titles.push(match[2].replace(/<[^>]*>/g, "").trim());
-        }
-        
-        while ((match = snippetRegex.exec(result.html)) !== null && snippets.length < maxResults) {
-          snippets.push(match[1].replace(/<[^>]*>/g, "").trim());
-        }
-        
-        for (let i = 0; i < Math.min(titles.length, maxResults); i++) {
-          results.push({
-            title: titles[i] || "",
-            url: urls[i] || "",
-            snippet: snippets[i] || ""
-          });
-        }
-      } else {
-        const extracted = extractWithReadability(result.html, searchUrl);
-        if (extracted) {
-          const links = extracted.links.slice(0, maxResults);
-          for (const link of links) {
-            if (link.href && !link.href.includes(engine)) {
-              results.push({
-                title: link.text || link.href,
-                url: link.href,
-                snippet: ""
-              });
-            }
+      if (pageState?.links) {
+        for (const link of pageState.links) {
+          if (link.href && !link.href.includes("duckduckgo") && !link.href.includes("google.com") && !link.href.includes("bing.com")) {
+            if (results.length >= maxResults) break;
+            results.push({
+              title: link.text || link.href,
+              url: link.href,
+              snippet: ""
+            });
           }
         }
       }
@@ -128,7 +108,8 @@ export const searchWebTool: ToolDefinition = {
       };
     } finally {
       if (sessionId) {
-        await browserWorker.destroySession(sessionId).catch(() => {});
+        browserSessionManager.stopScreenshotStreaming(sessionId);
+        await browserSessionManager.closeSession(sessionId).catch(() => {});
       }
     }
   }
