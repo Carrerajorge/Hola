@@ -299,7 +299,7 @@ function EditableDocumentPreview({
       );
     }
     
-    const baseClass = "cursor-pointer transition-all duration-200 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded px-2 py-1 -mx-2 border border-transparent hover:border-blue-200 dark:hover:border-blue-800";
+    const baseClass = "cursor-pointer transition-all duration-200 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded px-2 py-1 -mx-2 border border-transparent hover:border-teal-200 dark:hover:border-teal-800";
     
     switch (block.type) {
       case 'heading1':
@@ -307,7 +307,8 @@ function EditableDocumentPreview({
           <h1 
             key={block.id}
             onClick={() => handleBlockClick(block)}
-            className={cn("text-2xl font-bold mb-4 mt-6", baseClass)}
+            className={cn("text-4xl font-bold mb-6 mt-2 text-teal-700 dark:text-teal-400 italic", baseClass)}
+            style={{ fontFamily: 'Georgia, serif' }}
           >
             {block.content.replace(/^# /, '')}
           </h1>
@@ -317,7 +318,7 @@ function EditableDocumentPreview({
           <h2 
             key={block.id}
             onClick={() => handleBlockClick(block)}
-            className={cn("text-xl font-bold mb-3 mt-5", baseClass)}
+            className={cn("text-xl font-bold mb-3 mt-6 text-teal-700 dark:text-teal-400", baseClass)}
           >
             {block.content.replace(/^## /, '')}
           </h2>
@@ -327,7 +328,7 @@ function EditableDocumentPreview({
           <h3 
             key={block.id}
             onClick={() => handleBlockClick(block)}
-            className={cn("text-lg font-semibold mb-2 mt-4", baseClass)}
+            className={cn("text-lg font-bold mb-2 mt-4 text-gray-800 dark:text-gray-200", baseClass)}
           >
             {block.content.replace(/^### /, '')}
           </h3>
@@ -337,7 +338,7 @@ function EditableDocumentPreview({
           <p 
             key={block.id}
             onClick={() => handleBlockClick(block)}
-            className={cn("mb-4 leading-relaxed text-gray-800 dark:text-gray-200", baseClass)}
+            className={cn("mb-3 leading-relaxed text-gray-700 dark:text-gray-300 text-sm", baseClass)}
           >
             {renderInlineFormatting(block.content)}
           </p>
@@ -1814,78 +1815,125 @@ export function ChatInterface({
                 </Button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto p-4 bg-gradient-to-b from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900">
-              <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-2xl rounded-lg border min-h-full" style={{ minHeight: 'calc(100vh - 200px)' }}>
-                <div className="px-12 py-8 border-b bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20">
-                  <h1 className="text-2xl font-bold text-center text-gray-800 dark:text-gray-100">{previewDocument.title}</h1>
-                  <p className="text-center text-xs text-muted-foreground mt-2">Haz clic en cualquier sección para editarla</p>
+            {/* Formatting Toolbar */}
+            <div className="border-b bg-white dark:bg-gray-800 px-4 py-2">
+              <div className="flex items-center gap-1 flex-wrap">
+                <div className="flex items-center gap-1 pr-3 border-r">
+                  <select className="text-xs border rounded px-2 py-1 bg-transparent">
+                    <option>Normal Text</option>
+                    <option>Heading 1</option>
+                    <option>Heading 2</option>
+                    <option>Heading 3</option>
+                  </select>
+                  <select className="text-xs border rounded px-2 py-1 bg-transparent">
+                    <option>Inter</option>
+                    <option>Georgia</option>
+                    <option>Arial</option>
+                  </select>
+                  <select className="text-xs border rounded px-2 py-1 bg-transparent w-14">
+                    <option>12</option>
+                    <option>14</option>
+                    <option>16</option>
+                    <option>18</option>
+                  </select>
                 </div>
-                <div className="px-12 py-8" style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}>
+                <div className="flex items-center gap-0.5 px-2 border-r">
+                  <Button variant="ghost" size="icon" className="h-7 w-7"><span className="font-bold text-sm">B</span></Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7"><span className="italic text-sm">I</span></Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7"><span className="underline text-sm">U</span></Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7"><span className="line-through text-sm">S</span></Button>
+                </div>
+                <div className="flex items-center gap-0.5 px-2 border-r">
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">≡</Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">≡</Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">≡</Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">≡</Button>
+                </div>
+                <div className="flex items-center gap-0.5 px-2">
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">•</Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-xs">1.</Button>
+                </div>
+              </div>
+            </div>
+            
+            {/* Document Content Area */}
+            <div className="flex-1 overflow-auto bg-[#f8f9fa] dark:bg-gray-900 relative">
+              <div className="max-w-3xl mx-auto my-6 bg-white dark:bg-gray-800 shadow-lg min-h-[calc(100vh-280px)]" style={{ aspectRatio: '8.5/11' }}>
+                <div className="p-16" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
                   <EditableDocumentPreview 
                     content={editedDocumentContent}
                     onChange={setEditedDocumentContent}
                     onSelectionChange={handleSelectionChange}
                   />
                 </div>
-                
-                {/* Selection Edit Overlay */}
-                {textSelection && (
-                  <div className="fixed bottom-24 left-1/4 right-1/2 mx-4 z-50 animate-in slide-in-from-bottom duration-200">
-                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border-2 border-blue-500 overflow-hidden">
-                      <div className="px-4 py-2 bg-blue-500 text-white flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Pencil className="h-4 w-4" />
-                          <span className="font-medium text-sm">Editar selección</span>
-                        </div>
-                        <span className="text-xs opacity-80">{textSelection.text.length} caracteres</span>
+              </div>
+              
+              {/* AI Rewrite Panel - Fixed at bottom left */}
+              {textSelection && (
+                <div className="fixed bottom-6 left-6 w-96 z-50 animate-in slide-in-from-bottom duration-200">
+                  <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b">
+                      <span className="font-semibold text-sm">AI Rewrite</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={handleCancelSelectionEdit}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="p-4">
+                      <div className="text-sm text-gray-700 dark:text-gray-300 mb-4 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border max-h-24 overflow-auto">
+                        {editingSelectionText}
                       </div>
-                      <div className="p-4">
+                      <div className="relative">
                         <textarea
                           value={editingSelectionText}
                           onChange={(e) => setEditingSelectionText(e.target.value)}
-                          className="w-full min-h-[100px] p-3 text-sm border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 dark:bg-gray-900"
-                          placeholder="Edita el texto seleccionado..."
-                          autoFocus
+                          className="w-full min-h-[60px] p-3 pr-20 text-sm border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white dark:bg-gray-900"
+                          placeholder="Escribe el nuevo texto o pide a la IA que lo mejore..."
                           data-testid="textarea-selection-edit"
                         />
-                        <div className="flex items-center justify-between mt-3">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleRevertSelectionEdit}
-                            className="text-muted-foreground gap-1"
-                            disabled={editingSelectionText === originalSelectionText}
-                            data-testid="button-revert-selection"
-                          >
-                            <RefreshCw className="h-3 w-3" />
-                            Revertir
+                        <div className="absolute bottom-2 right-2 flex items-center gap-1">
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
+                            <Mic className="h-4 w-4" />
                           </Button>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={handleCancelSelectionEdit}
-                              data-testid="button-cancel-selection"
-                            >
-                              Cancelar
-                            </Button>
-                            <Button
-                              variant="default"
-                              size="sm"
-                              onClick={handleApplySelectionEdit}
-                              className="bg-blue-500 hover:bg-blue-600 gap-1"
-                              data-testid="button-apply-selection"
-                            >
-                              <CheckCircle2 className="h-3 w-3" />
-                              Aplicar
-                            </Button>
-                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-7 w-7 text-teal-600"
+                            onClick={handleApplySelectionEdit}
+                            data-testid="button-apply-selection"
+                          >
+                            <ArrowRight className="h-4 w-4" />
+                          </Button>
                         </div>
+                      </div>
+                      <div className="flex items-center gap-2 mt-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleCancelSelectionEdit}
+                          className="flex-1"
+                          data-testid="button-cancel-selection"
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={handleApplySelectionEdit}
+                          className="flex-1 bg-teal-600 hover:bg-teal-700"
+                          data-testid="button-apply-selection-2"
+                        >
+                          Aplicar cambios
+                        </Button>
                       </div>
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         )}
