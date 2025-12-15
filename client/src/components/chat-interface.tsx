@@ -161,6 +161,7 @@ export function ChatInterface({
   const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<DocumentBlock | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -206,6 +207,14 @@ export function ChatInterface({
       setCopiedMessageId(msgId);
       setTimeout(() => setCopiedMessageId(null), 2000);
     }
+  };
+
+  const handleOpenDocumentPreview = (doc: DocumentBlock) => {
+    setPreviewDocument(doc);
+  };
+
+  const handleCloseDocumentPreview = () => {
+    setPreviewDocument(null);
   };
 
   const handleDownloadDocument = async (doc: DocumentBlock) => {
@@ -851,8 +860,8 @@ export function ChatInterface({
                                 key={idx}
                                 variant="outline"
                                 className="flex items-center gap-2 px-4 py-2 h-auto"
-                                onClick={() => handleDownloadDocument(doc)}
-                                data-testid={`button-download-doc-${idx}`}
+                                onClick={() => handleOpenDocumentPreview(doc)}
+                                data-testid={`button-preview-doc-${idx}`}
                               >
                                 {doc.type === "word" && <FileText className="h-5 w-5 text-blue-600" />}
                                 {doc.type === "excel" && <FileSpreadsheet className="h-5 w-5 text-green-600" />}
@@ -860,7 +869,7 @@ export function ChatInterface({
                                 <div className="flex flex-col items-start">
                                   <span className="text-sm font-medium">{doc.title}</span>
                                   <span className="text-xs text-muted-foreground">
-                                    Descargar {doc.type === "word" ? "Word" : doc.type === "excel" ? "Excel" : "PowerPoint"}
+                                    Ver {doc.type === "word" ? "Word" : doc.type === "excel" ? "Excel" : "PowerPoint"}
                                   </span>
                                 </div>
                               </Button>
@@ -1352,6 +1361,70 @@ export function ChatInterface({
         </div>
       </div>
 
+      {/* Document Preview Panel */}
+      {previewDocument && (
+        <div className="fixed inset-y-0 right-0 w-1/2 bg-background border-l shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
+          <div className="flex items-center justify-between p-4 border-b bg-muted/30">
+            <div className="flex items-center gap-3">
+              {previewDocument.type === "word" && <FileText className="h-6 w-6 text-blue-600" />}
+              {previewDocument.type === "excel" && <FileSpreadsheet className="h-6 w-6 text-green-600" />}
+              {previewDocument.type === "ppt" && <FileIcon className="h-6 w-6 text-orange-600" />}
+              <div>
+                <h3 className="font-semibold">{previewDocument.title}</h3>
+                <span className="text-xs text-muted-foreground">
+                  {previewDocument.type === "word" ? "Documento Word" : previewDocument.type === "excel" ? "Hoja de Excel" : "Presentación PowerPoint"}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="default"
+                size="sm"
+                className="gap-2"
+                onClick={() => handleDownloadDocument(previewDocument)}
+                data-testid="button-download-preview"
+              >
+                <Download className="h-4 w-4" />
+                Descargar
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleCloseDocumentPreview}
+                data-testid="button-close-preview"
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-6 bg-white dark:bg-gray-900">
+            <div className="max-w-3xl mx-auto bg-white dark:bg-gray-800 shadow-lg rounded-lg p-8 min-h-full border">
+              <h1 className="text-2xl font-bold mb-6 text-center border-b pb-4">{previewDocument.title}</h1>
+              <div className="prose dark:prose-invert max-w-none">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                  components={{
+                    p: ({children}) => <p className="mb-4 leading-relaxed">{children}</p>,
+                    h1: ({children}) => <h1 className="text-2xl font-bold mt-6 mb-4">{children}</h1>,
+                    h2: ({children}) => <h2 className="text-xl font-bold mt-5 mb-3">{children}</h2>,
+                    h3: ({children}) => <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>,
+                    ul: ({children}) => <ul className="list-disc list-inside mb-4 space-y-2">{children}</ul>,
+                    ol: ({children}) => <ol className="list-decimal list-inside mb-4 space-y-2">{children}</ol>,
+                    li: ({children}) => <li className="ml-4">{children}</li>,
+                    blockquote: ({children}) => <blockquote className="border-l-4 border-blue-500 pl-4 italic my-4 bg-muted/50 py-2">{children}</blockquote>,
+                    table: ({children}) => <table className="w-full border-collapse border border-gray-300 my-4">{children}</table>,
+                    th: ({children}) => <th className="border border-gray-300 px-4 py-2 bg-muted font-semibold">{children}</th>,
+                    td: ({children}) => <td className="border border-gray-300 px-4 py-2">{children}</td>,
+                  }}
+                >
+                  {previewDocument.content}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
