@@ -880,12 +880,13 @@ export function ChatInterface({
           </div>
         ))}
         
-        {/* Virtual Computer - Always visible */}
+        {/* Virtual Computer - Always visible, fixed small size */}
         <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
           <VirtualComputer
             state={browserSession.state}
             onCancel={browserSession.cancel}
-            className="w-full"
+            className="w-[2cm] h-[2cm]"
+            compact={true}
           />
         </div>
 
