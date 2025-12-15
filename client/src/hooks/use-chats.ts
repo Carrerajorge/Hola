@@ -110,12 +110,6 @@ export function useChats() {
   }, [chats, isLoading]);
 
   const createChat = useCallback(async () => {
-    const currentActiveChat = chats.find(c => c.id === activeChatId);
-    const hasUserMessages = currentActiveChat?.messages.some(msg => msg.role === "user");
-    if (currentActiveChat && !hasUserMessages) {
-      return false;
-    }
-    
     try {
       const res = await fetch("/api/chats", {
         method: "POST",

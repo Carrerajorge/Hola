@@ -27,10 +27,7 @@ export default function Home() {
   } = useChats();
 
   const handleNewChat = () => {
-    const created = createChat();
-    if (!created) {
-      toast.info("Escribe un mensaje primero antes de crear un nuevo chat");
-    }
+    createChat();
   };
 
   return (
