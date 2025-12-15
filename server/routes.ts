@@ -8,6 +8,7 @@ import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
 import { routeMessage, extractUrls, agentOrchestrator, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, StepUpdate, runPipeline, initializePipeline, ProgressUpdate, guardrails } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
+import { searchWeb, needsWebSearch } from "./services/webSearch";
 
 const openai = new OpenAI({ 
   baseURL: "https://api.x.ai/v1", 
@@ -234,6 +235,28 @@ export async function registerRoutes(
 
       let contextInfo = "";
       let sources: { fileName: string; content: string }[] = [];
+      let webSearchInfo = "";
+
+      if (lastUserMessage && needsWebSearch(lastUserMessage.content)) {
+        try {
+          console.log("Web search triggered for:", lastUserMessage.content);
+          const searchResults = await searchWeb(lastUserMessage.content, 5);
+          
+          if (searchResults.contents.length > 0) {
+            webSearchInfo = "\n\n**Información de Internet (actualizada):**\n" +
+              searchResults.contents.map((content, i) => 
+                `[${i + 1}] ${content.title} (${content.url}):\n${content.content}`
+              ).join("\n\n");
+          } else if (searchResults.results.length > 0) {
+            webSearchInfo = "\n\n**Resultados de búsqueda web:**\n" +
+              searchResults.results.map((r, i) => 
+                `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
+              ).join("\n");
+          }
+        } catch (error) {
+          console.error("Web search error:", error);
+        }
+      }
 
       if (useRag && lastUserMessage) {
         try {
@@ -258,7 +281,7 @@ export async function registerRoutes(
 
       const systemMessage = {
         role: "system" as const,
-        content: `Eres Sira GPT, un asistente de IA avanzado capaz de navegar la web, recopilar información, crear documentos y ejecutar objetivos complejos. Responde de manera útil y profesional en el idioma del usuario.${contextInfo}`
+        content: `Eres Sira GPT, un asistente de IA avanzado con conexión a Internet. Puedes buscar información actualizada en la web. Responde de manera útil y profesional en el idioma del usuario. Si usas información de la web, cita las fuentes.${webSearchInfo}${contextInfo}`
       };
 
       let response;
