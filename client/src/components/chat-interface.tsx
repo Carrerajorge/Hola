@@ -725,26 +725,8 @@ export function ChatInterface({
                   )}
                   
                   {msg.content && !msg.isThinking && (
-                     <div className="px-4 py-3 text-sm leading-relaxed text-foreground">
-                       <ReactMarkdown
-                         remarkPlugins={[remarkGfm, remarkMath]}
-                         rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                         components={{
-                           p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
-                           a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
-                           ul: ({children}) => <ul className="list-disc pl-5 mb-3">{children}</ul>,
-                           ol: ({children}) => <ol className="list-decimal pl-5 mb-3">{children}</ol>,
-                           li: ({children}) => <li className="mb-1">{children}</li>,
-                           pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
-                           code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
-                           blockquote: ({children}) => <blockquote className="border-l-4 border-muted pl-4 italic mb-3">{children}</blockquote>,
-                           h1: ({children}) => <h1 className="text-xl font-bold mb-3">{children}</h1>,
-                           h2: ({children}) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
-                           h3: ({children}) => <h3 className="text-base font-bold mb-2">{children}</h3>,
-                         }}
-                       >
-                         {processLatex(msg.content)}
-                       </ReactMarkdown>
+                     <div className="px-4 py-3 text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+                       {msg.content}
                      </div>
                   )}
 
