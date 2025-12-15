@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useCallback, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -43,6 +42,8 @@ interface DocumentEditorProps {
   onClose: () => void;
   onDownload: () => void;
   documentType: 'word' | 'excel' | 'ppt';
+  onTextSelect?: (text: string, applyRewrite: (newText: string) => void) => void;
+  onTextDeselect?: () => void;
 }
 
 const fontFamilies = [
@@ -62,13 +63,10 @@ export function DocumentEditor({
   onClose,
   onDownload,
   documentType,
+  onTextSelect,
+  onTextDeselect,
 }: DocumentEditorProps) {
-  const [showAIRewrite, setShowAIRewrite] = useState(false);
-  const [selectedText, setSelectedText] = useState('');
-  const [rewriteText, setRewriteText] = useState('');
-  const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
   const savedRangeRef = useRef<Range | null>(null);
-  const aiPanelRef = useRef<HTMLDivElement>(null);
 
   const editor = useEditor({
     extensions: [
@@ -109,8 +107,21 @@ export function DocumentEditor({
     },
   });
 
+  const applyRewrite = useCallback((newText: string) => {
+    if (!editor || !savedRangeRef.current) return;
+
+    const selection = window.getSelection();
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(savedRangeRef.current);
+    }
+
+    editor.chain().focus().deleteSelection().insertContent(newText).run();
+    savedRangeRef.current = null;
+  }, [editor]);
+
   const handleTextSelection = useCallback(() => {
-    if (!editor) return;
+    if (!editor || !onTextSelect) return;
     
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.toString().trim()) {
@@ -120,59 +131,30 @@ export function DocumentEditor({
     const text = selection.toString();
     if (text.trim().length < 2) return;
 
-    // Save the range for later restoration
     savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-    
-    // Get position for popover
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    
-    setSelectedText(text);
-    setRewriteText(text);
-    setSelectionRect(rect);
-    setShowAIRewrite(true);
-  }, [editor]);
+    onTextSelect(text, applyRewrite);
+  }, [editor, onTextSelect, applyRewrite]);
 
-  const handleApplyRewrite = useCallback(() => {
-    if (!editor || !savedRangeRef.current) return;
-
-    // Restore the selection
-    const selection = window.getSelection();
-    if (selection) {
-      selection.removeAllRanges();
-      selection.addRange(savedRangeRef.current);
-    }
-
-    // Replace the selected text
-    editor.chain().focus().deleteSelection().insertContent(rewriteText).run();
-    
-    setShowAIRewrite(false);
-    setSelectedText('');
-    setRewriteText('');
-    savedRangeRef.current = null;
-  }, [editor, rewriteText]);
-
-  const handleCancelRewrite = useCallback(() => {
-    setShowAIRewrite(false);
-    setSelectedText('');
-    setRewriteText('');
-    savedRangeRef.current = null;
-    window.getSelection()?.removeAllRanges();
-  }, []);
-
-  const handleRevert = useCallback(() => {
-    setRewriteText(selectedText);
-  }, [selectedText]);
-
-  // Listen for mouseup to detect text selection
   useEffect(() => {
     const handleMouseUp = () => {
       setTimeout(handleTextSelection, 10);
     };
 
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.page-container') && onTextDeselect) {
+        onTextDeselect();
+        savedRangeRef.current = null;
+      }
+    };
+
     document.addEventListener('mouseup', handleMouseUp);
-    return () => document.removeEventListener('mouseup', handleMouseUp);
-  }, [handleTextSelection]);
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => {
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('mousedown', handleMouseDown);
+    };
+  }, [handleTextSelection, onTextDeselect]);
 
   if (!editor) return null;
 
@@ -378,24 +360,6 @@ export function DocumentEditor({
           </div>
         </div>
       </div>
-
-      {/* AI Rewrite - Minimal text hint above chat */}
-      {showAIRewrite && createPortal(
-        <div
-          ref={aiPanelRef}
-          className="fixed z-[1000] animate-in fade-in duration-150 pointer-events-none"
-          style={{
-            bottom: '140px',
-            left: '25%',
-            transform: 'translateX(-50%)',
-          }}
-        >
-          <div className="bg-gray-100/70 dark:bg-gray-700/50 backdrop-blur-sm rounded-lg px-4 py-2 text-sm text-gray-600 dark:text-gray-300 max-w-md truncate">
-            {selectedText.length > 60 ? selectedText.substring(0, 60) + '...' : selectedText}
-          </div>
-        </div>,
-        document.body
-      )}
     </div>
   );
 }

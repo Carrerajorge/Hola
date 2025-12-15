@@ -538,6 +538,8 @@ export function ChatInterface({
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
   const [editingSelectionText, setEditingSelectionText] = useState<string>("");
   const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
+  const [selectedDocText, setSelectedDocText] = useState<string>("");
+  const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -630,6 +632,16 @@ export function ChatInterface({
 
   const handleRevertSelectionEdit = () => {
     setEditingSelectionText(originalSelectionText);
+  };
+
+  const handleDocTextSelect = (text: string, applyRewrite: (newText: string) => void) => {
+    setSelectedDocText(text);
+    applyRewriteRef.current = applyRewrite;
+  };
+
+  const handleDocTextDeselect = () => {
+    setSelectedDocText("");
+    applyRewriteRef.current = null;
   };
 
   const handleDownloadDocument = async (doc: DocumentBlock) => {
@@ -958,6 +970,46 @@ export function ChatInterface({
 
   const handleSubmit = async () => {
     if (!input.trim() && uploadedFiles.length === 0) return;
+
+    // If there's selected text from document, rewrite it
+    if (selectedDocText && applyRewriteRef.current && input.trim()) {
+      const rewritePrompt = input.trim();
+      setInput("");
+      setAiState("thinking");
+      
+      try {
+        abortControllerRef.current = new AbortController();
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            messages: [{
+              role: "user",
+              content: `Reescribe el siguiente texto según esta instrucción: "${rewritePrompt}"\n\nTexto original:\n${selectedDocText}\n\nDevuelve SOLO el texto reescrito, sin explicaciones ni comentarios adicionales.`
+            }]
+          }),
+          signal: abortControllerRef.current.signal
+        });
+
+        const data = await response.json();
+        if (response.ok && data.content) {
+          applyRewriteRef.current(data.content.trim());
+        }
+        
+        setSelectedDocText("");
+        applyRewriteRef.current = null;
+        setAiState("idle");
+        abortControllerRef.current = null;
+        return;
+      } catch (error: any) {
+        if (error.name !== "AbortError") {
+          console.error("Rewrite error:", error);
+        }
+        setAiState("idle");
+        abortControllerRef.current = null;
+        return;
+      }
+    }
 
     const attachments = uploadedFiles
       .filter(f => f.status === "ready" || f.status === "processing")
@@ -1677,6 +1729,23 @@ export function ChatInterface({
                   ))}
                 </div>
               )}
+
+              {/* Selected text indicator */}
+              {selectedDocText && (
+                <div className="mb-2 px-1 animate-in fade-in duration-150">
+                  <div className="bg-teal-50/80 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-700 rounded-lg px-3 py-1.5 text-sm text-teal-700 dark:text-teal-300 flex items-center gap-2">
+                    <span className="truncate flex-1">
+                      {selectedDocText.length > 50 ? selectedDocText.substring(0, 50) + '...' : selectedDocText}
+                    </span>
+                    <button 
+                      onClick={handleDocTextDeselect}
+                      className="text-teal-500 hover:text-teal-700 flex-shrink-0"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              )}
               
               <div className="flex items-end gap-2">
               <Popover>
@@ -1738,7 +1807,7 @@ export function ChatInterface({
                     handleSubmit();
                   }
                 }}
-                placeholder="Type your message here..."
+                placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
                 className="min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-0 text-base"
                 rows={1}
               />
@@ -1788,6 +1857,8 @@ export function ChatInterface({
               onClose={handleCloseDocumentPreview}
               onDownload={() => handleDownloadDocument(previewDocument)}
               documentType={previewDocument.type}
+              onTextSelect={handleDocTextSelect}
+              onTextDeselect={handleDocTextDeselect}
             />
           </div>
         )}
