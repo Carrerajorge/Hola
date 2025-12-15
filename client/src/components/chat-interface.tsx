@@ -75,14 +75,46 @@ const parseDocumentBlocks = (content: string): { text: string; documents: Docume
   
   while ((match = regex.exec(content)) !== null) {
     try {
-      const jsonStr = match[1].trim();
+      let jsonStr = match[1].trim();
+      
+      // Fix common JSON issues from AI responses
+      // Replace actual newlines inside strings with \n
+      jsonStr = jsonStr.replace(/"content"\s*:\s*"([\s\S]*?)"\s*\}/, (m, contentValue) => {
+        const fixedContent = contentValue
+          .replace(/\n/g, '\\n')
+          .replace(/\r/g, '\\r')
+          .replace(/\t/g, '\\t');
+        return `"content": "${fixedContent}"}`;
+      });
+      
       const doc = JSON.parse(jsonStr);
       if (doc.type && doc.title && doc.content) {
+        // Clean up the content - remove double escaped newlines
+        doc.content = doc.content.replace(/\\n/g, '\n').replace(/\\\\n/g, '\n');
         documents.push(doc as DocumentBlock);
         successfulBlocks.push(match[0]);
       }
     } catch (e) {
       console.error("Failed to parse document block:", e);
+      
+      // Try regex extraction as fallback
+      try {
+        const blockContent = match[1];
+        const typeMatch = blockContent.match(/"type"\s*:\s*"(word|excel|ppt)"/);
+        const titleMatch = blockContent.match(/"title"\s*:\s*"([^"]+)"/);
+        const contentMatch = blockContent.match(/"content"\s*:\s*"([\s\S]*?)"\s*\}?\s*$/);
+        
+        if (typeMatch && titleMatch && contentMatch) {
+          documents.push({
+            type: typeMatch[1] as "word" | "excel" | "ppt",
+            title: titleMatch[1],
+            content: contentMatch[1].replace(/\\n/g, '\n').replace(/\\\\n/g, '\n')
+          });
+          successfulBlocks.push(match[0]);
+        }
+      } catch (fallbackError) {
+        console.error("Fallback parsing also failed:", fallbackError);
+      }
     }
   }
   
