@@ -3,13 +3,8 @@ import { extractWithReadability, summarizeForLLM, ExtractedContent } from "./ext
 import { routeMessage, RouteResult, extractUrls } from "./router";
 import { storage } from "../storage";
 import { ObjectStorageService } from "../objectStorage";
-import OpenAI from "openai";
+import { openai, MODELS } from "../lib/openai";
 import crypto from "crypto";
-
-const openai = new OpenAI({ 
-  baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
-});
 
 export interface AgentTask {
   runId: string;

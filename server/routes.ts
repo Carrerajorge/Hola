@@ -2,42 +2,16 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
-import OpenAI from "openai";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
-import { routeMessage, extractUrls, agentOrchestrator, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, StepUpdate, runPipeline, initializePipeline, ProgressUpdate, guardrails } from "./agent";
+import { agentOrchestrator, StepUpdate, ProgressUpdate, guardrails } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
-import { searchWeb, needsWebSearch, searchScholar, needsAcademicSearch } from "./services/webSearch";
-
-const openai = new OpenAI({ 
-  baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
-});
+import { handleChatRequest } from "./services/chatService";
+import { ALLOWED_MIME_TYPES } from "./lib/constants";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
-
-const ALLOWED_MIME_TYPES = [
-  "text/plain",
-  "text/markdown",
-  "text/csv",
-  "text/html",
-  "application/json",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-powerpoint",
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/gif",
-  "image/bmp",
-  "image/webp",
-  "image/tiff",
-];
 
 export async function registerRoutes(
   httpServer: Server,
@@ -152,194 +126,19 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Messages array is required" });
       }
 
-      // Check if any message contains images (base64 data URLs)
-      const hasImages = images && Array.isArray(images) && images.length > 0;
-      
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
 
-      const lastUserMessage = formattedMessages.filter((m: { role: string }) => m.role === "user").pop();
-      
-      if (lastUserMessage) {
-        const routeResult = await routeMessage(lastUserMessage.content);
-        
-        if (routeResult.decision === "agent" || routeResult.decision === "hybrid") {
-          const urls = routeResult.urls.length > 0 ? routeResult.urls : [];
-          
-          for (const url of urls) {
-            try {
-              const sanitizedUrl = sanitizeUrl(url);
-              const securityCheck = await checkDomainPolicy(sanitizedUrl);
-              
-              if (!securityCheck.allowed) {
-                return res.json({
-                  content: `No puedo acceder a ${url}: ${securityCheck.reason}`,
-                  role: "assistant"
-                });
-              }
-              
-              const domain = new URL(sanitizedUrl).hostname;
-              if (!checkRateLimit(domain, securityCheck.rateLimit)) {
-                return res.json({
-                  content: `Límite de solicitudes alcanzado para ${domain}. Intenta de nuevo en un minuto.`,
-                  role: "assistant"
-                });
-              }
-            } catch (e) {
-              console.error("URL validation error:", e);
-            }
-          }
-          
-          if (!isValidObjective(routeResult.objective || lastUserMessage.content)) {
-            return res.json({
-              content: "No puedo procesar solicitudes que involucren información sensible o actividades no permitidas.",
-              role: "assistant"
-            });
-          }
-          
-          const objective = routeResult.objective || lastUserMessage.content;
-          
-          let lastBrowserSessionId: string | null = null;
-          
-          const onProgress = (update: ProgressUpdate) => {
-            broadcastAgentUpdate(update.runId, update as any);
-            // Capture browserSessionId from progress updates
-            if (update.detail?.browserSessionId) {
-              lastBrowserSessionId = update.detail.browserSessionId;
-            }
-          };
-          
-          const pipelineResult = await runPipeline({
-            objective,
-            conversationId,
-            onProgress
-          });
-          
-          return res.json({
-            content: pipelineResult.summary || "Tarea completada.",
-            role: "assistant",
-            sources: pipelineResult.artifacts
-              .filter(a => a.type === "text" && a.name)
-              .slice(0, 5)
-              .map(a => ({ fileName: a.name, content: a.content?.slice(0, 200) || "" })),
-            agentRunId: pipelineResult.runId,
-            wasAgentTask: true,
-            pipelineSteps: pipelineResult.steps.length,
-            pipelineSuccess: pipelineResult.success,
-            browserSessionId: lastBrowserSessionId
-          });
-        }
-      }
-
-      let contextInfo = "";
-      let sources: { fileName: string; content: string }[] = [];
-      let webSearchInfo = "";
-
-      if (lastUserMessage && needsAcademicSearch(lastUserMessage.content)) {
-        try {
-          console.log("Academic search triggered for:", lastUserMessage.content);
-          const scholarResults = await searchScholar(lastUserMessage.content, 5);
-          
-          if (scholarResults.length > 0) {
-            webSearchInfo = "\n\n**Artículos académicos encontrados en Google Scholar:**\n" +
-              scholarResults.map((r, i) => 
-                `[${i + 1}] Autores: ${r.authors || "No disponible"}\nAño: ${r.year || "No disponible"}\nTítulo: ${r.title}\nURL: ${r.url}\nResumen: ${r.snippet}\nCita sugerida: ${r.citation}`
-              ).join("\n\n");
-          }
-        } catch (error) {
-          console.error("Academic search error:", error);
-        }
-      } else if (lastUserMessage && needsWebSearch(lastUserMessage.content)) {
-        try {
-          console.log("Web search triggered for:", lastUserMessage.content);
-          const searchResults = await searchWeb(lastUserMessage.content, 5);
-          
-          if (searchResults.contents.length > 0) {
-            webSearchInfo = "\n\n**Información de Internet (actualizada):**\n" +
-              searchResults.contents.map((content, i) => 
-                `[${i + 1}] ${content.title} (${content.url}):\n${content.content}`
-              ).join("\n\n");
-          } else if (searchResults.results.length > 0) {
-            webSearchInfo = "\n\n**Resultados de búsqueda web:**\n" +
-              searchResults.results.map((r, i) => 
-                `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
-              ).join("\n");
-          }
-        } catch (error) {
-          console.error("Web search error:", error);
-        }
-      }
-
-      if (useRag && lastUserMessage) {
-        try {
-          const queryEmbedding = await generateEmbedding(lastUserMessage.content);
-          const similarChunks = await storage.searchSimilarChunks(queryEmbedding, 5);
-          
-          if (similarChunks.length > 0) {
-            sources = similarChunks.map((chunk: any) => ({
-              fileName: chunk.file_name || "Documento",
-              content: chunk.content.slice(0, 200) + "..."
-            }));
-            
-            contextInfo = "\n\nContexto de documentos relevantes:\n" + 
-              similarChunks.map((chunk: any, i: number) => 
-                `[${i + 1}] ${chunk.file_name || "Documento"}: ${chunk.content}`
-              ).join("\n\n");
-          }
-        } catch (error) {
-          console.error("RAG search error:", error);
-        }
-      }
-
-      const systemMessage = {
-        role: "system" as const,
-        content: `Eres Sira GPT, un asistente de IA avanzado con conexión a Internet. Puedes buscar información actualizada en la web. Responde de manera útil y profesional en el idioma del usuario. Si usas información de la web, cita las fuentes.${webSearchInfo}${contextInfo}`
-      };
-
-      let response;
-      
-      if (hasImages) {
-        // Use vision model for image analysis
-        const imageContents = images.map((img: string) => ({
-          type: "image_url" as const,
-          image_url: { url: img }
-        }));
-        
-        const lastUserIdx = formattedMessages.findLastIndex((m: any) => m.role === "user");
-        const messagesWithImages = formattedMessages.map((msg: any, idx: number) => {
-          if (idx === lastUserIdx) {
-            return {
-              role: msg.role,
-              content: [
-                ...imageContents,
-                { type: "text" as const, text: msg.content || "Analiza esta imagen" }
-              ]
-            };
-          }
-          return msg;
-        });
-        
-        response = await openai.chat.completions.create({
-          model: "grok-2-vision-1212",
-          messages: [systemMessage, ...messagesWithImages],
-          max_tokens: 4096,
-        });
-      } else {
-        response = await openai.chat.completions.create({
-          model: "grok-3-fast",
-          messages: [systemMessage, ...formattedMessages],
-        });
-      }
-
-      const content = response.choices[0]?.message?.content || "No response generated";
-      
-      res.json({ 
-        content,
-        role: "assistant",
-        sources: sources.length > 0 ? sources : undefined
+      const response = await handleChatRequest(formattedMessages, {
+        useRag,
+        conversationId,
+        images,
+        onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update as any)
       });
+      
+      res.json(response);
     } catch (error: any) {
       console.error("Chat API error:", error);
       res.status(500).json({ 
