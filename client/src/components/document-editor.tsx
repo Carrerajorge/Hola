@@ -136,25 +136,18 @@ export function DocumentEditor({
   }, [editor, onTextSelect, applyRewrite]);
 
   useEffect(() => {
-    const handleMouseUp = () => {
-      setTimeout(handleTextSelection, 10);
-    };
-
-    const handleMouseDown = (e: MouseEvent) => {
+    const handleMouseUp = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.closest('.page-container') && onTextDeselect) {
-        onTextDeselect();
-        savedRangeRef.current = null;
+      if (target.closest('.page-container')) {
+        setTimeout(handleTextSelection, 10);
       }
     };
 
     document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('mousedown', handleMouseDown);
     return () => {
       document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('mousedown', handleMouseDown);
     };
-  }, [handleTextSelection, onTextDeselect]);
+  }, [handleTextSelection]);
 
   if (!editor) return null;
 
