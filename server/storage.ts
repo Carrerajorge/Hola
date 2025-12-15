@@ -6,7 +6,9 @@ import {
   type AgentStep, type InsertAgentStep,
   type AgentAsset, type InsertAgentAsset,
   type DomainPolicy, type InsertDomainPolicy,
-  files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies
+  type Chat, type InsertChat,
+  type ChatMessage, type InsertChatMessage,
+  files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -35,6 +37,14 @@ export interface IStorage {
   getAgentAssets(runId: string): Promise<AgentAsset[]>;
   getDomainPolicy(domain: string): Promise<DomainPolicy | undefined>;
   createDomainPolicy(policy: InsertDomainPolicy): Promise<DomainPolicy>;
+  // Chat CRUD operations
+  createChat(chat: InsertChat): Promise<Chat>;
+  getChat(id: string): Promise<Chat | undefined>;
+  getChats(): Promise<Chat[]>;
+  updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined>;
+  deleteChat(id: string): Promise<void>;
+  createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
+  getChatMessages(chatId: string): Promise<ChatMessage[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -168,6 +178,39 @@ export class MemStorage implements IStorage {
   async createDomainPolicy(policy: InsertDomainPolicy): Promise<DomainPolicy> {
     const [result] = await db.insert(domainPolicies).values(policy).returning();
     return result;
+  }
+
+  async createChat(chat: InsertChat): Promise<Chat> {
+    const [result] = await db.insert(chats).values(chat).returning();
+    return result;
+  }
+
+  async getChat(id: string): Promise<Chat | undefined> {
+    const [result] = await db.select().from(chats).where(eq(chats.id, id));
+    return result;
+  }
+
+  async getChats(): Promise<Chat[]> {
+    return db.select().from(chats).orderBy(desc(chats.updatedAt));
+  }
+
+  async updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined> {
+    const [result] = await db.update(chats).set({ ...updates, updatedAt: new Date() }).where(eq(chats.id, id)).returning();
+    return result;
+  }
+
+  async deleteChat(id: string): Promise<void> {
+    await db.delete(chats).where(eq(chats.id, id));
+  }
+
+  async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
+    const [result] = await db.insert(chatMessages).values(message).returning();
+    await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, message.chatId));
+    return result;
+  }
+
+  async getChatMessages(chatId: string): Promise<ChatMessage[]> {
+    return db.select().from(chatMessages).where(eq(chatMessages.chatId, chatId)).orderBy(chatMessages.createdAt);
   }
 }
 
