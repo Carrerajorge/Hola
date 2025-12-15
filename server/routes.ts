@@ -259,7 +259,7 @@ export async function registerRoutes(
       };
 
       const response = await openai.chat.completions.create({
-        model: "grok-4-0414",
+        model: "grok-3-fast",
         messages: [systemMessage, ...formattedMessages],
       });
 

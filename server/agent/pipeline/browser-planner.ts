@@ -49,7 +49,7 @@ export async function planNextAction(
   ).join("\n");
 
   const response = await openai.chat.completions.create({
-    model: "grok-4-0414",
+    model: "grok-3-fast",
     messages: [
       {
         role: "system",
@@ -170,7 +170,7 @@ export async function evaluateProgress(
   const actionsSummary = state.actions.map(a => a.action).join(" -> ");
 
   const response = await openai.chat.completions.create({
-    model: "grok-4-0414",
+    model: "grok-3-fast",
     messages: [
       {
         role: "system",

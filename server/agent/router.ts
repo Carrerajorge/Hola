@@ -80,7 +80,7 @@ export async function routeMessage(message: string): Promise<RouteResult> {
   if (hasWebIntent && !hasUrls) {
     try {
       const response = await openai.chat.completions.create({
-        model: "grok-4-0414",
+        model: "grok-3-fast",
         messages: [
           {
             role: "system",
