@@ -41,7 +41,7 @@ export async function interpretIntent(userMessage: string): Promise<InterpretedI
   const tools = toolRegistry.getToolManifest();
   
   const response = await callWithRetry(() => openai.chat.completions.create({
-    model: "grok-3-fast",
+    model: "grok-4-0414",
     messages: [
       {
         role: "system",
@@ -165,7 +165,7 @@ export async function createPlan(
   ).join("\n");
 
   const response = await callWithRetry(() => openai.chat.completions.create({
-    model: "grok-3-fast",
+    model: "grok-4-0414",
     messages: [
       {
         role: "system",
@@ -262,7 +262,7 @@ export async function refinePlan(
 ): Promise<ExecutionPlan> {
   const openai = getOpenAIClient();
   const response = await callWithRetry(() => openai.chat.completions.create({
-    model: "grok-3-fast",
+    model: "grok-4-0414",
     messages: [
       {
         role: "system",

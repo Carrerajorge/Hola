@@ -68,7 +68,7 @@ ${outputFormat === "json" ? `Respond with valid JSON containing:
 }` : outputFormat === "markdown" ? "Respond with well-formatted markdown with headers, lists, and emphasis." : "Respond with clear, structured text."}`;
 
       const response = await openai.chat.completions.create({
-        model: "grok-3-fast",
+        model: "grok-4-0414",
         messages: [
           {
             role: "system",

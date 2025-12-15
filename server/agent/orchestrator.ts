@@ -216,7 +216,7 @@ class AgentOrchestrator {
         .join("\n\n");
 
       const response = await openai.chat.completions.create({
-        model: "grok-3-fast",
+        model: "grok-4-0414",
         messages: [
           {
             role: "system",

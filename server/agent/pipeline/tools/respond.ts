@@ -49,7 +49,7 @@ export const respondTool: ToolDefinition = {
         : `Respond in ${language}.`;
 
       const response = await openai.chat.completions.create({
-        model: "grok-3-fast",
+        model: "grok-4-0414",
         messages: [
           {
             role: "system",

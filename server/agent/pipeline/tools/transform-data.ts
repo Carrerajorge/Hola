@@ -41,7 +41,7 @@ export const transformDataTool: ToolDefinition = {
       const dataStr = typeof data === "string" ? data : JSON.stringify(data, null, 2);
       
       const response = await openai.chat.completions.create({
-        model: "grok-3-fast",
+        model: "grok-4-0414",
         messages: [
           {
             role: "system",
