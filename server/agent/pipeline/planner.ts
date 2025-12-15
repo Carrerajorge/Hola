@@ -88,6 +88,22 @@ Respond in JSON format:
   }
 }
 
+// Detect URLs in text
+function detectUrls(text: string): string[] {
+  const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/gi;
+  return text.match(urlRegex) || [];
+}
+
+// Detect search intent
+function hasSearchIntent(text: string): boolean {
+  const searchPatterns = [
+    /\b(busca|buscar|búsqueda|search|find|look up|lookup|google|investigar|investiga)\b/i,
+    /\b(qué es|what is|quién es|who is|dónde|where|cómo|how to)\b/i,
+    /\?$/  // Questions often indicate search intent
+  ];
+  return searchPatterns.some(p => p.test(text));
+}
+
 export async function createPlan(
   runId: string,
   objective: string,
@@ -95,6 +111,45 @@ export async function createPlan(
 ): Promise<ExecutionPlan> {
   const openai = getOpenAIClient();
   const tools = toolRegistry.getToolManifest();
+  
+  // Check for URLs first - force web_navigate if URL detected
+  const detectedUrls = detectUrls(objective);
+  if (detectedUrls.length > 0) {
+    console.log("URL detected, forcing web_navigate tool:", detectedUrls[0]);
+    return {
+      id: `plan_${crypto.randomUUID()}`,
+      runId,
+      objective,
+      interpretedIntent: intent,
+      steps: [{
+        id: `step_0_${crypto.randomUUID().slice(0, 8)}`,
+        toolId: "web_navigate",
+        description: `Navigate to ${detectedUrls[0]}`,
+        params: { url: detectedUrls[0], takeScreenshot: true }
+      }],
+      createdAt: new Date(),
+      estimatedDuration: 30000
+    };
+  }
+  
+  // Check for search intent - force search_web
+  if (hasSearchIntent(objective)) {
+    console.log("Search intent detected, forcing search_web tool");
+    return {
+      id: `plan_${crypto.randomUUID()}`,
+      runId,
+      objective,
+      interpretedIntent: intent,
+      steps: [{
+        id: `step_0_${crypto.randomUUID().slice(0, 8)}`,
+        toolId: "search_web",
+        description: `Search the web for: ${objective}`,
+        params: { query: objective, engine: "duckduckgo", maxResults: 5 }
+      }],
+      createdAt: new Date(),
+      estimatedDuration: 30000
+    };
+  }
   
   const toolDescriptions = tools.map(t => 
     `- ${t.id}: ${t.description} (capabilities: ${t.capabilities.join(", ")})`
