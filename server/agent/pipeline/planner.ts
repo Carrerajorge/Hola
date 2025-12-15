@@ -112,10 +112,14 @@ export async function createPlan(
   const openai = getOpenAIClient();
   const tools = toolRegistry.getToolManifest();
   
+  console.log("PLANNER: Received objective:", objective);
+  
   // Check for URLs first - force web_navigate if URL detected
   const detectedUrls = detectUrls(objective);
+  console.log("PLANNER: Detected URLs:", detectedUrls);
+  
   if (detectedUrls.length > 0) {
-    console.log("URL detected, forcing web_navigate tool:", detectedUrls[0]);
+    console.log("PLANNER: URL detected, forcing web_navigate tool:", detectedUrls[0]);
     return {
       id: `plan_${crypto.randomUUID()}`,
       runId,
@@ -133,8 +137,11 @@ export async function createPlan(
   }
   
   // Check for search intent - force search_web
-  if (hasSearchIntent(objective)) {
-    console.log("Search intent detected, forcing search_web tool");
+  const searchIntent = hasSearchIntent(objective);
+  console.log("PLANNER: Search intent:", searchIntent);
+  
+  if (searchIntent) {
+    console.log("PLANNER: Search intent detected, forcing search_web tool");
     return {
       id: `plan_${crypto.randomUUID()}`,
       runId,
