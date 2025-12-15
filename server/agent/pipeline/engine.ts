@@ -37,7 +37,7 @@ export async function runPipeline(options: PipelineRunOptions): Promise<Pipeline
   
   initializePipeline();
   
-  const runId = crypto.randomUUID();
+  let runId = "";
   
   try {
     const agentRun = await storage.createAgentRun({
@@ -46,6 +46,8 @@ export async function runPipeline(options: PipelineRunOptions): Promise<Pipeline
       routerDecision: "pipeline",
       objective
     });
+    
+    runId = agentRun.id;
 
     onProgress?.({
       runId,
@@ -130,15 +132,17 @@ export async function runPipeline(options: PipelineRunOptions): Promise<Pipeline
   } catch (error: any) {
     console.error("Pipeline execution error:", error);
     
+    const errorRunId = runId || crypto.randomUUID();
+    
     onProgress?.({
-      runId,
+      runId: errorRunId,
       stepId: "error",
       status: "failed",
       message: error.message
     });
 
     return {
-      runId,
+      runId: errorRunId,
       planId: "",
       success: false,
       summary: `Error: ${error.message}`,

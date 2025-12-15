@@ -3,15 +3,44 @@ import crypto from "crypto";
 import { toolRegistry } from "./registry";
 import { ExecutionPlan, PlanStep, InterpretedIntent } from "./types";
 
-const openai = new OpenAI({ 
-  baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
-});
+function getOpenAIClient(): OpenAI {
+  if (!process.env.XAI_API_KEY) {
+    throw new Error("XAI_API_KEY is not configured");
+  }
+  return new OpenAI({ 
+    baseURL: "https://api.x.ai/v1", 
+    apiKey: process.env.XAI_API_KEY 
+  });
+}
+
+async function callWithRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  delayMs: number = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`API call failed (attempt ${attempt + 1}/${maxRetries}):`, error.message);
+      
+      if (attempt < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delayMs * Math.pow(2, attempt)));
+      }
+    }
+  }
+  
+  throw lastError || new Error("API call failed after retries");
+}
 
 export async function interpretIntent(userMessage: string): Promise<InterpretedIntent> {
+  const openai = getOpenAIClient();
   const tools = toolRegistry.getToolManifest();
   
-  const response = await openai.chat.completions.create({
+  const response = await callWithRetry(() => openai.chat.completions.create({
     model: "grok-3-fast",
     messages: [
       {
@@ -37,7 +66,7 @@ Respond in JSON format:
       }
     ],
     response_format: { type: "json_object" }
-  });
+  }));
 
   try {
     const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
@@ -64,13 +93,14 @@ export async function createPlan(
   objective: string,
   intent: InterpretedIntent
 ): Promise<ExecutionPlan> {
+  const openai = getOpenAIClient();
   const tools = toolRegistry.getToolManifest();
   
   const toolDescriptions = tools.map(t => 
     `- ${t.id}: ${t.description} (capabilities: ${t.capabilities.join(", ")})`
   ).join("\n");
 
-  const response = await openai.chat.completions.create({
+  const response = await callWithRetry(() => openai.chat.completions.create({
     model: "grok-3-fast",
     messages: [
       {
@@ -113,7 +143,7 @@ Create an execution plan.`
       }
     ],
     response_format: { type: "json_object" }
-  });
+  }));
 
   let steps: PlanStep[] = [];
   
@@ -166,7 +196,8 @@ export async function refinePlan(
   plan: ExecutionPlan,
   feedback: string
 ): Promise<ExecutionPlan> {
-  const response = await openai.chat.completions.create({
+  const openai = getOpenAIClient();
+  const response = await callWithRetry(() => openai.chat.completions.create({
     model: "grok-3-fast",
     messages: [
       {
@@ -185,7 +216,7 @@ Provide the refined plan.`
       }
     ],
     response_format: { type: "json_object" }
-  });
+  }));
 
   try {
     const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");

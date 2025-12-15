@@ -27,7 +27,18 @@ const stepTypeConfig: Record<string, { icon: typeof Globe; label: string; color:
   screenshot: { icon: Camera, label: "Captura", color: "text-purple-500" },
   synthesize: { icon: FileText, label: "Sintetizando", color: "text-orange-500" },
   click: { icon: Globe, label: "Click", color: "text-blue-400" },
-  input: { icon: FileText, label: "Escribiendo", color: "text-cyan-500" }
+  input: { icon: FileText, label: "Escribiendo", color: "text-cyan-500" },
+  "web-navigate": { icon: Globe, label: "Navegando web", color: "text-blue-500" },
+  "extract-content": { icon: FileText, label: "Extrayendo contenido", color: "text-green-500" },
+  "generate-file": { icon: FileText, label: "Generando archivo", color: "text-purple-500" },
+  "transform-data": { icon: FileText, label: "Transformando datos", color: "text-orange-500" },
+  "respond": { icon: FileText, label: "Generando respuesta", color: "text-cyan-500" },
+  "search-web": { icon: Globe, label: "Buscando en web", color: "text-blue-400" },
+  "analyze-data": { icon: FileText, label: "Analizando datos", color: "text-indigo-500" },
+  "init": { icon: Globe, label: "Iniciando", color: "text-gray-500" },
+  "plan": { icon: FileText, label: "Planificando", color: "text-yellow-500" },
+  "complete": { icon: CheckCircle2, label: "Completado", color: "text-green-500" },
+  "error": { icon: XCircle, label: "Error", color: "text-red-500" }
 };
 
 export function AgentObserver({ steps, objective, status, onCancel }: AgentObserverProps) {
@@ -78,7 +89,7 @@ export function AgentObserver({ steps, objective, status, onCancel }: AgentObser
             </div>
             <div className="text-left">
               <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                Navegación Web Autónoma
+                Ejecución Autónoma
               </p>
               {objective && (
                 <p className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[300px]">
@@ -156,10 +167,23 @@ export function AgentObserver({ steps, objective, status, onCancel }: AgentObser
                               </a>
                             )}
                             
-                            {step.detail?.title && (
+                            {(step.detail?.title || step.detail?.message || step.detail?.description) && (
                               <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 truncate">
-                                {step.detail.title}
+                                {step.detail.title || step.detail.message || step.detail.description}
                               </p>
+                            )}
+                            
+                            {step.detail?.steps && Array.isArray(step.detail.steps) && (
+                              <div className="mt-2 space-y-1">
+                                {step.detail.steps.slice(0, 5).map((planStep: any, idx: number) => (
+                                  <div key={idx} className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                                    <span className="w-4 h-4 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-[10px]">
+                                      {idx + 1}
+                                    </span>
+                                    <span>{planStep.description || planStep.tool}</span>
+                                  </div>
+                                ))}
+                              </div>
                             )}
                             
                             {step.error && (
@@ -191,7 +215,7 @@ export function AgentObserver({ steps, objective, status, onCancel }: AgentObser
                     className="mt-4 w-full py-2 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                     data-testid="button-cancel-agent"
                   >
-                    Cancelar navegación
+                    Cancelar ejecución
                   </button>
                 )}
               </div>
