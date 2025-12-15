@@ -34,7 +34,6 @@ import {
   Table as TableIcon,
   X,
   Download,
-  Sparkles,
 } from 'lucide-react';
 
 interface DocumentEditorProps {
@@ -380,45 +379,19 @@ export function DocumentEditor({
         </div>
       </div>
 
-      {/* AI Rewrite Bar - Minimalist floating bar at bottom */}
+      {/* AI Rewrite - Minimal text hint above chat */}
       {showAIRewrite && createPortal(
         <div
           ref={aiPanelRef}
-          className="fixed z-[1000] animate-in slide-in-from-bottom duration-200"
+          className="fixed z-[1000] animate-in fade-in duration-150 pointer-events-none"
           style={{
-            bottom: '100px',
-            left: '50%',
+            bottom: '140px',
+            left: '25%',
             transform: 'translateX(-50%)',
-            width: 'min(600px, 90vw)',
           }}
         >
-          <div className="bg-white dark:bg-gray-800 rounded-full shadow-2xl border px-4 py-2 flex items-center gap-3">
-            <Sparkles className="h-4 w-4 text-teal-500 flex-shrink-0" />
-            <input
-              type="text"
-              value={rewriteText}
-              onChange={(e) => setRewriteText(e.target.value)}
-              className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-gray-400"
-              placeholder="Describe cómo mejorar el texto seleccionado..."
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleApplyRewrite();
-                }
-                if (e.key === 'Escape') {
-                  handleCancelRewrite();
-                }
-              }}
-              autoFocus
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-400 hover:text-gray-600 flex-shrink-0"
-              onClick={handleCancelRewrite}
-            >
-              <X className="h-4 w-4" />
-            </Button>
+          <div className="bg-gray-100/70 dark:bg-gray-700/50 backdrop-blur-sm rounded-lg px-4 py-2 text-sm text-gray-600 dark:text-gray-300 max-w-md truncate">
+            {selectedText.length > 60 ? selectedText.substring(0, 60) + '...' : selectedText}
           </div>
         </div>,
         document.body
