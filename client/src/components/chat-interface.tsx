@@ -498,15 +498,7 @@ export function ChatInterface({
         throw new Error(data.error || "Failed to get response");
       }
 
-      // Check if this was an agent task - subscribe to WebSocket updates
-      if (data.wasAgentTask && data.agentRunId) {
-        agent.subscribe(data.agentRunId, userInput);
-      }
-      
-      // Subscribe to browser session if available
-      if (data.browserSessionId) {
-        browserSession.subscribeToSession(data.browserSessionId, userInput);
-      }
+      // Note: Not subscribing to agent/browser updates to keep simple thinking → streaming flow
 
       setAiState("responding");
       
@@ -898,7 +890,7 @@ export function ChatInterface({
               {aiState === "thinking" && (
                 <div className="liquid-message-ai-light px-4 py-3 text-sm">
                   <div className="flex items-center">
-                    <span className="thinking-wave">Thinking</span>
+                    <span className="thinking-wave">Pensando</span>
                     <span className="thinking-cursor">|</span>
                   </div>
                 </div>
