@@ -190,6 +190,17 @@ export async function searchScholar(query: string, maxResults: number = 5): Prom
 
 export function needsAcademicSearch(message: string): boolean {
   const academicTriggers = [
+    /dame.*cita/i,
+    /cita.*apa/i,
+    /cita.*mla/i,
+    /cita.*chicago/i,
+    /cita.*harvard/i,
+    /cita.*ieee/i,
+    /cita.*vancouver/i,
+    /formato\s*(apa|mla|chicago|harvard|ieee|vancouver)/i,
+    /apa\s*7/i,
+    /normas?\s*apa/i,
+    /estilo\s*apa/i,
     /cita(s|ción|ciones)?\s+(en\s+)?(apa|mla|chicago|harvard|ieee|vancouver)/i,
     /referencia(s)?\s+bibliogr[áa]fica/i,
     /art[ií]culo(s)?\s+cient[ií]fico/i,
@@ -205,6 +216,10 @@ export function needsAcademicSearch(message: string): boolean {
     /peer[\s-]?review/i,
     /bibliography/i,
     /citation\s+(in|for|style)/i,
+    /busca.*art[ií]culo.*cient[ií]fico/i,
+    /encuentra.*art[ií]culo/i,
+    /necesito.*cita/i,
+    /quiero.*cita/i,
   ];
   
   return academicTriggers.some(regex => regex.test(message));
