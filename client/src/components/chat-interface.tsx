@@ -880,16 +880,14 @@ export function ChatInterface({
           </div>
         ))}
         
-        {/* Virtual Computer - Show when browser session is active */}
-        {browserSession.state.status !== "idle" && (
-          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
-            <VirtualComputer
-              state={browserSession.state}
-              onCancel={browserSession.cancel}
-              className="w-full"
-            />
-          </div>
-        )}
+        {/* Virtual Computer - Always visible */}
+        <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
+          <VirtualComputer
+            state={browserSession.state}
+            onCancel={browserSession.cancel}
+            className="w-full"
+          />
+        </div>
 
         {/* Agent Observer - Show when agent is running */}
         {agent.state.status !== "idle" && (
