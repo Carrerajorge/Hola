@@ -308,7 +308,10 @@ export async function registerRoutes(
 
   const wss = new WebSocketServer({ server: httpServer, path: "/ws/agent" });
   
+  console.log("Agent WebSocket server created at /ws/agent");
+  
   wss.on("connection", (ws) => {
+    console.log("Agent WebSocket client connected");
     let subscribedRunId: string | null = null;
     
     ws.on("message", (message) => {
@@ -475,7 +478,10 @@ export async function registerRoutes(
 
   const browserWss = new WebSocketServer({ server: httpServer, path: "/ws/browser" });
   
+  console.log("Browser WebSocket server created at /ws/browser");
+  
   browserWss.on("connection", (ws) => {
+    console.log("Browser WebSocket client connected");
     let subscribedSessionId: string | null = null;
     
     ws.on("message", async (message) => {
