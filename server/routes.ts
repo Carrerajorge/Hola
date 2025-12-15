@@ -145,12 +145,15 @@ export async function registerRoutes(
 
   app.post("/api/chat", async (req, res) => {
     try {
-      const { messages, useRag = true, conversationId } = req.body;
+      const { messages, useRag = true, conversationId, images } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
       }
 
+      // Check if any message contains images (base64 data URLs)
+      const hasImages = images && Array.isArray(images) && images.length > 0;
+      
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
@@ -258,10 +261,40 @@ export async function registerRoutes(
         content: `Eres Sira GPT, un asistente de IA avanzado capaz de navegar la web, recopilar información, crear documentos y ejecutar objetivos complejos. Responde de manera útil y profesional en el idioma del usuario.${contextInfo}`
       };
 
-      const response = await openai.chat.completions.create({
-        model: "grok-3-fast",
-        messages: [systemMessage, ...formattedMessages],
-      });
+      let response;
+      
+      if (hasImages) {
+        // Use vision model for image analysis
+        const imageContents = images.map((img: string) => ({
+          type: "image_url" as const,
+          image_url: { url: img }
+        }));
+        
+        const lastUserIdx = formattedMessages.findLastIndex((m: any) => m.role === "user");
+        const messagesWithImages = formattedMessages.map((msg: any, idx: number) => {
+          if (idx === lastUserIdx) {
+            return {
+              role: msg.role,
+              content: [
+                ...imageContents,
+                { type: "text" as const, text: msg.content || "Analiza esta imagen" }
+              ]
+            };
+          }
+          return msg;
+        });
+        
+        response = await openai.chat.completions.create({
+          model: "grok-2-vision-1212",
+          messages: [systemMessage, ...messagesWithImages],
+          max_tokens: 4096,
+        });
+      } else {
+        response = await openai.chat.completions.create({
+          model: "grok-3-fast",
+          messages: [systemMessage, ...formattedMessages],
+        });
+      }
 
       const content = response.choices[0]?.message?.content || "No response generated";
       

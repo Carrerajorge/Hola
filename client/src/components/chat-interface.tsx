@@ -485,10 +485,18 @@ export function ChatInterface({
         content: m.content
       }));
 
+      // Extract image data URLs from current files
+      const imageDataUrls = currentFiles
+        .filter(f => f.type.startsWith("image/") && f.dataUrl)
+        .map(f => f.dataUrl as string);
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chatHistory }),
+        body: JSON.stringify({ 
+          messages: chatHistory,
+          images: imageDataUrls.length > 0 ? imageDataUrls : undefined
+        }),
         signal: abortControllerRef.current.signal
       });
 
