@@ -66,6 +66,319 @@ interface DocumentBlock {
   content: string;
 }
 
+interface ContentBlock {
+  id: number;
+  type: 'heading1' | 'heading2' | 'heading3' | 'paragraph' | 'list' | 'numberedList' | 'blockquote' | 'table' | 'hr';
+  content: string;
+  raw: string;
+}
+
+function parseContentToBlocks(content: string): ContentBlock[] {
+  const lines = content.split('\n');
+  const blocks: ContentBlock[] = [];
+  let currentBlock: string[] = [];
+  let blockId = 0;
+  
+  const flushBlock = (type: ContentBlock['type'], raw: string) => {
+    if (raw.trim()) {
+      blocks.push({ id: blockId++, type, content: raw.trim(), raw: raw });
+    }
+  };
+  
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    
+    if (line.startsWith('### ')) {
+      flushBlock('heading3', line);
+    } else if (line.startsWith('## ')) {
+      flushBlock('heading2', line);
+    } else if (line.startsWith('# ')) {
+      flushBlock('heading1', line);
+    } else if (line.startsWith('> ')) {
+      let quoteLines = [line];
+      while (i + 1 < lines.length && lines[i + 1].startsWith('> ')) {
+        i++;
+        quoteLines.push(lines[i]);
+      }
+      flushBlock('blockquote', quoteLines.join('\n'));
+    } else if (line.match(/^[-*] /)) {
+      let listLines = [line];
+      while (i + 1 < lines.length && lines[i + 1].match(/^[-*] /)) {
+        i++;
+        listLines.push(lines[i]);
+      }
+      flushBlock('list', listLines.join('\n'));
+    } else if (line.match(/^\d+\. /)) {
+      let listLines = [line];
+      while (i + 1 < lines.length && lines[i + 1].match(/^\d+\. /)) {
+        i++;
+        listLines.push(lines[i]);
+      }
+      flushBlock('numberedList', listLines.join('\n'));
+    } else if (line.startsWith('|')) {
+      let tableLines = [line];
+      while (i + 1 < lines.length && lines[i + 1].startsWith('|')) {
+        i++;
+        tableLines.push(lines[i]);
+      }
+      flushBlock('table', tableLines.join('\n'));
+    } else if (line.match(/^[-*_]{3,}$/)) {
+      flushBlock('hr', line);
+    } else if (line.trim()) {
+      let paraLines = [line];
+      while (i + 1 < lines.length && lines[i + 1].trim() && 
+             !lines[i + 1].startsWith('#') && 
+             !lines[i + 1].startsWith('>') && 
+             !lines[i + 1].match(/^[-*] /) && 
+             !lines[i + 1].match(/^\d+\. /) &&
+             !lines[i + 1].startsWith('|') &&
+             !lines[i + 1].match(/^[-*_]{3,}$/)) {
+        i++;
+        paraLines.push(lines[i]);
+      }
+      flushBlock('paragraph', paraLines.join('\n'));
+    }
+    i++;
+  }
+  
+  return blocks;
+}
+
+function EditableDocumentPreview({ 
+  content, 
+  onChange 
+}: { 
+  content: string; 
+  onChange: (newContent: string) => void;
+}) {
+  const [blocks, setBlocks] = useState<ContentBlock[]>(() => parseContentToBlocks(content));
+  const [editingBlockId, setEditingBlockId] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  
+  useEffect(() => {
+    setBlocks(parseContentToBlocks(content));
+  }, [content]);
+  
+  useEffect(() => {
+    if (editingBlockId !== null && textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.select();
+    }
+  }, [editingBlockId]);
+  
+  const handleBlockClick = (block: ContentBlock) => {
+    setEditingBlockId(block.id);
+    setEditingText(block.raw);
+  };
+  
+  const handleSaveBlock = () => {
+    if (editingBlockId === null) return;
+    
+    const newBlocks = blocks.map(b => 
+      b.id === editingBlockId 
+        ? { ...b, raw: editingText, content: editingText.trim() }
+        : b
+    );
+    setBlocks(newBlocks);
+    
+    const newContent = newBlocks.map(b => b.raw).join('\n\n');
+    onChange(newContent);
+    setEditingBlockId(null);
+    setEditingText("");
+  };
+  
+  const renderInlineFormatting = (text: string) => {
+    const parts: React.ReactNode[] = [];
+    let remaining = text;
+    let key = 0;
+    
+    while (remaining.length > 0) {
+      const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+      const italicMatch = remaining.match(/\*(.+?)\*/);
+      
+      if (boldMatch && boldMatch.index !== undefined) {
+        if (boldMatch.index > 0) {
+          parts.push(<span key={key++}>{remaining.slice(0, boldMatch.index)}</span>);
+        }
+        parts.push(<strong key={key++} className="font-bold">{boldMatch[1]}</strong>);
+        remaining = remaining.slice(boldMatch.index + boldMatch[0].length);
+      } else if (italicMatch && italicMatch.index !== undefined && !remaining.startsWith('**')) {
+        if (italicMatch.index > 0) {
+          parts.push(<span key={key++}>{remaining.slice(0, italicMatch.index)}</span>);
+        }
+        parts.push(<em key={key++} className="italic">{italicMatch[1]}</em>);
+        remaining = remaining.slice(italicMatch.index + italicMatch[0].length);
+      } else {
+        parts.push(<span key={key++}>{remaining}</span>);
+        break;
+      }
+    }
+    
+    return parts;
+  };
+  
+  const renderBlock = (block: ContentBlock) => {
+    const isEditing = editingBlockId === block.id;
+    
+    if (isEditing) {
+      return (
+        <div key={block.id} className="relative">
+          <textarea
+            ref={textareaRef}
+            value={editingText}
+            onChange={(e) => setEditingText(e.target.value)}
+            onBlur={handleSaveBlock}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setEditingBlockId(null);
+                setEditingText("");
+              }
+            }}
+            className="w-full p-3 border-2 border-blue-500 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-sm font-mono resize-none focus:outline-none"
+            style={{ minHeight: Math.max(60, editingText.split('\n').length * 24) }}
+            data-testid={`textarea-block-${block.id}`}
+          />
+          <div className="absolute -top-6 left-0 text-xs text-blue-600 bg-blue-100 dark:bg-blue-900 px-2 py-0.5 rounded">
+            Editando - Click afuera para guardar
+          </div>
+        </div>
+      );
+    }
+    
+    const baseClass = "cursor-pointer transition-all duration-200 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded px-2 py-1 -mx-2 border border-transparent hover:border-blue-200 dark:hover:border-blue-800";
+    
+    switch (block.type) {
+      case 'heading1':
+        return (
+          <h1 
+            key={block.id}
+            onClick={() => handleBlockClick(block)}
+            className={cn("text-2xl font-bold mb-4 mt-6", baseClass)}
+          >
+            {block.content.replace(/^# /, '')}
+          </h1>
+        );
+      case 'heading2':
+        return (
+          <h2 
+            key={block.id}
+            onClick={() => handleBlockClick(block)}
+            className={cn("text-xl font-bold mb-3 mt-5", baseClass)}
+          >
+            {block.content.replace(/^## /, '')}
+          </h2>
+        );
+      case 'heading3':
+        return (
+          <h3 
+            key={block.id}
+            onClick={() => handleBlockClick(block)}
+            className={cn("text-lg font-semibold mb-2 mt-4", baseClass)}
+          >
+            {block.content.replace(/^### /, '')}
+          </h3>
+        );
+      case 'paragraph':
+        return (
+          <p 
+            key={block.id}
+            onClick={() => handleBlockClick(block)}
+            className={cn("mb-4 leading-relaxed text-gray-800 dark:text-gray-200", baseClass)}
+          >
+            {renderInlineFormatting(block.content)}
+          </p>
+        );
+      case 'list':
+        return (
+          <ul 
+            key={block.id}
+            onClick={() => handleBlockClick(block)}
+            className={cn("list-disc list-inside mb-4 space-y-1", baseClass)}
+          >
+            {block.content.split('\n').map((item, idx) => (
+              <li key={idx} className="text-gray-800 dark:text-gray-200">
+                {renderInlineFormatting(item.replace(/^[-*] /, ''))}
+              </li>
+            ))}
+          </ul>
+        );
+      case 'numberedList':
+        return (
+          <ol 
+            key={block.id}
+            onClick={() => handleBlockClick(block)}
+            className={cn("list-decimal list-inside mb-4 space-y-1", baseClass)}
+          >
+            {block.content.split('\n').map((item, idx) => (
+              <li key={idx} className="text-gray-800 dark:text-gray-200">
+                {renderInlineFormatting(item.replace(/^\d+\. /, ''))}
+              </li>
+            ))}
+          </ol>
+        );
+      case 'blockquote':
+        return (
+          <blockquote 
+            key={block.id}
+            onClick={() => handleBlockClick(block)}
+            className={cn("border-l-4 border-blue-500 pl-4 italic my-4 py-2 bg-gray-50 dark:bg-gray-800", baseClass)}
+          >
+            {block.content.split('\n').map((line, idx) => (
+              <p key={idx} className="text-gray-700 dark:text-gray-300">
+                {renderInlineFormatting(line.replace(/^> /, ''))}
+              </p>
+            ))}
+          </blockquote>
+        );
+      case 'table':
+        const rows = block.content.split('\n').filter(r => !r.match(/^\|[-:| ]+\|$/));
+        return (
+          <div key={block.id} onClick={() => handleBlockClick(block)} className={baseClass}>
+            <table className="w-full border-collapse border border-gray-300 my-4">
+              <tbody>
+                {rows.map((row, idx) => (
+                  <tr key={idx} className={idx === 0 ? "bg-gray-100 dark:bg-gray-700" : ""}>
+                    {row.split('|').filter(c => c.trim()).map((cell, cidx) => (
+                      idx === 0 ? (
+                        <th key={cidx} className="border border-gray-300 px-3 py-2 font-semibold text-left">
+                          {cell.trim()}
+                        </th>
+                      ) : (
+                        <td key={cidx} className="border border-gray-300 px-3 py-2">
+                          {cell.trim()}
+                        </td>
+                      )
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      case 'hr':
+        return <hr key={block.id} className="my-6 border-t-2 border-gray-200 dark:border-gray-700" />;
+      default:
+        return (
+          <p key={block.id} onClick={() => handleBlockClick(block)} className={cn("mb-4", baseClass)}>
+            {block.content}
+          </p>
+        );
+    }
+  };
+  
+  return (
+    <div className="document-preview space-y-1">
+      {blocks.length === 0 ? (
+        <p className="text-muted-foreground italic">El documento está vacío. Haz clic para agregar contenido.</p>
+      ) : (
+        blocks.map(renderBlock)
+      )}
+    </div>
+  );
+}
+
 const parseDocumentBlocks = (content: string): { text: string; documents: DocumentBlock[] } => {
   const documents: DocumentBlock[] = [];
   const regex = /```document\s*\n([\s\S]*?)```/g;
@@ -1404,29 +1717,17 @@ export function ChatInterface({
                 </Button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto p-4 bg-white dark:bg-gray-900">
-              <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-lg rounded-lg border min-h-full">
-                <div className="p-6 border-b">
-                  <h1 className="text-xl font-bold text-center">{previewDocument.title}</h1>
+            <div className="flex-1 overflow-auto p-4 bg-gradient-to-b from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900">
+              <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-2xl rounded-lg border min-h-full" style={{ minHeight: 'calc(100vh - 200px)' }}>
+                <div className="px-12 py-8 border-b bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20">
+                  <h1 className="text-2xl font-bold text-center text-gray-800 dark:text-gray-100">{previewDocument.title}</h1>
+                  <p className="text-center text-xs text-muted-foreground mt-2">Haz clic en cualquier sección para editarla</p>
                 </div>
-                <div className="p-6">
-                  <textarea
-                    value={editedDocumentContent}
-                    onChange={(e) => setEditedDocumentContent(e.target.value)}
-                    className="w-full min-h-[500px] p-4 text-sm leading-relaxed bg-transparent border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                    placeholder="Edita el contenido del documento aquí..."
-                    data-testid="textarea-document-editor"
+                <div className="px-12 py-8" style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}>
+                  <EditableDocumentPreview 
+                    content={editedDocumentContent}
+                    onChange={setEditedDocumentContent}
                   />
-                  <div className="mt-4 text-xs text-muted-foreground">
-                    <p className="mb-2 font-medium">Formato soportado:</p>
-                    <ul className="space-y-1 text-xs">
-                      <li>## Título = Encabezado</li>
-                      <li>**texto** = Negrita</li>
-                      <li>*texto* = Cursiva</li>
-                      <li>- item = Lista con viñetas</li>
-                      <li>1. item = Lista numerada</li>
-                    </ul>
-                  </div>
                 </div>
               </div>
             </div>
