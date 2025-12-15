@@ -1747,7 +1747,7 @@ export function ChatInterface({
                 <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground">
                   <Mic className="h-5 w-5" />
                 </Button>
-                {aiState !== "idle" ? (
+                {aiState !== "idle" && (
                   <Button 
                     onClick={handleStopChat}
                     size="icon" 
@@ -1756,20 +1756,19 @@ export function ChatInterface({
                   >
                     <Square className="h-4 w-4 fill-current" />
                   </Button>
-                ) : (
-                  <Button 
-                    onClick={handleSubmit}
-                    disabled={!input.trim() && uploadedFiles.length === 0}
-                    size="icon" 
-                    className={cn(
-                      "h-9 w-9 rounded-full transition-all duration-300",
-                      (input.trim() || uploadedFiles.length > 0) ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
-                    )}
-                    data-testid="button-send-message"
-                  >
-                    <ArrowUp className="h-5 w-5" />
-                  </Button>
                 )}
+                <Button 
+                  onClick={handleSubmit}
+                  disabled={!input.trim() && uploadedFiles.length === 0}
+                  size="icon" 
+                  className={cn(
+                    "h-9 w-9 rounded-full transition-all duration-300",
+                    (input.trim() || uploadedFiles.length > 0) ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
+                  )}
+                  data-testid="button-send-message"
+                >
+                  <ArrowUp className="h-5 w-5" />
+                </Button>
               </div>
               </div>
             </div>
