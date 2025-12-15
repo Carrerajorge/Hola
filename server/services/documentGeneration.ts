@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle } from "docx";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType, convertInchesToTwip } from "docx";
 import * as XLSX from "xlsx";
 import PptxGenJS from "pptxgenjs";
 
@@ -8,54 +8,247 @@ export interface DocumentContent {
   content: any;
 }
 
-export async function generateWordDocument(title: string, content: string): Promise<Buffer> {
-  const paragraphs = content.split("\n").filter(p => p.trim());
+function parseInlineFormatting(text: string): TextRun[] {
+  const runs: TextRun[] = [];
+  const regex = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|__(.+?)__|_(.+?)_|`(.+?)`|([^*_`]+))/g;
+  let match;
   
-  const children: any[] = [
-    new Paragraph({
-      text: title,
-      heading: HeadingLevel.HEADING_1,
-      spacing: { after: 400 },
-    }),
-  ];
+  while ((match = regex.exec(text)) !== null) {
+    if (match[2]) {
+      runs.push(new TextRun({ text: match[2], bold: true, italics: true }));
+    } else if (match[3]) {
+      runs.push(new TextRun({ text: match[3], bold: true }));
+    } else if (match[4]) {
+      runs.push(new TextRun({ text: match[4], italics: true }));
+    } else if (match[5]) {
+      runs.push(new TextRun({ text: match[5], bold: true }));
+    } else if (match[6]) {
+      runs.push(new TextRun({ text: match[6], italics: true }));
+    } else if (match[7]) {
+      runs.push(new TextRun({ text: match[7], font: "Consolas", shading: { fill: "E8E8E8" } }));
+    } else if (match[8]) {
+      runs.push(new TextRun({ text: match[8] }));
+    }
+  }
+  
+  return runs.length > 0 ? runs : [new TextRun({ text })];
+}
 
-  for (const para of paragraphs) {
-    if (para.startsWith("## ")) {
+function parseMarkdownTable(lines: string[]): Table | null {
+  if (lines.length < 2) return null;
+  
+  const headerLine = lines[0];
+  if (!headerLine.includes("|")) return null;
+  
+  const rows: string[][] = [];
+  for (const line of lines) {
+    if (line.match(/^\|?[\s-:|]+\|?$/)) continue;
+    const cells = line.split("|").map(c => c.trim()).filter(c => c);
+    if (cells.length > 0) {
+      rows.push(cells);
+    }
+  }
+  
+  if (rows.length === 0) return null;
+  
+  const maxCols = Math.max(...rows.map(r => r.length));
+  
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: rows.map((row, rowIndex) => 
+      new TableRow({
+        children: Array.from({ length: maxCols }, (_, i) => 
+          new TableCell({
+            children: [new Paragraph({
+              children: parseInlineFormatting(row[i] || ""),
+              alignment: AlignmentType.LEFT,
+            })],
+            shading: rowIndex === 0 ? { fill: "E7E6E6" } : undefined,
+            borders: {
+              top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+              bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+              left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+              right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+            },
+          })
+        ),
+      })
+    ),
+  });
+}
+
+export async function generateWordDocument(title: string, content: string): Promise<Buffer> {
+  const lines = content.split("\n");
+  const children: any[] = [];
+  
+  children.push(
+    new Paragraph({
+      children: [new TextRun({ text: title, bold: true, size: 48 })],
+      heading: HeadingLevel.TITLE,
+      spacing: { after: 400 },
+      alignment: AlignmentType.CENTER,
+    })
+  );
+
+  let i = 0;
+  let numberedListCounter = 0;
+  
+  while (i < lines.length) {
+    const line = lines[i].trimEnd();
+    const trimmedLine = line.trim();
+    
+    if (!trimmedLine) {
+      children.push(new Paragraph({ spacing: { after: 100 } }));
+      i++;
+      continue;
+    }
+    
+    if (trimmedLine.includes("|") && lines[i + 1]?.match(/^\|?[\s-:|]+\|?$/)) {
+      const tableLines: string[] = [];
+      while (i < lines.length && (lines[i].includes("|") || lines[i].match(/^\|?[\s-:|]+\|?$/))) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const table = parseMarkdownTable(tableLines);
+      if (table) {
+        children.push(table);
+        children.push(new Paragraph({ spacing: { after: 200 } }));
+      }
+      continue;
+    }
+    
+    if (trimmedLine.startsWith("# ")) {
       children.push(
         new Paragraph({
-          text: para.replace("## ", ""),
+          children: parseInlineFormatting(trimmedLine.replace(/^# /, "")),
+          heading: HeadingLevel.HEADING_1,
+          spacing: { before: 400, after: 200 },
+        })
+      );
+      numberedListCounter = 0;
+    } else if (trimmedLine.startsWith("## ")) {
+      children.push(
+        new Paragraph({
+          children: parseInlineFormatting(trimmedLine.replace(/^## /, "")),
           heading: HeadingLevel.HEADING_2,
           spacing: { before: 300, after: 200 },
         })
       );
-    } else if (para.startsWith("### ")) {
+      numberedListCounter = 0;
+    } else if (trimmedLine.startsWith("### ")) {
       children.push(
         new Paragraph({
-          text: para.replace("### ", ""),
+          children: parseInlineFormatting(trimmedLine.replace(/^### /, "")),
           heading: HeadingLevel.HEADING_3,
           spacing: { before: 200, after: 150 },
         })
       );
-    } else if (para.startsWith("- ") || para.startsWith("* ")) {
+      numberedListCounter = 0;
+    } else if (trimmedLine.startsWith("#### ")) {
       children.push(
         new Paragraph({
-          text: para.replace(/^[-*] /, ""),
+          children: parseInlineFormatting(trimmedLine.replace(/^#### /, "")),
+          heading: HeadingLevel.HEADING_4,
+          spacing: { before: 200, after: 150 },
+        })
+      );
+      numberedListCounter = 0;
+    } else if (trimmedLine.match(/^[-*•]\s/)) {
+      children.push(
+        new Paragraph({
+          children: parseInlineFormatting(trimmedLine.replace(/^[-*•]\s/, "")),
           bullet: { level: 0 },
+          spacing: { after: 80 },
+        })
+      );
+    } else if (trimmedLine.match(/^\s{2,}[-*•]\s/)) {
+      children.push(
+        new Paragraph({
+          children: parseInlineFormatting(trimmedLine.replace(/^\s+[-*•]\s/, "")),
+          bullet: { level: 1 },
+          spacing: { after: 80 },
+        })
+      );
+    } else if (trimmedLine.match(/^\d+\.\s/)) {
+      numberedListCounter++;
+      children.push(
+        new Paragraph({
+          children: parseInlineFormatting(trimmedLine.replace(/^\d+\.\s/, "")),
+          numbering: { reference: "numbered-list", level: 0 },
+          spacing: { after: 80 },
+        })
+      );
+    } else if (trimmedLine.startsWith("> ")) {
+      children.push(
+        new Paragraph({
+          children: parseInlineFormatting(trimmedLine.replace(/^>\s?/, "")),
+          indent: { left: convertInchesToTwip(0.5) },
+          border: {
+            left: { style: BorderStyle.SINGLE, size: 24, color: "CCCCCC" },
+          },
           spacing: { after: 100 },
         })
       );
+      numberedListCounter = 0;
+    } else if (trimmedLine.match(/^---+$/) || trimmedLine.match(/^\*\*\*+$/)) {
+      children.push(
+        new Paragraph({
+          border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" } },
+          spacing: { before: 200, after: 200 },
+        })
+      );
+      numberedListCounter = 0;
     } else {
       children.push(
         new Paragraph({
-          children: [new TextRun({ text: para })],
-          spacing: { after: 200 },
+          children: parseInlineFormatting(trimmedLine),
+          spacing: { after: 200, line: 276 },
         })
       );
+      numberedListCounter = 0;
     }
+    
+    i++;
   }
 
   const doc = new Document({
-    sections: [{ children }],
+    numbering: {
+      config: [{
+        reference: "numbered-list",
+        levels: [{
+          level: 0,
+          format: "decimal",
+          text: "%1.",
+          alignment: AlignmentType.START,
+          style: { paragraph: { indent: { left: convertInchesToTwip(0.5), hanging: convertInchesToTwip(0.25) } } },
+        }],
+      }],
+    },
+    styles: {
+      paragraphStyles: [
+        {
+          id: "Normal",
+          name: "Normal",
+          basedOn: "Normal",
+          next: "Normal",
+          run: { font: "Calibri", size: 24 },
+          paragraph: { spacing: { line: 276 } },
+        },
+      ],
+    },
+    sections: [{ 
+      properties: {
+        page: {
+          margin: {
+            top: convertInchesToTwip(1),
+            right: convertInchesToTwip(1),
+            bottom: convertInchesToTwip(1),
+            left: convertInchesToTwip(1),
+          },
+        },
+      },
+      children 
+    }],
   });
 
   return await Packer.toBuffer(doc);
@@ -94,15 +287,7 @@ export async function generatePptDocument(title: string, slides: { title: string
     bold: true,
     color: "363636",
     align: "center",
-  });
-  titleSlide.addText("Generado por Sira GPT", {
-    x: 0.5,
-    y: 4,
-    w: 9,
-    h: 0.5,
-    fontSize: 18,
-    color: "666666",
-    align: "center",
+    fontFace: "Arial",
   });
 
   for (const slide of slides) {
@@ -113,23 +298,27 @@ export async function generatePptDocument(title: string, slides: { title: string
       y: 0.3,
       w: 9,
       h: 0.8,
-      fontSize: 28,
+      fontSize: 32,
       bold: true,
       color: "363636",
+      fontFace: "Arial",
     });
 
-    const bulletPoints = slide.content.map((text, idx) => ({
-      text: text,
-      options: { fontSize: 18, bullet: true, color: "444444" as const },
-    }));
+    if (slide.content.length > 0) {
+      const bulletPoints = slide.content.map(text => ({
+        text: text,
+        options: { bullet: true, fontSize: 18, color: "666666" },
+      }));
 
-    s.addText(bulletPoints, {
-      x: 0.5,
-      y: 1.3,
-      w: 9,
-      h: 4,
-      valign: "top",
-    });
+      s.addText(bulletPoints, {
+        x: 0.5,
+        y: 1.3,
+        w: 9,
+        h: 4,
+        fontFace: "Arial",
+        valign: "top",
+      });
+    }
   }
 
   const buffer = await pptx.write({ outputType: "nodebuffer" });
