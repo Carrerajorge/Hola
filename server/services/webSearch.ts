@@ -5,6 +5,9 @@ interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  authors?: string;
+  year?: string;
+  citation?: string;
 }
 
 interface WebSearchResponse {
@@ -122,6 +125,89 @@ async function fetchPageContent(url: string): Promise<{ title: string; text: str
   } catch (error) {
     return null;
   }
+}
+
+export async function searchScholar(query: string, maxResults: number = 5): Promise<SearchResult[]> {
+  const results: SearchResult[] = [];
+  
+  try {
+    const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(query)}&hl=es`;
+    
+    const response = await fetch(searchUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"
+      }
+    });
+    
+    if (!response.ok) {
+      console.error("Scholar search failed:", response.status);
+      return results;
+    }
+    
+    const html = await response.text();
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+    
+    const articles = doc.querySelectorAll(".gs_ri");
+    
+    for (const article of Array.from(articles).slice(0, maxResults)) {
+      const titleEl = article.querySelector(".gs_rt a");
+      const snippetEl = article.querySelector(".gs_rs");
+      const infoEl = article.querySelector(".gs_a");
+      
+      if (titleEl) {
+        const title = titleEl.textContent?.trim() || "";
+        const url = titleEl.getAttribute("href") || "";
+        const snippet = snippetEl?.textContent?.trim() || "";
+        const info = infoEl?.textContent?.trim() || "";
+        
+        const authorMatch = info.match(/^([^-]+)/);
+        const yearMatch = info.match(/\b(19|20)\d{2}\b/);
+        
+        const authors = authorMatch ? authorMatch[1].trim() : "";
+        const year = yearMatch ? yearMatch[0] : "";
+        
+        if (title && (url || snippet)) {
+          results.push({
+            title,
+            url,
+            snippet,
+            authors,
+            year,
+            citation: `${authors} (${year}). ${title}. Recuperado de ${url}`
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Scholar search error:", error);
+  }
+  
+  return results;
+}
+
+export function needsAcademicSearch(message: string): boolean {
+  const academicTriggers = [
+    /cita(s|ción|ciones)?\s+(en\s+)?(apa|mla|chicago|harvard|ieee|vancouver)/i,
+    /referencia(s)?\s+bibliogr[áa]fica/i,
+    /art[ií]culo(s)?\s+cient[ií]fico/i,
+    /investigaci[óo]n\s+(sobre|de|del)/i,
+    /estudio(s)?\s+(sobre|de|del|cient[ií]fico)/i,
+    /publicaci[óo]n\s+acad[ée]mica/i,
+    /paper(s)?\s+(sobre|de|del)/i,
+    /tesis\s+(sobre|de|del)/i,
+    /revista(s)?\s+cient[ií]fica/i,
+    /scholar/i,
+    /academic\s+(article|paper|research)/i,
+    /scientific\s+(article|paper|study)/i,
+    /peer[\s-]?review/i,
+    /bibliography/i,
+    /citation\s+(in|for|style)/i,
+  ];
+  
+  return academicTriggers.some(regex => regex.test(message));
 }
 
 export function needsWebSearch(message: string): boolean {

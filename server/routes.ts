@@ -8,7 +8,7 @@ import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
 import { routeMessage, extractUrls, agentOrchestrator, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, StepUpdate, runPipeline, initializePipeline, ProgressUpdate, guardrails } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
-import { searchWeb, needsWebSearch } from "./services/webSearch";
+import { searchWeb, needsWebSearch, searchScholar, needsAcademicSearch } from "./services/webSearch";
 
 const openai = new OpenAI({ 
   baseURL: "https://api.x.ai/v1", 
@@ -237,7 +237,21 @@ export async function registerRoutes(
       let sources: { fileName: string; content: string }[] = [];
       let webSearchInfo = "";
 
-      if (lastUserMessage && needsWebSearch(lastUserMessage.content)) {
+      if (lastUserMessage && needsAcademicSearch(lastUserMessage.content)) {
+        try {
+          console.log("Academic search triggered for:", lastUserMessage.content);
+          const scholarResults = await searchScholar(lastUserMessage.content, 5);
+          
+          if (scholarResults.length > 0) {
+            webSearchInfo = "\n\n**Artículos académicos encontrados en Google Scholar:**\n" +
+              scholarResults.map((r, i) => 
+                `[${i + 1}] Autores: ${r.authors || "No disponible"}\nAño: ${r.year || "No disponible"}\nTítulo: ${r.title}\nURL: ${r.url}\nResumen: ${r.snippet}\nCita sugerida: ${r.citation}`
+              ).join("\n\n");
+          }
+        } catch (error) {
+          console.error("Academic search error:", error);
+        }
+      } else if (lastUserMessage && needsWebSearch(lastUserMessage.content)) {
         try {
           console.log("Web search triggered for:", lastUserMessage.content);
           const searchResults = await searchWeb(lastUserMessage.content, 5);
