@@ -662,7 +662,7 @@ export function ChatInterface({
                         </div>
                       )}
                       {msg.content && (
-                        <div className="liquid-message-user px-4 py-2.5 text-sm">
+                        <div className="liquid-message-user px-4 py-2.5 text-sm break-words">
                           {msg.content}
                         </div>
                       )}

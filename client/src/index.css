@@ -299,6 +299,10 @@
   background: #667eea;
   border-radius: 18px 18px 4px 18px;
   color: white;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 .liquid-message-ai {
