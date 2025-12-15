@@ -145,17 +145,26 @@ function parseContentToBlocks(content: string): ContentBlock[] {
   return blocks;
 }
 
+interface TextSelection {
+  text: string;
+  startIndex: number;
+  endIndex: number;
+}
+
 function EditableDocumentPreview({ 
   content, 
-  onChange 
+  onChange,
+  onSelectionChange
 }: { 
   content: string; 
   onChange: (newContent: string) => void;
+  onSelectionChange?: (selection: TextSelection | null) => void;
 }) {
   const [blocks, setBlocks] = useState<ContentBlock[]>(() => parseContentToBlocks(content));
   const [editingBlockId, setEditingBlockId] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
     setBlocks(parseContentToBlocks(content));
@@ -167,6 +176,49 @@ function EditableDocumentPreview({
       textareaRef.current.select();
     }
   }, [editingBlockId]);
+
+  const handleTextSelection = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+      return;
+    }
+    
+    const selectedText = selection.toString();
+    if (!selectedText.trim()) {
+      return;
+    }
+    
+    const startIndex = content.indexOf(selectedText);
+    if (startIndex === -1) {
+      const normalizedContent = content.replace(/\s+/g, ' ');
+      const normalizedSelection = selectedText.replace(/\s+/g, ' ');
+      const normalizedStart = normalizedContent.indexOf(normalizedSelection);
+      
+      if (normalizedStart !== -1) {
+        let charCount = 0;
+        let realStart = 0;
+        for (let i = 0; i < content.length && charCount < normalizedStart; i++) {
+          if (!/\s/.test(content[i]) || (i > 0 && !/\s/.test(content[i-1]))) {
+            charCount++;
+          }
+          realStart = i + 1;
+        }
+        
+        onSelectionChange?.({
+          text: selectedText,
+          startIndex: realStart,
+          endIndex: realStart + selectedText.length
+        });
+      }
+      return;
+    }
+    
+    onSelectionChange?.({
+      text: selectedText,
+      startIndex,
+      endIndex: startIndex + selectedText.length
+    });
+  };
   
   const handleBlockClick = (block: ContentBlock) => {
     setEditingBlockId(block.id);
@@ -369,7 +421,12 @@ function EditableDocumentPreview({
   };
   
   return (
-    <div className="document-preview space-y-1">
+    <div 
+      ref={containerRef}
+      className="document-preview space-y-1 select-text"
+      onMouseUp={handleTextSelection}
+      onDoubleClick={handleTextSelection}
+    >
       {blocks.length === 0 ? (
         <p className="text-muted-foreground italic">El documento está vacío. Haz clic para agregar contenido.</p>
       ) : (
@@ -476,6 +533,9 @@ export function ChatInterface({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [previewDocument, setPreviewDocument] = useState<DocumentBlock | null>(null);
   const [editedDocumentContent, setEditedDocumentContent] = useState<string>("");
+  const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
+  const [editingSelectionText, setEditingSelectionText] = useState<string>("");
+  const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -531,6 +591,43 @@ export function ChatInterface({
   const handleCloseDocumentPreview = () => {
     setPreviewDocument(null);
     setEditedDocumentContent("");
+    setTextSelection(null);
+    setEditingSelectionText("");
+    setOriginalSelectionText("");
+  };
+
+  const handleSelectionChange = (selection: TextSelection | null) => {
+    if (selection && selection.text.trim()) {
+      setTextSelection(selection);
+      setEditingSelectionText(selection.text);
+      setOriginalSelectionText(selection.text);
+    }
+  };
+
+  const handleApplySelectionEdit = () => {
+    if (!textSelection || !editedDocumentContent) return;
+    
+    const before = editedDocumentContent.substring(0, textSelection.startIndex);
+    const after = editedDocumentContent.substring(textSelection.endIndex);
+    const newContent = before + editingSelectionText + after;
+    
+    setEditedDocumentContent(newContent);
+    setTextSelection(null);
+    setEditingSelectionText("");
+    setOriginalSelectionText("");
+    
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const handleCancelSelectionEdit = () => {
+    setTextSelection(null);
+    setEditingSelectionText("");
+    setOriginalSelectionText("");
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const handleRevertSelectionEdit = () => {
+    setEditingSelectionText(originalSelectionText);
   };
 
   const handleDownloadDocument = async (doc: DocumentBlock) => {
@@ -1727,8 +1824,67 @@ export function ChatInterface({
                   <EditableDocumentPreview 
                     content={editedDocumentContent}
                     onChange={setEditedDocumentContent}
+                    onSelectionChange={handleSelectionChange}
                   />
                 </div>
+                
+                {/* Selection Edit Overlay */}
+                {textSelection && (
+                  <div className="fixed bottom-24 left-1/4 right-1/2 mx-4 z-50 animate-in slide-in-from-bottom duration-200">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl border-2 border-blue-500 overflow-hidden">
+                      <div className="px-4 py-2 bg-blue-500 text-white flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Pencil className="h-4 w-4" />
+                          <span className="font-medium text-sm">Editar selección</span>
+                        </div>
+                        <span className="text-xs opacity-80">{textSelection.text.length} caracteres</span>
+                      </div>
+                      <div className="p-4">
+                        <textarea
+                          value={editingSelectionText}
+                          onChange={(e) => setEditingSelectionText(e.target.value)}
+                          className="w-full min-h-[100px] p-3 text-sm border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 dark:bg-gray-900"
+                          placeholder="Edita el texto seleccionado..."
+                          autoFocus
+                          data-testid="textarea-selection-edit"
+                        />
+                        <div className="flex items-center justify-between mt-3">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleRevertSelectionEdit}
+                            className="text-muted-foreground gap-1"
+                            disabled={editingSelectionText === originalSelectionText}
+                            data-testid="button-revert-selection"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                            Revertir
+                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleCancelSelectionEdit}
+                              data-testid="button-cancel-selection"
+                            >
+                              Cancelar
+                            </Button>
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={handleApplySelectionEdit}
+                              className="bg-blue-500 hover:bg-blue-600 gap-1"
+                              data-testid="button-apply-selection"
+                            >
+                              <CheckCircle2 className="h-3 w-3" />
+                              Aplicar
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
