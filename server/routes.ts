@@ -476,6 +476,93 @@ export async function registerRoutes(
     }
   });
 
+  // Chat persistence API routes
+  app.get("/api/chats", async (req, res) => {
+    try {
+      const chatList = await storage.getChats();
+      res.json(chatList);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/chats", async (req, res) => {
+    try {
+      const { title } = req.body;
+      const chat = await storage.createChat({ title: title || "New Chat" });
+      res.json(chat);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/chats/:id", async (req, res) => {
+    try {
+      const chat = await storage.getChat(req.params.id);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      const messages = await storage.getChatMessages(req.params.id);
+      res.json({ ...chat, messages });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.patch("/api/chats/:id", async (req, res) => {
+    try {
+      const { title, archived, hidden } = req.body;
+      const updates: any = {};
+      if (title !== undefined) updates.title = title;
+      if (archived !== undefined) updates.archived = archived.toString();
+      if (hidden !== undefined) updates.hidden = hidden.toString();
+      
+      const chat = await storage.updateChat(req.params.id, updates);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      res.json(chat);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/chats/:id", async (req, res) => {
+    try {
+      await storage.deleteChat(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/chats/:id/messages", async (req, res) => {
+    try {
+      const { role, content, attachments, sources } = req.body;
+      if (!role || !content) {
+        return res.status(400).json({ error: "role and content are required" });
+      }
+      const message = await storage.createChatMessage({
+        chatId: req.params.id,
+        role,
+        content,
+        attachments: attachments || null,
+        sources: sources || null
+      });
+      
+      // Update chat title if first user message
+      const chat = await storage.getChat(req.params.id);
+      if (chat && chat.title === "New Chat" && role === "user") {
+        const newTitle = content.slice(0, 30) + (content.length > 30 ? "..." : "");
+        await storage.updateChat(req.params.id, { title: newTitle });
+      }
+      
+      res.json(message);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   const browserWss = new WebSocketServer({ server: httpServer, path: "/ws/browser" });
   
   console.log("Browser WebSocket server created at /ws/browser");
