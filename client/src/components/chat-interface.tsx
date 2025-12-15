@@ -36,9 +36,8 @@ import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Upload, Search, Image, Video, Bot, Plug, ExternalLink, BookOpen } from "lucide-react";
+import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -96,7 +95,6 @@ export function ChatInterface({
   const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [sourcesPanel, setSourcesPanel] = useState<{ isOpen: boolean; sources: Array<{ fileName: string; content: string }> }>({ isOpen: false, sources: [] });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -764,18 +762,6 @@ export function ChatInterface({
                     </div>
                   )}
 
-                  {msg.sources && msg.sources.length > 0 && (
-                    <button
-                      onClick={() => setSourcesPanel({ isOpen: true, sources: msg.sources! })}
-                      className="mt-3 px-3 py-2 rounded-lg bg-muted/50 border border-muted hover:bg-muted/80 transition-colors flex items-center gap-2 text-xs font-medium text-muted-foreground"
-                      data-testid={`button-sources-${msg.id}`}
-                    >
-                      <BookOpen className="h-3 w-3" />
-                      Ver fuentes ({msg.sources.length})
-                      <ExternalLink className="h-3 w-3" />
-                    </button>
-                  )}
-
                   {/* Message Actions Toolbar */}
                   {msg.content && !msg.isThinking && (
                     <TooltipProvider delayDuration={300}>
@@ -1241,27 +1227,6 @@ export function ChatInterface({
         </div>
       </div>
 
-      {/* Sources Side Panel */}
-      <Sheet open={sourcesPanel.isOpen} onOpenChange={(open) => setSourcesPanel(prev => ({ ...prev, isOpen: open }))}>
-        <SheetContent side="right" className="w-[350px] sm:w-[400px]">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              <BookOpen className="h-5 w-5" />
-              Fuentes ({sourcesPanel.sources.length})
-            </SheetTitle>
-          </SheetHeader>
-          <ScrollArea className="h-[calc(100vh-100px)] mt-4">
-            <div className="space-y-4 pr-4">
-              {sourcesPanel.sources.map((source, idx) => (
-                <div key={idx} className="p-3 rounded-lg border bg-card">
-                  <div className="font-medium text-sm mb-2 text-foreground">{source.fileName}</div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{source.content}</p>
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }
