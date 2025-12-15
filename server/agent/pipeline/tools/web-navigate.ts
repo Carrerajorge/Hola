@@ -46,7 +46,8 @@ export const webNavigateTool: ToolDefinition = {
         stepId: `nav_${context.stepIndex}`,
         status: "progress",
         message: `Navigating to ${url}...`,
-        progress: 30
+        progress: 30,
+        detail: { browserSessionId: sessionId, url }
       });
       
       const result = await browserSessionManager.navigate(sessionId, url);

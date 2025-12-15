@@ -16,6 +16,7 @@ export interface AgentState {
   status: "idle" | "running" | "completed" | "failed" | "cancelled";
   steps: AgentStep[];
   objective?: string;
+  browserSessionId?: string;
 }
 
 export function useAgent() {
@@ -64,12 +65,20 @@ export function useAgent() {
 
           setState((prev) => {
             const existingIndex = prev.steps.findIndex(s => s.stepId === step.stepId);
+            const newState = { ...prev };
+            
+            if (step.detail?.browserSessionId && !prev.browserSessionId) {
+              newState.browserSessionId = step.detail.browserSessionId;
+            }
+            
             if (existingIndex >= 0) {
               const newSteps = [...prev.steps];
               newSteps[existingIndex] = step;
-              return { ...prev, steps: newSteps };
+              newState.steps = newSteps;
+            } else {
+              newState.steps = [...prev.steps, step];
             }
-            return { ...prev, steps: [...prev.steps, step] };
+            return newState;
           });
         }
       } catch (e) {

@@ -46,7 +46,9 @@ import rehypeHighlight from "rehype-highlight";
 
 import { Message } from "@/hooks/use-chats";
 import { useAgent } from "@/hooks/use-agent";
+import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
+import { VirtualComputer } from "@/components/virtual-computer";
 
 const processLatex = (content: string): string => {
   return content
@@ -98,6 +100,13 @@ export function ChatInterface({
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const agent = useAgent();
+  const browserSession = useBrowserSession();
+
+  useEffect(() => {
+    if (agent.state.browserSessionId && browserSession.state.sessionId !== agent.state.browserSessionId) {
+      browserSession.subscribeToSession(agent.state.browserSessionId, agent.state.objective || "Navegando web");
+    }
+  }, [agent.state.browserSessionId, agent.state.objective, browserSession.state.sessionId]);
 
   const handleStopChat = () => {
     if (abortControllerRef.current) {
@@ -871,6 +880,17 @@ export function ChatInterface({
           </div>
         ))}
         
+        {/* Virtual Computer - Show when browser session is active */}
+        {browserSession.state.status !== "idle" && (
+          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
+            <VirtualComputer
+              state={browserSession.state}
+              onCancel={browserSession.cancel}
+              className="w-full"
+            />
+          </div>
+        )}
+
         {/* Agent Observer - Show when agent is running */}
         {agent.state.status !== "idle" && (
           <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
