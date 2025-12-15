@@ -9,6 +9,13 @@ import { agentOrchestrator, StepUpdate, ProgressUpdate, guardrails } from "./age
 import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { handleChatRequest } from "./services/chatService";
 import { ALLOWED_MIME_TYPES } from "./lib/constants";
+import { 
+  generateWordDocument, 
+  generateExcelDocument, 
+  generatePptDocument,
+  parseExcelFromText,
+  parseSlidesFromText
+} from "./services/documentGeneration";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -429,6 +436,49 @@ export async function registerRoutes(
       res.json(message);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/documents/generate", async (req, res) => {
+    try {
+      const { type, title, content } = req.body;
+      
+      if (!type || !title || !content) {
+        return res.status(400).json({ error: "type, title, and content are required" });
+      }
+
+      let buffer: Buffer;
+      let filename: string;
+      let mimeType: string;
+
+      switch (type) {
+        case "word":
+          buffer = await generateWordDocument(title, content);
+          filename = `${title.replace(/[^a-zA-Z0-9]/g, "_")}.docx`;
+          mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+          break;
+        case "excel":
+          const excelData = parseExcelFromText(content);
+          buffer = await generateExcelDocument(title, excelData);
+          filename = `${title.replace(/[^a-zA-Z0-9]/g, "_")}.xlsx`;
+          mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+          break;
+        case "ppt":
+          const slides = parseSlidesFromText(content);
+          buffer = await generatePptDocument(title, slides);
+          filename = `${title.replace(/[^a-zA-Z0-9]/g, "_")}.pptx`;
+          mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+          break;
+        default:
+          return res.status(400).json({ error: "Invalid document type. Use 'word', 'excel', or 'ppt'" });
+      }
+
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Document generation error:", error);
+      res.status(500).json({ error: "Failed to generate document", details: error.message });
     }
   });
 

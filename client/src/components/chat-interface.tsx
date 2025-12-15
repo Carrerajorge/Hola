@@ -28,7 +28,8 @@ import {
   VolumeX,
   Flag,
   MessageSquare,
-  Square
+  Square,
+  Download
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -57,6 +58,39 @@ const processLatex = (content: string): string => {
     .replace(/\\\]/g, '$$')
     .replace(/\\\(/g, '$')
     .replace(/\\\)/g, '$');
+};
+
+interface DocumentBlock {
+  type: "word" | "excel" | "ppt";
+  title: string;
+  content: string;
+}
+
+const parseDocumentBlocks = (content: string): { text: string; documents: DocumentBlock[] } => {
+  const documents: DocumentBlock[] = [];
+  const regex = /```document\s*\n([\s\S]*?)```/g;
+  let match;
+  let cleanText = content;
+  const successfulBlocks: string[] = [];
+  
+  while ((match = regex.exec(content)) !== null) {
+    try {
+      const jsonStr = match[1].trim();
+      const doc = JSON.parse(jsonStr);
+      if (doc.type && doc.title && doc.content) {
+        documents.push(doc as DocumentBlock);
+        successfulBlocks.push(match[0]);
+      }
+    } catch (e) {
+      console.error("Failed to parse document block:", e);
+    }
+  }
+  
+  for (const block of successfulBlocks) {
+    cleanText = cleanText.replace(block, "").trim();
+  }
+  
+  return { text: cleanText, documents };
 };
 
 interface ChatInterfaceProps {
@@ -139,6 +173,35 @@ export function ChatInterface({
     if (msgId) {
       setCopiedMessageId(msgId);
       setTimeout(() => setCopiedMessageId(null), 2000);
+    }
+  };
+
+  const handleDownloadDocument = async (doc: DocumentBlock) => {
+    try {
+      const response = await fetch("/api/documents/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(doc),
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to generate document");
+      }
+      
+      const blob = await response.blob();
+      const ext = doc.type === "word" ? "docx" : doc.type === "excel" ? "xlsx" : "pptx";
+      const filename = `${doc.title.replace(/[^a-zA-Z0-9]/g, "_")}.${ext}`;
+      
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Document download error:", error);
     }
   };
 
@@ -722,29 +785,59 @@ export function ChatInterface({
                     </div>
                   )}
                   
-                  {msg.content && !msg.isThinking && (
-                     <div className="px-4 py-3 text-foreground liquid-message-ai-light" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
-                       <ReactMarkdown
-                         remarkPlugins={[remarkGfm, remarkMath]}
-                         rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                         components={{
-                           p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
-                           a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
-                           pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
-                           code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
-                           ul: ({children}) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
-                           ol: ({children}) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
-                           li: ({children}) => <li className="ml-2">{children}</li>,
-                           h1: ({children}) => <h1 className="text-xl font-bold mb-3">{children}</h1>,
-                           h2: ({children}) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
-                           h3: ({children}) => <h3 className="text-base font-semibold mb-2">{children}</h3>,
-                           blockquote: ({children}) => <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-3">{children}</blockquote>,
-                         }}
-                       >
-                         {processLatex(msg.content)}
-                       </ReactMarkdown>
-                     </div>
-                  )}
+                  {msg.content && !msg.isThinking && (() => {
+                    const { text, documents } = parseDocumentBlocks(msg.content);
+                    return (
+                      <>
+                        {text && (
+                          <div className="px-4 py-3 text-foreground liquid-message-ai-light" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm, remarkMath]}
+                              rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                              components={{
+                                p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
+                                a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
+                                pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
+                                code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
+                                ul: ({children}) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
+                                ol: ({children}) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
+                                li: ({children}) => <li className="ml-2">{children}</li>,
+                                h1: ({children}) => <h1 className="text-xl font-bold mb-3">{children}</h1>,
+                                h2: ({children}) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
+                                h3: ({children}) => <h3 className="text-base font-semibold mb-2">{children}</h3>,
+                                blockquote: ({children}) => <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-3">{children}</blockquote>,
+                              }}
+                            >
+                              {processLatex(text)}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                        {documents.length > 0 && (
+                          <div className="flex gap-2 flex-wrap mt-3 px-4">
+                            {documents.map((doc, idx) => (
+                              <Button
+                                key={idx}
+                                variant="outline"
+                                className="flex items-center gap-2 px-4 py-2 h-auto"
+                                onClick={() => handleDownloadDocument(doc)}
+                                data-testid={`button-download-doc-${idx}`}
+                              >
+                                {doc.type === "word" && <FileText className="h-5 w-5 text-blue-600" />}
+                                {doc.type === "excel" && <FileSpreadsheet className="h-5 w-5 text-green-600" />}
+                                {doc.type === "ppt" && <FileIcon className="h-5 w-5 text-orange-600" />}
+                                <div className="flex flex-col items-start">
+                                  <span className="text-sm font-medium">{doc.title}</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    Descargar {doc.type === "word" ? "Word" : doc.type === "excel" ? "Excel" : "PowerPoint"}
+                                  </span>
+                                </div>
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {msg.attachments && (
                     <div className="flex gap-2 flex-wrap mt-2">
