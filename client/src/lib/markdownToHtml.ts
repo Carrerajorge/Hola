@@ -7,11 +7,16 @@ import rehypeKatex from "rehype-katex";
 import rehypeStringify from "rehype-stringify";
 
 function normalizeMarkdown(text: string): string {
-  return text
+  let normalized = text
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  
+  normalized = normalized.replace(/\\\[/g, '$$').replace(/\\\]/g, '$$');
+  normalized = normalized.replace(/\\\(/g, '$').replace(/\\\)/g, '$');
+  
+  return normalized;
 }
 
 export function markdownToHtml(markdown: string): string {
