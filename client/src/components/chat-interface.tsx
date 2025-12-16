@@ -1237,10 +1237,31 @@ export function ChatInterface({
           }
           
           // If document mode is active, write content to document instead of chat
-          console.log('[ChatInterface] Streaming done. shouldWriteToDoc:', shouldWriteToDoc, 'ref:', !!docInsertContentRef.current);
-          if (shouldWriteToDoc && docInsertContentRef.current) {
+          // Check the CURRENT state of the editor (not the captured one) to handle cases where user closed the document
+          const isDocStillOpen = !!activeDocEditorRef.current;
+          console.log('[ChatInterface] Streaming done. shouldWriteToDoc:', shouldWriteToDoc, 'isDocStillOpen:', isDocStillOpen, 'ref:', !!docInsertContentRef.current);
+          if (shouldWriteToDoc && isDocStillOpen && docInsertContentRef.current) {
             console.log('[ChatInterface] Writing to document...');
-            docInsertContentRef.current(fullContent);
+            try {
+              docInsertContentRef.current(fullContent);
+            } catch (err) {
+              console.error('[ChatInterface] Error inserting content:', err);
+              // Fall back to showing in chat if document insertion fails
+              const aiMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: fullContent,
+                timestamp: new Date(),
+                sources: responseSources.length > 0 ? responseSources : undefined,
+              };
+              onSendMessage(aiMsg);
+              streamingContentRef.current = "";
+              setStreamingContent("");
+              setAiState("idle");
+              agent.complete();
+              abortControllerRef.current = null;
+              return;
+            }
             // Add a small assistant message to confirm
             const confirmMsg: Message = {
               id: (Date.now() + 1).toString(),

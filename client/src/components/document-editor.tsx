@@ -156,6 +156,13 @@ export function DocumentEditor({
     if (editor && onInsertContent) {
       const insertContent = (text: string) => {
         console.log('[DocumentEditor] Inserting AI content:', text.substring(0, 100) + '...');
+        
+        // Check if editor is still mounted and available
+        if (!editor || editor.isDestroyed) {
+          console.warn('[DocumentEditor] Editor is destroyed, cannot insert content');
+          throw new Error('Editor is not available');
+        }
+        
         // Convert markdown-like content to HTML for better formatting
         const htmlContent = text
           .replace(/\n\n/g, '</p><p>')
