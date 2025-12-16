@@ -151,7 +151,7 @@ export function SearchModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-md p-0 gap-0 overflow-hidden"
+        className="max-w-xl p-0 gap-0 overflow-hidden"
         aria-describedby={undefined}
         onKeyDown={handleKeyDown}
         data-testid="modal-search"
