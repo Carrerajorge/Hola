@@ -1989,7 +1989,7 @@ export function ChatInterface({
           </Panel>
         </PanelGroup>
       ) : (
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Messages Area - only show when there are messages */}
           {hasMessages && (
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
@@ -2359,7 +2359,7 @@ export function ChatInterface({
           )}
           
           {/* Input Bar */}
-          <div className="flex-shrink-0 px-4 pb-4">
+          <div className="shrink-0 px-4 pb-4">
             <div className={cn(
               "max-w-3xl mx-auto glass-card-light rounded-2xl border border-white/30 p-3",
               selectedDocText && "ring-2 ring-primary/50"
