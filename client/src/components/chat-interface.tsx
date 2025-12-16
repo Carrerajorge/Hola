@@ -1254,14 +1254,14 @@ export function ChatInterface({
               streamIntervalRef.current = null;
             }
             
-            // Final insert with normal mode to finalize and reset streaming state
+            // Final insert: Apply proper formatting to the complete content
             try {
               if (docInsertContentRef.current) {
-                // Insert empty to just reset the streaming state
-                docInsertContentRef.current("", false);
+                // Pass the full content with formatting applied (not streaming mode)
+                docInsertContentRef.current(fullContent, false);
               }
             } catch (err) {
-              console.error('[ChatInterface] Error resetting stream:', err);
+              console.error('[ChatInterface] Error finalizing document:', err);
             }
             
             // Add a small confirmation message in chat

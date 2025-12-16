@@ -219,19 +219,16 @@ export function DocumentEditor({
           throw new Error('Editor is not available');
         }
         
-        // Convert markdown to proper HTML
-        const htmlContent = convertMarkdownToHtmlForDoc(text);
-        
         if (replaceMode) {
-          // In replace mode (streaming), we replace streamed content
+          // STREAMING MODE: Insert plain text without HTML conversion for smooth typing
           if (!isStreamingRef.current) {
-            // First chunk - record starting position
+            // First chunk - record starting position and add a marker paragraph
             isStreamingRef.current = true;
             streamingStartPosRef.current = editor.state.doc.content.size;
-            console.log('[DocumentEditor] Starting stream at position:', streamingStartPosRef.current);
+            console.log('[DocumentEditor] Starting stream');
           }
           
-          // Clear from streaming start to end and insert new content
+          // Clear streaming area and insert plain text (no HTML conversion during streaming)
           const startPos = streamingStartPosRef.current || 1;
           const endPos = editor.state.doc.content.size;
           
@@ -239,16 +236,19 @@ export function DocumentEditor({
             editor.chain()
               .setTextSelection({ from: startPos, to: endPos })
               .deleteSelection()
-              .insertContent(htmlContent)
+              .insertContent(text) // Plain text during streaming
               .run();
           } else {
             editor.chain()
               .focus('end')
-              .insertContent(htmlContent)
+              .insertContent(text)
               .run();
           }
         } else {
-          // Normal append mode - also reset streaming state
+          // FINAL MODE: Replace plain streamed text with proper HTML formatting
+          const wasStreaming = isStreamingRef.current;
+          const streamStart = streamingStartPosRef.current;
+          
           isStreamingRef.current = false;
           streamingStartPosRef.current = null;
           
@@ -258,13 +258,25 @@ export function DocumentEditor({
             return;
           }
           
-          console.log('[DocumentEditor] Inserting AI content:', text.substring(0, 100) + '...');
+          // Convert markdown to proper HTML
+          const htmlContent = convertMarkdownToHtmlForDoc(text);
+          console.log('[DocumentEditor] Applying final formatted content');
           
-          // Move cursor to end and insert
-          editor.chain()
-            .focus('end')
-            .insertContent(htmlContent)
-            .run();
+          if (wasStreaming && streamStart) {
+            // Replace the plain text that was streamed with formatted HTML
+            const endPos = editor.state.doc.content.size;
+            editor.chain()
+              .setTextSelection({ from: streamStart, to: endPos })
+              .deleteSelection()
+              .insertContent(htmlContent)
+              .run();
+          } else {
+            // Normal append
+            editor.chain()
+              .focus('end')
+              .insertContent(htmlContent)
+              .run();
+          }
         }
       };
       
