@@ -558,7 +558,7 @@ export function ChatInterface({
   const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
   const [selectedDocText, setSelectedDocText] = useState<string>("");
   const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | null>(null);
-  const [selectedTool, setSelectedTool] = useState<"web" | "agent" | null>(null);
+  const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -2398,7 +2398,11 @@ export function ChatInterface({
                         <Globe className="h-4 w-4" />
                         Navegar en la web
                       </Button>
-                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                      <Button 
+                        variant="ghost" 
+                        className="justify-start gap-2 text-sm h-9"
+                        onClick={() => setSelectedTool("image")}
+                      >
                         <Image className="h-4 w-4" />
                         Generar imagen
                       </Button>
@@ -2478,7 +2482,8 @@ export function ChatInterface({
                         "after:absolute after:inset-0 after:rounded-xl after:opacity-0 after:transition-all after:duration-700",
                         "hover:after:opacity-100 after:animate-pulse",
                         selectedTool === "web" && "bg-gradient-to-br from-cyan-500 to-cyan-700 after:bg-cyan-400/20",
-                        selectedTool === "agent" && "bg-gradient-to-br from-purple-500 to-purple-700 after:bg-purple-400/20"
+                        selectedTool === "agent" && "bg-gradient-to-br from-purple-500 to-purple-700 after:bg-purple-400/20",
+                        selectedTool === "image" && "bg-gradient-to-br from-pink-500 to-rose-600 after:bg-pink-400/20"
                       )}
                       style={{
                         animation: "liquid-float 3s ease-in-out infinite"
@@ -2487,6 +2492,8 @@ export function ChatInterface({
                     >
                       {selectedTool === "web" ? (
                         <Globe className="h-5 w-5 text-white z-10 drop-shadow-md" />
+                      ) : selectedTool === "image" ? (
+                        <Image className="h-5 w-5 text-white z-10 drop-shadow-md" />
                       ) : (
                         <Bot className="h-5 w-5 text-white z-10 drop-shadow-md" />
                       )}
