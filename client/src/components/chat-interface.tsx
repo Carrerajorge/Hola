@@ -2563,6 +2563,29 @@ export function ChatInterface({
                 )}
               </div>
             </div>
+            
+            {/* Floating Label Web Search Input */}
+            <div className="mt-3 px-2">
+              <label className="floating-label">
+                <Search className="search-icon h-4 w-4" />
+                <input 
+                  type="text" 
+                  placeholder=" "
+                  className="text-foreground"
+                  data-testid="input-web-search"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.currentTarget.value.trim()) {
+                      const searchQuery = e.currentTarget.value.trim();
+                      setInput(`Buscar en la web: ${searchQuery}`);
+                      e.currentTarget.value = "";
+                      handleSubmit();
+                    }
+                  }}
+                />
+                <span>Buscar en la web</span>
+              </label>
+            </div>
+            
             <div className="text-center text-xs text-muted-foreground mt-3">
               Sira GPT can make mistakes. Check important info.
             </div>

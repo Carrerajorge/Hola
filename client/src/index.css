@@ -4,6 +4,55 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Floating Label Input Styles */
+.floating-label {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.floating-label input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  padding-left: 2.5rem;
+  font-size: 0.875rem;
+  background: transparent;
+  border: 1px solid hsl(var(--border));
+  border-radius: 9999px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.floating-label input:focus {
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.2);
+}
+
+.floating-label span {
+  position: absolute;
+  left: 2.5rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.875rem;
+  pointer-events: none;
+  transition: all 0.2s ease;
+}
+
+.floating-label input:focus + span,
+.floating-label input:not(:placeholder-shown) + span {
+  transform: translateY(-1.5rem) translateX(-0.5rem);
+  font-size: 0.75rem;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  padding: 0 0.25rem;
+}
+
+.floating-label .search-icon {
+  position: absolute;
+  left: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+}
+
 /* ========================================
    SIMPLE UI DESIGN SYSTEM
 ======================================== */
