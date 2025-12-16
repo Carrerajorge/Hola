@@ -1948,26 +1948,44 @@ export function ChatInterface({
                           </div>
                         ) : (
                           <div className="group">
-                            <div className="bg-muted/80 text-foreground px-4 py-2.5 rounded-2xl text-sm whitespace-pre-wrap">
-                              {msg.content}
-                            </div>
                             {msg.attachments && msg.attachments.length > 0 && (
-                              <div className="flex flex-wrap gap-2 mt-1">
+                              <div className="flex flex-wrap gap-2 mb-2 justify-end">
                                 {msg.attachments.map((att, i) => (
                                   att.type === "image" && att.imageUrl ? (
-                                    <img 
-                                      key={i} 
-                                      src={att.imageUrl} 
-                                      alt={att.name} 
-                                      className="max-w-[200px] max-h-[150px] rounded-lg object-cover border border-border/50"
-                                    />
+                                    <div key={i} className="relative max-w-[280px] rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+                                      <img 
+                                        src={att.imageUrl} 
+                                        alt={att.name} 
+                                        className="w-full h-auto max-h-[200px] object-cover"
+                                      />
+                                    </div>
                                   ) : (
-                                    <div key={i} className="flex items-center gap-2 px-3 py-1.5 bg-muted/50 rounded-lg text-xs">
-                                      <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                                      <span className="text-muted-foreground">{att.name}</span>
+                                    <div
+                                      key={i}
+                                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                                    >
+                                      <div className={cn(
+                                        "flex items-center justify-center w-8 h-8 rounded-lg",
+                                        att.type === "word" ? "bg-blue-600" :
+                                        att.type === "excel" ? "bg-green-600" :
+                                        att.type === "ppt" ? "bg-orange-500" :
+                                        "bg-gray-500"
+                                      )}>
+                                        <span className="text-white text-xs font-bold">
+                                          {att.type === "word" ? "W" :
+                                           att.type === "excel" ? "X" :
+                                           att.type === "ppt" ? "P" : "F"}
+                                        </span>
+                                      </div>
+                                      <span className="max-w-[200px] truncate font-medium">{att.name}</span>
                                     </div>
                                   )
                                 ))}
+                              </div>
+                            )}
+                            {msg.content && (
+                              <div className="liquid-message-user px-4 py-2.5 text-sm break-words">
+                                {msg.content}
                               </div>
                             )}
                           </div>
