@@ -1076,22 +1076,25 @@ export function ChatInterface({
         fileId: f.id,
       }));
     
+    // Set thinking state FIRST to show stop button immediately
+    setAiState("thinking");
+    streamingContentRef.current = "";
+    setStreamingContent("");
+    
+    const userInput = input;
+    const currentFiles = [...uploadedFiles];
+    setInput("");
+    setUploadedFiles([]);
+
     const userMsg: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input,
+      content: userInput,
       timestamp: new Date(),
       attachments: attachments.length > 0 ? attachments : undefined,
     };
 
     onSendMessage(userMsg);
-    const userInput = input;
-    const currentFiles = [...uploadedFiles];
-    setInput("");
-    setUploadedFiles([]);
-    setAiState("thinking");
-    streamingContentRef.current = "";
-    setStreamingContent("");
 
     try {
       abortControllerRef.current = new AbortController();
