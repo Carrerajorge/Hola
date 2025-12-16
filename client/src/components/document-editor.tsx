@@ -15,6 +15,7 @@ import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { markdownToHtml } from '@/lib/markdownToHtml';
 import {
   Bold,
   Italic,
@@ -98,7 +99,7 @@ export function DocumentEditor({
       TableCell,
       TableHeader,
     ],
-    content: convertMarkdownToHTML(content),
+    content: markdownToHtml(content),
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
     },
@@ -151,58 +152,7 @@ export function DocumentEditor({
     };
   }, [handleTextSelection]);
 
-  // Convert markdown to clean HTML - single-pass sanitized conversion
-  const convertMarkdownToHtml = (text: string): string => {
-    if (!text || text.trim() === '') return '';
-    
-    // Step 1: Sanitize and normalize the text
-    let cleanText = text
-      .replace(/\r\n/g, '\n')           // Normalize Windows line endings
-      .replace(/\n{3,}/g, '\n\n')       // Max 2 consecutive newlines
-      .trim();
-    
-    // Step 2: Convert inline formatting
-    cleanText = cleanText.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    cleanText = cleanText.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
-    
-    // Step 3: Convert headers
-    cleanText = cleanText.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    cleanText = cleanText.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    cleanText = cleanText.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-    
-    // Step 4: Process blocks (paragraphs and lists)
-    const blocks = cleanText.split(/\n\n+/);
-    
-    const processedBlocks = blocks.map(block => {
-      block = block.trim();
-      if (!block) return '';
-      
-      // Already a header tag
-      if (block.startsWith('<h')) return block;
-      
-      // Check for list patterns
-      const lines = block.split('\n').filter(l => l.trim());
-      const allBullets = lines.length > 0 && lines.every(line => /^[-•]\s+/.test(line.trim()));
-      const allNumbered = lines.length > 0 && lines.every(line => /^\d+\.\s+/.test(line.trim()));
-      
-      if (allBullets) {
-        const items = lines.map(line => `<li>${line.replace(/^[-•]\s+/, '').trim()}</li>`).join('');
-        return `<ul>${items}</ul>`;
-      }
-      
-      if (allNumbered) {
-        const items = lines.map(line => `<li>${line.replace(/^\d+\.\s+/, '').trim()}</li>`).join('');
-        return `<ol>${items}</ol>`;
-      }
-      
-      // Regular paragraph
-      return `<p>${block.replace(/\n/g, '<br>')}</p>`;
-    });
-    
-    return processedBlocks.filter(b => b).join('');
-  };
-  
-  // SINGLE WRITE approach - insert content only once, fully formatted
+  // SINGLE WRITE approach - insert content only once, fully formatted using AST-based converter
   useEffect(() => {
     if (editor && onInsertContent) {
       const insertContent = (text: string) => {
@@ -213,8 +163,8 @@ export function DocumentEditor({
         
         if (!text || text.trim() === '') return;
         
-        // Single conversion and single insert
-        const htmlContent = convertMarkdownToHtml(text);
+        // Use AST-based markdown to HTML conversion for accurate rendering
+        const htmlContent = markdownToHtml(text);
         console.log('[DocumentEditor] Single write completed');
         
         editor.chain()
@@ -434,38 +384,4 @@ export function DocumentEditor({
       </div>
     </div>
   );
-}
-
-// Helper function to convert markdown to HTML for TipTap
-function convertMarkdownToHTML(markdown: string): string {
-  if (!markdown) return '<p></p>';
-  
-  let html = markdown
-    // Headings
-    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-    // Bold and Italic
-    .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    // Lists
-    .replace(/^\s*[-*] (.*$)/gim, '<li>$1</li>')
-    .replace(/^\s*\d+\. (.*$)/gim, '<li>$1</li>')
-    // Blockquotes
-    .replace(/^> (.*$)/gim, '<blockquote>$1</blockquote>')
-    // Paragraphs (lines not already wrapped)
-    .split('\n')
-    .map(line => {
-      if (line.match(/^<(h[1-3]|li|blockquote|ul|ol)/)) return line;
-      if (line.trim() === '') return '';
-      if (!line.startsWith('<')) return `<p>${line}</p>`;
-      return line;
-    })
-    .join('');
-
-  // Wrap consecutive li items in ul
-  html = html.replace(/(<li>.*?<\/li>)+/g, '<ul>$&</ul>');
-  
-  return html || '<p></p>';
 }

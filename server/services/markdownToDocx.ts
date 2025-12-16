@@ -5,28 +5,11 @@ import remarkGfm from "remark-gfm";
 import type { Root, Content, Text, Strong, Emphasis, InlineCode, Paragraph as MdParagraph, Heading, List, ListItem, Table as MdTable, TableRow as MdTableRow, TableCell as MdTableCell, Blockquote, Code, ThematicBreak, Link } from "mdast";
 
 function normalizeMarkdown(text: string): string {
-  let normalized = text
+  return text
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  
-  normalized = balanceDelimiters(normalized, "**");
-  normalized = balanceDelimiters(normalized, "*");
-  normalized = balanceDelimiters(normalized, "__");
-  normalized = balanceDelimiters(normalized, "_");
-  normalized = balanceDelimiters(normalized, "`");
-  
-  return normalized;
-}
-
-function balanceDelimiters(text: string, delimiter: string): string {
-  const regex = new RegExp(delimiter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-  const matches = text.match(regex);
-  if (matches && matches.length % 2 !== 0) {
-    return text + delimiter;
-  }
-  return text;
 }
 
 function parseMarkdownToAst(markdown: string): Root {
