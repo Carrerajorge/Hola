@@ -557,6 +557,8 @@ export function ChatInterface({
   const [editingSelectionText, setEditingSelectionText] = useState<string>("");
   const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
   const [selectedDocText, setSelectedDocText] = useState<string>("");
+  const [toolVisible, setToolVisible] = useState(true);
+  const [toolActive, setToolActive] = useState(false);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -2563,6 +2565,30 @@ export function ChatInterface({
                 )}
               </div>
             </div>
+            {/* Tool Button */}
+            {toolVisible && (
+              <div className="flex justify-center mt-3">
+                <div 
+                  className={cn(
+                    "inline-flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer select-none transition-all duration-200",
+                    toolActive 
+                      ? "bg-green-500 text-white" 
+                      : "bg-blue-500 text-white hover:bg-blue-600"
+                  )}
+                  onClick={() => {
+                    setToolActive(true);
+                  }}
+                  onMouseOver={() => {
+                    setToolVisible(false);
+                  }}
+                  data-testid="button-tool"
+                >
+                  <span className="text-lg">🔧</span>
+                  <span className="font-medium">{toolActive ? "Activo ✔️" : "Herramienta"}</span>
+                </div>
+              </div>
+            )}
+            
             <div className="text-center text-xs text-muted-foreground mt-3">
               Sira GPT can make mistakes. Check important info.
             </div>
