@@ -97,13 +97,18 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     }
   }, [editingGpt, open]);
 
-  const generateSlug = (name: string) => {
-    return name
+  const generateSlug = (name: string, addSuffix = false) => {
+    let slug = name
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
+    
+    if (addSuffix) {
+      slug += "-" + Date.now().toString(36);
+    }
+    return slug;
   };
 
   const handleNameChange = (name: string) => {
@@ -157,6 +162,15 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
+        
+        if (response.status === 409) {
+          payload.slug = generateSlug(formData.name, true);
+          response = await fetch("/api/gpts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        }
       }
 
       if (!response.ok) {
