@@ -2128,7 +2128,11 @@ export function ChatInterface({
                         )}
                         {msg.sources && msg.sources.length > 0 && (
                           <div className="mt-3 flex flex-wrap gap-2">
-                            {msg.sources.map((source, i) => (
+                            {msg.sources
+                              .filter((source, index, self) => 
+                                index === self.findIndex(s => s.fileName === source.fileName)
+                              )
+                              .map((source, i) => (
                               <TooltipProvider key={i}>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
