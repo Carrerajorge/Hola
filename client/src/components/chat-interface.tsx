@@ -558,6 +558,7 @@ export function ChatInterface({
   const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
   const [selectedDocText, setSelectedDocText] = useState<string>("");
   const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | null>(null);
+  const [selectedTool, setSelectedTool] = useState<"web" | "agent" | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -2389,7 +2390,11 @@ export function ChatInterface({
                           </span>
                         </Button>
                       </label>
-                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                      <Button 
+                        variant="ghost" 
+                        className="justify-start gap-2 text-sm h-9"
+                        onClick={() => setSelectedTool("web")}
+                      >
                         <Globe className="h-4 w-4" />
                         Navegar en la web
                       </Button>
@@ -2444,7 +2449,11 @@ export function ChatInterface({
                         </HoverCardContent>
                       </HoverCard>
                       
-                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                      <Button 
+                        variant="ghost" 
+                        className="justify-start gap-2 text-sm h-9"
+                        onClick={() => setSelectedTool("agent")}
+                      >
                         <Bot className="h-4 w-4" />
                         Agente
                       </Button>
@@ -2455,6 +2464,50 @@ export function ChatInterface({
                     </div>
                   </PopoverContent>
                 </Popover>
+                
+                {/* Selected Tool Logo (Web/Agent) */}
+                {selectedTool && (
+                  <div className="relative group shrink-0">
+                    <div 
+                      className={cn(
+                        "relative flex items-center justify-center w-10 h-10 rounded-xl cursor-pointer overflow-hidden",
+                        "transition-all duration-500 ease-out",
+                        "hover:shadow-lg hover:shadow-current/30",
+                        "before:absolute before:inset-0 before:rounded-xl before:opacity-0 before:transition-opacity before:duration-300",
+                        "hover:before:opacity-100 before:bg-gradient-to-br before:from-white/20 before:to-transparent",
+                        "after:absolute after:inset-0 after:rounded-xl after:opacity-0 after:transition-all after:duration-700",
+                        "hover:after:opacity-100 after:animate-pulse",
+                        selectedTool === "web" && "bg-gradient-to-br from-cyan-500 to-cyan-700 after:bg-cyan-400/20",
+                        selectedTool === "agent" && "bg-gradient-to-br from-purple-500 to-purple-700 after:bg-purple-400/20"
+                      )}
+                      style={{
+                        animation: "liquid-float 3s ease-in-out infinite"
+                      }}
+                      data-testid="button-selected-tool"
+                    >
+                      {selectedTool === "web" ? (
+                        <Globe className="h-5 w-5 text-white z-10 drop-shadow-md" />
+                      ) : (
+                        <Bot className="h-5 w-5 text-white z-10 drop-shadow-md" />
+                      )}
+                    </div>
+                    {/* Close button on hover */}
+                    <button
+                      onClick={() => setSelectedTool(null)}
+                      className={cn(
+                        "absolute -top-1 -right-1 w-4 h-4 rounded-full",
+                        "bg-red-500 hover:bg-red-600 text-white",
+                        "flex items-center justify-center",
+                        "opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100",
+                        "transition-all duration-200 ease-out",
+                        "shadow-md hover:shadow-lg"
+                      )}
+                      data-testid="button-close-tool"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                )}
                 
                 {/* Selected Document Tool Logo */}
                 {selectedDocTool && (
