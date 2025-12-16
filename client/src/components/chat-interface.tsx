@@ -562,7 +562,7 @@ export function ChatInterface({
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
-  const docInsertContentRef = useRef<((content: string) => void) | null>(null);
+  const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -1218,64 +1218,88 @@ export function ChatInterface({
 
       // Note: Not subscribing to agent/browser updates to keep simple thinking → streaming flow
 
-      setAiState("responding");
-      
-      const fullContent = data.content;
-      const responseSources = data.sources || [];
-      let currentIndex = 0;
-      
       // Capture document mode state NOW using ref (avoids closure issues)
       const shouldWriteToDoc = !!activeDocEditorRef.current;
       console.log('[ChatInterface] Document mode:', shouldWriteToDoc, 'Insert ref available:', !!docInsertContentRef.current);
       
-      streamIntervalRef.current = setInterval(() => {
-        if (currentIndex < fullContent.length) {
-          const chunkSize = Math.floor(Math.random() * 3) + 1;
-          const newContent = fullContent.slice(0, currentIndex + chunkSize);
-          streamingContentRef.current = newContent; // Keep ref in sync for stop button
-          setStreamingContent(newContent);
-          currentIndex += chunkSize;
-        } else {
-          if (streamIntervalRef.current) {
-            clearInterval(streamIntervalRef.current);
-            streamIntervalRef.current = null;
-          }
-          
-          // If document mode is active, write content to document instead of chat
-          // Check the CURRENT state of the editor (not the captured one) to handle cases where user closed the document
-          const isDocStillOpen = !!activeDocEditorRef.current;
-          console.log('[ChatInterface] Streaming done. shouldWriteToDoc:', shouldWriteToDoc, 'isDocStillOpen:', isDocStillOpen, 'ref:', !!docInsertContentRef.current);
-          if (shouldWriteToDoc && isDocStillOpen && docInsertContentRef.current) {
-            console.log('[ChatInterface] Writing to document...');
+      const fullContent = data.content;
+      const responseSources = data.sources || [];
+      
+      // If document mode is active, write DIRECTLY to document with streaming effect
+      if (shouldWriteToDoc && docInsertContentRef.current) {
+        setAiState("responding");
+        
+        // Clear editor first and stream content directly into it
+        let currentIndex = 0;
+        let insertedContent = "";
+        
+        streamIntervalRef.current = setInterval(() => {
+          if (currentIndex < fullContent.length) {
+            const chunkSize = Math.floor(Math.random() * 5) + 2; // Slightly larger chunks for smoother typing
+            const newChunk = fullContent.slice(currentIndex, currentIndex + chunkSize);
+            insertedContent += newChunk;
+            currentIndex += chunkSize;
+            
+            // Update the document directly with the current content
             try {
-              docInsertContentRef.current(fullContent);
+              if (docInsertContentRef.current) {
+                // Use a special method to set/replace content for streaming
+                docInsertContentRef.current(insertedContent, true); // true = replace mode
+              }
             } catch (err) {
-              console.error('[ChatInterface] Error inserting content:', err);
-              // Fall back to showing in chat if document insertion fails
-              const aiMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                role: "assistant",
-                content: fullContent,
-                timestamp: new Date(),
-                sources: responseSources.length > 0 ? responseSources : undefined,
-              };
-              onSendMessage(aiMsg);
-              streamingContentRef.current = "";
-              setStreamingContent("");
-              setAiState("idle");
-              agent.complete();
-              abortControllerRef.current = null;
-              return;
+              console.error('[ChatInterface] Error streaming to document:', err);
             }
-            // Add a small assistant message to confirm
+            
+            streamingContentRef.current = insertedContent;
+          } else {
+            if (streamIntervalRef.current) {
+              clearInterval(streamIntervalRef.current);
+              streamIntervalRef.current = null;
+            }
+            
+            // Final insert to ensure complete content
+            try {
+              if (docInsertContentRef.current) {
+                docInsertContentRef.current(fullContent, true);
+              }
+            } catch (err) {
+              console.error('[ChatInterface] Error final insert:', err);
+            }
+            
+            // Add a small confirmation message in chat
             const confirmMsg: Message = {
               id: (Date.now() + 1).toString(),
               role: "assistant",
-              content: "✓ Contenido agregado al documento.",
+              content: "✓ Listo",
               timestamp: new Date(),
             };
             onSendMessage(confirmMsg);
+            
+            streamingContentRef.current = "";
+            setStreamingContent("");
+            setAiState("idle");
+            agent.complete();
+            abortControllerRef.current = null;
+          }
+        }, 12);
+      } else {
+        // Normal chat mode - stream to chat interface
+        setAiState("responding");
+        let currentIndex = 0;
+        
+        streamIntervalRef.current = setInterval(() => {
+          if (currentIndex < fullContent.length) {
+            const chunkSize = Math.floor(Math.random() * 3) + 1;
+            const newContent = fullContent.slice(0, currentIndex + chunkSize);
+            streamingContentRef.current = newContent;
+            setStreamingContent(newContent);
+            currentIndex += chunkSize;
           } else {
+            if (streamIntervalRef.current) {
+              clearInterval(streamIntervalRef.current);
+              streamIntervalRef.current = null;
+            }
+            
             const aiMsg: Message = {
               id: (Date.now() + 1).toString(),
               role: "assistant",
@@ -1284,15 +1308,15 @@ export function ChatInterface({
               sources: responseSources.length > 0 ? responseSources : undefined,
             };
             onSendMessage(aiMsg);
+            
+            streamingContentRef.current = "";
+            setStreamingContent("");
+            setAiState("idle");
+            agent.complete();
+            abortControllerRef.current = null;
           }
-          
-          streamingContentRef.current = "";
-          setStreamingContent("");
-          setAiState("idle");
-          agent.complete(); // Mark agent as complete when streaming ends
-          abortControllerRef.current = null;
-        }
-      }, 15);
+        }, 15);
+      }
       
     } catch (error: any) {
       if (error.name === "AbortError") {

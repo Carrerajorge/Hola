@@ -44,7 +44,7 @@ interface DocumentEditorProps {
   documentType: 'word' | 'excel' | 'ppt';
   onTextSelect?: (text: string, applyRewrite: (newText: string) => void) => void;
   onTextDeselect?: () => void;
-  onInsertContent?: (insertFn: (content: string) => void) => void;
+  onInsertContent?: (insertFn: (content: string, replaceMode?: boolean) => void) => void;
 }
 
 const fontFamilies = [
@@ -151,12 +151,13 @@ export function DocumentEditor({
     };
   }, [handleTextSelection]);
 
+  // Track the AI streaming content position
+  const streamingStartPosRef = useRef<number | null>(null);
+  
   // Provide insert function to parent for AI content insertion
   useEffect(() => {
     if (editor && onInsertContent) {
-      const insertContent = (text: string) => {
-        console.log('[DocumentEditor] Inserting AI content:', text.substring(0, 100) + '...');
-        
+      const insertContent = (text: string, replaceMode: boolean = false) => {
         // Check if editor is still mounted and available
         if (!editor || editor.isDestroyed) {
           console.warn('[DocumentEditor] Editor is destroyed, cannot insert content');
@@ -168,15 +169,45 @@ export function DocumentEditor({
           .replace(/\n\n/g, '</p><p>')
           .replace(/\n/g, '<br/>');
         
-        // Move cursor to end and insert
-        editor.chain()
-          .focus('end')
-          .insertContent(`<p>${htmlContent}</p>`)
-          .run();
+        if (replaceMode) {
+          // In replace mode (streaming), we replace all content with current stream
+          // This simulates real-time typing directly in the document
+          if (streamingStartPosRef.current === null) {
+            // First chunk - record starting position
+            streamingStartPosRef.current = editor.state.doc.content.size;
+            console.log('[DocumentEditor] Starting stream at position:', streamingStartPosRef.current);
+          }
+          
+          // Clear from streaming start to end and insert new content
+          const startPos = streamingStartPosRef.current;
+          const endPos = editor.state.doc.content.size;
+          
+          // Set content from the streaming start position
+          editor.chain()
+            .setTextSelection({ from: startPos, to: endPos })
+            .deleteSelection()
+            .insertContent(`<p>${htmlContent}</p>`)
+            .run();
+        } else {
+          // Normal append mode
+          streamingStartPosRef.current = null; // Reset streaming position
+          console.log('[DocumentEditor] Inserting AI content:', text.substring(0, 100) + '...');
+          
+          // Move cursor to end and insert
+          editor.chain()
+            .focus('end')
+            .insertContent(`<p>${htmlContent}</p>`)
+            .run();
+        }
       };
       console.log('[DocumentEditor] Providing insert function to parent');
       onInsertContent(insertContent);
     }
+    
+    // Reset streaming position when editor changes or unmounts
+    return () => {
+      streamingStartPosRef.current = null;
+    };
   }, [editor, onInsertContent]);
 
   if (!editor) return null;
