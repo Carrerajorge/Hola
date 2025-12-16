@@ -2071,7 +2071,7 @@ export function ChatInterface({
                               </div>
                             )}
                             {msg.content && (
-                              <div className="liquid-message-user px-4 py-2.5 text-sm break-words">
+                              <div className="liquid-message-user px-4 py-2.5 text-sm break-words leading-relaxed">
                                 {msg.content}
                               </div>
                             )}
@@ -2101,7 +2101,7 @@ export function ChatInterface({
                       </div>
                     ) : (
                       <div className="flex flex-col gap-2 w-full">
-                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed">
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkMath]}
                             rehypePlugins={[rehypeKatex, rehypeHighlight]}
@@ -2268,7 +2268,7 @@ export function ChatInterface({
               {streamingContent && (
                 <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
                   <div className="flex flex-col gap-2 max-w-[85%] items-start">
-                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkMath]}
                         rehypePlugins={[rehypeKatex, rehypeHighlight]}
@@ -2449,8 +2449,8 @@ export function ChatInterface({
                       handleSubmit();
                     }
                   }}
-                  placeholder="Type your message here..."
-                  className="min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-0 text-base"
+                  placeholder="Escribe tu mensaje aquí..."
+                  className="min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-0 text-base leading-relaxed"
                   rows={1}
                 />
 
