@@ -13,9 +13,11 @@ import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
+import MathExtension from '@aarkue/tiptap-math-extension';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { markdownToHtml } from '@/lib/markdownToHtml';
+import 'katex/dist/katex.min.css';
 import {
   Bold,
   Italic,
@@ -98,6 +100,14 @@ export function DocumentEditor({
       TableRow,
       TableCell,
       TableHeader,
+      MathExtension.configure({
+        evaluation: false,
+        delimiters: 'dollar',
+        katexOptions: {
+          throwOnError: false,
+          displayMode: false,
+        },
+      }),
     ],
     content: markdownToHtml(content),
     onUpdate: ({ editor }) => {

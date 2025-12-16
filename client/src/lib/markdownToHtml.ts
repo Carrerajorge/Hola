@@ -1,8 +1,9 @@
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import remarkRehype from "remark-rehype";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeKatex from "rehype-katex";
 import rehypeStringify from "rehype-stringify";
 
 function normalizeMarkdown(text: string): string {
@@ -24,9 +25,10 @@ export function markdownToHtml(markdown: string): string {
     const result = unified()
       .use(remarkParse)
       .use(remarkGfm)
+      .use(remarkMath)
       .use(remarkRehype, { allowDangerousHtml: true })
-      .use(rehypeSanitize)
-      .use(rehypeStringify)
+      .use(rehypeKatex)
+      .use(rehypeStringify, { allowDangerousHtml: true })
       .processSync(normalized);
     
     return String(result) || '<p></p>';
@@ -46,9 +48,10 @@ export function markdownToHtmlAsync(markdown: string): Promise<string> {
   return unified()
     .use(remarkParse)
     .use(remarkGfm)
+    .use(remarkMath)
     .use(remarkRehype, { allowDangerousHtml: true })
-    .use(rehypeSanitize)
-    .use(rehypeStringify)
+    .use(rehypeKatex)
+    .use(rehypeStringify, { allowDangerousHtml: true })
     .process(normalized)
     .then(result => String(result) || '<p></p>')
     .catch(error => {
