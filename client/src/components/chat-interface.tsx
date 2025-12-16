@@ -2462,32 +2462,45 @@ export function ChatInterface({
                 
                 {/* Selected Document Tool Logo */}
                 {selectedDocTool && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div 
-                          className={cn(
-                            "flex items-center justify-center w-8 h-8 rounded-lg shrink-0 cursor-pointer transition-all hover:scale-110",
-                            selectedDocTool === "word" && "bg-blue-600",
-                            selectedDocTool === "excel" && "bg-green-600",
-                            selectedDocTool === "ppt" && "bg-orange-500"
-                          )}
-                          onClick={() => setSelectedDocTool(null)}
-                          data-testid="button-selected-doc-tool"
-                        >
-                          <span className="text-white text-sm font-bold">
-                            {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "X" : "P"}
-                          </span>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        <p className="text-xs">
-                          {selectedDocTool === "word" ? "Documento Word" : selectedDocTool === "excel" ? "Hoja Excel" : "Presentación PPT"}
-                          <span className="text-muted-foreground ml-1">(clic para quitar)</span>
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <div className="relative group shrink-0">
+                    <div 
+                      className={cn(
+                        "relative flex items-center justify-center w-10 h-10 rounded-xl cursor-pointer overflow-hidden",
+                        "transition-all duration-500 ease-out",
+                        "hover:shadow-lg hover:shadow-current/30",
+                        "before:absolute before:inset-0 before:rounded-xl before:opacity-0 before:transition-opacity before:duration-300",
+                        "hover:before:opacity-100 before:bg-gradient-to-br before:from-white/20 before:to-transparent",
+                        "after:absolute after:inset-0 after:rounded-xl after:opacity-0 after:transition-all after:duration-700",
+                        "hover:after:opacity-100 after:animate-pulse",
+                        selectedDocTool === "word" && "bg-gradient-to-br from-blue-500 to-blue-700 after:bg-blue-400/20",
+                        selectedDocTool === "excel" && "bg-gradient-to-br from-green-500 to-green-700 after:bg-green-400/20",
+                        selectedDocTool === "ppt" && "bg-gradient-to-br from-orange-400 to-orange-600 after:bg-orange-400/20"
+                      )}
+                      style={{
+                        animation: "liquid-float 3s ease-in-out infinite"
+                      }}
+                      data-testid="button-selected-doc-tool"
+                    >
+                      <span className="text-white text-base font-bold z-10 drop-shadow-md">
+                        {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "X" : "P"}
+                      </span>
+                    </div>
+                    {/* Close button on hover */}
+                    <button
+                      onClick={() => setSelectedDocTool(null)}
+                      className={cn(
+                        "absolute -top-1 -right-1 w-4 h-4 rounded-full",
+                        "bg-red-500 hover:bg-red-600 text-white",
+                        "flex items-center justify-center",
+                        "opacity-0 group-hover:opacity-100 scale-75 group-hover:scale-100",
+                        "transition-all duration-200 ease-out",
+                        "shadow-md hover:shadow-lg"
+                      )}
+                      data-testid="button-close-doc-tool"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
                 )}
                 
                 <Textarea

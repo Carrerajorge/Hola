@@ -581,3 +581,33 @@
 .liquid-button:active svg {
   transform: scale(0.9);
 }
+
+/* Liquid Float Animation for Document Tool Icons */
+@keyframes liquid-float {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+  }
+  25% {
+    transform: translateY(-2px) scale(1.02);
+    border-radius: 70% 30% 30% 70% / 70% 70% 30% 30%;
+  }
+  50% {
+    transform: translateY(0) scale(1);
+    border-radius: 30% 70% 50% 50% / 50% 30% 70% 50%;
+  }
+  75% {
+    transform: translateY(-1px) scale(1.01);
+    border-radius: 50% 50% 30% 70% / 30% 70% 50% 50%;
+  }
+}
+
+/* Liquid shine effect */
+@keyframes liquid-shine {
+  0% {
+    background-position: -100% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
