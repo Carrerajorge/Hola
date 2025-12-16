@@ -570,8 +570,10 @@ export function ChatInterface({
     console.log('[ChatInterface] activeDocEditor changed:', !!activeDocEditor);
   }, [activeDocEditor]);
   
-  // Function to open blank document editor
+  // Function to open blank document editor - preserves existing messages
   const openBlankDocEditor = (type: "word" | "excel" | "ppt") => {
+    console.log('[ChatInterface] Opening document editor:', type, 'Current messages:', messages.length);
+    
     const titles = {
       word: "Nuevo Documento Word",
       excel: "Nueva Hoja de Cálculo",
@@ -583,6 +585,7 @@ export function ChatInterface({
       ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>"
     };
     
+    // Only update document editor state - DO NOT clear messages
     setSelectedDocTool(type);
     setActiveDocEditor({
       type,
