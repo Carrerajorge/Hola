@@ -1,7 +1,7 @@
 import { Sidebar } from "@/components/sidebar";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ export default function Home() {
   const isMobile = useIsMobile();
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
+  const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
   
   const { 
     chats, 
@@ -28,22 +29,29 @@ export default function Home() {
   } = useChats();
 
   const handleNewChat = () => {
+    const newKey = `new-chat-${Date.now()}`;
     setActiveChatId(null);
     setIsNewChatMode(true);
+    setNewChatStableKey(newKey);
   };
 
   const handleSendNewChatMessage = useCallback((message: Message) => {
-    const pendingId = createChat();
+    const { pendingId } = createChat();
     setIsNewChatMode(false);
-    setTimeout(() => {
-      addMessage(pendingId, message);
-    }, 50);
+    addMessage(pendingId, message);
   }, [createChat, addMessage]);
 
   const handleSelectChat = (id: string) => {
     setIsNewChatMode(false);
+    setNewChatStableKey(null);
     setActiveChatId(id);
   };
+
+  const chatInterfaceKey = useMemo(() => {
+    if (newChatStableKey) return newChatStableKey;
+    if (activeChat) return activeChat.stableKey;
+    return "default-chat";
+  }, [activeChat?.stableKey, newChatStableKey]);
 
   return (
     <div className="flex h-screen w-full overflow-hidden liquid-bg-light relative">
@@ -104,7 +112,7 @@ export default function Home() {
       <main className="flex-1 flex flex-col h-full w-full">
         {(activeChat || isNewChatMode || chats.length === 0) && (
           <ChatInterface 
-            key={activeChat?.stableKey || "new-chat"} 
+            key={chatInterfaceKey} 
             messages={activeChat?.messages || []}
             onSendMessage={activeChat ? (msg) => addMessage(activeChat.id, msg) : handleSendNewChatMessage}
             isSidebarOpen={isSidebarOpen} 
