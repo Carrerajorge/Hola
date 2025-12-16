@@ -1229,41 +1229,39 @@ export function ChatInterface({
       if (shouldWriteToDoc && docInsertContentRef.current) {
         setAiState("responding");
         
-        // Clear editor first and stream content directly into it
+        // Stream content directly into the document
         let currentIndex = 0;
-        let insertedContent = "";
         
         streamIntervalRef.current = setInterval(() => {
           if (currentIndex < fullContent.length) {
-            const chunkSize = Math.floor(Math.random() * 5) + 2; // Slightly larger chunks for smoother typing
-            const newChunk = fullContent.slice(currentIndex, currentIndex + chunkSize);
-            insertedContent += newChunk;
-            currentIndex += chunkSize;
+            const chunkSize = Math.floor(Math.random() * 5) + 3; // Larger chunks for smoother typing
+            currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
+            const currentContent = fullContent.slice(0, currentIndex);
             
-            // Update the document directly with the current content
+            // Update the document directly with the current streamed content
             try {
               if (docInsertContentRef.current) {
-                // Use a special method to set/replace content for streaming
-                docInsertContentRef.current(insertedContent, true); // true = replace mode
+                docInsertContentRef.current(currentContent, true); // true = replace/streaming mode
               }
             } catch (err) {
               console.error('[ChatInterface] Error streaming to document:', err);
             }
             
-            streamingContentRef.current = insertedContent;
+            streamingContentRef.current = currentContent;
           } else {
             if (streamIntervalRef.current) {
               clearInterval(streamIntervalRef.current);
               streamIntervalRef.current = null;
             }
             
-            // Final insert to ensure complete content
+            // Final insert with normal mode to finalize and reset streaming state
             try {
               if (docInsertContentRef.current) {
-                docInsertContentRef.current(fullContent, true);
+                // Insert empty to just reset the streaming state
+                docInsertContentRef.current("", false);
               }
             } catch (err) {
-              console.error('[ChatInterface] Error final insert:', err);
+              console.error('[ChatInterface] Error resetting stream:', err);
             }
             
             // Add a small confirmation message in chat
@@ -1281,7 +1279,7 @@ export function ChatInterface({
             agent.complete();
             abortControllerRef.current = null;
           }
-        }, 12);
+        }, 10);
       } else {
         // Normal chat mode - stream to chat interface
         setAiState("responding");

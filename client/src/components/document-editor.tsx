@@ -151,8 +151,50 @@ export function DocumentEditor({
     };
   }, [handleTextSelection]);
 
-  // Track the AI streaming content position
+  // Track the AI streaming content position - use a module-level ref to persist across re-renders
   const streamingStartPosRef = useRef<number | null>(null);
+  const isStreamingRef = useRef<boolean>(false);
+  
+  // Convert markdown to proper HTML for Word document
+  const convertMarkdownToHtmlForDoc = (text: string): string => {
+    let html = text;
+    
+    // Convert bold **text** or __text__
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
+    
+    // Convert italic *text* or _text_
+    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
+    
+    // Convert headers
+    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    
+    // Convert bullet lists (- item or • item)
+    html = html.replace(/^[-•]\s+(.+)$/gm, '<li>$1</li>');
+    
+    // Wrap consecutive <li> in <ul>
+    html = html.replace(/(<li>.*?<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
+    
+    // Convert numbered lists
+    html = html.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+    
+    // Convert double newlines to paragraphs
+    const paragraphs = html.split(/\n\n+/);
+    html = paragraphs.map(p => {
+      p = p.trim();
+      if (!p) return '';
+      // Don't wrap if already wrapped in block element
+      if (p.startsWith('<h') || p.startsWith('<ul') || p.startsWith('<ol') || p.startsWith('<li')) {
+        return p;
+      }
+      return `<p>${p.replace(/\n/g, '<br/>')}</p>`;
+    }).filter(p => p).join('');
+    
+    return html;
+  };
   
   // Provide insert function to parent for AI content insertion
   useEffect(() => {
@@ -164,48 +206,65 @@ export function DocumentEditor({
           throw new Error('Editor is not available');
         }
         
-        // Convert markdown-like content to HTML for better formatting
-        const htmlContent = text
-          .replace(/\n\n/g, '</p><p>')
-          .replace(/\n/g, '<br/>');
+        // Convert markdown to proper HTML
+        const htmlContent = convertMarkdownToHtmlForDoc(text);
         
         if (replaceMode) {
-          // In replace mode (streaming), we replace all content with current stream
-          // This simulates real-time typing directly in the document
-          if (streamingStartPosRef.current === null) {
+          // In replace mode (streaming), we replace streamed content
+          if (!isStreamingRef.current) {
             // First chunk - record starting position
+            isStreamingRef.current = true;
             streamingStartPosRef.current = editor.state.doc.content.size;
             console.log('[DocumentEditor] Starting stream at position:', streamingStartPosRef.current);
           }
           
           // Clear from streaming start to end and insert new content
-          const startPos = streamingStartPosRef.current;
+          const startPos = streamingStartPosRef.current || 1;
           const endPos = editor.state.doc.content.size;
           
-          // Set content from the streaming start position
-          editor.chain()
-            .setTextSelection({ from: startPos, to: endPos })
-            .deleteSelection()
-            .insertContent(`<p>${htmlContent}</p>`)
-            .run();
+          if (endPos > startPos) {
+            editor.chain()
+              .setTextSelection({ from: startPos, to: endPos })
+              .deleteSelection()
+              .insertContent(htmlContent)
+              .run();
+          } else {
+            editor.chain()
+              .focus('end')
+              .insertContent(htmlContent)
+              .run();
+          }
         } else {
-          // Normal append mode
-          streamingStartPosRef.current = null; // Reset streaming position
+          // Normal append mode - also reset streaming state
+          isStreamingRef.current = false;
+          streamingStartPosRef.current = null;
+          
+          // If empty text, just reset state without inserting
+          if (!text || text.trim() === '') {
+            console.log('[DocumentEditor] Resetting streaming state');
+            return;
+          }
+          
           console.log('[DocumentEditor] Inserting AI content:', text.substring(0, 100) + '...');
           
           // Move cursor to end and insert
           editor.chain()
             .focus('end')
-            .insertContent(`<p>${htmlContent}</p>`)
+            .insertContent(htmlContent)
             .run();
         }
       };
-      console.log('[DocumentEditor] Providing insert function to parent');
+      
+      // Only log once when editor is ready
+      if (!isStreamingRef.current) {
+        console.log('[DocumentEditor] Insert function ready');
+      }
       onInsertContent(insertContent);
     }
     
-    // Reset streaming position when editor changes or unmounts
+    // Reset streaming state when editor changes or unmounts
     return () => {
+      isStreamingRef.current = false;
       streamingStartPosRef.current = null;
     };
   }, [editor, onInsertContent]);
