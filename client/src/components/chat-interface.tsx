@@ -29,8 +29,10 @@ import {
   Flag,
   MessageSquare,
   Square,
-  Download
+  Download,
+  GripVertical
 } from "lucide-react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -1155,9 +1157,10 @@ export function ChatInterface({
       </header>
 
       {/* Main Content Area with Side Panel */}
-      <div className="flex-1 flex flex-row overflow-hidden">
-        {/* Left: Messages + Input */}
-        <div className={cn("flex flex-col min-w-0 transition-all duration-300", previewDocument ? "w-1/2" : "flex-1")}>
+      {previewDocument ? (
+        <PanelGroup direction="horizontal" className="flex-1">
+          <Panel defaultSize={50} minSize={30}>
+            <div className="flex flex-col min-w-0 h-full">
           {/* Messages Area - only show when there are messages */}
           {hasMessages && (
             <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
@@ -1846,24 +1849,376 @@ export function ChatInterface({
               Sira GPT can make mistakes. Check important info.
             </div>
           </div>
-        </div>
+            </div>
+          </Panel>
 
-        {/* Right: Document Editor Panel - Full TipTap WYSIWYG */}
-        {previewDocument && (
-          <div className="w-1/2 h-full animate-in slide-in-from-right duration-300">
-            <DocumentEditor
-              title={previewDocument.title}
-              content={editedDocumentContent}
-              onChange={setEditedDocumentContent}
-              onClose={handleCloseDocumentPreview}
-              onDownload={() => handleDownloadDocument(previewDocument)}
-              documentType={previewDocument.type}
-              onTextSelect={handleDocTextSelect}
-              onTextDeselect={handleDocTextDeselect}
-            />
+          {/* Resize Handle */}
+          <PanelResizeHandle className="w-2 bg-border/50 hover:bg-primary/30 transition-colors cursor-col-resize flex items-center justify-center group">
+            <GripVertical className="h-6 w-6 text-muted-foreground/50 group-hover:text-primary transition-colors" />
+          </PanelResizeHandle>
+
+          {/* Right: Document Editor Panel */}
+          <Panel defaultSize={50} minSize={25}>
+            <div className="h-full animate-in slide-in-from-right duration-300">
+              <DocumentEditor
+                title={previewDocument.title}
+                content={editedDocumentContent}
+                onChange={setEditedDocumentContent}
+                onClose={handleCloseDocumentPreview}
+                onDownload={() => handleDownloadDocument(previewDocument)}
+                documentType={previewDocument.type}
+                onTextSelect={handleDocTextSelect}
+                onTextDeselect={handleDocTextDeselect}
+              />
+            </div>
+          </Panel>
+        </PanelGroup>
+      ) : (
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Messages Area - only show when there are messages */}
+          {hasMessages && (
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
+              {messages.map((msg, msgIndex) => (
+                <div
+                  key={msg.id}
+                  className={cn(
+                    "flex w-full max-w-3xl mx-auto gap-4",
+                    msg.role === "user" ? "justify-end" : "justify-start"
+                  )}
+                >
+                  <div className={cn(
+                    "flex flex-col gap-2 max-w-[85%]",
+                    msg.role === "user" ? "items-end" : "items-start"
+                  )}>
+                    {msg.role === "user" ? (
+                      <div className="flex flex-col items-end gap-1">
+                        {editingMessageId === msg.id ? (
+                          <div className="w-full min-w-[300px] max-w-[500px]">
+                            <Textarea
+                              value={editContent}
+                              onChange={(e) => setEditContent(e.target.value)}
+                              className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-gray-200 bg-white focus:border-primary focus:ring-1 focus:ring-primary"
+                              autoFocus
+                            />
+                            <div className="flex items-center justify-end gap-2 mt-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-3 text-sm text-muted-foreground hover:text-foreground"
+                                onClick={handleCancelEdit}
+                              >
+                                <X className="h-4 w-4 mr-1" />
+                                Cancelar
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-3 text-sm text-muted-foreground hover:text-foreground"
+                                onClick={() => handleSendEdit(msg.id)}
+                              >
+                                <Send className="h-4 w-4 mr-1" />
+                                Enviar
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="group">
+                            <div className="bg-muted/80 text-foreground px-4 py-2.5 rounded-2xl text-sm whitespace-pre-wrap">
+                              {msg.content}
+                            </div>
+                            {msg.attachments && msg.attachments.length > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-1">
+                                {msg.attachments.map((att, i) => (
+                                  att.type === "image" && att.imageUrl ? (
+                                    <img 
+                                      key={i} 
+                                      src={att.imageUrl} 
+                                      alt={att.name} 
+                                      className="max-w-[200px] max-h-[150px] rounded-lg object-cover border border-border/50"
+                                    />
+                                  ) : (
+                                    <div key={i} className="flex items-center gap-2 px-3 py-1.5 bg-muted/50 rounded-lg text-xs">
+                                      <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                                      <span className="text-muted-foreground">{att.name}</span>
+                                    </div>
+                                  )
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2 w-full">
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm">
+                            <BotIcon className="h-4 w-4 text-primary-foreground" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm, remarkMath]}
+                                rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                              >
+                                {processLatex(parseDocumentBlocks(msg.content).text)}
+                              </ReactMarkdown>
+                            </div>
+                            {parseDocumentBlocks(msg.content).documents.length > 0 && (
+                              <div className="flex gap-2 flex-wrap mt-3">
+                                {parseDocumentBlocks(msg.content).documents.map((doc, idx) => (
+                                  <Button
+                                    key={idx}
+                                    variant="outline"
+                                    className="flex items-center gap-2 px-4 py-2 h-auto"
+                                    onClick={() => handleOpenDocumentPreview(doc)}
+                                  >
+                                    {doc.type === "word" && <FileText className="h-5 w-5 text-blue-600" />}
+                                    {doc.type === "excel" && <FileSpreadsheet className="h-5 w-5 text-green-600" />}
+                                    {doc.type === "ppt" && <FileIcon className="h-5 w-5 text-orange-600" />}
+                                    <span className="text-sm font-medium">{doc.title}</span>
+                                  </Button>
+                                ))}
+                              </div>
+                            )}
+                            {msg.sources && msg.sources.length > 0 && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {msg.sources.map((source, i) => (
+                                  <TooltipProvider key={i}>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-muted/50 hover:bg-muted rounded-full text-xs text-muted-foreground cursor-pointer transition-colors">
+                                          <FileText className="h-3 w-3" />
+                                          <span className="max-w-[120px] truncate">{source.fileName}</span>
+                                        </div>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" className="max-w-xs">
+                                        <p className="text-xs">{source.content}</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              
+              {streamingContent && (
+                <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                  <div className="flex flex-col gap-2 max-w-[85%] items-start">
+                    <div className="flex flex-col gap-2 w-full">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm">
+                          <BotIcon className="h-4 w-4 text-primary-foreground" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm, remarkMath]}
+                              rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                            >
+                              {processLatex(streamingContent)}
+                            </ReactMarkdown>
+                            <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {aiState === "thinking" && !streamingContent && (
+                <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm">
+                      <BotIcon className="h-4 w-4 text-primary-foreground" />
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Pensando...</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* Welcome Screen when no messages */}
+          {!hasMessages && (
+            <div className="flex-1 flex flex-col items-center justify-center px-4">
+              <motion.div 
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className="mb-8"
+              >
+                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
+                  <BotIcon className="h-10 w-10 text-primary-foreground" />
+                </div>
+              </motion.div>
+              <motion.h1 
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ duration: 0.5, delay: 0.2 }}
+                className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
+              >
+                ¿En qué puedo ayudarte?
+              </motion.h1>
+              <motion.p 
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ duration: 0.5, delay: 0.3 }}
+                className="text-muted-foreground text-center max-w-md text-base"
+              >
+                Soy Sira GPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más.
+              </motion.p>
+            </div>
+          )}
+          
+          {/* Input Bar */}
+          <div className="flex-shrink-0 px-4 pb-4">
+            <div className={cn(
+              "max-w-3xl mx-auto glass-card-light rounded-2xl border border-white/30 p-3",
+              selectedDocText && "ring-2 ring-primary/50"
+            )}>
+              {uploadedFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-2 pb-2 border-b border-border/50 mb-2">
+                  {uploadedFiles.map((file, index) => (
+                    <div 
+                      key={file.id} 
+                      className={cn(
+                        "flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200",
+                        file.status === "uploading" && "bg-blue-50 border border-blue-200",
+                        file.status === "processing" && "bg-yellow-50 border border-yellow-200",
+                        file.status === "ready" && "bg-green-50 border border-green-200",
+                        file.status === "error" && "bg-red-50 border border-red-200"
+                      )}
+                    >
+                      {file.status === "uploading" && <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />}
+                      {file.status === "processing" && <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />}
+                      {file.status === "ready" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                      {file.status === "error" && <X className="h-4 w-4 text-red-500" />}
+                      {getFileIcon(file.type)}
+                      <span className="max-w-[150px] truncate font-medium">{file.name}</span>
+                      <span className="text-xs text-muted-foreground">({formatFileSize(file.size)})</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 ml-1 text-muted-foreground hover:text-foreground"
+                        onClick={() => removeFile(index)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              <div className="flex items-end gap-2">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground flex-shrink-0 mb-1">
+                      <Plus className="h-5 w-5" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" align="start" className="w-56 p-2">
+                    <div className="grid gap-1">
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          className="hidden"
+                          multiple
+                          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.gif,.webp"
+                          onChange={handleFileUpload}
+                        />
+                        <Button variant="ghost" className="w-full justify-start gap-2 text-sm h-9" asChild>
+                          <span>
+                            <Upload className="h-4 w-4" />
+                            Subir archivo
+                          </span>
+                        </Button>
+                      </label>
+                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                        <Search className="h-4 w-4" />
+                        Buscar en Google
+                      </Button>
+                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                        <Globe className="h-4 w-4" />
+                        Navegar en la web
+                      </Button>
+                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                        <Image className="h-4 w-4" />
+                        Generar imagen
+                      </Button>
+                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                        <Bot className="h-4 w-4" />
+                        Agente
+                      </Button>
+                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                        <Plug className="h-4 w-4" />
+                        Connectors MPC
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                
+                <Textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSubmit();
+                    }
+                  }}
+                  placeholder="Type your message here..."
+                  className="min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-0 text-base"
+                  rows={1}
+                />
+
+                <div className="flex items-center gap-1 pb-1">
+                  <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground">
+                    <Mic className="h-5 w-5" />
+                  </Button>
+                  {aiState !== "idle" ? (
+                    <Button 
+                      onClick={handleStopChat}
+                      size="icon" 
+                      className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50"
+                      data-testid="button-stop-chat"
+                    >
+                      <Square className="h-5 w-5 fill-current" />
+                    </Button>
+                  ) : (
+                    <Button 
+                      onClick={handleSubmit}
+                      disabled={!input.trim() && uploadedFiles.length === 0}
+                      size="icon" 
+                      className={cn(
+                        "h-9 w-9 rounded-full transition-all duration-300",
+                        (input.trim() || uploadedFiles.length > 0) ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
+                      )}
+                      data-testid="button-send-message"
+                    >
+                      <ArrowUp className="h-5 w-5" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="text-center text-xs text-muted-foreground mt-3">
+              Sira GPT can make mistakes. Check important info.
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
