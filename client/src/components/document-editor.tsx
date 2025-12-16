@@ -155,45 +155,58 @@ export function DocumentEditor({
   const streamingStartPosRef = useRef<number | null>(null);
   const isStreamingRef = useRef<boolean>(false);
   
-  // Convert markdown to proper HTML for Word document
+  // Convert markdown to proper HTML for Word document - simplified version
   const convertMarkdownToHtmlForDoc = (text: string): string => {
+    if (!text) return '';
+    
     let html = text;
     
-    // Convert bold **text** or __text__
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
+    // Convert bold **text** 
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     
-    // Convert italic *text* or _text_
-    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
-    
-    // Convert headers
+    // Convert headers (only at start of line)
     html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
     
-    // Convert bullet lists (- item or • item)
-    html = html.replace(/^[-•]\s+(.+)$/gm, '<li>$1</li>');
+    // Split by double newlines for paragraphs
+    const blocks = html.split(/\n\n+/);
     
-    // Wrap consecutive <li> in <ul>
-    html = html.replace(/(<li>.*?<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
-    
-    // Convert numbered lists
-    html = html.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
-    
-    // Convert double newlines to paragraphs
-    const paragraphs = html.split(/\n\n+/);
-    html = paragraphs.map(p => {
-      p = p.trim();
-      if (!p) return '';
-      // Don't wrap if already wrapped in block element
-      if (p.startsWith('<h') || p.startsWith('<ul') || p.startsWith('<ol') || p.startsWith('<li')) {
-        return p;
+    const processedBlocks = blocks.map(block => {
+      block = block.trim();
+      if (!block) return '';
+      
+      // Check if block is already HTML
+      if (block.startsWith('<h') || block.startsWith('<ul') || block.startsWith('<ol')) {
+        return block;
       }
-      return `<p>${p.replace(/\n/g, '<br/>')}</p>`;
-    }).filter(p => p).join('');
+      
+      // Check if block is a list (all lines start with - or •)
+      const lines = block.split('\n');
+      const isBulletList = lines.every(line => /^[-•]\s+/.test(line.trim()));
+      const isNumberedList = lines.every(line => /^\d+\.\s+/.test(line.trim()));
+      
+      if (isBulletList) {
+        const items = lines.map(line => {
+          const content = line.replace(/^[-•]\s+/, '').trim();
+          return `<li>${content}</li>`;
+        }).join('');
+        return `<ul>${items}</ul>`;
+      }
+      
+      if (isNumberedList) {
+        const items = lines.map(line => {
+          const content = line.replace(/^\d+\.\s+/, '').trim();
+          return `<li>${content}</li>`;
+        }).join('');
+        return `<ol>${items}</ol>`;
+      }
+      
+      // Regular paragraph - just add line breaks for single newlines
+      return `<p>${block.replace(/\n/g, '<br/>')}</p>`;
+    });
     
-    return html;
+    return processedBlocks.filter(b => b).join('');
   };
   
   // Provide insert function to parent for AI content insertion
