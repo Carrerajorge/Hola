@@ -3,7 +3,8 @@ import {
   Mic, 
   ArrowUp, 
   Plus, 
-  ChevronDown, 
+  ChevronDown,
+  ChevronRight,
   Globe, 
   FileText,
   FileSpreadsheet,
@@ -38,7 +39,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
@@ -2430,6 +2432,53 @@ export function ChatInterface({
                         <Image className="h-4 w-4" />
                         Generar imagen
                       </Button>
+                      
+                      <HoverCard openDelay={100} closeDelay={100}>
+                        <HoverCardTrigger asChild>
+                          <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full">
+                            <span className="flex items-center gap-2">
+                              <FileText className="h-4 w-4" />
+                              Crear documento
+                            </span>
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </HoverCardTrigger>
+                        <HoverCardContent side="right" align="start" className="w-48 p-2">
+                          <div className="grid gap-1">
+                            <Button 
+                              variant="ghost" 
+                              className="justify-start gap-2 text-sm h-9"
+                              onClick={() => setInput("Genera un documento Word sobre: ")}
+                            >
+                              <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
+                                <span className="text-white text-xs font-bold">W</span>
+                              </div>
+                              Documento Word
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              className="justify-start gap-2 text-sm h-9"
+                              onClick={() => setInput("Genera una hoja de cálculo Excel con: ")}
+                            >
+                              <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
+                                <span className="text-white text-xs font-bold">X</span>
+                              </div>
+                              Hoja Excel
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              className="justify-start gap-2 text-sm h-9"
+                              onClick={() => setInput("Genera una presentación PowerPoint sobre: ")}
+                            >
+                              <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
+                                <span className="text-white text-xs font-bold">P</span>
+                              </div>
+                              Presentación PPT
+                            </Button>
+                          </div>
+                        </HoverCardContent>
+                      </HoverCard>
+                      
                       <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
                         <Bot className="h-4 w-4" />
                         Agente
