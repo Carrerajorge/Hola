@@ -1225,50 +1225,43 @@ export function ChatInterface({
       const fullContent = data.content;
       const responseSources = data.sources || [];
       
-      // If document mode is active, write DIRECTLY to document with streaming effect
+      // If document mode is active: Buffer approach - show progress in chat, single write to document at end
       if (shouldWriteToDoc && docInsertContentRef.current) {
         setAiState("responding");
         
-        // Stream content directly into the document
+        // Buffer the content - show typing animation in chat, write to doc ONCE at the end
         let currentIndex = 0;
         
         streamIntervalRef.current = setInterval(() => {
           if (currentIndex < fullContent.length) {
-            const chunkSize = Math.floor(Math.random() * 5) + 3; // Larger chunks for smoother typing
+            const chunkSize = Math.floor(Math.random() * 8) + 5; // Fast typing effect
             currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
             const currentContent = fullContent.slice(0, currentIndex);
             
-            // Update the document directly with the current streamed content
-            try {
-              if (docInsertContentRef.current) {
-                docInsertContentRef.current(currentContent, true); // true = replace/streaming mode
-              }
-            } catch (err) {
-              console.error('[ChatInterface] Error streaming to document:', err);
-            }
-            
+            // Show progress in chat bubble only - NO writes to document during streaming
             streamingContentRef.current = currentContent;
+            setStreamingContent(currentContent);
           } else {
             if (streamIntervalRef.current) {
               clearInterval(streamIntervalRef.current);
               streamIntervalRef.current = null;
             }
             
-            // Final insert: Apply proper formatting to the complete content
+            // SINGLE WRITE: Insert complete content to document once
             try {
               if (docInsertContentRef.current) {
-                // Pass the full content with formatting applied (not streaming mode)
-                docInsertContentRef.current(fullContent, false);
+                docInsertContentRef.current(fullContent);
+                console.log('[ChatInterface] Document written with single insert');
               }
             } catch (err) {
-              console.error('[ChatInterface] Error finalizing document:', err);
+              console.error('[ChatInterface] Error writing to document:', err);
             }
             
-            // Add a small confirmation message in chat
+            // Add confirmation message in chat
             const confirmMsg: Message = {
               id: (Date.now() + 1).toString(),
               role: "assistant",
-              content: "✓ Listo",
+              content: "✓ Contenido agregado al documento",
               timestamp: new Date(),
             };
             onSendMessage(confirmMsg);
@@ -1279,7 +1272,7 @@ export function ChatInterface({
             agent.complete();
             abortControllerRef.current = null;
           }
-        }, 10);
+        }, 8);
       } else {
         // Normal chat mode - stream to chat interface
         setAiState("responding");

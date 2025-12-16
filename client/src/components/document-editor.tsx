@@ -151,147 +151,81 @@ export function DocumentEditor({
     };
   }, [handleTextSelection]);
 
-  // Track the AI streaming content position - use a module-level ref to persist across re-renders
-  const streamingStartPosRef = useRef<number | null>(null);
-  const isStreamingRef = useRef<boolean>(false);
-  
-  // Convert markdown to proper HTML for Word document - simplified version
-  const convertMarkdownToHtmlForDoc = (text: string): string => {
-    if (!text) return '';
+  // Convert markdown to clean HTML - single-pass sanitized conversion
+  const convertMarkdownToHtml = (text: string): string => {
+    if (!text || text.trim() === '') return '';
     
-    let html = text;
+    // Step 1: Sanitize and normalize the text
+    let cleanText = text
+      .replace(/\r\n/g, '\n')           // Normalize Windows line endings
+      .replace(/\n{3,}/g, '\n\n')       // Max 2 consecutive newlines
+      .trim();
     
-    // Convert bold **text** 
-    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Step 2: Convert inline formatting
+    cleanText = cleanText.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    cleanText = cleanText.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
     
-    // Convert headers (only at start of line)
-    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    // Step 3: Convert headers
+    cleanText = cleanText.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    cleanText = cleanText.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    cleanText = cleanText.replace(/^# (.+)$/gm, '<h1>$1</h1>');
     
-    // Split by double newlines for paragraphs
-    const blocks = html.split(/\n\n+/);
+    // Step 4: Process blocks (paragraphs and lists)
+    const blocks = cleanText.split(/\n\n+/);
     
     const processedBlocks = blocks.map(block => {
       block = block.trim();
       if (!block) return '';
       
-      // Check if block is already HTML
-      if (block.startsWith('<h') || block.startsWith('<ul') || block.startsWith('<ol')) {
-        return block;
-      }
+      // Already a header tag
+      if (block.startsWith('<h')) return block;
       
-      // Check if block is a list (all lines start with - or •)
-      const lines = block.split('\n');
-      const isBulletList = lines.every(line => /^[-•]\s+/.test(line.trim()));
-      const isNumberedList = lines.every(line => /^\d+\.\s+/.test(line.trim()));
+      // Check for list patterns
+      const lines = block.split('\n').filter(l => l.trim());
+      const allBullets = lines.length > 0 && lines.every(line => /^[-•]\s+/.test(line.trim()));
+      const allNumbered = lines.length > 0 && lines.every(line => /^\d+\.\s+/.test(line.trim()));
       
-      if (isBulletList) {
-        const items = lines.map(line => {
-          const content = line.replace(/^[-•]\s+/, '').trim();
-          return `<li>${content}</li>`;
-        }).join('');
+      if (allBullets) {
+        const items = lines.map(line => `<li>${line.replace(/^[-•]\s+/, '').trim()}</li>`).join('');
         return `<ul>${items}</ul>`;
       }
       
-      if (isNumberedList) {
-        const items = lines.map(line => {
-          const content = line.replace(/^\d+\.\s+/, '').trim();
-          return `<li>${content}</li>`;
-        }).join('');
+      if (allNumbered) {
+        const items = lines.map(line => `<li>${line.replace(/^\d+\.\s+/, '').trim()}</li>`).join('');
         return `<ol>${items}</ol>`;
       }
       
-      // Regular paragraph - just add line breaks for single newlines
-      return `<p>${block.replace(/\n/g, '<br/>')}</p>`;
+      // Regular paragraph
+      return `<p>${block.replace(/\n/g, '<br>')}</p>`;
     });
     
     return processedBlocks.filter(b => b).join('');
   };
   
-  // Provide insert function to parent for AI content insertion
+  // SINGLE WRITE approach - insert content only once, fully formatted
   useEffect(() => {
     if (editor && onInsertContent) {
-      const insertContent = (text: string, replaceMode: boolean = false) => {
-        // Check if editor is still mounted and available
+      const insertContent = (text: string) => {
         if (!editor || editor.isDestroyed) {
-          console.warn('[DocumentEditor] Editor is destroyed, cannot insert content');
-          throw new Error('Editor is not available');
+          console.warn('[DocumentEditor] Editor not available');
+          return;
         }
         
-        if (replaceMode) {
-          // STREAMING MODE: Insert plain text without HTML conversion for smooth typing
-          if (!isStreamingRef.current) {
-            // First chunk - record starting position and add a marker paragraph
-            isStreamingRef.current = true;
-            streamingStartPosRef.current = editor.state.doc.content.size;
-            console.log('[DocumentEditor] Starting stream');
-          }
-          
-          // Clear streaming area and insert plain text (no HTML conversion during streaming)
-          const startPos = streamingStartPosRef.current || 1;
-          const endPos = editor.state.doc.content.size;
-          
-          if (endPos > startPos) {
-            editor.chain()
-              .setTextSelection({ from: startPos, to: endPos })
-              .deleteSelection()
-              .insertContent(text) // Plain text during streaming
-              .run();
-          } else {
-            editor.chain()
-              .focus('end')
-              .insertContent(text)
-              .run();
-          }
-        } else {
-          // FINAL MODE: Replace plain streamed text with proper HTML formatting
-          const wasStreaming = isStreamingRef.current;
-          const streamStart = streamingStartPosRef.current;
-          
-          isStreamingRef.current = false;
-          streamingStartPosRef.current = null;
-          
-          // If empty text, just reset state without inserting
-          if (!text || text.trim() === '') {
-            console.log('[DocumentEditor] Resetting streaming state');
-            return;
-          }
-          
-          // Convert markdown to proper HTML
-          const htmlContent = convertMarkdownToHtmlForDoc(text);
-          console.log('[DocumentEditor] Applying final formatted content');
-          
-          if (wasStreaming && streamStart) {
-            // Replace the plain text that was streamed with formatted HTML
-            const endPos = editor.state.doc.content.size;
-            editor.chain()
-              .setTextSelection({ from: streamStart, to: endPos })
-              .deleteSelection()
-              .insertContent(htmlContent)
-              .run();
-          } else {
-            // Normal append
-            editor.chain()
-              .focus('end')
-              .insertContent(htmlContent)
-              .run();
-          }
-        }
+        if (!text || text.trim() === '') return;
+        
+        // Single conversion and single insert
+        const htmlContent = convertMarkdownToHtml(text);
+        console.log('[DocumentEditor] Single write completed');
+        
+        editor.chain()
+          .focus('end')
+          .insertContent(htmlContent)
+          .run();
       };
       
-      // Only log once when editor is ready
-      if (!isStreamingRef.current) {
-        console.log('[DocumentEditor] Insert function ready');
-      }
+      console.log('[DocumentEditor] Insert function ready');
       onInsertContent(insertContent);
     }
-    
-    // Reset streaming state when editor changes or unmounts
-    return () => {
-      isStreamingRef.current = false;
-      streamingStartPosRef.current = null;
-    };
   }, [editor, onInsertContent]);
 
   if (!editor) return null;
