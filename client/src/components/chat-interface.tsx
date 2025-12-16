@@ -1615,10 +1615,7 @@ export function ChatInterface({
           {!hasMessages && (
             <div className="flex-1 flex flex-col items-center justify-center">
               <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
-                <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
-                  <BotIcon className="h-6 w-6 text-muted-foreground" />
-                </div>
-                <p className="text-muted-foreground">How can I help you today?</p>
+                <p className="text-muted-foreground">¿En qué puedo ayudarte?</p>
               </div>
             </div>
           )}
@@ -2036,57 +2033,50 @@ export function ChatInterface({
                       </div>
                     ) : (
                       <div className="flex flex-col gap-2 w-full">
-                        <div className="flex items-start gap-3">
-                          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm">
-                            <BotIcon className="h-4 w-4 text-primary-foreground" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
-                              <ReactMarkdown
-                                remarkPlugins={[remarkGfm, remarkMath]}
-                                rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                              >
-                                {processLatex(parseDocumentBlocks(msg.content).text)}
-                              </ReactMarkdown>
-                            </div>
-                            {parseDocumentBlocks(msg.content).documents.length > 0 && (
-                              <div className="flex gap-2 flex-wrap mt-3">
-                                {parseDocumentBlocks(msg.content).documents.map((doc, idx) => (
-                                  <Button
-                                    key={idx}
-                                    variant="outline"
-                                    className="flex items-center gap-2 px-4 py-2 h-auto"
-                                    onClick={() => handleOpenDocumentPreview(doc)}
-                                  >
-                                    {doc.type === "word" && <FileText className="h-5 w-5 text-blue-600" />}
-                                    {doc.type === "excel" && <FileSpreadsheet className="h-5 w-5 text-green-600" />}
-                                    {doc.type === "ppt" && <FileIcon className="h-5 w-5 text-orange-600" />}
-                                    <span className="text-sm font-medium">{doc.title}</span>
-                                  </Button>
-                                ))}
-                              </div>
-                            )}
-                            {msg.sources && msg.sources.length > 0 && (
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {msg.sources.map((source, i) => (
-                                  <TooltipProvider key={i}>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-muted/50 hover:bg-muted rounded-full text-xs text-muted-foreground cursor-pointer transition-colors">
-                                          <FileText className="h-3 w-3" />
-                                          <span className="max-w-[120px] truncate">{source.fileName}</span>
-                                        </div>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-xs">
-                                        <p className="text-xs">{source.content}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                ))}
-                              </div>
-                            )}
-                          </div>
+                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkMath]}
+                            rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                          >
+                            {processLatex(parseDocumentBlocks(msg.content).text)}
+                          </ReactMarkdown>
                         </div>
+                        {parseDocumentBlocks(msg.content).documents.length > 0 && (
+                          <div className="flex gap-2 flex-wrap mt-3">
+                            {parseDocumentBlocks(msg.content).documents.map((doc, idx) => (
+                              <Button
+                                key={idx}
+                                variant="outline"
+                                className="flex items-center gap-2 px-4 py-2 h-auto"
+                                onClick={() => handleOpenDocumentPreview(doc)}
+                              >
+                                {doc.type === "word" && <FileText className="h-5 w-5 text-blue-600" />}
+                                {doc.type === "excel" && <FileSpreadsheet className="h-5 w-5 text-green-600" />}
+                                {doc.type === "ppt" && <FileIcon className="h-5 w-5 text-orange-600" />}
+                                <span className="text-sm font-medium">{doc.title}</span>
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                        {msg.sources && msg.sources.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {msg.sources.map((source, i) => (
+                              <TooltipProvider key={i}>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-muted/50 hover:bg-muted rounded-full text-xs text-muted-foreground cursor-pointer transition-colors">
+                                      <FileText className="h-3 w-3" />
+                                      <span className="max-w-[120px] truncate">{source.fileName}</span>
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-xs">
+                                    <p className="text-xs">{source.content}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2096,23 +2086,14 @@ export function ChatInterface({
               {streamingContent && (
                 <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
                   <div className="flex flex-col gap-2 max-w-[85%] items-start">
-                    <div className="flex flex-col gap-2 w-full">
-                      <div className="flex items-start gap-3">
-                        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm">
-                          <BotIcon className="h-4 w-4 text-primary-foreground" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
-                            <ReactMarkdown
-                              remarkPlugins={[remarkGfm, remarkMath]}
-                              rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                            >
-                              {processLatex(streamingContent)}
-                            </ReactMarkdown>
-                            <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5" />
-                          </div>
-                        </div>
-                      </div>
+                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkMath]}
+                        rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                      >
+                        {processLatex(streamingContent)}
+                      </ReactMarkdown>
+                      <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5" />
                     </div>
                   </div>
                 </div>
@@ -2120,14 +2101,9 @@ export function ChatInterface({
               
               {aiState === "thinking" && !streamingContent && (
                 <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-                  <div className="flex items-start gap-3">
-                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-sm">
-                      <BotIcon className="h-4 w-4 text-primary-foreground" />
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Pensando...</span>
-                    </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Pensando...</span>
                   </div>
                 </div>
               )}
