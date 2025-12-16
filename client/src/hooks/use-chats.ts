@@ -14,6 +14,7 @@ export interface Message {
 
 export interface Chat {
   id: string;
+  stableKey: string; // Stable key for React that doesn't change when pending -> real ID
   title: string;
   timestamp: number;
   messages: Message[];
@@ -44,6 +45,7 @@ export function useChats() {
           const fullChat = await chatRes.json();
           return {
             id: chat.id,
+            stableKey: `stable-${chat.id}`, // Use ID as stable key for server chats
             title: chat.title,
             timestamp: new Date(chat.updatedAt).getTime(),
             archived: chat.archived === "true",
@@ -86,6 +88,7 @@ export function useChats() {
             const parsed = JSON.parse(saved);
             const restored = parsed.map((chat: any) => ({
               ...chat,
+              stableKey: chat.stableKey || `stable-${chat.id}`, // Ensure stableKey exists
               messages: chat.messages.map((msg: any) => ({
                 ...msg,
                 timestamp: new Date(msg.timestamp)
@@ -115,8 +118,10 @@ export function useChats() {
 
   const createChat = useCallback(() => {
     const pendingId = `${PENDING_CHAT_PREFIX}${Date.now()}`;
+    const stableKey = `stable-${Date.now()}`; // Stable key that won't change
     const pendingChat: Chat = {
       id: pendingId,
+      stableKey,
       title: "Nuevo Chat",
       timestamp: Date.now(),
       messages: []

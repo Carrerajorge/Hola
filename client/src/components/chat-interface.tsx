@@ -548,6 +548,12 @@ export function ChatInterface({
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const streamingContentRef = useRef<string>("");
+  const aiStateRef = useRef<"idle" | "thinking" | "responding">("idle");
+  
+  // Keep aiStateRef in sync with aiState for reliable access
+  useEffect(() => {
+    aiStateRef.current = aiState;
+  }, [aiState]);
   const agent = useAgent();
   const browserSession = useBrowserSession();
 

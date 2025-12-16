@@ -89,7 +89,7 @@ export default function Home() {
       <main className="flex-1 flex flex-col h-full w-full">
         {activeChat && (
           <ChatInterface 
-            key={activeChat.id} 
+            key={activeChat.stableKey} 
             messages={activeChat.messages}
             onSendMessage={(msg) => addMessage(activeChat.id, msg)}
             isSidebarOpen={isSidebarOpen} 
