@@ -1,17 +1,18 @@
 import { Sidebar } from "@/components/sidebar";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { useChats } from "@/hooks/use-chats";
+import { useChats, Message } from "@/hooks/use-chats";
 import { toast } from "sonner";
 
 export default function Home() {
   const isMobile = useIsMobile();
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
+  const [isNewChatMode, setIsNewChatMode] = useState(false);
   
   const { 
     chats, 
@@ -27,7 +28,21 @@ export default function Home() {
   } = useChats();
 
   const handleNewChat = () => {
-    createChat();
+    setActiveChatId(null);
+    setIsNewChatMode(true);
+  };
+
+  const handleSendNewChatMessage = useCallback((message: Message) => {
+    const pendingId = createChat();
+    setIsNewChatMode(false);
+    setTimeout(() => {
+      addMessage(pendingId, message);
+    }, 50);
+  }, [createChat, addMessage]);
+
+  const handleSelectChat = (id: string) => {
+    setIsNewChatMode(false);
+    setActiveChatId(id);
   };
 
   return (
@@ -42,7 +57,7 @@ export default function Home() {
           chats={chats} 
           hiddenChats={hiddenChats}
           activeChatId={activeChat?.id || null} 
-          onSelectChat={setActiveChatId} 
+          onSelectChat={handleSelectChat} 
           onNewChat={handleNewChat} 
           onToggle={() => setIsSidebarOpen(false)} 
           onDeleteChat={deleteChat}
@@ -73,7 +88,7 @@ export default function Home() {
               chats={chats} 
               hiddenChats={hiddenChats}
               activeChatId={activeChat?.id || null} 
-              onSelectChat={setActiveChatId} 
+              onSelectChat={handleSelectChat} 
               onNewChat={handleNewChat} 
               onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
               onDeleteChat={deleteChat}
@@ -87,11 +102,11 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full w-full">
-        {activeChat && (
+        {(activeChat || isNewChatMode || chats.length === 0) && (
           <ChatInterface 
-            key={activeChat.stableKey} 
-            messages={activeChat.messages}
-            onSendMessage={(msg) => addMessage(activeChat.id, msg)}
+            key={activeChat?.stableKey || "new-chat"} 
+            messages={activeChat?.messages || []}
+            onSendMessage={activeChat ? (msg) => addMessage(activeChat.id, msg) : handleSendNewChatMessage}
             isSidebarOpen={isSidebarOpen} 
             onToggleSidebar={() => setIsSidebarOpen(true)} 
           />

@@ -116,7 +116,7 @@ export function useChats() {
     }
   }, [chats, isLoading]);
 
-  const createChat = useCallback(() => {
+  const createChat = useCallback((): string => {
     const pendingId = `${PENDING_CHAT_PREFIX}${Date.now()}`;
     const stableKey = `stable-${Date.now()}`; // Stable key that won't change
     const pendingChat: Chat = {
@@ -128,7 +128,7 @@ export function useChats() {
     };
     setChats(prev => [pendingChat, ...prev]);
     setActiveChatId(pendingId);
-    return true;
+    return pendingId;
   }, []);
 
   const flushPendingMessages = async (pendingId: string, realChatId: string) => {
