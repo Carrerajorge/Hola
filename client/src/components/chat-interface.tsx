@@ -996,6 +996,10 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
+    // Don't submit if files are still uploading/processing
+    const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+    if (filesStillLoading) return;
+    
     if (!input.trim() && uploadedFiles.length === 0) return;
 
     // If there's selected text from document, rewrite it
@@ -1830,7 +1834,8 @@ export function ChatInterface({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
+                  const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                  if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
                     e.preventDefault();
                     handleSubmit();
                   }
@@ -1853,20 +1858,24 @@ export function ChatInterface({
                   >
                     <Square className="h-5 w-5 fill-current" />
                   </Button>
-                ) : (
-                  <Button 
-                    onClick={handleSubmit}
-                    disabled={!input.trim() && uploadedFiles.length === 0}
-                    size="icon" 
-                    className={cn(
-                      "h-9 w-9 rounded-full transition-all duration-300",
-                      (input.trim() || uploadedFiles.length > 0) ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
-                    )}
-                    data-testid="button-send-message"
-                  >
-                    <ArrowUp className="h-5 w-5" />
-                  </Button>
-                )}
+                ) : (() => {
+                  const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                  const canSend = (input.trim() || uploadedFiles.length > 0) && !filesStillLoading;
+                  return (
+                    <Button 
+                      onClick={handleSubmit}
+                      disabled={!canSend}
+                      size="icon" 
+                      className={cn(
+                        "h-9 w-9 rounded-full transition-all duration-300",
+                        canSend ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
+                      )}
+                      data-testid="button-send-message"
+                    >
+                      <ArrowUp className="h-5 w-5" />
+                    </Button>
+                  );
+                })()}
               </div>
               </div>
             </div>
@@ -2216,7 +2225,8 @@ export function ChatInterface({
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
+                    const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                    if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
                       e.preventDefault();
                       handleSubmit();
                     }
@@ -2239,20 +2249,24 @@ export function ChatInterface({
                     >
                       <Square className="h-5 w-5 fill-current" />
                     </Button>
-                  ) : (
-                    <Button 
-                      onClick={handleSubmit}
-                      disabled={!input.trim() && uploadedFiles.length === 0}
-                      size="icon" 
-                      className={cn(
-                        "h-9 w-9 rounded-full transition-all duration-300",
-                        (input.trim() || uploadedFiles.length > 0) ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
-                      )}
-                      data-testid="button-send-message"
-                    >
-                      <ArrowUp className="h-5 w-5" />
-                    </Button>
-                  )}
+                  ) : (() => {
+                    const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                    const canSend = (input.trim() || uploadedFiles.length > 0) && !filesStillLoading;
+                    return (
+                      <Button 
+                        onClick={handleSubmit}
+                        disabled={!canSend}
+                        size="icon" 
+                        className={cn(
+                          "h-9 w-9 rounded-full transition-all duration-300",
+                          canSend ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
+                        )}
+                        data-testid="button-send-message"
+                      >
+                        <ArrowUp className="h-5 w-5" />
+                      </Button>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
