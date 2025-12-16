@@ -547,6 +547,7 @@ export function ChatInterface({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const streamingContentRef = useRef<string>("");
   const agent = useAgent();
   const browserSession = useBrowserSession();
 
@@ -557,26 +558,32 @@ export function ChatInterface({
   }, [agent.state.browserSessionId, agent.state.objective, browserSession.state.sessionId]);
 
   const handleStopChat = () => {
+    // Abort any ongoing fetch request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    
+    // Clear any streaming interval
     if (streamIntervalRef.current) {
       clearInterval(streamIntervalRef.current);
       streamIntervalRef.current = null;
     }
     
-    // Save the partial content as a message if there's any
-    if (streamingContent.trim()) {
+    // Save the partial content as a message if there's any (use ref for latest value)
+    const currentContent = streamingContentRef.current;
+    if (currentContent && currentContent.trim()) {
       const partialMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: streamingContent + "\n\n*[Respuesta detenida]*",
+        content: currentContent + "\n\n*[Respuesta detenida]*",
         timestamp: new Date(),
       };
       onSendMessage(partialMsg);
     }
     
+    // Reset states
+    streamingContentRef.current = "";
     setAiState("idle");
     setStreamingContent("");
   };
@@ -723,9 +730,12 @@ export function ChatInterface({
     const contextUpToUser = prevMessages.slice(0, prevMessages.length - lastUserMsgIndex);
     
     setAiState("thinking");
+    streamingContentRef.current = "";
     setStreamingContent("");
     
     try {
+      abortControllerRef.current = new AbortController();
+      
       const chatHistory = contextUpToUser.map(m => ({
         role: m.role,
         content: m.content
@@ -734,7 +744,8 @@ export function ChatInterface({
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chatHistory })
+        body: JSON.stringify({ messages: chatHistory }),
+        signal: abortControllerRef.current.signal
       });
 
       const data = await response.json();
@@ -744,13 +755,18 @@ export function ChatInterface({
       const fullContent = data.content;
       let currentIndex = 0;
       
-      const streamInterval = setInterval(() => {
+      streamIntervalRef.current = setInterval(() => {
         if (currentIndex < fullContent.length) {
           const chunkSize = Math.floor(Math.random() * 3) + 1;
-          setStreamingContent(fullContent.slice(0, currentIndex + chunkSize));
+          const newContent = fullContent.slice(0, currentIndex + chunkSize);
+          streamingContentRef.current = newContent;
+          setStreamingContent(newContent);
           currentIndex += chunkSize;
         } else {
-          clearInterval(streamInterval);
+          if (streamIntervalRef.current) {
+            clearInterval(streamIntervalRef.current);
+            streamIntervalRef.current = null;
+          }
           const aiMsg: Message = {
             id: (Date.now() + 1).toString(),
             role: "assistant",
@@ -758,13 +774,17 @@ export function ChatInterface({
             timestamp: new Date(),
           };
           onSendMessage(aiMsg);
+          streamingContentRef.current = "";
           setStreamingContent("");
           setAiState("idle");
+          abortControllerRef.current = null;
         }
       }, 15);
-    } catch (error) {
+    } catch (error: any) {
+      if (error.name === "AbortError") return;
       console.error("Regenerate error:", error);
       setAiState("idle");
+      abortControllerRef.current = null;
     }
   };
 
@@ -1070,6 +1090,7 @@ export function ChatInterface({
     setInput("");
     setUploadedFiles([]);
     setAiState("thinking");
+    streamingContentRef.current = "";
     setStreamingContent("");
 
     try {
@@ -1121,7 +1142,9 @@ export function ChatInterface({
       streamIntervalRef.current = setInterval(() => {
         if (currentIndex < fullContent.length) {
           const chunkSize = Math.floor(Math.random() * 3) + 1;
-          setStreamingContent(fullContent.slice(0, currentIndex + chunkSize));
+          const newContent = fullContent.slice(0, currentIndex + chunkSize);
+          streamingContentRef.current = newContent; // Keep ref in sync for stop button
+          setStreamingContent(newContent);
           currentIndex += chunkSize;
         } else {
           if (streamIntervalRef.current) {
@@ -1136,6 +1159,7 @@ export function ChatInterface({
             sources: responseSources.length > 0 ? responseSources : undefined,
           };
           onSendMessage(aiMsg);
+          streamingContentRef.current = "";
           setStreamingContent("");
           setAiState("idle");
           agent.complete(); // Mark agent as complete when streaming ends
