@@ -2028,6 +2028,27 @@ export function ChatInterface({
                                 {msg.content}
                               </div>
                             )}
+                            {/* User Message Actions */}
+                            <div className="flex items-center justify-end gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                onClick={() => handleCopyMessage(msg.content, msg.id)}
+                                data-testid={`button-copy-user-${msg.id}`}
+                              >
+                                {copiedMessageId === msg.id ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                onClick={() => handleStartEdit(msg)}
+                                data-testid={`button-edit-user-${msg.id}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -2076,6 +2097,120 @@ export function ChatInterface({
                               </TooltipProvider>
                             ))}
                           </div>
+                        )}
+                        {/* Assistant Message Actions Toolbar */}
+                        {msg.content && !msg.isThinking && (
+                          <TooltipProvider delayDuration={300}>
+                            <div className="flex items-center gap-1 mt-2" data-testid={`message-actions-main-${msg.id}`}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    onClick={() => handleCopyMessage(msg.content, msg.id)}
+                                    data-testid={`button-copy-main-${msg.id}`}
+                                  >
+                                    {copiedMessageId === msg.id ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom"><p>Copiar</p></TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className={cn("h-7 w-7", messageFeedback[msg.id] === "up" ? "text-green-500" : "text-muted-foreground hover:text-foreground")}
+                                    onClick={() => handleFeedback(msg.id, "up")}
+                                    data-testid={`button-like-main-${msg.id}`}
+                                  >
+                                    <ThumbsUp className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom"><p>Me gusta</p></TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className={cn("h-7 w-7", messageFeedback[msg.id] === "down" ? "text-red-500" : "text-muted-foreground hover:text-foreground")}
+                                    onClick={() => handleFeedback(msg.id, "down")}
+                                    data-testid={`button-dislike-main-${msg.id}`}
+                                  >
+                                    <ThumbsDown className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom"><p>No me gusta</p></TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    onClick={() => handleRegenerate(msgIndex)}
+                                    disabled={aiState !== "idle"}
+                                    data-testid={`button-regenerate-main-${msg.id}`}
+                                  >
+                                    <RefreshCw className={cn("h-4 w-4", aiState !== "idle" && "animate-spin")} />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom"><p>Regenerar</p></TooltipContent>
+                              </Tooltip>
+
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    onClick={() => handleShare(msg.content)}
+                                    data-testid={`button-share-main-${msg.id}`}
+                                  >
+                                    <Share2 className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom"><p>Compartir</p></TooltipContent>
+                              </Tooltip>
+
+                              <DropdownMenu>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                        data-testid={`button-more-main-${msg.id}`}
+                                      >
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom"><p>Más opciones</p></TooltipContent>
+                                </Tooltip>
+                                <DropdownMenuContent align="start" side="bottom">
+                                  <DropdownMenuItem onClick={() => handleReadAloud(msg.id, msg.content)} data-testid={`menu-read-aloud-main-${msg.id}`}>
+                                    {speakingMessageId === msg.id ? <VolumeX className="h-4 w-4 mr-2" /> : <Volume2 className="h-4 w-4 mr-2" />}
+                                    {speakingMessageId === msg.id ? "Detener lectura" : "Leer en voz alta"}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem data-testid={`menu-create-thread-main-${msg.id}`}>
+                                    <MessageSquare className="h-4 w-4 mr-2" />
+                                    Crear hilo desde aquí
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem className="text-red-500" data-testid={`menu-report-main-${msg.id}`}>
+                                    <Flag className="h-4 w-4 mr-2" />
+                                    Reportar mensaje
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </TooltipProvider>
                         )}
                       </div>
                     )}
