@@ -945,11 +945,36 @@ export function ChatInterface({
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const getFileIcon = (type: string) => {
-    if (type.includes("pdf")) return <FileText className="h-4 w-4 text-red-500" />;
-    if (type.includes("word") || type.includes("document")) return <FileText className="h-4 w-4 text-blue-600" />;
-    if (type.includes("sheet") || type.includes("excel")) return <FileSpreadsheet className="h-4 w-4 text-green-600" />;
-    if (type.includes("image")) return <Image className="h-4 w-4 text-purple-500" />;
+  const getFileIcon = (type: string, fileName?: string) => {
+    const lowerType = type.toLowerCase();
+    const lowerName = (fileName || "").toLowerCase();
+    
+    // Check by file extension first (more reliable)
+    if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls") || lowerName.endsWith(".csv")) {
+      return <FileSpreadsheet className="h-4 w-4 text-green-600" />;
+    }
+    if (lowerName.endsWith(".docx") || lowerName.endsWith(".doc")) {
+      return <FileText className="h-4 w-4 text-blue-600" />;
+    }
+    if (lowerName.endsWith(".pptx") || lowerName.endsWith(".ppt")) {
+      return <FileText className="h-4 w-4 text-orange-500" />;
+    }
+    if (lowerName.endsWith(".pdf")) {
+      return <FileText className="h-4 w-4 text-red-500" />;
+    }
+    
+    // Check by MIME type
+    if (lowerType.includes("pdf")) return <FileText className="h-4 w-4 text-red-500" />;
+    if (lowerType.includes("word") || lowerType.includes("document") || lowerType.includes("wordprocessing")) {
+      return <FileText className="h-4 w-4 text-blue-600" />;
+    }
+    if (lowerType.includes("sheet") || lowerType.includes("excel") || lowerType.includes("spreadsheet") || lowerType.includes("csv")) {
+      return <FileSpreadsheet className="h-4 w-4 text-green-600" />;
+    }
+    if (lowerType.includes("presentation") || lowerType.includes("powerpoint")) {
+      return <FileText className="h-4 w-4 text-orange-500" />;
+    }
+    if (lowerType.includes("image")) return <Image className="h-4 w-4 text-purple-500" />;
     return <FileIcon className="h-4 w-4 text-gray-500" />;
   };
 
@@ -1697,17 +1722,17 @@ export function ChatInterface({
                         <div className="flex items-center gap-2 px-2 py-1.5 pr-6 max-w-[180px]">
                           <div className={cn(
                             "flex items-center justify-center w-8 h-8 rounded flex-shrink-0",
-                            file.type.includes("pdf") ? "bg-red-500" :
-                            file.type.includes("word") || file.type.includes("document") ? "bg-blue-600" :
-                            file.type.includes("sheet") || file.type.includes("excel") ? "bg-green-600" :
-                            file.type.includes("presentation") || file.type.includes("powerpoint") ? "bg-orange-500" :
+                            (file.name.toLowerCase().endsWith(".pdf") || file.type.includes("pdf")) ? "bg-red-500" :
+                            (file.name.toLowerCase().endsWith(".docx") || file.name.toLowerCase().endsWith(".doc") || file.type.includes("word") || file.type.includes("document") || file.type.includes("wordprocessing")) ? "bg-blue-600" :
+                            (file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls") || file.name.toLowerCase().endsWith(".csv") || file.type.includes("sheet") || file.type.includes("excel") || file.type.includes("spreadsheet")) ? "bg-green-600" :
+                            (file.name.toLowerCase().endsWith(".pptx") || file.name.toLowerCase().endsWith(".ppt") || file.type.includes("presentation") || file.type.includes("powerpoint")) ? "bg-orange-500" :
                             "bg-gray-500"
                           )}>
                             <span className="text-white text-[10px] font-bold">
-                              {file.type.includes("pdf") ? "PDF" :
-                               file.type.includes("word") || file.type.includes("document") ? "DOC" :
-                               file.type.includes("sheet") || file.type.includes("excel") ? "XLS" :
-                               file.type.includes("presentation") || file.type.includes("powerpoint") ? "PPT" :
+                              {(file.name.toLowerCase().endsWith(".pdf") || file.type.includes("pdf")) ? "PDF" :
+                               (file.name.toLowerCase().endsWith(".docx") || file.name.toLowerCase().endsWith(".doc") || file.type.includes("word") || file.type.includes("document") || file.type.includes("wordprocessing")) ? "DOC" :
+                               (file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls") || file.name.toLowerCase().endsWith(".csv") || file.type.includes("sheet") || file.type.includes("excel") || file.type.includes("spreadsheet")) ? "XLS" :
+                               (file.name.toLowerCase().endsWith(".pptx") || file.name.toLowerCase().endsWith(".ppt") || file.type.includes("presentation") || file.type.includes("powerpoint")) ? "PPT" :
                                "FILE"}
                             </span>
                           </div>
@@ -2104,7 +2129,7 @@ export function ChatInterface({
                       {file.status === "processing" && <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />}
                       {file.status === "ready" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
                       {file.status === "error" && <X className="h-4 w-4 text-red-500" />}
-                      {getFileIcon(file.type)}
+                      {getFileIcon(file.type, file.name)}
                       <span className="max-w-[150px] truncate font-medium">{file.name}</span>
                       <span className="text-xs text-muted-foreground">({formatFileSize(file.size)})</span>
                       <Button
