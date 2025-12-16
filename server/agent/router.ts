@@ -34,12 +34,29 @@ const CONTENT_CREATION_KEYWORDS = [
 ];
 
 export function extractUrls(text: string): string[] {
+  // Remove content inside [ARCHIVO ADJUNTO] blocks to avoid extracting URLs from attached files
+  let textWithoutAttachments = text;
+  // Use [\s\S] instead of . with s flag for multiline matching
+  const attachmentPattern = /\[ARCHIVO ADJUNTO:[\s\S]*?\[FIN DEL ARCHIVO\]/g;
+  textWithoutAttachments = textWithoutAttachments.replace(attachmentPattern, '');
+  
   const urls: string[] = [];
-  const urlMatches = text.match(URL_REGEX);
+  const urlMatches = textWithoutAttachments.match(URL_REGEX);
   if (urlMatches) {
     urls.push(...urlMatches);
   }
   return Array.from(new Set(urls));
+}
+
+// Extract only the user's request from a message that may contain file content
+function extractUserRequest(text: string): string {
+  // If message has the [SOLICITUD DEL USUARIO] marker, extract only that part
+  const userRequestMatch = text.match(/\[SOLICITUD DEL USUARIO\]:\s*([\s\S]+)$/);
+  if (userRequestMatch) {
+    return userRequestMatch[1].trim();
+  }
+  // Otherwise return the full text (no attachments)
+  return text;
 }
 
 export function hasWebActionIntent(text: string): boolean {
@@ -53,10 +70,26 @@ export function hasContentCreationIntent(text: string): boolean {
 }
 
 export async function routeMessage(message: string): Promise<RouteResult> {
+  // Extract only the user's actual request (not file content) for routing decisions
+  const userRequest = extractUserRequest(message);
   const urls = extractUrls(message);
   const hasUrls = urls.length > 0;
-  const hasWebIntent = hasWebActionIntent(message);
-  const hasContentIntent = hasContentCreationIntent(message);
+  // Check intents only on the user's request, not on file content
+  const hasWebIntent = hasWebActionIntent(userRequest);
+  const hasContentIntent = hasContentCreationIntent(userRequest);
+  
+  // Check if message has file attachments - if so, likely a file processing request
+  const hasAttachments = message.includes("[ARCHIVO ADJUNTO:");
+  
+  // If there are file attachments and no explicit URLs in user's request, route to LLM
+  if (hasAttachments && !hasUrls) {
+    return {
+      decision: "llm",
+      confidence: 0.95,
+      urls: [],
+      reasoning: "File attachments detected - processing with LLM"
+    };
+  }
 
   if (!hasUrls && !hasWebIntent) {
     return {

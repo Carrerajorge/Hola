@@ -1073,11 +1073,11 @@ export function ChatInterface({
       
       const fileContents = currentFiles
         .filter(f => f.content && f.status === "ready")
-        .map(f => `Contenido del archivo "${f.name}":\n${f.content}`)
+        .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
         .join("\n\n");
       
       const messageWithFiles = fileContents 
-        ? `${userInput}\n\n${fileContents}`
+        ? `${fileContents}\n\n[SOLICITUD DEL USUARIO]: ${userInput}`
         : userInput;
 
       const chatHistory = [...messages, { ...userMsg, content: messageWithFiles }].map(m => ({
