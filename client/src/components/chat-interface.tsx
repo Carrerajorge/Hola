@@ -499,11 +499,24 @@ const parseDocumentBlocks = (content: string): { text: string; documents: Docume
   return { text: cleanText, documents };
 };
 
+interface ActiveGpt {
+  id: string;
+  name: string;
+  description: string | null;
+  systemPrompt: string;
+  temperature: string | null;
+  topP: string | null;
+  welcomeMessage: string | null;
+  conversationStarters: string[] | null;
+  avatar: string | null;
+}
+
 interface ChatInterfaceProps {
   messages: Message[];
   onSendMessage: (message: Message) => void;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  activeGpt?: ActiveGpt | null;
 }
 
 interface UploadedFile {
@@ -521,7 +534,8 @@ export function ChatInterface({
   messages, 
   onSendMessage, 
   isSidebarOpen = true, 
-  onToggleSidebar 
+  onToggleSidebar,
+  activeGpt
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
@@ -1138,7 +1152,13 @@ export function ChatInterface({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           messages: chatHistory,
-          images: imageDataUrls.length > 0 ? imageDataUrls : undefined
+          images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+          gptConfig: activeGpt ? {
+            id: activeGpt.id,
+            systemPrompt: activeGpt.systemPrompt,
+            temperature: parseFloat(activeGpt.temperature || "0.7"),
+            topP: parseFloat(activeGpt.topP || "1")
+          } : undefined
         }),
         signal: abortControllerRef.current.signal
       });
@@ -1615,7 +1635,34 @@ export function ChatInterface({
           {!hasMessages && (
             <div className="flex-1 flex flex-col items-center justify-center">
               <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
-                <p className="text-muted-foreground">¿En qué puedo ayudarte?</p>
+                {activeGpt ? (
+                  <>
+                    <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
+                      {activeGpt.avatar ? (
+                        <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
+                      ) : (
+                        <Bot className="h-8 w-8 text-muted-foreground" />
+                      )}
+                    </div>
+                    <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
+                    <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
+                    {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
+                        {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setInput(starter)}
+                            className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                          >
+                            {starter}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">¿En qué puedo ayudarte?</p>
+                )}
               </div>
             </div>
           )}
@@ -2256,7 +2303,11 @@ export function ChatInterface({
                 className="mb-8"
               >
                 <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
-                  <BotIcon className="h-10 w-10 text-primary-foreground" />
+                  {activeGpt?.avatar ? (
+                    <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
+                  ) : (
+                    <BotIcon className="h-10 w-10 text-primary-foreground" />
+                  )}
                 </div>
               </motion.div>
               <motion.h1 
@@ -2265,7 +2316,7 @@ export function ChatInterface({
                 transition={{ duration: 0.5, delay: 0.2 }}
                 className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
               >
-                ¿En qué puedo ayudarte?
+                {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
               </motion.h1>
               <motion.p 
                 initial={{ y: 20, opacity: 0 }}
@@ -2273,8 +2324,30 @@ export function ChatInterface({
                 transition={{ duration: 0.5, delay: 0.3 }}
                 className="text-muted-foreground text-center max-w-md text-base"
               >
-                Soy Sira GPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más.
+                {activeGpt 
+                  ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
+                  : "Soy Sira GPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                }
               </motion.p>
+              {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                <motion.div
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.5, delay: 0.4 }}
+                  className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
+                >
+                  {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setInput(starter)}
+                      className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                      data-testid={`button-starter-${idx}`}
+                    >
+                      {starter}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
             </div>
           )}
           

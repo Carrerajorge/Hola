@@ -1,6 +1,8 @@
 import { Sidebar } from "@/components/sidebar";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
+import { GptExplorer, Gpt } from "@/components/gpt-explorer";
+import { GptBuilder } from "@/components/gpt-builder";
 import { useState, useCallback, useMemo } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Menu } from "lucide-react";
@@ -14,6 +16,10 @@ export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
+  const [isGptExplorerOpen, setIsGptExplorerOpen] = useState(false);
+  const [isGptBuilderOpen, setIsGptBuilderOpen] = useState(false);
+  const [editingGpt, setEditingGpt] = useState<Gpt | null>(null);
+  const [activeGpt, setActiveGpt] = useState<Gpt | null>(null);
   
   const { 
     chats, 
@@ -53,6 +59,21 @@ export default function Home() {
     return "default-chat";
   }, [activeChat?.stableKey, newChatStableKey]);
 
+  const handleOpenGpts = () => {
+    setIsGptExplorerOpen(true);
+  };
+
+  const handleSelectGpt = (gpt: Gpt) => {
+    setActiveGpt(gpt);
+    handleNewChat();
+    toast.success(`Usando ${gpt.name}`);
+  };
+
+  const handleCreateGpt = () => {
+    setEditingGpt(null);
+    setIsGptBuilderOpen(true);
+  };
+
   return (
     <div className="flex h-screen w-full overflow-hidden liquid-bg-light relative">
       <div className="liquid-blob liquid-blob-1 opacity-30"></div>
@@ -72,6 +93,7 @@ export default function Home() {
           onEditChat={editChatTitle}
           onArchiveChat={archiveChat}
           onHideChat={hideChat}
+          onOpenGpts={handleOpenGpts}
         />
       </div>
 
@@ -103,6 +125,7 @@ export default function Home() {
               onEditChat={editChatTitle}
               onArchiveChat={archiveChat}
               onHideChat={hideChat}
+              onOpenGpts={handleOpenGpts}
             />
           </SheetContent>
         </Sheet>
@@ -116,10 +139,30 @@ export default function Home() {
             messages={activeChat?.messages || []}
             onSendMessage={activeChat ? (msg) => addMessage(activeChat.id, msg) : handleSendNewChatMessage}
             isSidebarOpen={isSidebarOpen} 
-            onToggleSidebar={() => setIsSidebarOpen(true)} 
+            onToggleSidebar={() => setIsSidebarOpen(true)}
+            activeGpt={activeGpt}
           />
         )}
       </main>
+
+      {/* GPT Explorer Modal */}
+      <GptExplorer
+        open={isGptExplorerOpen}
+        onOpenChange={setIsGptExplorerOpen}
+        onSelectGpt={handleSelectGpt}
+        onCreateGpt={handleCreateGpt}
+      />
+
+      {/* GPT Builder Modal */}
+      <GptBuilder
+        open={isGptBuilderOpen}
+        onOpenChange={setIsGptBuilderOpen}
+        editingGpt={editingGpt}
+        onSave={() => {
+          setIsGptBuilderOpen(false);
+          setEditingGpt(null);
+        }}
+      />
     </div>
   );
 }

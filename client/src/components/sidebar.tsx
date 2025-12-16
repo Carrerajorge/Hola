@@ -47,6 +47,7 @@ interface SidebarProps {
   onEditChat?: (id: string, newTitle: string) => void;
   onArchiveChat?: (id: string, e: React.MouseEvent) => void;
   onHideChat?: (id: string, e: React.MouseEvent) => void;
+  onOpenGpts?: () => void;
 }
 
 export function Sidebar({ 
@@ -60,7 +61,8 @@ export function Sidebar({
   onDeleteChat,
   onEditChat,
   onArchiveChat,
-  onHideChat
+  onHideChat,
+  onOpenGpts
 }: SidebarProps) {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -163,6 +165,7 @@ export function Sidebar({
         <Button 
           variant="ghost" 
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          onClick={onOpenGpts}
           data-testid="button-gpts"
         >
           <Bot className="h-4 w-4" />

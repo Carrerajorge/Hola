@@ -8,7 +8,11 @@ import {
   type DomainPolicy, type InsertDomainPolicy,
   type Chat, type InsertChat,
   type ChatMessage, type InsertChatMessage,
-  files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages
+  type Gpt, type InsertGpt,
+  type GptCategory, type InsertGptCategory,
+  type GptVersion, type InsertGptVersion,
+  files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages,
+  gpts, gptCategories, gptVersions
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -45,6 +49,22 @@ export interface IStorage {
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessages(chatId: string): Promise<ChatMessage[]>;
+  // GPT CRUD operations
+  createGpt(gpt: InsertGpt): Promise<Gpt>;
+  getGpt(id: string): Promise<Gpt | undefined>;
+  getGptBySlug(slug: string): Promise<Gpt | undefined>;
+  getGpts(filters?: { visibility?: string; categoryId?: string; creatorId?: string }): Promise<Gpt[]>;
+  getPopularGpts(limit?: number): Promise<Gpt[]>;
+  updateGpt(id: string, updates: Partial<InsertGpt>): Promise<Gpt | undefined>;
+  deleteGpt(id: string): Promise<void>;
+  incrementGptUsage(id: string): Promise<void>;
+  // GPT Category operations
+  createGptCategory(category: InsertGptCategory): Promise<GptCategory>;
+  getGptCategories(): Promise<GptCategory[]>;
+  // GPT Version operations
+  createGptVersion(version: InsertGptVersion): Promise<GptVersion>;
+  getGptVersions(gptId: string): Promise<GptVersion[]>;
+  getLatestGptVersion(gptId: string): Promise<GptVersion | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -211,6 +231,84 @@ export class MemStorage implements IStorage {
 
   async getChatMessages(chatId: string): Promise<ChatMessage[]> {
     return db.select().from(chatMessages).where(eq(chatMessages.chatId, chatId)).orderBy(chatMessages.createdAt);
+  }
+
+  // GPT operations
+  async createGpt(gpt: InsertGpt): Promise<Gpt> {
+    const [result] = await db.insert(gpts).values(gpt).returning();
+    return result;
+  }
+
+  async getGpt(id: string): Promise<Gpt | undefined> {
+    const [result] = await db.select().from(gpts).where(eq(gpts.id, id));
+    return result;
+  }
+
+  async getGptBySlug(slug: string): Promise<Gpt | undefined> {
+    const [result] = await db.select().from(gpts).where(eq(gpts.slug, slug));
+    return result;
+  }
+
+  async getGpts(filters?: { visibility?: string; categoryId?: string; creatorId?: string }): Promise<Gpt[]> {
+    let query = db.select().from(gpts);
+    if (filters?.visibility) {
+      query = query.where(eq(gpts.visibility, filters.visibility)) as typeof query;
+    }
+    if (filters?.categoryId) {
+      query = query.where(eq(gpts.categoryId, filters.categoryId)) as typeof query;
+    }
+    if (filters?.creatorId) {
+      query = query.where(eq(gpts.creatorId, filters.creatorId)) as typeof query;
+    }
+    return query.orderBy(desc(gpts.createdAt));
+  }
+
+  async getPopularGpts(limit: number = 10): Promise<Gpt[]> {
+    return db.select().from(gpts)
+      .where(eq(gpts.visibility, "public"))
+      .orderBy(desc(gpts.usageCount))
+      .limit(limit);
+  }
+
+  async updateGpt(id: string, updates: Partial<InsertGpt>): Promise<Gpt | undefined> {
+    const [result] = await db.update(gpts).set({ ...updates, updatedAt: new Date() }).where(eq(gpts.id, id)).returning();
+    return result;
+  }
+
+  async deleteGpt(id: string): Promise<void> {
+    await db.delete(gpts).where(eq(gpts.id, id));
+  }
+
+  async incrementGptUsage(id: string): Promise<void> {
+    await db.update(gpts).set({ usageCount: sql`${gpts.usageCount} + 1` }).where(eq(gpts.id, id));
+  }
+
+  // GPT Category operations
+  async createGptCategory(category: InsertGptCategory): Promise<GptCategory> {
+    const [result] = await db.insert(gptCategories).values(category).returning();
+    return result;
+  }
+
+  async getGptCategories(): Promise<GptCategory[]> {
+    return db.select().from(gptCategories).orderBy(gptCategories.sortOrder);
+  }
+
+  // GPT Version operations
+  async createGptVersion(version: InsertGptVersion): Promise<GptVersion> {
+    const [result] = await db.insert(gptVersions).values(version).returning();
+    return result;
+  }
+
+  async getGptVersions(gptId: string): Promise<GptVersion[]> {
+    return db.select().from(gptVersions).where(eq(gptVersions.gptId, gptId)).orderBy(desc(gptVersions.versionNumber));
+  }
+
+  async getLatestGptVersion(gptId: string): Promise<GptVersion | undefined> {
+    const [result] = await db.select().from(gptVersions)
+      .where(eq(gptVersions.gptId, gptId))
+      .orderBy(desc(gptVersions.versionNumber))
+      .limit(1);
+    return result;
   }
 }
 

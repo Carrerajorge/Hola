@@ -10,6 +10,13 @@ interface ChatMessage {
   content: string;
 }
 
+interface GptConfig {
+  id: string;
+  systemPrompt: string;
+  temperature: number;
+  topP: number;
+}
+
 interface ChatSource {
   fileName: string;
   content: string;
@@ -36,10 +43,32 @@ export async function handleChatRequest(
     conversationId?: string;
     images?: string[];
     onAgentProgress?: (update: ProgressUpdate) => void;
+    gptConfig?: GptConfig;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, images, onAgentProgress } = options;
+  const { useRag = true, conversationId, images, onAgentProgress, gptConfig } = options;
   const hasImages = images && images.length > 0;
+  
+  let validatedGptConfig = gptConfig;
+  if (gptConfig?.id) {
+    try {
+      const gpt = await storage.getGpt(gptConfig.id);
+      if (gpt) {
+        validatedGptConfig = {
+          id: gpt.id,
+          systemPrompt: gpt.systemPrompt,
+          temperature: parseFloat(gpt.temperature || "0.7"),
+          topP: parseFloat(gpt.topP || "1")
+        };
+        storage.incrementGptUsage(gpt.id).catch(console.error);
+      } else {
+        validatedGptConfig = undefined;
+      }
+    } catch (error) {
+      console.error("Error loading GPT config:", error);
+      validatedGptConfig = undefined;
+    }
+  }
   
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
   
@@ -170,9 +199,7 @@ export async function handleChatRequest(
     }
   }
 
-  const systemMessage: ChatMessage = {
-    role: "system",
-    content: `Eres Sira GPT, un asistente de IA avanzado con conexión a Internet. Puedes buscar información actualizada en la web. Responde de manera útil y profesional en el idioma del usuario. Si usas información de la web, cita las fuentes.
+  const defaultSystemContent = `Eres Sira GPT, un asistente de IA avanzado con conexión a Internet. Puedes buscar información actualizada en la web. Responde de manera útil y profesional en el idioma del usuario. Si usas información de la web, cita las fuentes.
 
 CAPACIDADES DE GENERACIÓN DE DOCUMENTOS:
 Puedes crear documentos Word, Excel y PowerPoint. Cuando el usuario solicite crear un documento, incluye en tu respuesta un bloque especial con el formato:
@@ -189,8 +216,19 @@ Para Word: usa markdown simple (## para títulos, - para listas).
 Para Excel: usa formato de tabla con | columna1 | columna2 | o CSV.
 Para PPT: usa ## para títulos de diapositivas y - para puntos.
 
-El usuario podrá descargar el documento generado directamente.${webSearchInfo}${contextInfo}`
+El usuario podrá descargar el documento generado directamente.`;
+
+  const systemContent = validatedGptConfig 
+    ? `${validatedGptConfig.systemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}`
+    : `${defaultSystemContent}${webSearchInfo}${contextInfo}`;
+
+  const systemMessage: ChatMessage = {
+    role: "system",
+    content: systemContent
   };
+
+  const temperature = validatedGptConfig?.temperature ?? 0.7;
+  const topP = validatedGptConfig?.topP ?? 1;
 
   let response;
   
@@ -218,11 +256,15 @@ El usuario podrá descargar el documento generado directamente.${webSearchInfo}$
       model: MODELS.VISION,
       messages: [systemMessage, ...messagesWithImages] as any,
       max_tokens: 4096,
+      temperature,
+      top_p: topP,
     });
   } else {
     response = await openai.chat.completions.create({
       model: MODELS.TEXT,
       messages: [systemMessage, ...messages],
+      temperature,
+      top_p: topP,
     });
   }
 

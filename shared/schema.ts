@@ -176,6 +176,7 @@ export type DomainPolicy = typeof domainPolicies.$inferSelect;
 export const chats = pgTable("chats", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   title: text("title").notNull().default("New Chat"),
+  gptId: varchar("gpt_id"),
   archived: text("archived").default("false"),
   hidden: text("hidden").default("false"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -210,3 +211,82 @@ export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({
 
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+
+// GPT Categories
+export const gptCategories = pgTable("gpt_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  description: text("description"),
+  icon: text("icon"),
+  sortOrder: integer("sort_order").default(0),
+});
+
+export const insertGptCategorySchema = createInsertSchema(gptCategories).omit({
+  id: true,
+});
+
+export type InsertGptCategory = z.infer<typeof insertGptCategorySchema>;
+export type GptCategory = typeof gptCategories.$inferSelect;
+
+// Custom GPTs
+export const gpts = pgTable("gpts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  description: text("description"),
+  avatar: text("avatar"),
+  categoryId: varchar("category_id").references(() => gptCategories.id),
+  creatorId: varchar("creator_id"),
+  visibility: text("visibility").default("private"), // private, public, unlisted
+  systemPrompt: text("system_prompt").notNull(),
+  temperature: text("temperature").default("0.7"),
+  topP: text("top_p").default("1"),
+  maxTokens: integer("max_tokens").default(4096),
+  welcomeMessage: text("welcome_message"),
+  capabilities: jsonb("capabilities"), // { webBrowsing: boolean, codeInterpreter: boolean, imageGeneration: boolean }
+  conversationStarters: jsonb("conversation_starters"), // array of starter prompts
+  usageCount: integer("usage_count").default(0),
+  version: integer("version").default(1),
+  isPublished: text("is_published").default("false"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("gpts_category_idx").on(table.categoryId),
+  index("gpts_creator_idx").on(table.creatorId),
+  index("gpts_visibility_idx").on(table.visibility),
+]);
+
+export const insertGptSchema = createInsertSchema(gpts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  usageCount: true,
+});
+
+export type InsertGpt = z.infer<typeof insertGptSchema>;
+export type Gpt = typeof gpts.$inferSelect;
+
+// GPT Versions for version control
+export const gptVersions = pgTable("gpt_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  gptId: varchar("gpt_id").notNull().references(() => gpts.id, { onDelete: "cascade" }),
+  versionNumber: integer("version_number").notNull(),
+  systemPrompt: text("system_prompt").notNull(),
+  temperature: text("temperature").default("0.7"),
+  topP: text("top_p").default("1"),
+  maxTokens: integer("max_tokens").default(4096),
+  changeNotes: text("change_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdBy: varchar("created_by"),
+}, (table) => [
+  index("gpt_versions_gpt_idx").on(table.gptId),
+]);
+
+export const insertGptVersionSchema = createInsertSchema(gptVersions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertGptVersion = z.infer<typeof insertGptVersionSchema>;
+export type GptVersion = typeof gptVersions.$inferSelect;
