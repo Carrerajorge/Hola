@@ -1334,13 +1334,61 @@ export function ChatInterface({
       {/* Main Content Area with Side Panel */}
       {(previewDocument || activeDocEditor) ? (
         <PanelGroup direction="horizontal" className="flex-1">
-          <Panel defaultSize={50} minSize={30}>
-            <div className="flex flex-col min-w-0 h-full">
-          {/* Messages Area - only show when there are messages */}
+          {/* Left Panel: Minimized Chat for Document Mode */}
+          <Panel defaultSize={activeDocEditor ? 25 : 50} minSize={20} maxSize={activeDocEditor ? 35 : 70}>
+            <div className="flex flex-col min-w-0 h-full bg-background/50">
+              {/* Compact Header for Document Mode */}
+              {activeDocEditor && (
+                <div className="p-3 border-b border-border/50 bg-muted/30">
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "w-8 h-8 rounded-lg flex items-center justify-center",
+                      activeDocEditor.type === "word" && "bg-blue-600",
+                      activeDocEditor.type === "excel" && "bg-green-600",
+                      activeDocEditor.type === "ppt" && "bg-orange-500"
+                    )}>
+                      <span className="text-white text-sm font-bold">
+                        {activeDocEditor.type === "word" ? "W" : activeDocEditor.type === "excel" ? "X" : "P"}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">Instrucciones</p>
+                      <p className="text-xs text-muted-foreground">El AI escribe directo al documento</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+          {/* Messages Area - Compact for document mode */}
           {hasMessages && (
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
+            <div className={cn(
+              "flex-1 overflow-y-auto space-y-3",
+              activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+            )}>
         
         {messages.map((msg, msgIndex) => (
+          // Compact message display for document mode
+          activeDocEditor ? (
+            <div
+              key={msg.id}
+              className={cn(
+                "flex gap-2 text-sm",
+                msg.role === "user" ? "justify-end" : "justify-start"
+              )}
+            >
+              {msg.role === "user" ? (
+                <div className="bg-primary/10 text-primary-foreground px-3 py-1.5 rounded-lg max-w-[90%] text-xs">
+                  <span className="text-muted-foreground mr-1">Tú:</span>
+                  <span className="text-foreground">{msg.content.length > 100 ? msg.content.substring(0, 100) + '...' : msg.content}</span>
+                </div>
+              ) : (
+                <div className="bg-green-500/10 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-lg max-w-[90%] text-xs flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  <span>{msg.content.length > 50 ? msg.content.substring(0, 50) + '...' : msg.content}</span>
+                </div>
+              )}
+            </div>
+          ) : (
           <div
             key={msg.id}
             className={cn(
@@ -1663,6 +1711,7 @@ export function ChatInterface({
               )}
             </div>
           </div>
+          )
         ))}
         
 
