@@ -17,6 +17,10 @@ interface GptConfig {
   topP: number;
 }
 
+interface DocumentMode {
+  type: "word" | "excel" | "ppt";
+}
+
 interface ChatSource {
   fileName: string;
   content: string;
@@ -44,9 +48,10 @@ export async function handleChatRequest(
     images?: string[];
     onAgentProgress?: (update: ProgressUpdate) => void;
     gptConfig?: GptConfig;
+    documentMode?: DocumentMode;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, images, onAgentProgress, gptConfig } = options;
+  const { useRag = true, conversationId, images, onAgentProgress, gptConfig, documentMode } = options;
   const hasImages = images && images.length > 0;
   
   let validatedGptConfig = gptConfig;
@@ -199,6 +204,32 @@ export async function handleChatRequest(
     }
   }
 
+  // Special system prompt for document mode - AI writes clean content only
+  const documentModePrompt = documentMode ? `Eres un asistente de escritura de documentos. El usuario está editando un documento ${documentMode.type === 'word' ? 'Word' : documentMode.type === 'excel' ? 'Excel' : 'PowerPoint'}.
+
+REGLAS ESTRICTAS:
+1. Escribe SOLO el contenido solicitado, sin explicaciones ni introducciones.
+2. NO incluyas frases como "Aquí está...", "A continuación...", "Claro, te escribo...", etc.
+3. NO hagas preguntas de seguimiento ni pidas confirmación.
+4. NO incluyas comentarios sobre lo que vas a hacer o has hecho.
+5. Escribe el contenido directamente como si estuvieras escribiendo en el documento.
+6. Usa formato apropiado: párrafos para Word, datos estructurados para Excel, puntos clave para PPT.
+7. Si el usuario pide una lista, escribe solo la lista.
+8. Si el usuario pide un párrafo, escribe solo el párrafo.
+9. Si el usuario pide editar algo, escribe solo el texto editado/corregido.
+10. El contenido se insertará directamente en el editor del usuario.
+
+EJEMPLOS:
+- Usuario: "escribe un párrafo sobre IA"
+- Correcto: "La inteligencia artificial es una rama de la informática que..."
+- Incorrecto: "Claro, aquí tienes un párrafo sobre IA: La inteligencia artificial..."
+
+- Usuario: "agrega 3 puntos sobre beneficios"
+- Correcto: "• Mejora la eficiencia operativa\n• Reduce costos a largo plazo\n• Automatiza tareas repetitivas"
+- Incorrecto: "Aquí tienes 3 puntos sobre los beneficios: • Mejora..."
+
+Escribe contenido limpio y directo.${contextInfo}` : null;
+
   const defaultSystemContent = `Eres Sira GPT, un asistente de IA avanzado con conexión a Internet. Puedes buscar información actualizada en la web. Responde de manera útil y profesional en el idioma del usuario. Si usas información de la web, cita las fuentes.
 
 CAPACIDADES DE GENERACIÓN DE DOCUMENTOS:
@@ -218,9 +249,12 @@ Para PPT: usa ## para títulos de diapositivas y - para puntos.
 
 El usuario podrá descargar el documento generado directamente.`;
 
-  const systemContent = validatedGptConfig 
-    ? `${validatedGptConfig.systemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}`
-    : `${defaultSystemContent}${webSearchInfo}${contextInfo}`;
+  // Use document mode prompt when in document editing mode
+  const systemContent = documentModePrompt 
+    ? documentModePrompt
+    : (validatedGptConfig 
+        ? `${validatedGptConfig.systemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}`
+        : `${defaultSystemContent}${webSearchInfo}${contextInfo}`);
 
   const systemMessage: ChatMessage = {
     role: "system",

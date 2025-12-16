@@ -1189,12 +1189,17 @@ export function ChatInterface({
         .filter(f => f.type.startsWith("image/") && f.dataUrl)
         .map(f => f.dataUrl as string);
 
+      // Determine if we're in document mode for special AI behavior
+      const isDocumentMode = !!activeDocEditorRef.current;
+      const documentType = activeDocEditorRef.current || null;
+      
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           messages: chatHistory,
           images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+          documentMode: isDocumentMode ? { type: documentType } : undefined,
           gptConfig: activeGpt ? {
             id: activeGpt.id,
             systemPrompt: activeGpt.systemPrompt,
