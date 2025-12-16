@@ -1397,14 +1397,14 @@ export function ChatInterface({
               )}
             >
               {msg.role === "user" ? (
-                <div className="bg-primary/10 text-primary-foreground px-3 py-1.5 rounded-lg max-w-[90%] text-xs">
-                  <span className="text-muted-foreground mr-1">Tú:</span>
-                  <span className="text-foreground">{msg.content.length > 100 ? msg.content.substring(0, 100) + '...' : msg.content}</span>
+                <div className="bg-primary/10 text-primary-foreground px-3 py-2 rounded-lg max-w-full text-sm">
+                  <span className="text-muted-foreground mr-1 font-medium">Instrucción:</span>
+                  <span className="text-foreground">{msg.content}</span>
                 </div>
               ) : (
                 <div className="bg-green-500/10 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-lg max-w-[90%] text-xs flex items-center gap-1">
                   <CheckCircle2 className="h-3 w-3" />
-                  <span>{msg.content.length > 50 ? msg.content.substring(0, 50) + '...' : msg.content}</span>
+                  <span>{msg.content}</span>
                 </div>
               )}
             </div>
