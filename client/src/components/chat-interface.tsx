@@ -1212,8 +1212,9 @@ export function ChatInterface({
       const responseSources = data.sources || [];
       let currentIndex = 0;
       
-      // Check if we should write to document instead of chat
-      const isDocumentMode = activeDocEditor && docInsertContentRef.current;
+      // Capture document mode state NOW (before streaming starts)
+      const shouldWriteToDoc = !!activeDocEditor;
+      console.log('[ChatInterface] Document mode:', shouldWriteToDoc, 'Insert ref available:', !!docInsertContentRef.current);
       
       streamIntervalRef.current = setInterval(() => {
         if (currentIndex < fullContent.length) {
@@ -1229,7 +1230,9 @@ export function ChatInterface({
           }
           
           // If document mode is active, write content to document instead of chat
-          if (isDocumentMode && docInsertContentRef.current) {
+          console.log('[ChatInterface] Streaming done. shouldWriteToDoc:', shouldWriteToDoc, 'ref:', !!docInsertContentRef.current);
+          if (shouldWriteToDoc && docInsertContentRef.current) {
+            console.log('[ChatInterface] Writing to document...');
             docInsertContentRef.current(fullContent);
             // Add a small assistant message to confirm
             const confirmMsg: Message = {

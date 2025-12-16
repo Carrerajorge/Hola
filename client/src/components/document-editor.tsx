@@ -155,6 +155,7 @@ export function DocumentEditor({
   useEffect(() => {
     if (editor && onInsertContent) {
       const insertContent = (text: string) => {
+        console.log('[DocumentEditor] Inserting AI content:', text.substring(0, 100) + '...');
         // Convert markdown-like content to HTML for better formatting
         const htmlContent = text
           .replace(/\n\n/g, '</p><p>')
@@ -166,6 +167,7 @@ export function DocumentEditor({
           .insertContent(`<p>${htmlContent}</p>`)
           .run();
       };
+      console.log('[DocumentEditor] Providing insert function to parent');
       onInsertContent(insertContent);
     }
   }, [editor, onInsertContent]);
