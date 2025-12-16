@@ -557,8 +557,7 @@ export function ChatInterface({
   const [editingSelectionText, setEditingSelectionText] = useState<string>("");
   const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
   const [selectedDocText, setSelectedDocText] = useState<string>("");
-  const [toolVisible, setToolVisible] = useState(true);
-  const [toolActive, setToolActive] = useState(false);
+  const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -2418,7 +2417,7 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => setInput("Genera un documento Word sobre: ")}
+                              onClick={() => { setSelectedDocTool("word"); setInput("Genera un documento Word sobre: "); }}
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
                                 <span className="text-white text-xs font-bold">W</span>
@@ -2428,7 +2427,7 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => setInput("Genera una hoja de cálculo Excel con: ")}
+                              onClick={() => { setSelectedDocTool("excel"); setInput("Genera una hoja de cálculo Excel con: "); }}
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
                                 <span className="text-white text-xs font-bold">X</span>
@@ -2438,7 +2437,7 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => setInput("Genera una presentación PowerPoint sobre: ")}
+                              onClick={() => { setSelectedDocTool("ppt"); setInput("Genera una presentación PowerPoint sobre: "); }}
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
                                 <span className="text-white text-xs font-bold">P</span>
@@ -2460,6 +2459,36 @@ export function ChatInterface({
                     </div>
                   </PopoverContent>
                 </Popover>
+                
+                {/* Selected Document Tool Logo */}
+                {selectedDocTool && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div 
+                          className={cn(
+                            "flex items-center justify-center w-8 h-8 rounded-lg shrink-0 cursor-pointer transition-all hover:scale-110",
+                            selectedDocTool === "word" && "bg-blue-600",
+                            selectedDocTool === "excel" && "bg-green-600",
+                            selectedDocTool === "ppt" && "bg-orange-500"
+                          )}
+                          onClick={() => setSelectedDocTool(null)}
+                          data-testid="button-selected-doc-tool"
+                        >
+                          <span className="text-white text-sm font-bold">
+                            {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "X" : "P"}
+                          </span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        <p className="text-xs">
+                          {selectedDocTool === "word" ? "Documento Word" : selectedDocTool === "excel" ? "Hoja Excel" : "Presentación PPT"}
+                          <span className="text-muted-foreground ml-1">(clic para quitar)</span>
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
                 
                 <Textarea
                   ref={textareaRef}
@@ -2565,30 +2594,6 @@ export function ChatInterface({
                 )}
               </div>
             </div>
-            {/* Tool Button */}
-            {toolVisible && (
-              <div className="flex justify-center mt-3">
-                <div 
-                  className={cn(
-                    "inline-flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer select-none transition-all duration-200",
-                    toolActive 
-                      ? "bg-green-500 text-white" 
-                      : "bg-blue-500 text-white hover:bg-blue-600"
-                  )}
-                  onClick={() => {
-                    setToolActive(true);
-                  }}
-                  onMouseOver={() => {
-                    setToolVisible(false);
-                  }}
-                  data-testid="button-tool"
-                >
-                  <span className="text-lg">🔧</span>
-                  <span className="font-medium">{toolActive ? "Activo ✔️" : "Herramienta"}</span>
-                </div>
-              </div>
-            )}
-            
             <div className="text-center text-xs text-muted-foreground mt-3">
               Sira GPT can make mistakes. Check important info.
             </div>
