@@ -559,7 +559,36 @@ export function ChatInterface({
   const [selectedDocText, setSelectedDocText] = useState<string>("");
   const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | null>(null);
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
+  const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
+  
+  // Function to open blank document editor
+  const openBlankDocEditor = (type: "word" | "excel" | "ppt") => {
+    const titles = {
+      word: "Nuevo Documento Word",
+      excel: "Nueva Hoja de Cálculo",
+      ppt: "Nueva Presentación"
+    };
+    const templates = {
+      word: "<p>Comienza a escribir tu documento aquí...</p>",
+      excel: "<table><thead><tr><th>A</th><th>B</th><th>C</th><th>D</th></tr></thead><tbody><tr><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td></tr></tbody></table>",
+      ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>"
+    };
+    
+    setSelectedDocTool(type);
+    setActiveDocEditor({
+      type,
+      title: titles[type],
+      content: templates[type]
+    });
+    setEditedDocumentContent(templates[type]);
+  };
+  
+  const closeDocEditor = () => {
+    setActiveDocEditor(null);
+    setSelectedDocTool(null);
+    setEditedDocumentContent("");
+  };
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1252,7 +1281,7 @@ export function ChatInterface({
       </header>
 
       {/* Main Content Area with Side Panel */}
-      {previewDocument ? (
+      {(previewDocument || activeDocEditor) ? (
         <PanelGroup direction="horizontal" className="flex-1">
           <Panel defaultSize={50} minSize={30}>
             <div className="flex flex-col min-w-0 h-full">
@@ -1977,12 +2006,13 @@ export function ChatInterface({
           <Panel defaultSize={50} minSize={25}>
             <div className="h-full animate-in slide-in-from-right duration-300">
               <DocumentEditor
-                title={previewDocument.title}
+                key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
+                title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
                 content={editedDocumentContent}
                 onChange={setEditedDocumentContent}
-                onClose={handleCloseDocumentPreview}
-                onDownload={() => handleDownloadDocument(previewDocument)}
-                documentType={previewDocument.type}
+                onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
+                onDownload={previewDocument ? () => handleDownloadDocument(previewDocument) : () => {}}
+                documentType={activeDocEditor ? activeDocEditor.type : (previewDocument?.type || "word")}
                 onTextSelect={handleDocTextSelect}
                 onTextDeselect={handleDocTextDeselect}
               />
@@ -2422,7 +2452,7 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => { setSelectedDocTool("word"); setInput("Genera un documento Word sobre: "); }}
+                              onClick={() => openBlankDocEditor("word")}
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
                                 <span className="text-white text-xs font-bold">W</span>
@@ -2432,7 +2462,7 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => { setSelectedDocTool("excel"); setInput("Genera una hoja de cálculo Excel con: "); }}
+                              onClick={() => openBlankDocEditor("excel")}
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
                                 <span className="text-white text-xs font-bold">X</span>
@@ -2442,7 +2472,7 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => { setSelectedDocTool("ppt"); setInput("Genera una presentación PowerPoint sobre: "); }}
+                              onClick={() => openBlankDocEditor("ppt")}
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
                                 <span className="text-white text-xs font-bold">P</span>
