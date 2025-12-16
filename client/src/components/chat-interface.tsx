@@ -1533,7 +1533,7 @@ export function ChatInterface({
         )}
 
         {/* Thinking/Responding State */}
-        {aiState !== "idle" && agent.state.status === "idle" && (
+        {aiState !== "idle" && agent.state.status !== "running" && (
           <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
             <div className="flex flex-col gap-2 items-start">
               {aiState === "thinking" && (
