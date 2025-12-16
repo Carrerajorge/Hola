@@ -1858,24 +1858,16 @@ export function ChatInterface({
                   >
                     <Square className="h-5 w-5 fill-current" />
                   </Button>
-                ) : (() => {
-                  const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
-                  const canSend = (input.trim() || uploadedFiles.length > 0) && !filesStillLoading;
-                  return (
-                    <Button 
-                      onClick={handleSubmit}
-                      disabled={!canSend}
-                      size="icon" 
-                      className={cn(
-                        "h-9 w-9 rounded-full transition-all duration-300",
-                        canSend ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
-                      )}
-                      data-testid="button-send-message"
-                    >
-                      <ArrowUp className="h-5 w-5" />
-                    </Button>
-                  );
-                })()}
+                ) : (
+                  <Button 
+                    onClick={handleSubmit}
+                    size="icon" 
+                    className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn"
+                    data-testid="button-send-message"
+                  >
+                    <ArrowUp className="h-5 w-5" />
+                  </Button>
+                )}
               </div>
               </div>
             </div>
@@ -2249,24 +2241,16 @@ export function ChatInterface({
                     >
                       <Square className="h-5 w-5 fill-current" />
                     </Button>
-                  ) : (() => {
-                    const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
-                    const canSend = (input.trim() || uploadedFiles.length > 0) && !filesStillLoading;
-                    return (
-                      <Button 
-                        onClick={handleSubmit}
-                        disabled={!canSend}
-                        size="icon" 
-                        className={cn(
-                          "h-9 w-9 rounded-full transition-all duration-300",
-                          canSend ? "liquid-btn" : "bg-muted/50 text-muted-foreground"
-                        )}
-                        data-testid="button-send-message"
-                      >
-                        <ArrowUp className="h-5 w-5" />
-                      </Button>
-                    );
-                  })()}
+                  ) : (
+                    <Button 
+                      onClick={handleSubmit}
+                      size="icon" 
+                      className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn"
+                      data-testid="button-send-message"
+                    >
+                      <ArrowUp className="h-5 w-5" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
