@@ -560,8 +560,15 @@ export function ChatInterface({
   const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | null>(null);
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
+  const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string) => void) | null>(null);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    activeDocEditorRef.current = activeDocEditor;
+    console.log('[ChatInterface] activeDocEditor changed:', !!activeDocEditor);
+  }, [activeDocEditor]);
   
   // Function to open blank document editor
   const openBlankDocEditor = (type: "word" | "excel" | "ppt") => {
@@ -1212,8 +1219,8 @@ export function ChatInterface({
       const responseSources = data.sources || [];
       let currentIndex = 0;
       
-      // Capture document mode state NOW (before streaming starts)
-      const shouldWriteToDoc = !!activeDocEditor;
+      // Capture document mode state NOW using ref (avoids closure issues)
+      const shouldWriteToDoc = !!activeDocEditorRef.current;
       console.log('[ChatInterface] Document mode:', shouldWriteToDoc, 'Insert ref available:', !!docInsertContentRef.current);
       
       streamIntervalRef.current = setInterval(() => {
