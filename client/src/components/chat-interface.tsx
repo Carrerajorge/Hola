@@ -561,6 +561,7 @@ export function ChatInterface({
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
+  const docInsertContentRef = useRef<((content: string) => void) | null>(null);
   
   // Function to open blank document editor
   const openBlankDocEditor = (type: "word" | "excel" | "ppt") => {
@@ -588,6 +589,7 @@ export function ChatInterface({
     setActiveDocEditor(null);
     setSelectedDocTool(null);
     setEditedDocumentContent("");
+    docInsertContentRef.current = null;
   };
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -1210,6 +1212,9 @@ export function ChatInterface({
       const responseSources = data.sources || [];
       let currentIndex = 0;
       
+      // Check if we should write to document instead of chat
+      const isDocumentMode = activeDocEditor && docInsertContentRef.current;
+      
       streamIntervalRef.current = setInterval(() => {
         if (currentIndex < fullContent.length) {
           const chunkSize = Math.floor(Math.random() * 3) + 1;
@@ -1222,14 +1227,29 @@ export function ChatInterface({
             clearInterval(streamIntervalRef.current);
             streamIntervalRef.current = null;
           }
-          const aiMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: fullContent,
-            timestamp: new Date(),
-            sources: responseSources.length > 0 ? responseSources : undefined,
-          };
-          onSendMessage(aiMsg);
+          
+          // If document mode is active, write content to document instead of chat
+          if (isDocumentMode && docInsertContentRef.current) {
+            docInsertContentRef.current(fullContent);
+            // Add a small assistant message to confirm
+            const confirmMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: "✓ Contenido agregado al documento.",
+              timestamp: new Date(),
+            };
+            onSendMessage(confirmMsg);
+          } else {
+            const aiMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: fullContent,
+              timestamp: new Date(),
+              sources: responseSources.length > 0 ? responseSources : undefined,
+            };
+            onSendMessage(aiMsg);
+          }
+          
           streamingContentRef.current = "";
           setStreamingContent("");
           setAiState("idle");
@@ -2049,6 +2069,7 @@ export function ChatInterface({
                 documentType={activeDocEditor ? activeDocEditor.type : (previewDocument?.type || "word")}
                 onTextSelect={handleDocTextSelect}
                 onTextDeselect={handleDocTextDeselect}
+                onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
               />
             </div>
           </Panel>

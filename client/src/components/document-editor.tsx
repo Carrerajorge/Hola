@@ -44,6 +44,7 @@ interface DocumentEditorProps {
   documentType: 'word' | 'excel' | 'ppt';
   onTextSelect?: (text: string, applyRewrite: (newText: string) => void) => void;
   onTextDeselect?: () => void;
+  onInsertContent?: (insertFn: (content: string) => void) => void;
 }
 
 const fontFamilies = [
@@ -65,6 +66,7 @@ export function DocumentEditor({
   documentType,
   onTextSelect,
   onTextDeselect,
+  onInsertContent,
 }: DocumentEditorProps) {
   const savedRangeRef = useRef<Range | null>(null);
 
@@ -148,6 +150,25 @@ export function DocumentEditor({
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [handleTextSelection]);
+
+  // Provide insert function to parent for AI content insertion
+  useEffect(() => {
+    if (editor && onInsertContent) {
+      const insertContent = (text: string) => {
+        // Convert markdown-like content to HTML for better formatting
+        const htmlContent = text
+          .replace(/\n\n/g, '</p><p>')
+          .replace(/\n/g, '<br/>');
+        
+        // Move cursor to end and insert
+        editor.chain()
+          .focus('end')
+          .insertContent(`<p>${htmlContent}</p>`)
+          .run();
+      };
+      onInsertContent(insertContent);
+    }
+  }, [editor, onInsertContent]);
 
   if (!editor) return null;
 
