@@ -576,10 +576,19 @@ export function ChatInterface({
       const partialMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: currentContent + "\n\n*[Respuesta detenida]*",
+        content: currentContent + "\n\n*[Respuesta detenida por el usuario]*",
         timestamp: new Date(),
       };
       onSendMessage(partialMsg);
+    } else {
+      // If stopped during "thinking" phase (no content yet), show a stopped message
+      const stoppedMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "*[Solicitud cancelada por el usuario]*",
+        timestamp: new Date(),
+      };
+      onSendMessage(stoppedMsg);
     }
     
     // Reset states
