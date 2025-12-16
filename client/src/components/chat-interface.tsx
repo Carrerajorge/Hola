@@ -2390,10 +2390,6 @@ export function ChatInterface({
                         </Button>
                       </label>
                       <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
-                        <Search className="h-4 w-4" />
-                        Buscar en Google
-                      </Button>
-                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
                         <Globe className="h-4 w-4" />
                         Navegar en la web
                       </Button>
