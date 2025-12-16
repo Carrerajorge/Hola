@@ -74,6 +74,6 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   viewport: { width: 1280, height: 720 },
   timeout: 30000,
   allowedDomains: [],
-  maxDownloadSize: 50 * 1024 * 1024,
+  maxDownloadSize: 100 * 1024 * 1024,
   enableNetworkCapture: true
 };

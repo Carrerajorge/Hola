@@ -39,7 +39,7 @@ const DEFAULT_CONFIG: GuardrailsConfig = {
   enablePIIRedaction: true,
   enableAuditLog: true,
   enableDownloadControls: true,
-  maxDownloadSizeMB: 50,
+  maxDownloadSizeMB: 100,
   allowedDownloadTypes: [
     "application/pdf",
     "text/plain",
