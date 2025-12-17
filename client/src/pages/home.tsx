@@ -3,7 +3,7 @@ import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { GptExplorer, Gpt } from "@/components/gpt-explorer";
 import { GptBuilder } from "@/components/gpt-builder";
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useLocation } from "wouter";
 import { Menu } from "lucide-react";
@@ -61,11 +61,27 @@ export default function Home() {
     setNewChatStableKey(newKey);
   };
 
+  // Store the pending chat ID during new chat creation
+  const pendingChatIdRef = useRef<string | null>(null);
+  
   const handleSendNewChatMessage = useCallback((message: Message) => {
-    const { pendingId } = createChat();
+    const { pendingId, stableKey } = createChat();
+    pendingChatIdRef.current = pendingId;
     setIsNewChatMode(false);
+    setNewChatStableKey(stableKey); // Keep the stable key from the created chat
     addMessage(pendingId, message);
   }, [createChat, addMessage]);
+  
+  // Stable message sender that uses the correct chat ID
+  const handleSendMessage = useCallback((message: Message) => {
+    const targetChatId = activeChat?.id || pendingChatIdRef.current;
+    if (targetChatId) {
+      addMessage(targetChatId, message);
+    } else {
+      // Fallback: create new chat
+      handleSendNewChatMessage(message);
+    }
+  }, [activeChat?.id, addMessage, handleSendNewChatMessage]);
 
   const handleSelectChat = (id: string) => {
     setIsNewChatMode(false);
@@ -157,7 +173,7 @@ export default function Home() {
           <ChatInterface 
             key={chatInterfaceKey} 
             messages={activeChat?.messages || []}
-            onSendMessage={activeChat ? (msg) => addMessage(activeChat.id, msg) : handleSendNewChatMessage}
+            onSendMessage={handleSendMessage}
             isSidebarOpen={isSidebarOpen} 
             onToggleSidebar={() => setIsSidebarOpen(true)}
             activeGpt={activeGpt}

@@ -180,23 +180,30 @@ export function useChats() {
     const isPending = resolvedChatId.startsWith(PENDING_CHAT_PREFIX);
     const isCreatingChat = chatCreationInProgress.has(chatId) || chatCreationInProgress.has(resolvedChatId);
     
+    console.log('[useChats] addMessage called:', { chatId, resolvedChatId, role: message.role, content: message.content?.substring(0, 30) });
+    
     const title = message.role === "user" && message.content
       ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
       : "Nuevo Chat";
 
-    setChats(prev => prev.map(chat => {
-      const matchId = chat.id === chatId || chat.id === resolvedChatId;
-      if (matchId) {
-        const isFirstMessage = chat.messages.length === 0;
-        return {
-          ...chat,
-          messages: [...chat.messages, message],
-          title: isFirstMessage && message.role === "user" ? title : chat.title,
-          timestamp: Date.now()
-        };
-      }
-      return chat;
-    }));
+    setChats(prev => {
+      const updated = prev.map(chat => {
+        const matchId = chat.id === chatId || chat.id === resolvedChatId;
+        if (matchId) {
+          const isFirstMessage = chat.messages.length === 0;
+          console.log('[useChats] Found matching chat:', chat.id, 'adding message, current count:', chat.messages.length);
+          return {
+            ...chat,
+            messages: [...chat.messages, message],
+            title: isFirstMessage && message.role === "user" ? title : chat.title,
+            timestamp: Date.now()
+          };
+        }
+        return chat;
+      });
+      console.log('[useChats] Updated chats:', updated.map(c => ({ id: c.id, msgCount: c.messages.length })));
+      return updated;
+    });
 
     if (isPending && message.role === "user" && !isCreatingChat) {
       chatCreationInProgress.add(chatId);
