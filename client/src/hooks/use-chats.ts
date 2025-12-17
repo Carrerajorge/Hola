@@ -226,9 +226,16 @@ export function useChats() {
           setActiveChatId(realChatId);
 
           await flushPendingMessages(chatId, realChatId);
+        } else {
+          // If server creation fails (e.g., 401), keep using local-only chat
+          // Clear the pending queue to prevent messages from being lost
+          console.log("Server chat creation failed (likely not authenticated), using local-only mode");
+          pendingMessageQueue.delete(chatId);
         }
       } catch (error) {
         console.error("Error creating chat on first message:", error);
+        // Clear the pending queue on error to prevent messages from being lost
+        pendingMessageQueue.delete(chatId);
       } finally {
         chatCreationInProgress.delete(chatId);
       }
