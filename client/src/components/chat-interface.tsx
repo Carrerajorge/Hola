@@ -1305,7 +1305,7 @@ export function ChatInterface({
 
       // Determine if we're in document mode for special AI behavior
       const isDocumentMode = !!activeDocEditorRef.current;
-      const documentType = activeDocEditorRef.current || null;
+      const documentType = activeDocEditorRef.current?.type || null;
       
       const response = await fetch("/api/chat", {
         method: "POST",
