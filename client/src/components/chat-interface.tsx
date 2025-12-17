@@ -60,6 +60,7 @@ import { VirtualComputer } from "@/components/virtual-computer";
 import { DocumentEditor } from "@/components/document-editor";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 import { ETLDialog } from "@/components/etl-dialog";
+import { FigmaConnector } from "@/components/figma-connector";
 import { Database } from "lucide-react";
 
 const processLatex = (content: string): string => {
@@ -587,6 +588,7 @@ export function ChatInterface({
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isETLDialogOpen, setIsETLDialogOpen] = useState(false);
+  const [isFigmaConnectorOpen, setIsFigmaConnectorOpen] = useState(false);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
@@ -2916,9 +2918,14 @@ export function ChatInterface({
                         <Bot className="h-4 w-4" />
                         Agente
                       </Button>
-                      <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+                      <Button 
+                        variant="ghost" 
+                        className="justify-start gap-2 text-sm h-9"
+                        onClick={() => { setIsFigmaConnectorOpen(true); onCloseSidebar?.(); }}
+                        data-testid="button-mcp-connectors"
+                      >
                         <Plug className="h-4 w-4" />
-                        Connectors MPC
+                        Figma MCP
                       </Button>
                     </div>
                   </PopoverContent>
@@ -3083,6 +3090,20 @@ export function ChatInterface({
             id: `etl-${Date.now()}`,
             role: "assistant",
             content: `ETL Agent completed. ${summary}`,
+            timestamp: new Date()
+          });
+        }}
+      />
+
+      <FigmaConnector
+        open={isFigmaConnectorOpen}
+        onClose={() => setIsFigmaConnectorOpen(false)}
+        onCodeGenerated={(code, type) => {
+          const codeBlock = `\`\`\`${type}\n${code}\n\`\`\``;
+          onSendMessage({
+            id: `figma-${Date.now()}`,
+            role: "assistant",
+            content: `Código generado desde Figma:\n\n${codeBlock}`,
             timestamp: new Date()
           });
         }}

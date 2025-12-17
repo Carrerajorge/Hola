@@ -135,3 +135,35 @@ The ETL agent returns a ZIP file containing two Excel workbooks:
 - `ETLDialog` component (`client/src/components/etl-dialog.tsx`)
 - Accessible via + menu → "ETL Datos Económicos"
 - Results appear in chat transcript after download
+
+## Figma MCP Integration
+
+### Figma Connector (`server/services/figmaService.ts`)
+The application includes a Figma MCP (Model Context Protocol) integration for extracting designs and generating code:
+
+**Features:**
+- **Design Token Extraction**: Extract colors, typography, and spacing from Figma files
+- **Code Generation**: Generate React components and CSS from Figma designs
+- **File Exploration**: Browse Figma files and nodes via the API
+
+**API Endpoints:**
+- `POST /api/figma/connect` - Connect with Figma Personal Access Token
+- `GET /api/figma/status` - Check connection status
+- `POST /api/figma/disconnect` - Disconnect from Figma
+- `GET /api/figma/file/:fileKey` - Get Figma file data
+- `GET /api/figma/file/:fileKey/tokens` - Extract design tokens
+- `POST /api/figma/code` - Generate React/CSS code from design
+- `POST /api/figma/parse-url` - Parse Figma URL to extract file key and node ID
+- `GET /api/figma/images/:fileKey` - Get rendered images of nodes
+
+**Frontend Integration:**
+- `FigmaConnector` component (`client/src/components/figma-connector.tsx`)
+- Accessible via + menu → "Figma MCP"
+- Three tabs: Connect, Design (URL input), Code (generated output)
+
+**Usage:**
+1. Generate a Personal Access Token from Figma Settings
+2. Connect using the token in the connector modal
+3. Paste a Figma URL (file or specific node)
+4. Extract design tokens or generate React/CSS code
+5. Insert generated code into chat or copy to clipboard
