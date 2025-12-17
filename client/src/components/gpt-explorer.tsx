@@ -140,7 +140,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[99vw] max-w-[99vw] h-[99vh] p-0 gap-0 overflow-hidden" data-testid="gpt-explorer-dialog">
+      <DialogContent className="w-[95vw] max-w-[95vw] h-[95vh] p-0 gap-0 overflow-hidden" data-testid="gpt-explorer-dialog">
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between px-6 py-4 border-b">
             <div className="flex items-center gap-4">
