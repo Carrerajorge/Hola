@@ -50,21 +50,38 @@ async function buildAll() {
     entryPoints: ["server/index.ts"],
     platform: "node",
     bundle: true,
-    format: "cjs",
-    outfile: "dist/index.cjs",
+    format: "esm",
+    outfile: "dist/index.mjs",
     define: {
       "process.env.NODE_ENV": '"production"',
-      "import.meta.url": "importMetaUrl",
     },
     banner: {
       js: `
-const importMetaUrl = require('url').pathToFileURL(__filename).href;
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+const require = createRequire(import.meta.url);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
       `.trim(),
     },
     minify: true,
     external: externals,
     logLevel: "info",
   });
+
+  // Create a minimal CJS entry point that loads the ESM bundle
+  console.log("creating start wrapper...");
+  const startWrapper = `#!/usr/bin/env node
+"use strict";
+const { pathToFileURL } = require("url");
+const { join } = require("path");
+import(pathToFileURL(join(__dirname, "index.mjs")).href).catch(err => {
+  console.error("Failed to start application:", err);
+  process.exit(1);
+});
+`;
+  await writeFile("dist/index.cjs", startWrapper, "utf-8");
 }
 
 buildAll().catch((err) => {
