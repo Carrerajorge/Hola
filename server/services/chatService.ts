@@ -221,14 +221,34 @@ REGLAS DE ESCRITURA DE DOCUMENTOS:
 
 Escribe contenido limpio y directo.`;
 
+  const excelChartInstructions = `
+INSTRUCCIONES PARA GRÁFICOS EN EXCEL:
+Cuando el usuario pida un gráfico de barras o datos visuales, genera los datos en formato de tabla CSV.
+Usa caracteres de barra (█) para crear una representación visual del gráfico.
+
+Ejemplo de gráfico de barras con datos del 2020 al 2025:
+Año,Valor,Gráfico
+2020,45,█████████
+2021,62,████████████
+2022,78,████████████████
+2023,85,█████████████████
+2024,92,██████████████████
+2025,98,████████████████████
+
+Las barras deben ser proporcionales al valor máximo.
+Para valores negativos, usa caracteres vacíos o el símbolo ○.
+Siempre incluye una columna con los valores numéricos reales.
+No uses formato markdown ni bloques de código, solo datos CSV separados por comas.
+`;
+
   const documentModePrompt = documentMode ? (
     validatedGptConfig
       ? `${validatedGptConfig.systemPrompt}
 
 Estás ayudando al usuario a crear un documento ${documentMode.type === 'word' ? 'Word' : documentMode.type === 'excel' ? 'Excel' : 'PowerPoint'}.
-${documentModeInstructions}${contextInfo}`
+${documentModeInstructions}${documentMode.type === 'excel' ? excelChartInstructions : ''}${contextInfo}`
       : `Eres un asistente de escritura de documentos. El usuario está editando un documento ${documentMode.type === 'word' ? 'Word' : documentMode.type === 'excel' ? 'Excel' : 'PowerPoint'}.
-${documentModeInstructions}${contextInfo}`
+${documentModeInstructions}${documentMode.type === 'excel' ? excelChartInstructions : ''}${contextInfo}`
   ) : null;
 
   const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.
