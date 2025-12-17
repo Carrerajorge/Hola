@@ -217,7 +217,7 @@ export async function registerRoutes(
       });
 
       if (result.success && result.workbookBuffer) {
-        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
         res.send(result.workbookBuffer);
       } else {

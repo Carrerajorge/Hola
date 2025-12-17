@@ -99,14 +99,25 @@ The application includes a production-ready ETL agent for downloading and proces
 **Normalized Schema:**
 All data is normalized to a standard long schema: `Date, Country, Indicator, Value, Unit, Frequency, Source_ID`
 
-**7-Sheet Excel Workbook Structure:**
-- `00_README`: Documentation and data dictionary
-- `01_SOURCES`: Full source metadata with API endpoints and fetch timestamps
-- `02_RAW`: Original data as fetched from APIs
-- `03_CLEAN`: Deduplicated and normalized data
-- `04_MODEL`: Calculated metrics (YoY changes, growth rates, averages)
-- `05_DASHBOARD`: Summary statistics and key figures
-- `06_AUDIT`: Data quality test results with PASS/FAIL status
+**Output Format: ZIP Bundle**
+The ETL agent returns a ZIP file containing two Excel workbooks:
+
+1. **ETL_Datos_Completos.xlsx** - Complete data workbook with 7 sheets:
+   - `00_README`: Documentation and data dictionary
+   - `01_SOURCES`: Full source metadata with API endpoints and fetch timestamps
+   - `02_RAW`: Original data as fetched from APIs
+   - `03_CLEAN`: Deduplicated and normalized data
+   - `04_MODEL`: Calculated metrics (YoY changes, growth rates, averages)
+   - `05_DASHBOARD`: Summary statistics and key figures
+   - `06_AUDIT`: Data quality test results with PASS/FAIL status
+
+2. **ETL_Grafico_Dashboard.xlsx** - Native Excel chart workbook:
+   - Column chart visualization of economic data by country
+   - Native Excel chart objects (not images)
+
+3. **LEEME.txt** - Documentation explaining the bundle contents
+
+*Note: Two files are delivered due to technical limitations with embedding native Excel charts in multi-sheet workbooks using open-source libraries.*
 
 **Audit Engine (6 Test Categories):**
 - Coverage: ≥80% of expected date range

@@ -4,7 +4,7 @@ export * from './excelBuilder';
 
 import { ETLSpec, createDefaultSpec, DEFAULT_INDICATORS, COUNTRY_CODES } from './types';
 import { runETLPipeline, ETLPipelineResult } from './pipeline';
-import { buildExcelWorkbook } from './excelBuilder';
+import { buildExcelWorkbookBundle } from './excelBuilder';
 
 export interface ETLAgentRequest {
   countries: string[];
@@ -82,9 +82,9 @@ export async function runETLAgent(request: ETLAgentRequest): Promise<ETLAgentRes
       };
     }
 
-    const workbookBuffer = await buildExcelWorkbook(result.workbook);
+    const workbookBuffer = await buildExcelWorkbookBundle(result.workbook);
     const timestamp = new Date().toISOString().split('T')[0];
-    const filename = `ETL_Data_${validCountries.join('_')}_${timestamp}.xlsx`;
+    const filename = `ETL_Data_${validCountries.join('_')}_${timestamp}.zip`;
 
     console.log('[ETL Agent] Workbook generated:', filename, 'Size:', workbookBuffer.length, 'bytes');
 

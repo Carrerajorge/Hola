@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 // @ts-ignore - xlsx-chart doesn't have type definitions
 import XLSXChart from 'xlsx-chart';
+import JSZip from 'jszip';
 import { 
   WorkbookSheets, 
   NormalizedRecord, 
@@ -10,56 +11,42 @@ import {
 } from './types';
 
 export async function buildExcelWorkbook(sheets: WorkbookSheets): Promise<Buffer> {
-  // Step 1: Generate chart workbook with xlsx-chart (it creates native Excel charts)
-  const chartBuffer = await generateChartWorkbook(sheets.clean);
-  
-  // Step 2: Load the chart workbook and add our data sheets
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(chartBuffer);
-  
-  workbook.creator = 'Sira GPT ETL Agent';
-  workbook.created = new Date();
-  
-  // Rename the chart sheet to Dashboard
-  const chartSheet = workbook.worksheets[0];
-  if (chartSheet) {
-    chartSheet.name = '05_DASHBOARD';
-  }
-
-  // Add all data sheets (these will be added after the chart sheet)
-  buildReadmeSheet(workbook, sheets.readme);
-  buildSourcesSheet(workbook, sheets.sources);
-  buildRawSheet(workbook, sheets.raw);
-  buildCleanSheet(workbook, sheets.clean);
-  buildModelSheet(workbook, sheets.model, sheets.clean);
-  buildAuditSheet(workbook, sheets.audit);
-  
-  // Reorder sheets: move data sheets before Dashboard for proper ordering
-  reorderSheets(workbook);
-
-  const buffer = await workbook.xlsx.writeBuffer();
-  return Buffer.from(buffer);
+  return generateDataWorkbook(sheets);
 }
 
-function reorderSheets(workbook: ExcelJS.Workbook): void {
-  // Get sheet order by name
-  const sheetOrder = ['00_README', '01_SOURCES', '02_RAW', '03_CLEAN', '04_MODEL', '05_DASHBOARD', '06_AUDIT'];
-  const sheets = workbook.worksheets;
+export async function buildExcelWorkbookBundle(sheets: WorkbookSheets): Promise<Buffer> {
+  const [dataBuffer, chartBuffer] = await Promise.all([
+    generateDataWorkbook(sheets),
+    generateChartWorkbook(sheets.clean, sheets.dashboard)
+  ]);
   
-  // Sort sheets by the defined order
-  sheets.sort((a, b) => {
-    const aIndex = sheetOrder.indexOf(a.name);
-    const bIndex = sheetOrder.indexOf(b.name);
-    if (aIndex === -1) return 1;
-    if (bIndex === -1) return -1;
-    return aIndex - bIndex;
-  });
+  const zip = new JSZip();
+  zip.file('ETL_Datos_Completos.xlsx', dataBuffer);
+  zip.file('ETL_Grafico_Dashboard.xlsx', chartBuffer);
+  zip.file('LEEME.txt', `ETL Data Bundle
+=================
+Este archivo ZIP contiene dos archivos Excel:
+
+1. ETL_Datos_Completos.xlsx
+   - Workbook completo con 7 hojas de datos
+   - Incluye: README, SOURCES, RAW, CLEAN, MODEL, DASHBOARD, AUDIT
+   - Todos los datos con formato profesional y filtros
+
+2. ETL_Grafico_Dashboard.xlsx
+   - Gráfico nativo de Excel con resumen por país
+   - Abre en Excel para ver el gráfico de columnas
+
+Generado por Sira GPT ETL Agent
+${new Date().toISOString()}
+`);
+  
+  const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  return Buffer.from(zipBuffer);
 }
 
-async function generateChartWorkbook(clean: NormalizedRecord[]): Promise<Buffer> {
+async function generateChartWorkbook(clean: NormalizedRecord[], dashboard: WorkbookSheets['dashboard']): Promise<Buffer> {
   const xlsxChart = new XLSXChart();
   
-  // Aggregate data by country for the chart (with proper null handling)
   const byCountry = new Map<string, { records: number; valueSum: number; valueCount: number }>();
   for (const r of clean) {
     if (!byCountry.has(r.countryCode)) {
@@ -73,29 +60,27 @@ async function generateChartWorkbook(clean: NormalizedRecord[]): Promise<Buffer>
     }
   }
 
-  // Prepare data for xlsx-chart
-  const titles = Array.from(byCountry.keys()).slice(0, 10); // Max 10 countries for chart readability
+  const titles = Array.from(byCountry.keys()).slice(0, 10);
   const chartData: Record<string, Record<string, number>> = {};
   
   for (const country of titles) {
     const entry = byCountry.get(country)!;
     const avgValue = entry.valueCount > 0 ? entry.valueSum / entry.valueCount : 0;
     chartData[country] = {
-      'Records': entry.records,
-      'Avg Value (scaled)': Math.round(avgValue / 1000000) // Scale large values for chart
+      'Total Records': entry.records,
+      'Avg Value (M)': Math.round(avgValue / 1000000)
     };
   }
 
-  // Handle empty data case
   if (titles.length === 0) {
-    chartData['No Data'] = { 'Records': 0, 'Avg Value (scaled)': 0 };
+    chartData['No Data'] = { 'Total Records': 0, 'Avg Value (M)': 0 };
     titles.push('No Data');
   }
 
   const opts = {
     chart: 'column' as const,
     titles,
-    fields: ['Records', 'Avg Value (scaled)'],
+    fields: ['Total Records', 'Avg Value (M)'],
     data: chartData,
     chartTitle: 'Economic Data Summary by Country'
   };
@@ -108,9 +93,25 @@ async function generateChartWorkbook(clean: NormalizedRecord[]): Promise<Buffer>
   });
 }
 
+async function generateDataWorkbook(sheets: WorkbookSheets): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Sira GPT ETL Agent';
+  workbook.created = new Date();
+
+  buildReadmeSheet(workbook, sheets.readme);
+  buildSourcesSheet(workbook, sheets.sources);
+  buildRawSheet(workbook, sheets.raw);
+  buildCleanSheet(workbook, sheets.clean);
+  buildModelSheet(workbook, sheets.model, sheets.clean);
+  buildDashboardSheet(workbook, sheets.dashboard, sheets.clean);
+  buildAuditSheet(workbook, sheets.audit);
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+}
+
 function buildReadmeSheet(workbook: ExcelJS.Workbook, readme: WorkbookSheets['readme']): void {
   const sheet = workbook.addWorksheet('00_README');
-  
   sheet.getColumn(1).width = 20;
   sheet.getColumn(2).width = 80;
 
@@ -122,59 +123,40 @@ function buildReadmeSheet(workbook: ExcelJS.Workbook, readme: WorkbookSheets['re
   sheet.addRow(['Description:', readme.description]);
   sheet.addRow(['Generated At:', readme.generatedAt]);
   sheet.addRow([]);
-  
   sheet.addRow(['SPECIFICATION']);
   sheet.addRow(['Countries:', readme.spec.countries.join(', ')]);
   sheet.addRow(['Date Range:', `${readme.spec.dateRange.start} to ${readme.spec.dateRange.end}`]);
   sheet.addRow(['Indicators:', readme.spec.indicators.map(i => i.name).join(', ')]);
   sheet.addRow([]);
-  
   sheet.addRow(['METHODOLOGY']);
-  const methodRows = readme.methodology.split('\n');
-  for (const line of methodRows) {
+  for (const line of readme.methodology.split('\n')) {
     sheet.addRow(['', line]);
   }
   sheet.addRow([]);
-  
   sheet.addRow(['SHEETS']);
   sheet.addRow(['00_README', 'This documentation sheet']);
   sheet.addRow(['01_SOURCES', 'Data source traceability with URLs, timestamps, and metadata']);
   sheet.addRow(['02_RAW', 'Raw downloaded data preserved as-is']);
   sheet.addRow(['03_CLEAN', 'Normalized and deduplicated data']);
   sheet.addRow(['04_MODEL', 'Calculated metrics with formulas']);
-  sheet.addRow(['05_DASHBOARD', 'Summary tables and visualizations']);
+  sheet.addRow(['05_DASHBOARD', 'Summary tables and chart-ready data']);
   sheet.addRow(['06_AUDIT', 'Quality control test results']);
   sheet.addRow([]);
-  
   sheet.addRow(['Contact:', readme.contacts]);
 }
 
 function buildSourcesSheet(workbook: ExcelJS.Workbook, sources: SourceMetadata[]): void {
   const sheet = workbook.addWorksheet('01_SOURCES');
-  
   const headers = ['Source_ID', 'Provider', 'URL', 'Method', 'Timestamp', 'Indicator', 'Country', 'Unit', 'Frequency', 'Notes'];
   const headerRow = sheet.addRow(headers);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
-  headerRow.eachCell(cell => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  });
+  headerRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   for (const source of sources) {
-    sheet.addRow([
-      source.sourceId,
-      source.provider,
-      source.url,
-      source.method,
-      source.timestamp,
-      source.indicator,
-      source.country,
-      source.unit,
-      source.frequency,
-      source.notes
-    ]);
+    sheet.addRow([source.sourceId, source.provider, source.url, source.method, source.timestamp, source.indicator, source.country, source.unit, source.frequency, source.notes]);
   }
-
+  
   sheet.getColumn(1).width = 30;
   sheet.getColumn(2).width = 15;
   sheet.getColumn(3).width = 60;
@@ -185,38 +167,26 @@ function buildSourcesSheet(workbook: ExcelJS.Workbook, sources: SourceMetadata[]
   sheet.getColumn(8).width = 15;
   sheet.getColumn(9).width = 10;
   sheet.getColumn(10).width = 40;
-
-  sheet.autoFilter = { from: 'A1', to: `J${sources.length + 1}` };
+  
+  if (sources.length > 0) {
+    sheet.autoFilter = { from: 'A1', to: `J${sources.length + 1}` };
+  }
 }
 
 function buildRawSheet(workbook: ExcelJS.Workbook, raw: RawDataRecord[]): void {
   const sheet = workbook.addWorksheet('02_RAW');
-  
   const headers = ['Source_ID', 'Provider', 'Indicator', 'Country', 'Timestamp', 'Record_Count', 'Raw_JSON_Sample'];
   const headerRow = sheet.addRow(headers);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF70AD47' } };
-  headerRow.eachCell(cell => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  });
+  headerRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   for (const record of raw) {
     const rawSample = JSON.stringify(record.rawData).substring(0, 500) + '...';
-    const recordCount = Array.isArray(record.rawData) && record.rawData.length >= 2 && Array.isArray(record.rawData[1]) 
-      ? record.rawData[1].length 
-      : 'N/A';
-    
-    sheet.addRow([
-      record.sourceId,
-      record.metadata.provider,
-      record.metadata.indicator,
-      record.metadata.country,
-      record.metadata.timestamp,
-      recordCount,
-      rawSample
-    ]);
+    const recordCount = Array.isArray(record.rawData) && record.rawData.length >= 2 && Array.isArray(record.rawData[1]) ? record.rawData[1].length : 'N/A';
+    sheet.addRow([record.sourceId, record.metadata.provider, record.metadata.indicator, record.metadata.country, record.metadata.timestamp, recordCount, rawSample]);
   }
-
+  
   sheet.getColumn(1).width = 35;
   sheet.getColumn(2).width = 15;
   sheet.getColumn(3).width = 15;
@@ -228,29 +198,15 @@ function buildRawSheet(workbook: ExcelJS.Workbook, raw: RawDataRecord[]): void {
 
 function buildCleanSheet(workbook: ExcelJS.Workbook, clean: NormalizedRecord[]): void {
   const sheet = workbook.addWorksheet('03_CLEAN');
-  
   const headers = ['Date', 'Country', 'Country_Code', 'Indicator', 'Indicator_Code', 'Value', 'Unit', 'Frequency', 'Source_ID'];
   const headerRow = sheet.addRow(headers);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC000' } };
-  headerRow.eachCell(cell => {
-    cell.font = { bold: true };
-  });
 
   for (const record of clean) {
-    sheet.addRow([
-      record.date,
-      record.country,
-      record.countryCode,
-      record.indicator,
-      record.indicatorCode,
-      record.value,
-      record.unit,
-      record.frequency,
-      record.sourceId
-    ]);
+    sheet.addRow([record.date, record.country, record.countryCode, record.indicator, record.indicatorCode, record.value, record.unit, record.frequency, record.sourceId]);
   }
-
+  
   sheet.getColumn(1).width = 12;
   sheet.getColumn(2).width = 20;
   sheet.getColumn(3).width = 12;
@@ -261,7 +217,7 @@ function buildCleanSheet(workbook: ExcelJS.Workbook, clean: NormalizedRecord[]):
   sheet.getColumn(7).width = 15;
   sheet.getColumn(8).width = 10;
   sheet.getColumn(9).width = 35;
-
+  
   if (clean.length > 0) {
     sheet.autoFilter = { from: 'A1', to: `I${clean.length + 1}` };
   }
@@ -275,9 +231,7 @@ function buildModelSheet(workbook: ExcelJS.Workbook, model: WorkbookSheets['mode
   const defHeaderRow = sheet.addRow(defHeaders);
   defHeaderRow.font = { bold: true };
   defHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9C27B0' } };
-  defHeaderRow.eachCell(cell => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  });
+  defHeaderRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   for (const metric of model.metrics) {
     sheet.addRow([metric.id, metric.name, metric.formula, metric.description]);
@@ -285,15 +239,13 @@ function buildModelSheet(workbook: ExcelJS.Workbook, model: WorkbookSheets['mode
 
   sheet.addRow([]);
   sheet.addRow([]);
-
   sheet.addRow(['SUMMARY BY COUNTRY AND INDICATOR']);
+  
   const summaryHeaders = ['Country', 'Indicator', 'Latest_Year', 'Latest_Value', 'Avg_5Y', 'YoY_Change', 'Min', 'Max'];
   const summaryHeaderRow = sheet.addRow(summaryHeaders);
   summaryHeaderRow.font = { bold: true };
   summaryHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2196F3' } };
-  summaryHeaderRow.eachCell(cell => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  });
+  summaryHeaderRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   const grouped = new Map<string, NormalizedRecord[]>();
   for (const record of clean) {
@@ -356,7 +308,7 @@ function buildDashboardSheet(workbook: ExcelJS.Workbook, dashboard: WorkbookShee
   const sheet = workbook.addWorksheet('05_DASHBOARD');
   
   sheet.addRow(['DATA DASHBOARD']);
-  sheet.addRow(['Use filters in 03_CLEAN sheet to filter data by country or indicator']);
+  sheet.addRow(['Chart-ready data - Select data and Insert > Column Chart in Excel']);
   sheet.addRow([]);
 
   sheet.addRow(['COUNTRY SUMMARY']);
@@ -364,9 +316,7 @@ function buildDashboardSheet(workbook: ExcelJS.Workbook, dashboard: WorkbookShee
   const countryHeaderRow = sheet.addRow(countryHeaders);
   countryHeaderRow.font = { bold: true };
   countryHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00BCD4' } };
-  countryHeaderRow.eachCell(cell => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  });
+  countryHeaderRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   const byCountry = new Map<string, NormalizedRecord[]>();
   for (const r of clean) {
@@ -377,12 +327,7 @@ function buildDashboardSheet(workbook: ExcelJS.Workbook, dashboard: WorkbookShee
   for (const [country, records] of Array.from(byCountry.entries())) {
     const indicators = new Set(records.map(r => r.indicator)).size;
     const dates = records.map(r => r.date).sort();
-    sheet.addRow([
-      country,
-      records.length,
-      indicators,
-      dates.length > 0 ? `${dates[0]} to ${dates[dates.length - 1]}` : 'N/A'
-    ]);
+    sheet.addRow([country, records.length, indicators, dates.length > 0 ? `${dates[0]} to ${dates[dates.length - 1]}` : 'N/A']);
   }
 
   sheet.addRow([]);
@@ -393,9 +338,7 @@ function buildDashboardSheet(workbook: ExcelJS.Workbook, dashboard: WorkbookShee
   const indHeaderRow = sheet.addRow(indHeaders);
   indHeaderRow.font = { bold: true };
   indHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFF5722' } };
-  indHeaderRow.eachCell(cell => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  });
+  indHeaderRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   const byIndicator = new Map<string, NormalizedRecord[]>();
   for (const r of clean) {
@@ -408,14 +351,7 @@ function buildDashboardSheet(workbook: ExcelJS.Workbook, dashboard: WorkbookShee
     const values = records.filter(r => r.value !== null).map(r => r.value as number);
     const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
     const latestYear = records.map(r => r.date).sort().pop()?.substring(0, 4) || 'N/A';
-    
-    sheet.addRow([
-      indicator,
-      countries,
-      records.length,
-      avg,
-      latestYear
-    ]);
+    sheet.addRow([indicator, countries, records.length, avg, latestYear]);
   }
 
   sheet.getColumn(1).width = 20;
@@ -449,20 +385,10 @@ function buildAuditSheet(workbook: ExcelJS.Workbook, audit: WorkbookSheets['audi
   const headerRow = sheet.addRow(headers);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF607D8B' } };
-  headerRow.eachCell(cell => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-  });
+  headerRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
 
   for (const test of audit.tests) {
-    const row = sheet.addRow([
-      test.name,
-      test.category,
-      test.result,
-      test.details,
-      test.value ?? 'N/A',
-      test.threshold ?? 'N/A'
-    ]);
-
+    const row = sheet.addRow([test.name, test.category, test.result, test.details, test.value ?? 'N/A', test.threshold ?? 'N/A']);
     const resultCell = row.getCell(3);
     if (test.result === 'PASS') {
       resultCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00FF00' } };
