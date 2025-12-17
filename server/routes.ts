@@ -18,6 +18,7 @@ import {
   parseSlidesFromText
 } from "./services/documentGeneration";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "./etl";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -180,6 +181,57 @@ export async function registerRoutes(
       console.error("Chat API error:", error);
       res.status(500).json({ 
         error: "Failed to get AI response",
+        details: error.message 
+      });
+    }
+  });
+
+  // ETL Agent Routes
+  app.get("/api/etl/config", async (req, res) => {
+    try {
+      res.json({
+        countries: getAvailableCountries(),
+        indicators: getAvailableIndicators()
+      });
+    } catch (error: any) {
+      console.error("ETL config error:", error);
+      res.status(500).json({ error: "Failed to get ETL config" });
+    }
+  });
+
+  app.post("/api/etl/run", async (req, res) => {
+    try {
+      const { countries, indicators, startDate, endDate } = req.body;
+      
+      if (!countries || !Array.isArray(countries) || countries.length === 0) {
+        return res.status(400).json({ error: "Countries array is required" });
+      }
+
+      console.log("[ETL API] Starting ETL for countries:", countries);
+
+      const result = await runETLAgent({
+        countries,
+        indicators,
+        startDate,
+        endDate
+      });
+
+      if (result.success && result.workbookBuffer) {
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+        res.send(result.workbookBuffer);
+      } else {
+        res.status(result.success ? 200 : 500).json({
+          success: result.success,
+          message: result.message,
+          summary: result.summary,
+          errors: result.errors
+        });
+      }
+    } catch (error: any) {
+      console.error("ETL API error:", error);
+      res.status(500).json({ 
+        error: "ETL pipeline failed",
         details: error.message 
       });
     }
