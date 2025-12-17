@@ -3,16 +3,26 @@ import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { GptExplorer, Gpt } from "@/components/gpt-explorer";
 import { GptBuilder } from "@/components/gpt-builder";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useLocation } from "wouter";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useChats, Message } from "@/hooks/use-chats";
 import { toast } from "sonner";
+import { useAuth } from "@/App";
 
 export default function Home() {
   const isMobile = useIsMobile();
+  const [, setLocation] = useLocation();
+  const { isLoggedIn } = useAuth();
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setLocation("/welcome");
+    }
+  }, [isLoggedIn, setLocation]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);

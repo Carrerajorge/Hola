@@ -3,15 +3,23 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X, Chrome, Apple, Building2, Phone } from "lucide-react";
+import { useAuth } from "@/App";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
   const [email, setEmail] = useState("");
+  const { login } = useAuth();
 
   const handleContinue = () => {
     if (email) {
+      login();
       setLocation("/");
     }
+  };
+
+  const handleSocialLogin = () => {
+    login();
+    setLocation("/");
   };
 
   return (
@@ -21,7 +29,7 @@ export default function LoginPage() {
           variant="ghost" 
           size="icon"
           className="absolute -top-2 -right-2"
-          onClick={() => setLocation("/")}
+          onClick={() => setLocation("/welcome")}
           data-testid="button-close-login"
         >
           <X className="h-5 w-5" />
@@ -38,6 +46,7 @@ export default function LoginPage() {
           <Button 
             variant="outline" 
             className="w-full h-12 justify-start gap-3 text-base font-normal"
+            onClick={handleSocialLogin}
             data-testid="button-login-google"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24">
@@ -52,6 +61,7 @@ export default function LoginPage() {
           <Button 
             variant="outline" 
             className="w-full h-12 justify-start gap-3 text-base font-normal"
+            onClick={handleSocialLogin}
             data-testid="button-login-apple"
           >
             <Apple className="h-5 w-5" />
@@ -61,6 +71,7 @@ export default function LoginPage() {
           <Button 
             variant="outline" 
             className="w-full h-12 justify-start gap-3 text-base font-normal"
+            onClick={handleSocialLogin}
             data-testid="button-login-microsoft"
           >
             <svg className="h-5 w-5" viewBox="0 0 23 23">
@@ -75,6 +86,7 @@ export default function LoginPage() {
           <Button 
             variant="outline" 
             className="w-full h-12 justify-start gap-3 text-base font-normal"
+            onClick={handleSocialLogin}
             data-testid="button-login-phone"
           >
             <Phone className="h-5 w-5" />
