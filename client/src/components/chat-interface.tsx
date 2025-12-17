@@ -2627,8 +2627,70 @@ export function ChatInterface({
             </div>
           )}
 
-          {/* Welcome Screen when no messages */}
-          {!hasMessages && (
+          {/* Processing indicators when AI is working (even without messages) */}
+          {!hasMessages && aiState !== "idle" && (
+            <div className="flex-1 flex flex-col items-center justify-center px-4">
+              {streamingContent ? (
+                <div className="w-full max-w-3xl mx-auto">
+                  <div className="flex flex-col gap-2 max-w-[85%] items-start">
+                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkMath]}
+                        rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                      >
+                        {processLatex(streamingContent)}
+                      </ReactMarkdown>
+                      <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5" />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="w-full max-w-3xl mx-auto"
+                >
+                  <div className="flex flex-col gap-1 py-3 px-4 rounded-xl bg-muted/30 border border-border/50">
+                    {aiProcessSteps.length > 0 ? (
+                      aiProcessSteps.map((step, idx) => (
+                        <motion.div 
+                          key={idx}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: idx * 0.1 }}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          {step.status === "done" ? (
+                            <Check className="h-4 w-4 text-green-500" />
+                          ) : step.status === "active" ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                          ) : (
+                            <div className="h-4 w-4 rounded-full border border-muted-foreground/30" />
+                          )}
+                          <span className={cn(
+                            "transition-colors",
+                            step.status === "done" && "text-muted-foreground line-through",
+                            step.status === "active" && "text-foreground font-medium",
+                            step.status === "pending" && "text-muted-foreground/60"
+                          )}>
+                            {step.step}
+                          </span>
+                        </motion.div>
+                      ))
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Procesando...</span>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          )}
+
+          {/* Welcome Screen when no messages AND not processing */}
+          {!hasMessages && aiState === "idle" && (
             <div className="flex-1 flex flex-col items-center justify-center px-4">
               <motion.div 
                 initial={{ scale: 0.8, opacity: 0 }}
