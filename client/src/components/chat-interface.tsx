@@ -1456,11 +1456,6 @@ export function ChatInterface({
       {/* Header */}
       <header className="flex h-14 items-center justify-between px-4 border-b border-white/20 glass-card-light rounded-none z-10 sticky top-0 flex-shrink-0">
         <div className="flex items-center gap-2">
-          {!isSidebarOpen && (
-            <Button variant="ghost" size="icon" onClick={onToggleSidebar} className="h-8 w-8 mr-2 text-muted-foreground">
-              <PanelLeftOpen className="h-4 w-4" />
-            </Button>
-          )}
           <div className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 px-2 py-1 rounded-md transition-colors">
             <span className="font-semibold text-sm">xAI: Grok 4.1 Fast</span>
             <ChevronDown className="h-3 w-3 text-muted-foreground" />
