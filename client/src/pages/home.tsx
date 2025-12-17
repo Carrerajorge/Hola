@@ -54,6 +54,10 @@ export default function Home() {
     hideChat
   } = useChats();
 
+  // AI processing state - kept in parent to survive ChatInterface key changes
+  const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
+  const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
+
   const handleNewChat = () => {
     const newKey = `new-chat-${Date.now()}`;
     setActiveChatId(null);
@@ -68,7 +72,8 @@ export default function Home() {
     const { pendingId, stableKey } = createChat();
     pendingChatIdRef.current = pendingId;
     setIsNewChatMode(false);
-    setNewChatStableKey(stableKey); // Keep the stable key from the created chat
+    // DON'T change the stableKey immediately to prevent component remount
+    // setNewChatStableKey(stableKey); 
     addMessage(pendingId, message);
   }, [createChat, addMessage]);
   
@@ -179,6 +184,10 @@ export default function Home() {
             isSidebarOpen={isSidebarOpen} 
             onToggleSidebar={() => setIsSidebarOpen(true)}
             activeGpt={activeGpt}
+            aiState={aiState}
+            setAiState={setAiState}
+            aiProcessSteps={aiProcessSteps}
+            setAiProcessSteps={setAiProcessSteps}
           />
         )}
       </main>

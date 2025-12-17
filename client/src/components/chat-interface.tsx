@@ -523,12 +523,19 @@ interface ActiveGpt {
   };
 }
 
+type AiState = "idle" | "thinking" | "responding";
+type AiProcessStep = { step: string; status: "pending" | "active" | "done" };
+
 interface ChatInterfaceProps {
   messages: Message[];
   onSendMessage: (message: Message) => void;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   activeGpt?: ActiveGpt | null;
+  aiState: AiState;
+  setAiState: React.Dispatch<React.SetStateAction<AiState>>;
+  aiProcessSteps: AiProcessStep[];
+  setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
 }
 
 interface UploadedFile {
@@ -547,11 +554,13 @@ export function ChatInterface({
   onSendMessage, 
   isSidebarOpen = true, 
   onToggleSidebar,
-  activeGpt
+  activeGpt,
+  aiState,
+  setAiState,
+  aiProcessSteps,
+  setAiProcessSteps
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
-  const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
-  const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
   const [streamingContent, setStreamingContent] = useState("");
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
@@ -1441,6 +1450,11 @@ export function ChatInterface({
   };
 
   const hasMessages = messages.length > 0;
+  
+  // Debug: Log state changes
+  useEffect(() => {
+    console.log("[ChatInterface] State:", { hasMessages, aiState, aiProcessStepsCount: aiProcessSteps.length, streamingContent: !!streamingContent });
+  }, [hasMessages, aiState, aiProcessSteps.length, streamingContent]);
 
 
   return (
