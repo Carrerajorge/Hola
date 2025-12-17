@@ -1,4 +1,5 @@
 import { openai, MODELS } from "../lib/openai";
+import { llmGateway } from "../lib/llmGateway";
 import { LIMITS } from "../lib/constants";
 import { storage } from "../storage";
 import { generateEmbedding } from "../embeddingService";
@@ -294,12 +295,24 @@ El usuario podrá descargar el documento generado directamente.`;
       top_p: topP,
     });
   } else {
-    response = await openai.chat.completions.create({
-      model: MODELS.TEXT,
-      messages: [systemMessage, ...messages],
-      temperature,
-      top_p: topP,
-    });
+    const gatewayResponse = await llmGateway.chat(
+      [systemMessage, ...messages],
+      {
+        model: MODELS.TEXT,
+        temperature,
+        topP,
+        userId: conversationId,
+        requestId: `chat_${Date.now()}`,
+      }
+    );
+    
+    console.log(`[ChatService] LLM Gateway response: ${gatewayResponse.latencyMs}ms, tokens: ${gatewayResponse.usage?.totalTokens || 0}`);
+    
+    return { 
+      content: gatewayResponse.content,
+      role: "assistant",
+      sources: sources.length > 0 ? sources : undefined
+    };
   }
 
   const content = response.choices[0]?.message?.content || "No response generated";

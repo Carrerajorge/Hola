@@ -58,3 +58,30 @@ Preferred communication style: Simple, everyday language.
 - `framer-motion`: UI animations
 - `date-fns`: Date formatting utilities
 - `connect-pg-simple`: PostgreSQL session store (available but using memory store currently)
+
+## LLM Gateway Architecture
+
+### Production-Ready LLM Gateway (`server/lib/llmGateway.ts`)
+The application includes a centralized LLM Gateway that provides enterprise-grade reliability:
+
+**Resilience Patterns:**
+- **Circuit Breaker**: 3-state machine (closed/open/half-open) with 5-failure threshold and 30s reset timeout
+- **Exponential Backoff Retries**: Up to 3 retries with jittered delays (1s base, 10s max)
+- **Per-User Rate Limiting**: Token bucket algorithm (100 tokens/min, refill every 600ms)
+- **Request Timeout**: Configurable timeout with AbortController (default 60s)
+
+**Performance Optimizations:**
+- **Response Caching**: 5-minute TTL cache keyed by userId + messages + options
+- **Context Truncation**: Automatic LIFO truncation to stay within token limits (8000 tokens default)
+- **Metrics Collection**: Latency, tokens, errors, cache hits, rate limit hits, circuit breaker status
+
+**Streaming Support:**
+- **SSE Endpoint**: `/api/chat/stream` with standard event fields
+- **Heartbeat**: 15-second keepalive pings
+- **Sequence IDs**: Each chunk numbered for client-side ordering
+- **Error Recovery**: Proper connection close detection and cleanup
+
+**API Endpoints:**
+- `POST /api/chat` - Standard chat request (uses gateway for non-image requests)
+- `POST /api/chat/stream` - SSE streaming chat with resilience
+- `GET /api/admin/llm/metrics` - Gateway metrics dashboard

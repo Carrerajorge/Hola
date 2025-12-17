@@ -8,6 +8,7 @@ import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddi
 import { agentOrchestrator, StepUpdate, ProgressUpdate, guardrails } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { handleChatRequest } from "./services/chatService";
+import { llmGateway } from "./lib/llmGateway";
 import { ALLOWED_MIME_TYPES } from "./lib/constants";
 import { 
   generateWordDocument, 
@@ -181,6 +182,136 @@ export async function registerRoutes(
         error: "Failed to get AI response",
         details: error.message 
       });
+    }
+  });
+
+  app.post("/api/chat/stream", async (req, res) => {
+    const requestId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    let heartbeatInterval: NodeJS.Timeout | null = null;
+    let isConnectionClosed = false;
+
+    try {
+      const { messages, conversationId } = req.body;
+      
+      if (!messages || !Array.isArray(messages)) {
+        return res.status(400).json({ error: "Messages array is required" });
+      }
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Request-Id", requestId);
+      res.flushHeaders();
+
+      req.on("close", () => {
+        isConnectionClosed = true;
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+        }
+        console.log(`[SSE] Connection closed: ${requestId}`);
+      });
+
+      heartbeatInterval = setInterval(() => {
+        if (!isConnectionClosed) {
+          res.write(`:heartbeat\n\n`);
+        }
+      }, 15000);
+
+      const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
+        role: msg.role as "user" | "assistant" | "system",
+        content: msg.content
+      }));
+
+      const systemMessage = {
+        role: "system" as const,
+        content: `Eres Sira GPT, un asistente de IA avanzado. Responde de manera útil y profesional en el idioma del usuario.`
+      };
+
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+
+      res.write(`event: start\ndata: ${JSON.stringify({ requestId, timestamp: Date.now() })}\n\n`);
+
+      const streamGenerator = llmGateway.streamChat(
+        [systemMessage, ...formattedMessages],
+        {
+          userId: userId || conversationId || "anonymous",
+          requestId,
+        }
+      );
+
+      let fullContent = "";
+      let lastAckSequence = -1;
+
+      for await (const chunk of streamGenerator) {
+        if (isConnectionClosed) break;
+
+        fullContent += chunk.content;
+        lastAckSequence = chunk.sequenceId;
+
+        if (chunk.done) {
+          res.write(`event: done\ndata: ${JSON.stringify({
+            sequenceId: chunk.sequenceId,
+            requestId: chunk.requestId,
+            timestamp: Date.now(),
+          })}\n\n`);
+        } else {
+          res.write(`event: chunk\ndata: ${JSON.stringify({
+            content: chunk.content,
+            sequenceId: chunk.sequenceId,
+            requestId: chunk.requestId,
+            timestamp: Date.now(),
+          })}\n\n`);
+        }
+      }
+
+      if (!isConnectionClosed) {
+        res.write(`event: complete\ndata: ${JSON.stringify({ 
+          requestId, 
+          totalSequences: lastAckSequence + 1,
+          contentLength: fullContent.length,
+          timestamp: Date.now() 
+        })}\n\n`);
+      }
+
+      if (userId) {
+        try {
+          await storage.createAuditLog({
+            userId,
+            action: "chat_stream",
+            resource: "chats",
+            resourceId: conversationId || null,
+            details: { 
+              messageCount: messages.length,
+              requestId,
+              streaming: true
+            }
+          });
+        } catch (auditError) {
+          console.error("Failed to create audit log:", auditError);
+        }
+      }
+
+    } catch (error: any) {
+      console.error(`[SSE] Stream error ${requestId}:`, error);
+      if (!isConnectionClosed) {
+        try {
+          res.write(`event: error\ndata: ${JSON.stringify({ 
+            error: error.message, 
+            requestId,
+            timestamp: Date.now() 
+          })}\n\n`);
+        } catch (writeError) {
+          console.error(`[SSE] Failed to write error event:`, writeError);
+        }
+      }
+    } finally {
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+      }
+      if (!isConnectionClosed) {
+        res.end();
+      }
     }
   });
 
@@ -1102,6 +1233,16 @@ export async function registerRoutes(
         details: { key, value }
       });
       res.json(setting);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // LLM Gateway metrics
+  app.get("/api/admin/llm/metrics", async (req, res) => {
+    try {
+      const metrics = llmGateway.getMetrics();
+      res.json(metrics);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

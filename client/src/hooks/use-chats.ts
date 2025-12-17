@@ -77,7 +77,12 @@ export function useChats() {
       
       if (serverChats && serverChats.length > 0) {
         setChats(serverChats);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(serverChats));
+        } catch (e) {
+          console.warn("Failed to cache chats to localStorage:", e);
+          localStorage.removeItem(STORAGE_KEY);
+        }
         if (!activeChatId) {
           setActiveChatId(serverChats[0]?.id || null);
         }
