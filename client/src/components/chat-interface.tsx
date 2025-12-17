@@ -59,6 +59,8 @@ import { AgentObserver } from "@/components/agent-observer";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { DocumentEditor } from "@/components/document-editor";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
+import { ETLDialog } from "@/components/etl-dialog";
+import { Database } from "lucide-react";
 
 const processLatex = (content: string): string => {
   return content
@@ -582,6 +584,7 @@ export function ChatInterface({
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [isETLDialogOpen, setIsETLDialogOpen] = useState(false);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
@@ -2836,6 +2839,15 @@ export function ChatInterface({
                         <Bot className="h-4 w-4" />
                         Agente
                       </Button>
+                      <Button 
+                        variant="ghost" 
+                        className="justify-start gap-2 text-sm h-9"
+                        onClick={() => setIsETLDialogOpen(true)}
+                        data-testid="button-etl-agent"
+                      >
+                        <Database className="h-4 w-4" />
+                        ETL Datos Económicos
+                      </Button>
                       <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
                         <Plug className="h-4 w-4" />
                         Connectors MPC
@@ -3055,6 +3067,19 @@ export function ChatInterface({
           </div>
         </div>
       )}
+      
+      <ETLDialog 
+        open={isETLDialogOpen} 
+        onClose={() => setIsETLDialogOpen(false)}
+        onComplete={(summary) => {
+          onSendMessage({
+            id: `etl-${Date.now()}`,
+            role: "assistant",
+            content: `ETL Agent completed. ${summary}`,
+            timestamp: new Date()
+          });
+        }}
+      />
     </div>
   );
 }
