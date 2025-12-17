@@ -75,10 +75,12 @@ export default function Home() {
   // Stable message sender that uses the correct chat ID
   const handleSendMessage = useCallback((message: Message) => {
     const targetChatId = activeChat?.id || pendingChatIdRef.current;
+    console.log('[Home] handleSendMessage:', { targetChatId, hasActiveChat: !!activeChat, pendingRef: pendingChatIdRef.current, role: message.role });
     if (targetChatId) {
       addMessage(targetChatId, message);
     } else {
       // Fallback: create new chat
+      console.log('[Home] Creating new chat for message');
       handleSendNewChatMessage(message);
     }
   }, [activeChat?.id, addMessage, handleSendNewChatMessage]);
