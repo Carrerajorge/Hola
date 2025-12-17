@@ -205,9 +205,8 @@ export async function handleChatRequest(
   }
 
   // Special system prompt for document mode - AI writes clean content only
-  const documentModePrompt = documentMode ? `Eres un asistente de escritura de documentos. El usuario está editando un documento ${documentMode.type === 'word' ? 'Word' : documentMode.type === 'excel' ? 'Excel' : 'PowerPoint'}.
-
-REGLAS ESTRICTAS:
+  const documentModeInstructions = `
+REGLAS DE ESCRITURA DE DOCUMENTOS:
 1. Escribe SOLO el contenido solicitado, sin explicaciones ni introducciones.
 2. NO incluyas frases como "Aquí está...", "A continuación...", "Claro, te escribo...", etc.
 3. NO hagas preguntas de seguimiento ni pidas confirmación.
@@ -219,16 +218,17 @@ REGLAS ESTRICTAS:
 9. Si el usuario pide editar algo, escribe solo el texto editado/corregido.
 10. El contenido se insertará directamente en el editor del usuario.
 
-EJEMPLOS:
-- Usuario: "escribe un párrafo sobre IA"
-- Correcto: "La inteligencia artificial es una rama de la informática que..."
-- Incorrecto: "Claro, aquí tienes un párrafo sobre IA: La inteligencia artificial..."
+Escribe contenido limpio y directo.`;
 
-- Usuario: "agrega 3 puntos sobre beneficios"
-- Correcto: "• Mejora la eficiencia operativa\n• Reduce costos a largo plazo\n• Automatiza tareas repetitivas"
-- Incorrecto: "Aquí tienes 3 puntos sobre los beneficios: • Mejora..."
+  const documentModePrompt = documentMode ? (
+    validatedGptConfig
+      ? `${validatedGptConfig.systemPrompt}
 
-Escribe contenido limpio y directo.${contextInfo}` : null;
+Estás ayudando al usuario a crear un documento ${documentMode.type === 'word' ? 'Word' : documentMode.type === 'excel' ? 'Excel' : 'PowerPoint'}.
+${documentModeInstructions}${contextInfo}`
+      : `Eres un asistente de escritura de documentos. El usuario está editando un documento ${documentMode.type === 'word' ? 'Word' : documentMode.type === 'excel' ? 'Excel' : 'PowerPoint'}.
+${documentModeInstructions}${contextInfo}`
+  ) : null;
 
   const defaultSystemContent = `Eres Sira GPT, un asistente de IA avanzado con conexión a Internet. Puedes buscar información actualizada en la web. Responde de manera útil y profesional en el idioma del usuario. Si usas información de la web, cita las fuentes.
 
