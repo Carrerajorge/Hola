@@ -590,47 +590,8 @@ export function ChatInterface({
     console.log('[ChatInterface] activeDocEditor changed:', !!activeDocEditor);
   }, [activeDocEditor]);
   
-  // Auto-open document editor when GPT with document capabilities is selected
-  useEffect(() => {
-    if (activeGpt?.capabilities) {
-      const caps = activeGpt.capabilities;
-      // Priority: Word > Excel > PPT
-      if (caps.wordCreation && !activeDocEditor) {
-        console.log('[ChatInterface] GPT has wordCreation capability, opening Word editor');
-        const titles = { word: "Nuevo Documento Word", excel: "Nueva Hoja de Cálculo", ppt: "Nueva Presentación" };
-        const templates = {
-          word: "<p>Comienza a escribir tu documento aquí...</p>",
-          excel: "<table><thead><tr><th>A</th><th>B</th><th>C</th><th>D</th></tr></thead><tbody><tr><td></td><td></td><td></td><td></td></tr></tbody></table>",
-          ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>"
-        };
-        setSelectedDocTool("word");
-        setActiveDocEditor({ type: "word", title: titles.word, content: templates.word });
-        setEditedDocumentContent(templates.word);
-      } else if (caps.excelCreation && !activeDocEditor) {
-        console.log('[ChatInterface] GPT has excelCreation capability, opening Excel editor');
-        const titles = { word: "Nuevo Documento Word", excel: "Nueva Hoja de Cálculo", ppt: "Nueva Presentación" };
-        const templates = {
-          word: "<p>Comienza a escribir tu documento aquí...</p>",
-          excel: "<table><thead><tr><th>A</th><th>B</th><th>C</th><th>D</th></tr></thead><tbody><tr><td></td><td></td><td></td><td></td></tr></tbody></table>",
-          ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>"
-        };
-        setSelectedDocTool("excel");
-        setActiveDocEditor({ type: "excel", title: titles.excel, content: templates.excel });
-        setEditedDocumentContent(templates.excel);
-      } else if (caps.pptCreation && !activeDocEditor) {
-        console.log('[ChatInterface] GPT has pptCreation capability, opening PPT editor');
-        const titles = { word: "Nuevo Documento Word", excel: "Nueva Hoja de Cálculo", ppt: "Nueva Presentación" };
-        const templates = {
-          word: "<p>Comienza a escribir tu documento aquí...</p>",
-          excel: "<table><thead><tr><th>A</th><th>B</th><th>C</th><th>D</th></tr></thead><tbody><tr><td></td><td></td><td></td><td></td></tr></tbody></table>",
-          ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>"
-        };
-        setSelectedDocTool("ppt");
-        setActiveDocEditor({ type: "ppt", title: titles.ppt, content: templates.ppt });
-        setEditedDocumentContent(templates.ppt);
-      }
-    }
-  }, [activeGpt?.id]); // Only trigger when GPT changes
+  // Document editor is now only opened manually by the user clicking the buttons
+  // Removed auto-open behavior to prevent unwanted document creation
   
   // Function to open blank document editor - preserves existing messages
   const openBlankDocEditor = (type: "word" | "excel" | "ppt") => {
@@ -1865,7 +1826,7 @@ export function ChatInterface({
         )}
 
         {/* Thinking/Responding State */}
-        {aiState !== "idle" && agent.state.status !== "running" && (
+        {aiState !== "idle" && (
           <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
             <div className="flex flex-col gap-2 items-start">
               {aiState === "thinking" && (
