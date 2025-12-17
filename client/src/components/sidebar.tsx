@@ -31,6 +31,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { SearchModal } from "@/components/search-modal";
+import { ProfileModal, BillingModal, SettingsModal, PrivacyModal, AdminPanelModal } from "@/components/user-modals";
 
 import { Chat } from "@/hooks/use-chats";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
@@ -68,6 +69,12 @@ export function Sidebar({
   const [editTitle, setEditTitle] = useState("");
   const [showHidden, setShowHidden] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isBillingOpen, setIsBillingOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   
   const handleStartEdit = (chat: Chat, e: React.MouseEvent) => {
@@ -333,7 +340,7 @@ export function Sidebar({
       )}
 
       <div className="mt-auto border-t p-4">
-        <Popover>
+        <Popover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
           <PopoverTrigger asChild>
             <button className="flex w-full items-center gap-3 rounded-lg p-2 liquid-button cursor-pointer" data-testid="button-user-menu">
               <Avatar className="h-10 w-10">
@@ -347,28 +354,28 @@ export function Sidebar({
           </PopoverTrigger>
           <PopoverContent className="w-56 p-2" align="start" side="top">
             <div className="flex flex-col">
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-profile">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setIsProfileOpen(true); }} data-testid="button-profile">
                 <User className="h-4 w-4" />
                 Perfil
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-billing">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setIsBillingOpen(true); }} data-testid="button-billing">
                 <CreditCard className="h-4 w-4" />
                 Facturación
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-settings">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setIsSettingsOpen(true); }} data-testid="button-settings">
                 <Settings className="h-4 w-4" />
                 Configuración
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-privacy">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setIsPrivacyOpen(true); }} data-testid="button-privacy">
                 <Shield className="h-4 w-4" />
                 Privacidad
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" data-testid="button-admin-panel">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setIsAdminPanelOpen(true); }} data-testid="button-admin-panel">
                 <Settings className="h-4 w-4" />
                 Admin Panel
               </Button>
               <Separator className="my-1" />
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" data-testid="button-logout">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" onClick={() => setIsUserMenuOpen(false)} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
                 Cerrar sesión
               </Button>
@@ -384,6 +391,12 @@ export function Sidebar({
         onSelectChat={onSelectChat}
         triggerRef={searchButtonRef}
       />
+
+      <ProfileModal open={isProfileOpen} onOpenChange={setIsProfileOpen} />
+      <BillingModal open={isBillingOpen} onOpenChange={setIsBillingOpen} />
+      <SettingsModal open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+      <PrivacyModal open={isPrivacyOpen} onOpenChange={setIsPrivacyOpen} />
+      <AdminPanelModal open={isAdminPanelOpen} onOpenChange={setIsAdminPanelOpen} />
     </div>
   );
 }
