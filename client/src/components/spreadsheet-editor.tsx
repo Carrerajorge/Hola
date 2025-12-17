@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -11,7 +11,11 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  BarChart3,
+  LineChart,
+  PieChart,
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart as RechartsLineChart, Line, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
 
 interface SpreadsheetEditorProps {
   title: string;
@@ -154,14 +158,63 @@ export function SpreadsheetEditor({
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [selectionRange, setSelectionRange] = useState<{start: string; end: string} | null>(null);
+  const [showChart, setShowChart] = useState(false);
+  const [chartType, setChartType] = useState<'bar' | 'line' | 'pie'>('bar');
   const inputRef = useRef<HTMLInputElement>(null);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const initialContentRef = useRef(content);
   const insertFnRegisteredRef = useRef(false);
+  
+  const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
   // Get active sheet data
   const activeSheet = workbook.sheets.find(s => s.id === workbook.activeSheetId) || workbook.sheets[0];
   const data = activeSheet?.data || { cells: {}, rowCount: 20, colCount: 10 };
+
+  // Extract chart data from spreadsheet
+  const chartData = useMemo(() => {
+    const result: Array<{ name: string; value: number; [key: string]: string | number }> = [];
+    const headers: string[] = [];
+    
+    // Get headers from first row
+    for (let c = 0; c < data.colCount; c++) {
+      const cell = data.cells[getCellKey(0, c)];
+      if (cell?.value) {
+        headers[c] = cell.value;
+      }
+    }
+    
+    // Get data rows
+    for (let r = 1; r < data.rowCount; r++) {
+      const labelCell = data.cells[getCellKey(r, 0)];
+      if (!labelCell?.value) continue;
+      
+      const row: { name: string; value: number; [key: string]: string | number } = {
+        name: labelCell.value,
+        value: 0
+      };
+      
+      let hasNumericData = false;
+      for (let c = 1; c < data.colCount; c++) {
+        const cell = data.cells[getCellKey(r, c)];
+        if (cell?.value) {
+          const numVal = parseFloat(cell.value.replace(/[^\d.-]/g, ''));
+          if (!isNaN(numVal)) {
+            const key = headers[c] || `col${c}`;
+            row[key] = numVal;
+            if (c === 1) row.value = numVal;
+            hasNumericData = true;
+          }
+        }
+      }
+      
+      if (hasNumericData) {
+        result.push(row);
+      }
+    }
+    
+    return { data: result, headers: headers.filter((h, i) => i > 0 && h) };
+  }, [data.cells, data.rowCount, data.colCount]);
 
   // Update active sheet data helper
   const setData = useCallback((updater: (prev: SpreadsheetData) => SpreadsheetData) => {
@@ -632,7 +685,139 @@ export function SpreadsheetEditor({
         <Button variant="ghost" size="sm" onClick={deleteColumn} disabled={!selectedCell} className="gap-1 text-xs text-red-600">
           <Trash2 className="h-3 w-3" /> Col
         </Button>
+
+        <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
+
+        {/* Chart Controls */}
+        <Button
+          variant={showChart && chartType === 'bar' ? 'default' : 'ghost'}
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => { setChartType('bar'); setShowChart(true); }}
+          title="Gráfico de barras"
+          data-testid="btn-bar-chart"
+        >
+          <BarChart3 className="h-4 w-4" />
+        </Button>
+        <Button
+          variant={showChart && chartType === 'line' ? 'default' : 'ghost'}
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => { setChartType('line'); setShowChart(true); }}
+          title="Gráfico de líneas"
+          data-testid="btn-line-chart"
+        >
+          <LineChart className="h-4 w-4" />
+        </Button>
+        <Button
+          variant={showChart && chartType === 'pie' ? 'default' : 'ghost'}
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => { setChartType('pie'); setShowChart(true); }}
+          title="Gráfico circular"
+          data-testid="btn-pie-chart"
+        >
+          <PieChart className="h-4 w-4" />
+        </Button>
+        {showChart && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs text-gray-500"
+            onClick={() => setShowChart(false)}
+          >
+            Ocultar
+          </Button>
+        )}
       </div>
+
+      {/* Chart Panel */}
+      {showChart && chartData.data.length > 0 && (
+        <div className="border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-black p-4" style={{ height: '280px' }}>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-medium">Gráfico: {activeSheet?.name}</h3>
+            <span className="text-xs text-gray-500">{chartData.data.length} registros</span>
+          </div>
+          <ResponsiveContainer width="100%" height="90%">
+            {chartType === 'bar' ? (
+              <BarChart data={chartData.data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'white', 
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '6px',
+                    fontSize: '12px'
+                  }} 
+                />
+                {chartData.headers.length > 0 ? (
+                  chartData.headers.map((header, i) => (
+                    <Bar key={header} dataKey={header} fill={CHART_COLORS[i % CHART_COLORS.length]} radius={[4, 4, 0, 0]} />
+                  ))
+                ) : (
+                  <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                )}
+              </BarChart>
+            ) : chartType === 'line' ? (
+              <RechartsLineChart data={chartData.data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'white', 
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '6px',
+                    fontSize: '12px'
+                  }} 
+                />
+                {chartData.headers.length > 0 ? (
+                  chartData.headers.map((header, i) => (
+                    <Line key={header} type="monotone" dataKey={header} stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth={2} dot={{ fill: CHART_COLORS[i % CHART_COLORS.length] }} />
+                  ))
+                ) : (
+                  <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} dot={{ fill: '#3b82f6' }} />
+                )}
+              </RechartsLineChart>
+            ) : (
+              <RechartsPieChart>
+                <Pie
+                  data={chartData.data}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  labelLine={{ stroke: '#9ca3af' }}
+                >
+                  {chartData.data.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'white', 
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '6px',
+                    fontSize: '12px'
+                  }} 
+                />
+              </RechartsPieChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {showChart && chartData.data.length === 0 && (
+        <div className="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-6 text-center">
+          <BarChart3 className="h-12 w-12 mx-auto text-gray-300 mb-2" />
+          <p className="text-sm text-gray-500">Agrega datos numéricos para ver el gráfico</p>
+          <p className="text-xs text-gray-400 mt-1">Primera columna: etiquetas, siguientes columnas: valores</p>
+        </div>
+      )}
 
       {/* Spreadsheet Grid */}
       <div className="flex-1 overflow-auto">
