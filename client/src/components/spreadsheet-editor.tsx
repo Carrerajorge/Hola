@@ -35,6 +35,17 @@ interface SpreadsheetData {
   colCount: number;
 }
 
+interface SheetData {
+  id: string;
+  name: string;
+  data: SpreadsheetData;
+}
+
+interface WorkbookData {
+  sheets: SheetData[];
+  activeSheetId: string;
+}
+
 const getColumnLabel = (index: number): string => {
   let label = '';
   let num = index;
@@ -47,14 +58,13 @@ const getColumnLabel = (index: number): string => {
 
 const getCellKey = (row: number, col: number): string => `${row}-${col}`;
 
-const parseContent = (content: string): SpreadsheetData => {
-  try {
-    const parsed = JSON.parse(content);
-    if (parsed.cells && typeof parsed.rowCount === 'number') {
-      return parsed;
-    }
-  } catch {}
+const createEmptySheet = (id: string, name: string): SheetData => ({
+  id,
+  name,
+  data: { cells: {}, rowCount: 20, colCount: 10 }
+});
 
+const parseSheetData = (content: string): SpreadsheetData => {
   if (content.includes('<table') && content.includes('</table>')) {
     const cells: { [key: string]: CellData } = {};
     let maxRow = 0;
@@ -111,6 +121,27 @@ const parseContent = (content: string): SpreadsheetData => {
   };
 };
 
+const parseContent = (content: string): WorkbookData => {
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed.sheets && Array.isArray(parsed.sheets)) {
+      return parsed as WorkbookData;
+    }
+    if (parsed.cells && typeof parsed.rowCount === 'number') {
+      return {
+        sheets: [{ id: 'sheet1', name: 'Hoja 1', data: parsed }],
+        activeSheetId: 'sheet1'
+      };
+    }
+  } catch {}
+
+  const sheetData = parseSheetData(content);
+  return {
+    sheets: [{ id: 'sheet1', name: 'Hoja 1', data: sheetData }],
+    activeSheetId: 'sheet1'
+  };
+};
+
 export function SpreadsheetEditor({
   title,
   content,
@@ -119,18 +150,68 @@ export function SpreadsheetEditor({
   onDownload,
   onInsertContent,
 }: SpreadsheetEditorProps) {
-  const [data, setData] = useState<SpreadsheetData>(() => parseContent(content));
+  const [workbook, setWorkbook] = useState<WorkbookData>(() => parseContent(content));
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [selectionRange, setSelectionRange] = useState<{start: string; end: string} | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const initialContentRef = useRef(content);
+  const insertFnRegisteredRef = useRef(false);
+
+  // Get active sheet data
+  const activeSheet = workbook.sheets.find(s => s.id === workbook.activeSheetId) || workbook.sheets[0];
+  const data = activeSheet?.data || { cells: {}, rowCount: 20, colCount: 10 };
+
+  // Update active sheet data helper
+  const setData = useCallback((updater: (prev: SpreadsheetData) => SpreadsheetData) => {
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: prev.sheets.map(sheet => 
+        sheet.id === prev.activeSheetId 
+          ? { ...sheet, data: updater(sheet.data) }
+          : sheet
+      )
+    }));
+  }, []);
+
+  // Sheet management functions
+  const addSheet = useCallback(() => {
+    const newId = `sheet${Date.now()}`;
+    const sheetNum = workbook.sheets.length + 1;
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: [...prev.sheets, createEmptySheet(newId, `Hoja ${sheetNum}`)],
+      activeSheetId: newId
+    }));
+  }, [workbook.sheets.length]);
+
+  const switchSheet = useCallback((sheetId: string) => {
+    setWorkbook(prev => ({ ...prev, activeSheetId: sheetId }));
+    setSelectedCell(null);
+    setEditingCell(null);
+  }, []);
+
+  const renameSheet = useCallback((sheetId: string, newName: string) => {
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: prev.sheets.map(s => s.id === sheetId ? { ...s, name: newName } : s)
+    }));
+  }, []);
+
+  const deleteSheet = useCallback((sheetId: string) => {
+    if (workbook.sheets.length <= 1) return;
+    setWorkbook(prev => {
+      const newSheets = prev.sheets.filter(s => s.id !== sheetId);
+      const newActiveId = prev.activeSheetId === sheetId ? newSheets[0].id : prev.activeSheetId;
+      return { sheets: newSheets, activeSheetId: newActiveId };
+    });
+  }, [workbook.sheets.length]);
 
   useEffect(() => {
     if (content !== initialContentRef.current && content) {
-      const newData = parseContent(content);
-      setData(newData);
+      const newWorkbook = parseContent(content);
+      setWorkbook(newWorkbook);
       initialContentRef.current = content;
     }
   }, [content]);
@@ -160,10 +241,11 @@ export function SpreadsheetEditor({
     return html;
   }, []);
 
+  // Serialize workbook to JSON for storage
   useEffect(() => {
-    const htmlContent = dataToHtml(data);
-    onChange(htmlContent);
-  }, [data, onChange, dataToHtml]);
+    const workbookJson = JSON.stringify(workbook);
+    onChange(workbookJson);
+  }, [workbook, onChange]);
 
   useEffect(() => {
     if (editingCell && inputRef.current) {
@@ -172,71 +254,132 @@ export function SpreadsheetEditor({
     }
   }, [editingCell]);
 
-  useEffect(() => {
-    if (onInsertContent) {
-      const insertContent = (text: string) => {
-        console.log('[SpreadsheetEditor] insertContent called with:', text.substring(0, 100));
-        
-        // Clean markdown formatting if present
-        let cleanText = text
-          .replace(/^\*\*[^*]+\*\*\s*/gm, '') // Remove **Title**
-          .replace(/^-\s+\*\*([^*]+)\*\*:\s*/gm, '$1,') // Convert - **Year**: value to Year,value
-          .replace(/^\s*-\s+/gm, '') // Remove leading dashes
-          .trim();
-        
-        const lines = cleanText.split('\n').filter(line => line.trim());
-        if (lines.length === 0) {
-          console.log('[SpreadsheetEditor] No lines to insert');
-          return;
+  const insertContentFn = useCallback((text: string) => {
+    console.log('[SpreadsheetEditor] insertContent called with:', text.substring(0, 100));
+    
+    // Clean markdown from text
+    const cleanMarkdown = (str: string) => str
+      .replace(/^\*\*[^*]+\*\*\s*/gm, '')
+      .replace(/^-\s+\*\*([^*]+)\*\*:\s*/gm, '$1,')
+      .replace(/^\s*-\s+/gm, '')
+      .trim();
+    
+    // Parse lines and insert into a sheet
+    const insertLines = (lines: string[], sheetData: SpreadsheetData): SpreadsheetData => {
+      const newCells = { ...sheetData.cells };
+      let maxColInserted = 0;
+      
+      let startRow = 0;
+      for (let r = 0; r < sheetData.rowCount; r++) {
+        let rowHasData = false;
+        for (let c = 0; c < sheetData.colCount; c++) {
+          if (sheetData.cells[getCellKey(r, c)]?.value) {
+            rowHasData = true;
+            break;
+          }
         }
+        if (!rowHasData) {
+          startRow = r;
+          break;
+        }
+        startRow = r + 1;
+      }
+      
+      lines.forEach((line, rowOffset) => {
+        const values = line.split(/[,\t]/).map(v => v.trim());
+        values.forEach((value, colOffset) => {
+          if (value) {
+            newCells[getCellKey(startRow + rowOffset, colOffset)] = { value };
+            maxColInserted = Math.max(maxColInserted, colOffset);
+          }
+        });
+      });
+      
+      return {
+        ...sheetData,
+        cells: newCells,
+        rowCount: Math.max(sheetData.rowCount, startRow + lines.length + 1),
+        colCount: Math.max(sheetData.colCount, maxColInserted + 1)
+      };
+    };
+    
+    // Check if there are sheet commands
+    const hasSheetCommands = /\[(NUEVA_HOJA|HOJA):/.test(text);
+    
+    // If no sheet commands, insert into active sheet
+    if (!hasSheetCommands) {
+      const cleanText = cleanMarkdown(text);
+      const lines = cleanText.split('\n').filter(line => line.trim());
+      if (lines.length === 0) return;
+      
+      console.log('[SpreadsheetEditor] Inserting', lines.length, 'lines into active sheet');
+      setData(prev => insertLines(lines, prev));
+      return;
+    }
+    
+    // Parse sheet commands and their content using regex.exec
+    const sheetCommandPattern = /\[(NUEVA_HOJA|HOJA):([^\]]+)\]/g;
+    const commands: { type: string; name: string; startIndex: number; endIndex: number }[] = [];
+    let match;
+    
+    while ((match = sheetCommandPattern.exec(text)) !== null) {
+      commands.push({
+        type: match[1],
+        name: match[2].trim(),
+        startIndex: match.index,
+        endIndex: match.index + match[0].length
+      });
+    }
+    
+    // Process multiple sheets
+    setWorkbook(prev => {
+      let newWorkbook = { ...prev, sheets: [...prev.sheets.map(s => ({ ...s, data: { ...s.data, cells: { ...s.data.cells } } }))] };
+      let lastSheetId = prev.activeSheetId;
+      
+      commands.forEach((cmd, idx) => {
+        // Get content between this command and the next (or end of text)
+        const contentStart = cmd.endIndex;
+        const contentEnd = idx < commands.length - 1 ? commands[idx + 1].startIndex : text.length;
+        const content = text.substring(contentStart, contentEnd);
+        const cleanText = cleanMarkdown(content);
+        const lines = cleanText.split('\n').filter(line => line.trim());
         
-        console.log('[SpreadsheetEditor] Inserting', lines.length, 'lines');
-        
-        setData(prev => {
-          const newCells = { ...prev.cells };
-          let maxColInserted = 0;
+        if (cmd.type === 'NUEVA_HOJA') {
+          const newId = `sheet${Date.now()}_${idx}`;
+          const newSheet = createEmptySheet(newId, cmd.name);
           
-          // Find first empty row to append data
-          let startRow = 0;
-          for (let r = 0; r < prev.rowCount; r++) {
-            let rowHasData = false;
-            for (let c = 0; c < prev.colCount; c++) {
-              if (prev.cells[getCellKey(r, c)]?.value) {
-                rowHasData = true;
-                break;
-              }
-            }
-            if (!rowHasData) {
-              startRow = r;
-              break;
-            }
-            startRow = r + 1;
+          if (lines.length > 0) {
+            newSheet.data = insertLines(lines, newSheet.data);
           }
           
-          lines.forEach((line, rowOffset) => {
-            const values = line.split(/[,\t]/).map(v => v.trim());
-            values.forEach((value, colOffset) => {
-              if (value) {
-                newCells[getCellKey(startRow + rowOffset, colOffset)] = { value };
-                maxColInserted = Math.max(maxColInserted, colOffset);
-              }
-            });
-          });
-          
-          console.log('[SpreadsheetEditor] Data updated, rows:', startRow + lines.length);
-          
-          return {
-            ...prev,
-            cells: newCells,
-            rowCount: Math.max(prev.rowCount, startRow + lines.length + 1),
-            colCount: Math.max(prev.colCount, maxColInserted + 1)
-          };
-        });
-      };
-      onInsertContent(insertContent);
+          newWorkbook.sheets.push(newSheet);
+          lastSheetId = newId;
+          console.log('[SpreadsheetEditor] Created sheet:', cmd.name, 'with', lines.length, 'lines');
+        } else if (cmd.type === 'HOJA') {
+          const targetSheet = newWorkbook.sheets.find(s => s.name.toLowerCase() === cmd.name.toLowerCase());
+          if (targetSheet && lines.length > 0) {
+            const sheetIndex = newWorkbook.sheets.findIndex(s => s.id === targetSheet.id);
+            if (sheetIndex >= 0) {
+              newWorkbook.sheets[sheetIndex].data = insertLines(lines, newWorkbook.sheets[sheetIndex].data);
+            }
+            lastSheetId = targetSheet.id;
+          }
+        }
+      });
+      
+      newWorkbook.activeSheetId = lastSheetId;
+      console.log('[SpreadsheetEditor] Workbook updated with', newWorkbook.sheets.length, 'sheets');
+      return newWorkbook;
+    });
+  }, [setData]);
+
+  useEffect(() => {
+    if (onInsertContent && !insertFnRegisteredRef.current) {
+      onInsertContent(insertContentFn);
+      insertFnRegisteredRef.current = true;
       console.log('[SpreadsheetEditor] Insert function registered');
     }
-  }, [onInsertContent]);
+  }, [onInsertContent, insertContentFn]);
 
   const updateCell = useCallback((key: string, updates: Partial<CellData>) => {
     setData(prev => ({
@@ -555,10 +698,42 @@ export function SpreadsheetEditor({
         </table>
       </div>
 
-      {/* Status Bar */}
-      <div className="flex items-center justify-between px-4 py-1 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 text-xs text-gray-500">
-        <span>{data.rowCount} filas × {data.colCount} columnas</span>
-        <span>Haga doble clic para editar</span>
+      {/* Sheet Tabs */}
+      <div className="flex items-center border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
+        <div className="flex items-center gap-1 px-2 py-1 overflow-x-auto flex-1">
+          {workbook.sheets.map(sheet => (
+            <button
+              key={sheet.id}
+              onClick={() => switchSheet(sheet.id)}
+              className={cn(
+                'px-3 py-1.5 text-xs rounded-t border-x border-t transition-colors whitespace-nowrap',
+                sheet.id === workbook.activeSheetId
+                  ? 'bg-white dark:bg-black border-gray-300 dark:border-gray-700 font-medium'
+                  : 'bg-gray-100 dark:bg-gray-900 border-transparent hover:bg-gray-200 dark:hover:bg-gray-800'
+              )}
+            >
+              {sheet.name}
+              {workbook.sheets.length > 1 && (
+                <span
+                  onClick={(e) => { e.stopPropagation(); deleteSheet(sheet.id); }}
+                  className="ml-2 text-gray-400 hover:text-red-500 cursor-pointer"
+                >
+                  ×
+                </span>
+              )}
+            </button>
+          ))}
+          <button
+            onClick={addSheet}
+            className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            title="Agregar hoja"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="px-4 py-1 text-xs text-gray-500 border-l border-gray-200 dark:border-gray-800">
+          {data.rowCount} × {data.colCount}
+        </div>
       </div>
     </div>
   );

@@ -2304,7 +2304,7 @@ export function ChatInterface({
             <div className="h-full animate-in slide-in-from-right duration-300">
               {(activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
                 <SpreadsheetEditor
-                  key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
+                  key="excel-editor-stable"
                   title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
                   content={editedDocumentContent}
                   onChange={setEditedDocumentContent}

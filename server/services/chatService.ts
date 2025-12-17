@@ -228,7 +228,12 @@ FORMATO OBLIGATORIO PARA EXCEL:
 - Cada línea es una fila de la hoja de cálculo.
 - Los valores se separan con comas.
 
-EJEMPLO CORRECTO para gráfico de barras 2020-2025:
+COMANDOS DE HOJAS:
+- Para crear una NUEVA hoja: [NUEVA_HOJA:Nombre de la Hoja]
+- Para cambiar a una hoja existente: [HOJA:Nombre de la Hoja]
+
+EJEMPLO con múltiples hojas:
+[NUEVA_HOJA:Datos 2020-2025]
 Año,Valor,Gráfico
 2020,45,█████████
 2021,62,████████████
@@ -237,12 +242,20 @@ Año,Valor,Gráfico
 2024,92,██████████████████
 2025,98,████████████████████
 
-EJEMPLO INCORRECTO (NO HAGAS ESTO):
-- **2020**: 45
-- **2021**: 62
+[NUEVA_HOJA:Datos 2030-2035]
+Año,Valor,Gráfico
+2030,110,██████████████████████
+2031,125,█████████████████████████
+2032,140,████████████████████████████
+2033,155,███████████████████████████████
+2034,170,██████████████████████████████████
+2035,185,█████████████████████████████████████
 
-Para crear barras visuales, usa el carácter █ repetido proporcionalmente al valor.
-Fórmula: número de █ = (valor / valor_máximo) * 20
+REGLAS:
+1. Usa [NUEVA_HOJA:nombre] para crear cada hoja nueva con su nombre.
+2. Después del comando de hoja, escribe los datos CSV directamente.
+3. Para barras visuales, usa █ repetido proporcionalmente al valor.
+4. Fórmula: número de █ = (valor / valor_máximo) * 20
 `;
 
   const documentModePrompt = documentMode ? (
