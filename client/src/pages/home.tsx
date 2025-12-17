@@ -199,6 +199,7 @@ export default function Home() {
             onSendMessage={handleSendMessage}
             isSidebarOpen={isSidebarOpen} 
             onToggleSidebar={() => setIsSidebarOpen(true)}
+            onCloseSidebar={() => setIsSidebarOpen(false)}
             activeGpt={activeGpt}
             aiState={aiState}
             setAiState={setAiState}

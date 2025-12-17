@@ -534,6 +534,7 @@ interface ChatInterfaceProps {
   onSendMessage: (message: Message) => void;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  onCloseSidebar?: () => void;
   activeGpt?: ActiveGpt | null;
   aiState: AiState;
   setAiState: React.Dispatch<React.SetStateAction<AiState>>;
@@ -557,6 +558,7 @@ export function ChatInterface({
   onSendMessage, 
   isSidebarOpen = true, 
   onToggleSidebar,
+  onCloseSidebar,
   activeGpt,
   aiState,
   setAiState,
@@ -639,6 +641,9 @@ export function ChatInterface({
       content: templates[type]
     });
     setEditedDocumentContent(templates[type]);
+    
+    // Close sidebar when opening a document tool
+    onCloseSidebar?.();
   };
   
   const closeDocEditor = () => {
@@ -2831,7 +2836,7 @@ export function ChatInterface({
                       <Button 
                         variant="ghost" 
                         className="justify-start gap-2 text-sm h-9"
-                        onClick={() => setSelectedTool("web")}
+                        onClick={() => { setSelectedTool("web"); onCloseSidebar?.(); }}
                       >
                         <Globe className="h-4 w-4" />
                         Navegar en la web
@@ -2839,7 +2844,7 @@ export function ChatInterface({
                       <Button 
                         variant="ghost" 
                         className="justify-start gap-2 text-sm h-9"
-                        onClick={() => setSelectedTool("image")}
+                        onClick={() => { setSelectedTool("image"); onCloseSidebar?.(); }}
                       >
                         <Image className="h-4 w-4" />
                         Generar imagen
@@ -2894,7 +2899,7 @@ export function ChatInterface({
                       <Button 
                         variant="ghost" 
                         className="justify-start gap-2 text-sm h-9"
-                        onClick={() => setSelectedTool("agent")}
+                        onClick={() => { setSelectedTool("agent"); onCloseSidebar?.(); }}
                       >
                         <Bot className="h-4 w-4" />
                         Agente
