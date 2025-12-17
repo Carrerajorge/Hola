@@ -2917,79 +2917,90 @@ export function ChatInterface({
                         Agente
                       </Button>
                       
-                      <div className="border-t my-2" />
-                      
-                      <div className="text-xs text-muted-foreground px-2 py-1">MCP Connectors</div>
-                      
-                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-gmail">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-white border flex items-center justify-center">
-                            <svg width="18" height="14" viewBox="0 0 24 18" fill="none">
-                              <path d="M1.5 5.25V15.75C1.5 16.1478 1.65804 16.5294 1.93934 16.8107C2.22064 17.092 2.60218 17.25 3 17.25H21C21.3978 17.25 21.7794 17.092 22.0607 16.8107C22.342 16.5294 22.5 16.1478 22.5 15.75V5.25L12 12L1.5 5.25Z" fill="#EA4335"/>
-                              <path d="M22.5 2.25V5.25L12 12L1.5 5.25V2.25C1.5 1.85218 1.65804 1.47064 1.93934 1.18934C2.22064 0.908035 2.60218 0.75 3 0.75H21C21.3978 0.75 21.7794 0.908035 22.0607 1.18934C22.342 1.47064 22.5 1.85218 22.5 2.25Z" fill="#FBBC05"/>
-                              <path d="M1.5 5.25L12 12L22.5 5.25" stroke="#34A853" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
+                      <HoverCard openDelay={100} closeDelay={100}>
+                        <HoverCardTrigger asChild>
+                          <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full">
+                            <span className="flex items-center gap-2">
+                              <Plug className="h-4 w-4" />
+                              Conectores
+                            </span>
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </HoverCardTrigger>
+                        <HoverCardContent side="right" align="start" className="w-56 p-2">
+                          <div className="grid gap-1">
+                            <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-gmail">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-white border flex items-center justify-center">
+                                  <svg width="18" height="14" viewBox="0 0 24 18" fill="none">
+                                    <path d="M1.5 5.25V15.75C1.5 16.1478 1.65804 16.5294 1.93934 16.8107C2.22064 17.092 2.60218 17.25 3 17.25H21C21.3978 17.25 21.7794 17.092 22.0607 16.8107C22.342 16.5294 22.5 16.1478 22.5 15.75V5.25L12 12L1.5 5.25Z" fill="#EA4335"/>
+                                    <path d="M22.5 2.25V5.25L12 12L1.5 5.25V2.25C1.5 1.85218 1.65804 1.47064 1.93934 1.18934C2.22064 0.908035 2.60218 0.75 3 0.75H21C21.3978 0.75 21.7794 0.908035 22.0607 1.18934C22.342 1.47064 22.5 1.85218 22.5 2.25Z" fill="#FBBC05"/>
+                                    <path d="M1.5 5.25L12 12L22.5 5.25" stroke="#34A853" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
+                                </div>
+                                <span className="text-sm font-medium">Gmail</span>
+                              </div>
+                              <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
+                                Conectar
+                              </Button>
+                            </div>
+                            
+                            <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-google-drive">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-white border flex items-center justify-center">
+                                  <svg width="20" height="18" viewBox="0 0 87.3 78" fill="none">
+                                    <path d="M6.6 66.85L0.8 56.05L28.7 5.8H57.7L85.6 56.05L79.8 66.85L56.1 25.6H30.4L6.6 66.85Z" fill="#0066DA"/>
+                                    <path d="M29.2 78L44.1 51.2H87.3L72.4 78H29.2Z" fill="#00AC47"/>
+                                    <path d="M0 78L14.9 51.2H29.2L44.1 78H0Z" fill="#EA4335"/>
+                                    <path d="M57.7 5.8L72.6 32.6L87.3 51.2H44.1L29.2 24.4L57.7 5.8Z" fill="#00832D"/>
+                                    <path d="M14.9 51.2L29.2 24.4L44.1 51.2H14.9Z" fill="#2684FC"/>
+                                    <path d="M44.1 51.2L29.2 78H0L14.9 51.2H44.1Z" fill="#FFBA00"/>
+                                  </svg>
+                                </div>
+                                <span className="text-sm font-medium">Google Drive</span>
+                              </div>
+                              <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
+                                Conectar
+                              </Button>
+                            </div>
+                            
+                            <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-onedrive">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-white border flex items-center justify-center">
+                                  <svg width="20" height="14" viewBox="0 0 24 16" fill="none">
+                                    <path d="M14.5 2C12.5 2 10.7 3.1 9.8 4.8C9.3 4.5 8.7 4.4 8 4.4C5.8 4.4 4 6.2 4 8.4C4 8.6 4 8.8 4.1 9C1.8 9.4 0 11.4 0 13.8C0 16.1 1.9 18 4.2 18H19.5C22 18 24 16 24 13.5C24 11.2 22.3 9.3 20 9C20 5.1 17.6 2 14.5 2Z" fill="#0364B8"/>
+                                    <path d="M9.8 4.8C10.7 3.1 12.5 2 14.5 2C17.6 2 20 5.1 20 9C22.3 9.3 24 11.2 24 13.5C24 16 22 18 19.5 18H10L9.8 4.8Z" fill="#0078D4"/>
+                                    <path d="M8 4.4C8.7 4.4 9.3 4.5 9.8 4.8L10 18H4.2C1.9 18 0 16.1 0 13.8C0 11.4 1.8 9.4 4.1 9C4 8.8 4 8.6 4 8.4C4 6.2 5.8 4.4 8 4.4Z" fill="#1490DF"/>
+                                    <path d="M10 18L9.8 4.8C9.3 4.5 8.7 4.4 8 4.4C5.8 4.4 4 6.2 4 8.4C4 8.6 4 8.8 4.1 9C1.8 9.4 0 11.4 0 13.8C0 16.1 1.9 18 4.2 18H10Z" fill="#28A8EA"/>
+                                  </svg>
+                                </div>
+                                <span className="text-sm font-medium">OneDrive</span>
+                              </div>
+                              <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
+                                Conectar
+                              </Button>
+                            </div>
+                            
+                            <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-figma">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-white border flex items-center justify-center">
+                                  <svg width="14" height="20" viewBox="0 0 38 57" fill="none">
+                                    <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE"/>
+                                    <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83"/>
+                                    <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262"/>
+                                    <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E"/>
+                                    <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF"/>
+                                  </svg>
+                                </div>
+                                <span className="text-sm font-medium">Figma</span>
+                              </div>
+                              <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
+                                Conectar
+                              </Button>
+                            </div>
                           </div>
-                          <span className="text-sm font-medium">Gmail</span>
-                        </div>
-                        <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
-                          Conectar
-                        </Button>
-                      </div>
-                      
-                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-google-drive">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-white border flex items-center justify-center">
-                            <svg width="20" height="18" viewBox="0 0 87.3 78" fill="none">
-                              <path d="M6.6 66.85L0.8 56.05L28.7 5.8H57.7L85.6 56.05L79.8 66.85L56.1 25.6H30.4L6.6 66.85Z" fill="#0066DA"/>
-                              <path d="M29.2 78L44.1 51.2H87.3L72.4 78H29.2Z" fill="#00AC47"/>
-                              <path d="M0 78L14.9 51.2H29.2L44.1 78H0Z" fill="#EA4335"/>
-                              <path d="M57.7 5.8L72.6 32.6L87.3 51.2H44.1L29.2 24.4L57.7 5.8Z" fill="#00832D"/>
-                              <path d="M14.9 51.2L29.2 24.4L44.1 51.2H14.9Z" fill="#2684FC"/>
-                              <path d="M44.1 51.2L29.2 78H0L14.9 51.2H44.1Z" fill="#FFBA00"/>
-                            </svg>
-                          </div>
-                          <span className="text-sm font-medium">Google Drive</span>
-                        </div>
-                        <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
-                          Conectar
-                        </Button>
-                      </div>
-                      
-                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-onedrive">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-white border flex items-center justify-center">
-                            <svg width="20" height="14" viewBox="0 0 24 16" fill="none">
-                              <path d="M14.5 2C12.5 2 10.7 3.1 9.8 4.8C9.3 4.5 8.7 4.4 8 4.4C5.8 4.4 4 6.2 4 8.4C4 8.6 4 8.8 4.1 9C1.8 9.4 0 11.4 0 13.8C0 16.1 1.9 18 4.2 18H19.5C22 18 24 16 24 13.5C24 11.2 22.3 9.3 20 9C20 5.1 17.6 2 14.5 2Z" fill="#0364B8"/>
-                              <path d="M9.8 4.8C10.7 3.1 12.5 2 14.5 2C17.6 2 20 5.1 20 9C22.3 9.3 24 11.2 24 13.5C24 16 22 18 19.5 18H10L9.8 4.8Z" fill="#0078D4"/>
-                              <path d="M8 4.4C8.7 4.4 9.3 4.5 9.8 4.8L10 18H4.2C1.9 18 0 16.1 0 13.8C0 11.4 1.8 9.4 4.1 9C4 8.8 4 8.6 4 8.4C4 6.2 5.8 4.4 8 4.4Z" fill="#1490DF"/>
-                              <path d="M10 18L9.8 4.8C9.3 4.5 8.7 4.4 8 4.4C5.8 4.4 4 6.2 4 8.4C4 8.6 4 8.8 4.1 9C1.8 9.4 0 11.4 0 13.8C0 16.1 1.9 18 4.2 18H10Z" fill="#28A8EA"/>
-                            </svg>
-                          </div>
-                          <span className="text-sm font-medium">OneDrive</span>
-                        </div>
-                        <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
-                          Conectar
-                        </Button>
-                      </div>
-                      
-                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-figma">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-white border flex items-center justify-center">
-                            <svg width="14" height="20" viewBox="0 0 38 57" fill="none">
-                              <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE"/>
-                              <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83"/>
-                              <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262"/>
-                              <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E"/>
-                              <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF"/>
-                            </svg>
-                          </div>
-                          <span className="text-sm font-medium">Figma</span>
-                        </div>
-                        <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
-                          Conectar
-                        </Button>
-                      </div>
+                        </HoverCardContent>
+                      </HoverCard>
                     </div>
                   </PopoverContent>
                 </Popover>
