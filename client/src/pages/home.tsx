@@ -58,15 +58,19 @@ export default function Home() {
   const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
   const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
 
+  // Store the pending chat ID during new chat creation
+  const pendingChatIdRef = useRef<string | null>(null);
+
   const handleNewChat = () => {
     const newKey = `new-chat-${Date.now()}`;
     setActiveChatId(null);
     setIsNewChatMode(true);
     setNewChatStableKey(newKey);
+    pendingChatIdRef.current = null;
+    // Reset AI state for new chat
+    setAiState("idle");
+    setAiProcessSteps([]);
   };
-
-  // Store the pending chat ID during new chat creation
-  const pendingChatIdRef = useRef<string | null>(null);
   
   const handleSendNewChatMessage = useCallback((message: Message) => {
     const { pendingId, stableKey } = createChat();
