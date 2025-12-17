@@ -152,6 +152,28 @@ export async function registerRoutes(
         onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update as any)
       });
       
+      // Track chat query activity (only for authenticated users)
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      if (userId) {
+        try {
+          await storage.createAuditLog({
+            userId,
+            action: "chat_query",
+            resource: "chats",
+            resourceId: conversationId || null,
+            details: { 
+              messageCount: messages.length,
+              useRag,
+              documentMode: documentMode || false,
+              hasImages: !!images && images.length > 0
+            }
+          });
+        } catch (auditError) {
+          console.error("Failed to create audit log:", auditError);
+        }
+      }
+      
       res.json(response);
     } catch (error: any) {
       console.error("Chat API error:", error);

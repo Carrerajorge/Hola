@@ -7,6 +7,7 @@ import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
+import { storage } from "../../storage";
 
 const getOidcConfig = memoize(
   async () => {
@@ -122,11 +123,32 @@ export async function setupAuth(app: Express) {
         console.error("[Auth] No user returned:", info);
         return res.redirect("/login?error=no_user");
       }
-      req.logIn(user, (loginErr) => {
+      req.logIn(user, async (loginErr) => {
         if (loginErr) {
           console.error("[Auth] Login error:", loginErr);
           return res.redirect("/login?error=login_failed");
         }
+        
+        // Track user login
+        const userId = user.claims?.sub;
+        if (userId) {
+          try {
+            await storage.createAuditLog({
+              userId,
+              action: "user_login",
+              resource: "auth",
+              details: { 
+                email: user.claims?.email,
+                provider: "google_oauth"
+              },
+              ipAddress: req.ip || req.socket.remoteAddress || null,
+              userAgent: req.headers["user-agent"] || null
+            });
+          } catch (auditError) {
+            console.error("Failed to create audit log:", auditError);
+          }
+        }
+        
         // Redirect with success flag so client can set localStorage
         return res.redirect("/?auth=success");
       });

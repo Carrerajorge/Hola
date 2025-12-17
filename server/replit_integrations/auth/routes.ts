@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { authStorage } from "./storage";
 import { isAuthenticated } from "./replitAuth";
+import { storage } from "../../storage";
 
 // Admin credentials from environment variables
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@gmail.com";
@@ -42,11 +43,26 @@ export function registerAuthRoutes(app: Express): void {
         expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 1 week
       };
       
-      req.login(adminUser, (err: any) => {
+      req.login(adminUser, async (err: any) => {
         if (err) {
           console.error("Admin login error:", err);
           return res.status(500).json({ message: "Login failed" });
         }
+        
+        // Track admin login
+        try {
+          await storage.createAuditLog({
+            userId: adminId,
+            action: "admin_login",
+            resource: "auth",
+            details: { email: ADMIN_EMAIL },
+            ipAddress: req.ip || req.socket.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null
+          });
+        } catch (auditError) {
+          console.error("Failed to create audit log:", auditError);
+        }
+        
         res.json({ success: true, user: { id: adminId, email: ADMIN_EMAIL, firstName: "Admin", lastName: "User" } });
       });
     } catch (error) {
