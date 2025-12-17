@@ -23,6 +23,8 @@ export default function LoginPage() {
         });
         
         if (response.ok) {
+          // Set localStorage to mark as logged in
+          localStorage.setItem("sira_logged_in", "true");
           window.location.href = "/";
         } else {
           const data = await response.json();
