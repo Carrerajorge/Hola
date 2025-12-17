@@ -256,3 +256,184 @@
 .ai-rewrite-panel {
   animation: slideInFromBottom 0.2s ease-out;
 }
+
+/* ========================================
+   SPREADSHEET EDITOR STYLES
+======================================== */
+
+.spreadsheet-editor {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.spreadsheet-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+/* Corner cell (top-left) */
+.spreadsheet-corner-cell {
+  width: 50px;
+  min-width: 50px;
+  height: 28px;
+  background: #f8f8f8;
+  border: 1px solid #e0e0e0;
+  position: sticky;
+  left: 0;
+  z-index: 20;
+}
+
+.dark .spreadsheet-corner-cell {
+  background: #1a1a1a;
+  border-color: #333;
+}
+
+/* Column headers (A, B, C...) */
+.spreadsheet-col-header {
+  width: 100px;
+  min-width: 100px;
+  height: 28px;
+  background: #f8f8f8;
+  border: 1px solid #e0e0e0;
+  font-weight: 500;
+  font-size: 12px;
+  color: #666;
+  text-align: center;
+  user-select: none;
+}
+
+.dark .spreadsheet-col-header {
+  background: #1a1a1a;
+  border-color: #333;
+  color: #888;
+}
+
+/* Row headers (1, 2, 3...) */
+.spreadsheet-row-header {
+  width: 50px;
+  min-width: 50px;
+  height: 24px;
+  background: #f8f8f8;
+  border: 1px solid #e0e0e0;
+  font-weight: 500;
+  font-size: 12px;
+  color: #666;
+  text-align: center;
+  user-select: none;
+  position: sticky;
+  left: 0;
+  z-index: 10;
+}
+
+.dark .spreadsheet-row-header {
+  background: #1a1a1a;
+  border-color: #333;
+  color: #888;
+}
+
+/* Data cells */
+.spreadsheet-cell {
+  width: 100px;
+  min-width: 100px;
+  height: 24px;
+  border: 1px solid #e0e0e0;
+  padding: 0;
+  background: #fff;
+  cursor: cell;
+  position: relative;
+  overflow: hidden;
+}
+
+.dark .spreadsheet-cell {
+  background: #0a0a0a;
+  border-color: #333;
+}
+
+.spreadsheet-cell:hover {
+  background: #f5f5f5;
+}
+
+.dark .spreadsheet-cell:hover {
+  background: #151515;
+}
+
+/* Selected cell */
+.spreadsheet-cell-selected {
+  outline: 2px solid #000 !important;
+  outline-offset: -1px;
+  z-index: 5;
+}
+
+.dark .spreadsheet-cell-selected {
+  outline-color: #fff !important;
+}
+
+/* Cell content */
+.spreadsheet-cell-content {
+  display: block;
+  padding: 2px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  height: 100%;
+  line-height: 20px;
+}
+
+/* Cell input (editing mode) */
+.spreadsheet-cell-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  padding: 2px 6px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+
+.dark .spreadsheet-cell-input {
+  background: #0a0a0a;
+  color: #fff;
+}
+
+/* Spreadsheet scrollbar */
+.spreadsheet-editor ::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.spreadsheet-editor ::-webkit-scrollbar-track {
+  background: #f0f0f0;
+}
+
+.dark .spreadsheet-editor ::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+.spreadsheet-editor ::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border-radius: 6px;
+  border: 3px solid #f0f0f0;
+}
+
+.dark .spreadsheet-editor ::-webkit-scrollbar-thumb {
+  background: #444;
+  border-color: #1a1a1a;
+}
+
+.spreadsheet-editor ::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
+
+.dark .spreadsheet-editor ::-webkit-scrollbar-thumb:hover {
+  background: #666;
+}
+
+/* Selection highlight for multiple cells */
+.spreadsheet-cell-in-range {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.dark .spreadsheet-cell-in-range {
+  background: rgba(255, 255, 255, 0.05);
+}

@@ -58,6 +58,7 @@ import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { DocumentEditor } from "@/components/document-editor";
+import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 
 const processLatex = (content: string): string => {
   return content
@@ -623,7 +624,7 @@ export function ChatInterface({
     };
     const templates = {
       word: "<p>Comienza a escribir tu documento aquí...</p>",
-      excel: "<table><thead><tr><th>A</th><th>B</th><th>C</th><th>D</th></tr></thead><tbody><tr><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td></tr></tbody></table>",
+      excel: "",
       ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>"
     };
     
@@ -2301,28 +2302,50 @@ export function ChatInterface({
           {/* Right: Document Editor Panel */}
           <Panel defaultSize={50} minSize={25}>
             <div className="h-full animate-in slide-in-from-right duration-300">
-              <DocumentEditor
-                key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
-                title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
-                content={editedDocumentContent}
-                onChange={setEditedDocumentContent}
-                onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
-                onDownload={() => {
-                  if (activeDocEditor) {
-                    handleDownloadDocument({
-                      type: activeDocEditor.type,
-                      title: activeDocEditor.title,
-                      content: editedDocumentContent
-                    });
-                  } else if (previewDocument) {
-                    handleDownloadDocument(previewDocument);
-                  }
-                }}
-                documentType={activeDocEditor ? activeDocEditor.type : (previewDocument?.type || "word")}
-                onTextSelect={handleDocTextSelect}
-                onTextDeselect={handleDocTextDeselect}
-                onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
-              />
+              {(activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
+                <SpreadsheetEditor
+                  key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
+                  title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                  content={editedDocumentContent}
+                  onChange={setEditedDocumentContent}
+                  onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
+                  onDownload={() => {
+                    if (activeDocEditor) {
+                      handleDownloadDocument({
+                        type: activeDocEditor.type,
+                        title: activeDocEditor.title,
+                        content: editedDocumentContent
+                      });
+                    } else if (previewDocument) {
+                      handleDownloadDocument(previewDocument);
+                    }
+                  }}
+                  onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                />
+              ) : (
+                <DocumentEditor
+                  key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
+                  title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                  content={editedDocumentContent}
+                  onChange={setEditedDocumentContent}
+                  onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
+                  onDownload={() => {
+                    if (activeDocEditor) {
+                      handleDownloadDocument({
+                        type: activeDocEditor.type,
+                        title: activeDocEditor.title,
+                        content: editedDocumentContent
+                      });
+                    } else if (previewDocument) {
+                      handleDownloadDocument(previewDocument);
+                    }
+                  }}
+                  documentType={activeDocEditor ? activeDocEditor.type : (previewDocument?.type || "word")}
+                  onTextSelect={handleDocTextSelect}
+                  onTextDeselect={handleDocTextDeselect}
+                  onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                />
+              )}
             </div>
           </Panel>
         </PanelGroup>
