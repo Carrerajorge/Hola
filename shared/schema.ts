@@ -197,13 +197,16 @@ export type DomainPolicy = typeof domainPolicies.$inferSelect;
 
 export const chats = pgTable("chats", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id"),
   title: text("title").notNull().default("New Chat"),
   gptId: varchar("gpt_id"),
   archived: text("archived").default("false"),
   hidden: text("hidden").default("false"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("chats_user_idx").on(table.userId),
+]);
 
 export const insertChatSchema = createInsertSchema(chats).omit({
   id: true,

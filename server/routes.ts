@@ -381,10 +381,19 @@ export async function registerRoutes(
     }
   });
 
-  // Chat persistence API routes
+  // Chat persistence API routes (require authentication for user-specific history)
   app.get("/api/chats", async (req, res) => {
     try {
-      const chatList = await storage.getChats();
+      // Get userId from authenticated session
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      // If not authenticated, return empty array (user sees no chats)
+      if (!userId) {
+        return res.json([]);
+      }
+      
+      const chatList = await storage.getChats(userId);
       res.json(chatList);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -394,7 +403,16 @@ export async function registerRoutes(
   app.post("/api/chats", async (req, res) => {
     try {
       const { title } = req.body;
-      const chat = await storage.createChat({ title: title || "New Chat" });
+      // Get userId from authenticated session
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      // Require authentication to create chats
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required to create chats" });
+      }
+      
+      const chat = await storage.createChat({ title: title || "New Chat", userId });
       res.json(chat);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -403,10 +421,19 @@ export async function registerRoutes(
 
   app.get("/api/chats/:id", async (req, res) => {
     try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
       const chat = await storage.getChat(req.params.id);
       if (!chat) {
         return res.status(404).json({ error: "Chat not found" });
       }
+      
+      // Verify ownership - block access to chats without userId (legacy/orphaned) or wrong user
+      if (!chat.userId || chat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
       const messages = await storage.getChatMessages(req.params.id);
       res.json({ ...chat, messages });
     } catch (error: any) {
@@ -416,6 +443,18 @@ export async function registerRoutes(
 
   app.patch("/api/chats/:id", async (req, res) => {
     try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      // First check if chat exists and verify ownership
+      const existingChat = await storage.getChat(req.params.id);
+      if (!existingChat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      if (!existingChat.userId || existingChat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
       const { title, archived, hidden } = req.body;
       const updates: any = {};
       if (title !== undefined) updates.title = title;
@@ -423,9 +462,6 @@ export async function registerRoutes(
       if (hidden !== undefined) updates.hidden = hidden.toString();
       
       const chat = await storage.updateChat(req.params.id, updates);
-      if (!chat) {
-        return res.status(404).json({ error: "Chat not found" });
-      }
       res.json(chat);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -434,6 +470,18 @@ export async function registerRoutes(
 
   app.delete("/api/chats/:id", async (req, res) => {
     try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      // Verify ownership before delete
+      const chat = await storage.getChat(req.params.id);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      if (!chat.userId || chat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
       await storage.deleteChat(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
@@ -443,6 +491,18 @@ export async function registerRoutes(
 
   app.post("/api/chats/:id/messages", async (req, res) => {
     try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      // Verify ownership before adding message
+      const chat = await storage.getChat(req.params.id);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      if (!chat.userId || chat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
       const { role, content, attachments, sources } = req.body;
       if (!role || !content) {
         return res.status(400).json({ error: "role and content are required" });
@@ -456,8 +516,7 @@ export async function registerRoutes(
       });
       
       // Update chat title if first user message
-      const chat = await storage.getChat(req.params.id);
-      if (chat && chat.title === "New Chat" && role === "user") {
+      if (chat.title === "New Chat" && role === "user") {
         const newTitle = content.slice(0, 30) + (content.length > 30 ? "..." : "");
         await storage.updateChat(req.params.id, { title: newTitle });
       }

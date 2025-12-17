@@ -52,7 +52,7 @@ export interface IStorage {
   // Chat CRUD operations
   createChat(chat: InsertChat): Promise<Chat>;
   getChat(id: string): Promise<Chat | undefined>;
-  getChats(): Promise<Chat[]>;
+  getChats(userId?: string): Promise<Chat[]>;
   updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined>;
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
@@ -256,7 +256,10 @@ export class MemStorage implements IStorage {
     return result;
   }
 
-  async getChats(): Promise<Chat[]> {
+  async getChats(userId?: string): Promise<Chat[]> {
+    if (userId) {
+      return db.select().from(chats).where(eq(chats.userId, userId)).orderBy(desc(chats.updatedAt));
+    }
     return db.select().from(chats).orderBy(desc(chats.updatedAt));
   }
 
