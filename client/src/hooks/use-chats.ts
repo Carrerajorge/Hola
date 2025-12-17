@@ -254,30 +254,6 @@ export function useChats() {
     }
   }, [activeChatId]);
 
-  const deleteMessage = useCallback(async (chatId: string, messageId: string) => {
-    const resolvedChatId = pendingToRealIdMap.get(chatId) || chatId;
-    
-    setChats(prev => prev.map(chat => {
-      if (chat.id === chatId || chat.id === resolvedChatId) {
-        return {
-          ...chat,
-          messages: chat.messages.filter(msg => msg.id !== messageId)
-        };
-      }
-      return chat;
-    }));
-
-    if (!resolvedChatId.startsWith(PENDING_CHAT_PREFIX)) {
-      try {
-        await fetch(`/api/chats/${resolvedChatId}/messages/${messageId}`, { 
-          method: "DELETE" 
-        });
-      } catch (error) {
-        console.error("Error deleting message from server:", error);
-      }
-    }
-  }, []);
-
   const editChatTitle = useCallback(async (chatId: string, newTitle: string) => {
     setChats(prev => prev.map(chat => 
       chat.id === chatId ? { ...chat, title: newTitle } : chat
@@ -363,7 +339,6 @@ export function useChats() {
     createChat,
     addMessage,
     deleteChat,
-    deleteMessage,
     editChatTitle,
     archiveChat,
     hideChat,
