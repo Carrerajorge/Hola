@@ -69,7 +69,10 @@ export function Sidebar({
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const handleLogout = () => {
-    window.location.href = "/api/logout";
+    // Clear localStorage
+    localStorage.removeItem("sira_logged_in");
+    // Redirect to welcome page
+    window.location.href = "/welcome";
   };
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");

@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X, Chrome, Apple, Building2, Phone, Loader2 } from "lucide-react";
+import { queryClient } from "@/lib/queryClient";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
@@ -25,6 +26,9 @@ export default function LoginPage() {
         if (response.ok) {
           // Set localStorage to mark as logged in
           localStorage.setItem("sira_logged_in", "true");
+          // Invalidate auth query cache
+          queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+          // Navigate to home
           window.location.href = "/";
         } else {
           const data = await response.json();
