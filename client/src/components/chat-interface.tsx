@@ -61,6 +61,7 @@ import { DocumentEditor } from "@/components/document-editor";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 import { ETLDialog } from "@/components/etl-dialog";
 import { FigmaConnector } from "@/components/figma-connector";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Database } from "lucide-react";
 
 const processLatex = (content: string): string => {
@@ -3095,19 +3096,11 @@ export function ChatInterface({
         }}
       />
 
-      <FigmaConnector
-        open={isFigmaConnectorOpen}
-        onClose={() => setIsFigmaConnectorOpen(false)}
-        onCodeGenerated={(code, type) => {
-          const codeBlock = `\`\`\`${type}\n${code}\n\`\`\``;
-          onSendMessage({
-            id: `figma-${Date.now()}`,
-            role: "assistant",
-            content: `Código generado desde Figma:\n\n${codeBlock}`,
-            timestamp: new Date()
-          });
-        }}
-      />
+      <Dialog open={isFigmaConnectorOpen} onOpenChange={(open) => !open && setIsFigmaConnectorOpen(false)}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden">
+          <FigmaConnector />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
