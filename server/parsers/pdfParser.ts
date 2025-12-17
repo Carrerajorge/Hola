@@ -1,5 +1,3 @@
-import * as pdfParse from "pdf-parse";
-const pdf = (pdfParse as any).default || pdfParse;
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 
 export class PdfParser implements FileParser {
@@ -8,7 +6,8 @@ export class PdfParser implements FileParser {
 
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
     try {
-      const data = await pdf(content);
+      const pdfParse = require("pdf-parse");
+      const data = await pdfParse(content);
       return {
         text: data.text,
         metadata: {
