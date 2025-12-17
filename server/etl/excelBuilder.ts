@@ -1,4 +1,6 @@
 import ExcelJS from 'exceljs';
+// @ts-ignore - xlsx-chart doesn't have type definitions
+import XLSXChart from 'xlsx-chart';
 import { 
   WorkbookSheets, 
   NormalizedRecord, 
@@ -8,20 +10,102 @@ import {
 } from './types';
 
 export async function buildExcelWorkbook(sheets: WorkbookSheets): Promise<Buffer> {
+  // Step 1: Generate chart workbook with xlsx-chart (it creates native Excel charts)
+  const chartBuffer = await generateChartWorkbook(sheets.clean);
+  
+  // Step 2: Load the chart workbook and add our data sheets
   const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(chartBuffer);
+  
   workbook.creator = 'Sira GPT ETL Agent';
   workbook.created = new Date();
+  
+  // Rename the chart sheet to Dashboard
+  const chartSheet = workbook.worksheets[0];
+  if (chartSheet) {
+    chartSheet.name = '05_DASHBOARD';
+  }
 
+  // Add all data sheets (these will be added after the chart sheet)
   buildReadmeSheet(workbook, sheets.readme);
   buildSourcesSheet(workbook, sheets.sources);
   buildRawSheet(workbook, sheets.raw);
   buildCleanSheet(workbook, sheets.clean);
   buildModelSheet(workbook, sheets.model, sheets.clean);
-  buildDashboardSheet(workbook, sheets.dashboard, sheets.clean);
   buildAuditSheet(workbook, sheets.audit);
+  
+  // Reorder sheets: move data sheets before Dashboard for proper ordering
+  reorderSheets(workbook);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
+}
+
+function reorderSheets(workbook: ExcelJS.Workbook): void {
+  // Get sheet order by name
+  const sheetOrder = ['00_README', '01_SOURCES', '02_RAW', '03_CLEAN', '04_MODEL', '05_DASHBOARD', '06_AUDIT'];
+  const sheets = workbook.worksheets;
+  
+  // Sort sheets by the defined order
+  sheets.sort((a, b) => {
+    const aIndex = sheetOrder.indexOf(a.name);
+    const bIndex = sheetOrder.indexOf(b.name);
+    if (aIndex === -1) return 1;
+    if (bIndex === -1) return -1;
+    return aIndex - bIndex;
+  });
+}
+
+async function generateChartWorkbook(clean: NormalizedRecord[]): Promise<Buffer> {
+  const xlsxChart = new XLSXChart();
+  
+  // Aggregate data by country for the chart (with proper null handling)
+  const byCountry = new Map<string, { records: number; valueSum: number; valueCount: number }>();
+  for (const r of clean) {
+    if (!byCountry.has(r.countryCode)) {
+      byCountry.set(r.countryCode, { records: 0, valueSum: 0, valueCount: 0 });
+    }
+    const entry = byCountry.get(r.countryCode)!;
+    entry.records++;
+    if (r.value !== null) {
+      entry.valueSum += r.value;
+      entry.valueCount++;
+    }
+  }
+
+  // Prepare data for xlsx-chart
+  const titles = Array.from(byCountry.keys()).slice(0, 10); // Max 10 countries for chart readability
+  const chartData: Record<string, Record<string, number>> = {};
+  
+  for (const country of titles) {
+    const entry = byCountry.get(country)!;
+    const avgValue = entry.valueCount > 0 ? entry.valueSum / entry.valueCount : 0;
+    chartData[country] = {
+      'Records': entry.records,
+      'Avg Value (scaled)': Math.round(avgValue / 1000000) // Scale large values for chart
+    };
+  }
+
+  // Handle empty data case
+  if (titles.length === 0) {
+    chartData['No Data'] = { 'Records': 0, 'Avg Value (scaled)': 0 };
+    titles.push('No Data');
+  }
+
+  const opts = {
+    chart: 'column' as const,
+    titles,
+    fields: ['Records', 'Avg Value (scaled)'],
+    data: chartData,
+    chartTitle: 'Economic Data Summary by Country'
+  };
+
+  return new Promise((resolve, reject) => {
+    xlsxChart.generate(opts, (err: Error | null, data: Buffer) => {
+      if (err) reject(err);
+      else resolve(data);
+    });
+  });
 }
 
 function buildReadmeSheet(workbook: ExcelJS.Workbook, readme: WorkbookSheets['readme']): void {
