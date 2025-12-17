@@ -1449,6 +1449,11 @@ export function ChatInterface({
   };
 
   const hasMessages = messages.length > 0;
+  
+  // Debug: log messages
+  useEffect(() => {
+    console.log('[ChatInterface] Messages updated:', messages.length, messages.map(m => ({ role: m.role, content: m.content?.substring(0, 30) })));
+  }, [messages]);
 
 
   return (
