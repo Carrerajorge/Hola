@@ -15,6 +15,7 @@
     "@aarkue/tiptap-math-extension": "^1.4.0",
     "@google-cloud/storage": "^7.18.0",
     "@hookform/resolvers": "^3.10.0",
+    "@hungknguyen/docx-math-converter": "^1.1.4",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@mozilla/readability": "^0.6.0",
     "@radix-ui/react-accordion": "^1.2.12",
