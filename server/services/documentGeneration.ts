@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
 import { JSDOM } from "jsdom";
 import { generateWordFromMarkdown } from "./markdownToDocx";
@@ -139,21 +139,26 @@ export async function generateWordDocument(title: string, content: string): Prom
 }
 
 export async function generateExcelDocument(title: string, data: any[][]): Promise<Buffer> {
-  const workbook = XLSX.utils.book_new();
+  const workbook = new ExcelJS.Workbook();
   
   const safeData = data.length > 0 ? data : [["Contenido"], ["No hay datos disponibles"]];
-  const worksheet = XLSX.utils.aoa_to_sheet(safeData);
+  
+  const sheetName = title.replace(/[\\/:*?[\]]/g, "").slice(0, 31) || "Hoja1";
+  const worksheet = workbook.addWorksheet(sheetName);
+  
+  worksheet.addRows(safeData);
   
   const colWidths = safeData[0]?.map((_, colIndex) => {
     const maxLength = Math.max(...safeData.map(row => String(row[colIndex] || "").length));
-    return { wch: Math.min(Math.max(maxLength, 10), 50) };
+    return Math.min(Math.max(maxLength, 10), 50);
   }) || [];
-  worksheet["!cols"] = colWidths;
-
-  const sheetName = title.replace(/[\\/:*?[\]]/g, "").slice(0, 31) || "Hoja1";
-  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   
-  return Buffer.from(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
+  worksheet.columns = colWidths.map((width, index) => ({
+    key: String.fromCharCode(65 + index),
+    width: width
+  }));
+  
+  return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 export async function generatePptDocument(title: string, slides: { title: string; content: string[] }[]): Promise<Buffer> {

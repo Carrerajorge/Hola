@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 
 export class XlsxParser implements FileParser {
@@ -10,18 +10,35 @@ export class XlsxParser implements FileParser {
 
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
     try {
-      const workbook = XLSX.read(content, { type: "buffer" });
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(content);
+      
       let text = "";
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName];
+      const sheetNames: string[] = [];
+      
+      workbook.eachSheet((worksheet) => {
+        const sheetName = worksheet.name;
+        sheetNames.push(sheetName);
         text += `Sheet: ${sheetName}\n`;
-        text += XLSX.utils.sheet_to_csv(sheet) + "\n\n";
-      }
+        
+        worksheet.eachRow((row) => {
+          const values = row.values as any[];
+          const csvRow = values.slice(1).map(val => {
+            if (val === null || val === undefined) return '';
+            if (typeof val === 'object' && 'text' in val) return val.text;
+            return String(val);
+          }).join(',');
+          text += csvRow + "\n";
+        });
+        
+        text += "\n";
+      });
+      
       return {
         text: text.trim(),
         metadata: {
-          sheetNames: workbook.SheetNames,
-          sheetCount: workbook.SheetNames.length,
+          sheetNames,
+          sheetCount: sheetNames.length,
         },
       };
     } catch (error) {

@@ -1,5 +1,5 @@
 import mammoth from "mammoth";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import * as pdfParse from "pdf-parse";
 import officeParser from "officeparser";
 
@@ -55,13 +55,27 @@ export async function extractText(content: Buffer, mimeType: string): Promise<st
   if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
       mimeType === "application/vnd.ms-excel") {
     try {
-      const workbook = XLSX.read(content, { type: "buffer" });
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(content);
+      
       let text = "";
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName];
+      workbook.eachSheet((worksheet) => {
+        const sheetName = worksheet.name;
         text += `Sheet: ${sheetName}\n`;
-        text += XLSX.utils.sheet_to_csv(sheet) + "\n\n";
-      }
+        
+        worksheet.eachRow((row) => {
+          const values = row.values as any[];
+          const csvRow = values.slice(1).map(val => {
+            if (val === null || val === undefined) return '';
+            if (typeof val === 'object' && 'text' in val) return val.text;
+            return String(val);
+          }).join(',');
+          text += csvRow + "\n";
+        });
+        
+        text += "\n";
+      });
+      
       return text.trim();
     } catch (error) {
       console.error("Error parsing Excel:", error);
