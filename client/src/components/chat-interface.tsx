@@ -2368,30 +2368,7 @@ export function ChatInterface({
                             ))}
                           </div>
                         )}
-                        {msg.sources && msg.sources.length > 0 && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {msg.sources
-                              .filter((source, index, self) => 
-                                index === self.findIndex(s => s.fileName === source.fileName)
-                              )
-                              .map((source, i) => (
-                              <TooltipProvider key={i}>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-muted/50 hover:bg-muted rounded-full text-xs text-muted-foreground cursor-pointer transition-colors">
-                                      <FileText className="h-3 w-3" />
-                                      <span className="max-w-[120px] truncate">{source.fileName}</span>
-                                    </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="top" className="max-w-xs">
-                                    <p className="text-xs">{source.content}</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            ))}
-                          </div>
-                        )}
-                        {/* Assistant Message Actions Toolbar */}
+                                                {/* Assistant Message Actions Toolbar */}
                         {msg.content && !msg.isThinking && (
                           <TooltipProvider delayDuration={300}>
                             <div className="flex items-center gap-1 mt-2" data-testid={`message-actions-main-${msg.id}`}>
