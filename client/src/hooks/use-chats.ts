@@ -112,7 +112,21 @@ export function useChats() {
 
   useEffect(() => {
     if (!isLoading && chats.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+      // Strip sources from messages to save localStorage space
+      const chatsForStorage = chats.map(chat => ({
+        ...chat,
+        messages: chat.messages.map(msg => ({
+          ...msg,
+          sources: undefined // Don't store sources in localStorage - they take too much space
+        }))
+      }));
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(chatsForStorage));
+      } catch (e) {
+        console.warn("Failed to save chats to localStorage:", e);
+        // If storage is full, clear old data and try again
+        localStorage.removeItem(STORAGE_KEY);
+      }
     }
   }, [chats, isLoading]);
 
