@@ -2293,7 +2293,17 @@ export function ChatInterface({
                 content={editedDocumentContent}
                 onChange={setEditedDocumentContent}
                 onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
-                onDownload={previewDocument ? () => handleDownloadDocument(previewDocument) : () => {}}
+                onDownload={() => {
+                  if (activeDocEditor) {
+                    handleDownloadDocument({
+                      type: activeDocEditor.type,
+                      title: activeDocEditor.title,
+                      content: editedDocumentContent
+                    });
+                  } else if (previewDocument) {
+                    handleDownloadDocument(previewDocument);
+                  }
+                }}
                 documentType={activeDocEditor ? activeDocEditor.type : (previewDocument?.type || "word")}
                 onTextSelect={handleDocTextSelect}
                 onTextDeselect={handleDocTextDeselect}
