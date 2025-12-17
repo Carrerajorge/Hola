@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { 
-  Mic, 
+  Mic,
+  MicOff,
   ArrowUp, 
   Plus, 
   ChevronDown,
@@ -568,9 +569,20 @@ export function ChatInterface({
   const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | null>(null);
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
+  const speechRecognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.stop();
+        speechRecognitionRef.current = null;
+      }
+    };
+  }, []);
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -717,6 +729,63 @@ export function ChatInterface({
     if (msgId) {
       setCopiedMessageId(msgId);
       setTimeout(() => setCopiedMessageId(null), 2000);
+    }
+  };
+
+  const toggleVoiceRecording = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      alert("Tu navegador no soporta reconocimiento de voz. Por favor usa Chrome, Edge o Safari.");
+      return;
+    }
+
+    if (isRecording) {
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.stop();
+        speechRecognitionRef.current = null;
+      }
+      setIsRecording(false);
+    } else {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'es-ES';
+
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      recognition.onstart = () => {
+        setIsRecording(true);
+        finalTranscript = input;
+      };
+
+      recognition.onresult = (event: any) => {
+        interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+          } else {
+            interimTranscript = transcript;
+          }
+        }
+        setInput(finalTranscript + (interimTranscript ? ' ' + interimTranscript : ''));
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsRecording(false);
+        speechRecognitionRef.current = null;
+      };
+
+      recognition.onend = () => {
+        setIsRecording(false);
+        speechRecognitionRef.current = null;
+      };
+
+      speechRecognitionRef.current = recognition;
+      recognition.start();
     }
   };
 
@@ -2172,8 +2241,19 @@ export function ChatInterface({
               />
 
               <div className="flex items-center gap-1 pb-1">
-                <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground">
-                  <Mic className="h-5 w-5" />
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={toggleVoiceRecording}
+                  className={cn(
+                    "h-9 w-9 rounded-full transition-all duration-300",
+                    isRecording 
+                      ? "bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50" 
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  data-testid="button-voice-recording"
+                >
+                  {isRecording ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
                 </Button>
                 {aiState !== "idle" ? (
                   <Button 
@@ -2791,8 +2871,19 @@ export function ChatInterface({
                 />
 
                 <div className="flex items-center gap-1 pb-1">
-                  <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground">
-                    <Mic className="h-5 w-5" />
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    onClick={toggleVoiceRecording}
+                    className={cn(
+                      "h-9 w-9 rounded-full transition-all duration-300",
+                      isRecording 
+                        ? "bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    data-testid="button-voice-recording"
+                  >
+                    {isRecording ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
                   </Button>
                   {aiState !== "idle" ? (
                     <Button 
