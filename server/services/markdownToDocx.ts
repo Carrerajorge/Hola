@@ -1,8 +1,23 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType, convertInchesToTwip, IRunOptions } from "docx";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType, convertInchesToTwip, IRunOptions, Math as DocxMath } from "docx";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import { convertLatex2Math, mathJaxReady } from "@hungknguyen/docx-math-converter";
 import type { Root, Content, Text, Strong, Emphasis, InlineCode, Paragraph as MdParagraph, Heading, List, ListItem, Table as MdTable, TableRow as MdTableRow, TableCell as MdTableCell, Blockquote, Code, ThematicBreak, Link } from "mdast";
+
+interface MathNode {
+  type: "math" | "inlineMath";
+  value: string;
+}
+
+let mathJaxInitialized = false;
+async function ensureMathJaxReady(): Promise<void> {
+  if (!mathJaxInitialized) {
+    await mathJaxReady;
+    mathJaxInitialized = true;
+  }
+}
 
 function normalizeMarkdown(text: string): string {
   return text
@@ -13,10 +28,14 @@ function normalizeMarkdown(text: string): string {
 }
 
 function parseMarkdownToAst(markdown: string): Root {
-  const normalizedMd = normalizeMarkdown(markdown);
+  let normalizedMd = normalizeMarkdown(markdown);
+  normalizedMd = normalizedMd.replace(/\\\[/g, '$$').replace(/\\\]/g, '$$');
+  normalizedMd = normalizedMd.replace(/\\\(/g, '$').replace(/\\\)/g, '$');
+  
   const processor = unified()
     .use(remarkParse)
-    .use(remarkGfm);
+    .use(remarkGfm)
+    .use(remarkMath);
   
   return processor.parse(normalizedMd) as Root;
 }
@@ -25,28 +44,39 @@ interface TextRunOptions extends Partial<IRunOptions> {
   text: string;
 }
 
-function extractTextRuns(node: Content, inherited: Partial<IRunOptions> = {}): TextRunOptions[] {
-  const runs: TextRunOptions[] = [];
+interface MathRunMarker {
+  type: "mathRun";
+  latex: string;
+}
+
+type ParagraphChild = TextRunOptions | MathRunMarker;
+
+function isMathRunMarker(item: ParagraphChild): item is MathRunMarker {
+  return (item as MathRunMarker).type === "mathRun";
+}
+
+function extractParagraphChildren(node: Content, inherited: Partial<IRunOptions> = {}): ParagraphChild[] {
+  const children: ParagraphChild[] = [];
   
   switch (node.type) {
     case "text":
-      runs.push({ text: (node as Text).value, ...inherited });
+      children.push({ text: (node as Text).value, ...inherited });
       break;
       
     case "strong":
       for (const child of (node as Strong).children) {
-        runs.push(...extractTextRuns(child, { ...inherited, bold: true }));
+        children.push(...extractParagraphChildren(child, { ...inherited, bold: true }));
       }
       break;
       
     case "emphasis":
       for (const child of (node as Emphasis).children) {
-        runs.push(...extractTextRuns(child, { ...inherited, italics: true }));
+        children.push(...extractParagraphChildren(child, { ...inherited, italics: true }));
       }
       break;
       
     case "inlineCode":
-      runs.push({ 
+      children.push({ 
         text: (node as InlineCode).value, 
         ...inherited,
         font: "Consolas",
@@ -54,35 +84,64 @@ function extractTextRuns(node: Content, inherited: Partial<IRunOptions> = {}): T
       });
       break;
       
+    case "inlineMath":
+      children.push({ type: "mathRun", latex: (node as unknown as MathNode).value });
+      break;
+      
     case "link":
       const linkNode = node as Link;
       for (const child of linkNode.children) {
-        runs.push(...extractTextRuns(child, { ...inherited, color: "0563C1", underline: { type: "single" } }));
+        children.push(...extractParagraphChildren(child, { ...inherited, color: "0563C1", underline: { type: "single" } }));
       }
       break;
       
     case "break":
-      runs.push({ text: "", break: 1, ...inherited });
+      children.push({ text: "", break: 1, ...inherited });
       break;
       
     default:
       if ('children' in node && Array.isArray((node as any).children)) {
         for (const child of (node as any).children) {
-          runs.push(...extractTextRuns(child as Content, inherited));
+          children.push(...extractParagraphChildren(child as Content, inherited));
         }
       } else if ('value' in node) {
-        runs.push({ text: String((node as any).value), ...inherited });
+        children.push({ text: String((node as any).value), ...inherited });
       }
   }
   
-  return runs;
+  return children;
+}
+
+function extractTextRuns(node: Content, inherited: Partial<IRunOptions> = {}): TextRunOptions[] {
+  const children = extractParagraphChildren(node, inherited);
+  return children.filter((c): c is TextRunOptions => !isMathRunMarker(c));
 }
 
 function createTextRuns(runOptions: TextRunOptions[]): TextRun[] {
   return runOptions.map(opt => new TextRun(opt as IRunOptions));
 }
 
-function processTableNode(tableNode: MdTable): Table {
+async function createParagraphChildren(children: ParagraphChild[]): Promise<(TextRun | DocxMath)[]> {
+  const result: (TextRun | DocxMath)[] = [];
+  
+  for (const child of children) {
+    if (isMathRunMarker(child)) {
+      try {
+        const mathElement = await convertLatex2Math(child.latex);
+        result.push(mathElement);
+      } catch (error) {
+        console.error('[markdownToDocx] Math conversion error:', error);
+        result.push(new TextRun({ text: child.latex, italics: true }));
+      }
+    } else {
+      result.push(new TextRun(child as IRunOptions));
+    }
+  }
+  
+  return result;
+}
+
+async function processTableNode(tableNode: MdTable): Promise<Table> {
   const rows: TableRow[] = [];
   let maxCols = 0;
   
@@ -90,23 +149,23 @@ function processTableNode(tableNode: MdTable): Table {
     maxCols = Math.max(maxCols, row.children.length);
   }
   
-  tableNode.children.forEach((row, rowIndex) => {
-    const mdRow = row as MdTableRow;
+  for (let rowIndex = 0; rowIndex < tableNode.children.length; rowIndex++) {
+    const mdRow = tableNode.children[rowIndex] as MdTableRow;
     const cells: TableCell[] = [];
     
     for (let i = 0; i < maxCols; i++) {
       const cellNode = mdRow.children[i] as MdTableCell | undefined;
-      const textRuns: TextRunOptions[] = [];
+      const paraChildren: ParagraphChild[] = [];
       
       if (cellNode) {
         for (const child of cellNode.children) {
-          textRuns.push(...extractTextRuns(child as Content));
+          paraChildren.push(...extractParagraphChildren(child as Content));
         }
       }
       
       cells.push(new TableCell({
         children: [new Paragraph({
-          children: createTextRuns(textRuns.length > 0 ? textRuns : [{ text: "" }]),
+          children: paraChildren.length > 0 ? await createParagraphChildren(paraChildren) : [new TextRun({ text: "" })],
           alignment: AlignmentType.LEFT,
         })],
         shading: rowIndex === 0 ? { fill: "E7E6E6", type: "clear", color: "auto" } : undefined,
@@ -120,7 +179,7 @@ function processTableNode(tableNode: MdTable): Table {
     }
     
     rows.push(new TableRow({ children: cells }));
-  });
+  }
   
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
@@ -128,20 +187,20 @@ function processTableNode(tableNode: MdTable): Table {
   });
 }
 
-function processListNode(listNode: List, level: number = 0): Paragraph[] {
+async function processListNode(listNode: List, level: number = 0): Promise<Paragraph[]> {
   const paragraphs: Paragraph[] = [];
   const isOrdered = listNode.ordered;
   
   for (const item of listNode.children as ListItem[]) {
     for (const child of item.children) {
       if (child.type === "paragraph") {
-        const textRuns: TextRunOptions[] = [];
+        const paraChildren: ParagraphChild[] = [];
         for (const inlineChild of (child as MdParagraph).children) {
-          textRuns.push(...extractTextRuns(inlineChild as Content));
+          paraChildren.push(...extractParagraphChildren(inlineChild as Content));
         }
         
         const para = new Paragraph({
-          children: createTextRuns(textRuns),
+          children: await createParagraphChildren(paraChildren),
           ...(isOrdered 
             ? { numbering: { reference: "numbered-list", level } }
             : { bullet: { level } }
@@ -150,7 +209,7 @@ function processListNode(listNode: List, level: number = 0): Paragraph[] {
         });
         paragraphs.push(para);
       } else if (child.type === "list") {
-        paragraphs.push(...processListNode(child as List, level + 1));
+        paragraphs.push(...await processListNode(child as List, level + 1));
       }
     }
   }
@@ -158,18 +217,18 @@ function processListNode(listNode: List, level: number = 0): Paragraph[] {
   return paragraphs;
 }
 
-function processBlockquote(node: Blockquote): Paragraph[] {
+async function processBlockquote(node: Blockquote): Promise<Paragraph[]> {
   const paragraphs: Paragraph[] = [];
   
   for (const child of node.children) {
     if (child.type === "paragraph") {
-      const textRuns: TextRunOptions[] = [];
+      const paraChildren: ParagraphChild[] = [];
       for (const inlineChild of (child as MdParagraph).children) {
-        textRuns.push(...extractTextRuns(inlineChild as Content));
+        paraChildren.push(...extractParagraphChildren(inlineChild as Content));
       }
       
       paragraphs.push(new Paragraph({
-        children: createTextRuns(textRuns),
+        children: await createParagraphChildren(paraChildren),
         indent: { left: convertInchesToTwip(0.5) },
         border: {
           left: { style: BorderStyle.SINGLE, size: 24, color: "CCCCCC" },
@@ -182,16 +241,16 @@ function processBlockquote(node: Blockquote): Paragraph[] {
   return paragraphs;
 }
 
-function astToDocxElements(ast: Root): (Paragraph | Table)[] {
+async function astToDocxElements(ast: Root): Promise<(Paragraph | Table)[]> {
   const elements: (Paragraph | Table)[] = [];
   
   for (const node of ast.children) {
     switch (node.type) {
       case "heading": {
         const headingNode = node as Heading;
-        const textRuns: TextRunOptions[] = [];
+        const paraChildren: ParagraphChild[] = [];
         for (const child of headingNode.children) {
-          textRuns.push(...extractTextRuns(child as Content));
+          paraChildren.push(...extractParagraphChildren(child as Content));
         }
         
         const headingLevelMap: Record<number, typeof HeadingLevel[keyof typeof HeadingLevel]> = {
@@ -204,7 +263,7 @@ function astToDocxElements(ast: Root): (Paragraph | Table)[] {
         };
         
         elements.push(new Paragraph({
-          children: createTextRuns(textRuns),
+          children: await createParagraphChildren(paraChildren),
           heading: headingLevelMap[headingNode.depth] || HeadingLevel.HEADING_1,
           spacing: { before: headingNode.depth === 1 ? 400 : 300, after: 200 },
         }));
@@ -213,33 +272,53 @@ function astToDocxElements(ast: Root): (Paragraph | Table)[] {
       
       case "paragraph": {
         const paraNode = node as MdParagraph;
-        const textRuns: TextRunOptions[] = [];
+        const paraChildren: ParagraphChild[] = [];
         for (const child of paraNode.children) {
-          textRuns.push(...extractTextRuns(child as Content));
+          paraChildren.push(...extractParagraphChildren(child as Content));
         }
         
-        if (textRuns.length > 0) {
+        if (paraChildren.length > 0) {
           elements.push(new Paragraph({
-            children: createTextRuns(textRuns),
+            children: await createParagraphChildren(paraChildren),
             spacing: { after: 200, line: 276 },
           }));
         }
         break;
       }
       
+      case "math": {
+        const mathNode = node as unknown as MathNode;
+        try {
+          const mathElement = await convertLatex2Math(mathNode.value);
+          elements.push(new Paragraph({
+            children: [mathElement],
+            spacing: { before: 200, after: 200 },
+            alignment: AlignmentType.CENTER,
+          }));
+        } catch (error) {
+          console.error('[markdownToDocx] Block math conversion error:', error);
+          elements.push(new Paragraph({
+            children: [new TextRun({ text: mathNode.value, italics: true })],
+            spacing: { after: 200 },
+            alignment: AlignmentType.CENTER,
+          }));
+        }
+        break;
+      }
+      
       case "list": {
-        elements.push(...processListNode(node as List));
+        elements.push(...await processListNode(node as List));
         break;
       }
       
       case "table": {
-        elements.push(processTableNode(node as MdTable));
+        elements.push(await processTableNode(node as MdTable));
         elements.push(new Paragraph({ spacing: { after: 200 } }));
         break;
       }
       
       case "blockquote": {
-        elements.push(...processBlockquote(node as Blockquote));
+        elements.push(...await processBlockquote(node as Blockquote));
         break;
       }
       
@@ -280,8 +359,10 @@ function astToDocxElements(ast: Root): (Paragraph | Table)[] {
 }
 
 export async function generateWordFromMarkdown(title: string, content: string): Promise<Buffer> {
+  await ensureMathJaxReady();
+  
   const ast = parseMarkdownToAst(content);
-  const bodyElements = astToDocxElements(ast);
+  const bodyElements = await astToDocxElements(ast);
   
   const titleParagraph = new Paragraph({
     children: [new TextRun({ text: title, bold: true, size: 48 })],
