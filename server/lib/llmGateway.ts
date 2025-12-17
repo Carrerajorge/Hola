@@ -115,7 +115,14 @@ class LLMGateway {
     return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  private getCacheKey(messages: ChatCompletionMessageParam[], options: LLMRequestOptions): string {
+  private getCacheKey(messages: ChatCompletionMessageParam[], options: LLMRequestOptions): string | null {
+    // Don't cache short conversational messages - they should get dynamic responses
+    const lastUserMessage = messages.filter(m => m.role === "user").pop();
+    const lastMsgContent = typeof lastUserMessage?.content === "string" ? lastUserMessage.content : "";
+    if (lastMsgContent.length < 50) {
+      return null; // Skip caching for short messages
+    }
+    
     const userId = options.userId || "anonymous";
     const msgHash = JSON.stringify(messages);
     const optsHash = `${userId}:${options.model}:${options.temperature}:${options.topP}`;
@@ -280,10 +287,12 @@ class LLMGateway {
     this.metrics.totalRequests++;
 
     const cacheKey = this.getCacheKey(messages, options);
-    const cached = this.requestCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      this.metrics.cacheHits++;
-      return { ...cached.response, cached: true, requestId };
+    if (cacheKey) {
+      const cached = this.requestCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        this.metrics.cacheHits++;
+        return { ...cached.response, cached: true, requestId };
+      }
     }
 
     if (!this.checkRateLimit(userId)) {
@@ -341,10 +350,12 @@ class LLMGateway {
           model,
         };
 
-        this.requestCache.set(cacheKey, {
-          response: result,
-          expiresAt: Date.now() + 300000,
-        });
+        if (cacheKey) {
+          this.requestCache.set(cacheKey, {
+            response: result,
+            expiresAt: Date.now() + 300000,
+          });
+        }
 
         console.log(`[LLMGateway] ${requestId} completed in ${latencyMs}ms, tokens: ${usage?.total_tokens || 0}`);
         return result;
