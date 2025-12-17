@@ -136,34 +136,15 @@ The ETL agent returns a ZIP file containing two Excel workbooks:
 - Accessible via + menu → "ETL Datos Económicos"
 - Results appear in chat transcript after download
 
-## Figma MCP Integration
+## Figma MCP Integration (Disabled)
 
-### Figma Connector (`server/services/figmaService.ts`)
-The application includes a Figma MCP (Model Context Protocol) integration for extracting designs and generating code:
+The Figma MCP integration is available but currently disabled in the UI. To enable it:
 
-**Features:**
-- **Design Token Extraction**: Extract colors, typography, and spacing from Figma files
-- **Code Generation**: Generate React components and CSS from Figma designs
-- **File Exploration**: Browse Figma files and nodes via the API
+1. Create a Figma OAuth application at https://figma.com/developers/apps
+2. Get the Client ID and Client Secret
+3. Add `FIGMA_CLIENT_ID` and `FIGMA_CLIENT_SECRET` as environment secrets
+4. Re-enable the Figma button in `chat-interface.tsx`
 
-**API Endpoints:**
-- `POST /api/figma/connect` - Connect with Figma Personal Access Token
-- `GET /api/figma/status` - Check connection status
-- `POST /api/figma/disconnect` - Disconnect from Figma
-- `GET /api/figma/file/:fileKey` - Get Figma file data
-- `GET /api/figma/file/:fileKey/tokens` - Extract design tokens
-- `POST /api/figma/code` - Generate React/CSS code from design
-- `POST /api/figma/parse-url` - Parse Figma URL to extract file key and node ID
-- `GET /api/figma/images/:fileKey` - Get rendered images of nodes
-
-**Frontend Integration:**
-- `FigmaConnector` component (`client/src/components/figma-connector.tsx`)
-- Accessible via + menu → "Figma MCP"
-- Three tabs: Connect, Design (URL input), Code (generated output)
-
-**Usage:**
-1. Generate a Personal Access Token from Figma Settings
-2. Connect using the token in the connector modal
-3. Paste a Figma URL (file or specific node)
-4. Extract design tokens or generate React/CSS code
-5. Insert generated code into chat or copy to clipboard
+**Backend services are ready:**
+- `server/services/figmaService.ts` - Figma API service
+- `client/src/components/figma-connector.tsx` - UI component
