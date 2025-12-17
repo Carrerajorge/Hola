@@ -167,7 +167,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
             </div>
             <Button 
               onClick={handleCreateNew}
-              className="gap-2"
+              className="gap-2 mr-10"
               data-testid="button-create-gpt"
             >
               <Plus className="h-4 w-4" />
