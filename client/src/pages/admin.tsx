@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +8,9 @@ import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft,
   LayoutDashboard,
@@ -30,9 +34,13 @@ import {
   Key,
   AlertTriangle,
   Download,
-  RefreshCw
+  RefreshCw,
+  Trash2,
+  Edit,
+  Loader2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { format } from "date-fns";
 
 type AdminSection = "dashboard" | "users" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings";
 
@@ -50,6 +58,21 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
 ];
 
 function DashboardSection() {
+  const { data: dashboardData, isLoading } = useQuery({
+    queryKey: ["/api/admin/dashboard"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/dashboard");
+      return res.json();
+    }
+  });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
+
+  const metrics = dashboardData?.metrics || { users: 0, queries: 0, revenue: "0", uptime: 99.9 };
+  const recentActivity = dashboardData?.recentActivity || [];
+
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Dashboard</h2>
@@ -59,21 +82,21 @@ function DashboardSection() {
             <span className="text-xs text-muted-foreground">Usuarios</span>
             <Users className="h-4 w-4 text-muted-foreground" />
           </div>
-          <p className="text-2xl font-semibold">1,247</p>
+          <p className="text-2xl font-semibold" data-testid="text-total-users">{metrics.users.toLocaleString()}</p>
           <div className="flex items-center text-xs text-green-600">
             <TrendingUp className="h-3 w-3 mr-1" />
-            +12% este mes
+            Activos
           </div>
         </div>
         <div className="rounded-lg border p-4 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Consultas/día</span>
+            <span className="text-xs text-muted-foreground">Consultas</span>
             <Activity className="h-4 w-4 text-muted-foreground" />
           </div>
-          <p className="text-2xl font-semibold">8,432</p>
+          <p className="text-2xl font-semibold" data-testid="text-total-queries">{metrics.queries.toLocaleString()}</p>
           <div className="flex items-center text-xs text-green-600">
             <TrendingUp className="h-3 w-3 mr-1" />
-            +8% vs ayer
+            Total
           </div>
         </div>
         <div className="rounded-lg border p-4 space-y-2">
@@ -81,10 +104,10 @@ function DashboardSection() {
             <span className="text-xs text-muted-foreground">Ingresos</span>
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </div>
-          <p className="text-2xl font-semibold">€24,500</p>
+          <p className="text-2xl font-semibold" data-testid="text-total-revenue">€{parseFloat(metrics.revenue).toLocaleString()}</p>
           <div className="flex items-center text-xs text-green-600">
             <TrendingUp className="h-3 w-3 mr-1" />
-            +15% este mes
+            Total
           </div>
         </div>
         <div className="rounded-lg border p-4 space-y-2">
@@ -92,24 +115,25 @@ function DashboardSection() {
             <span className="text-xs text-muted-foreground">Uptime</span>
             <CheckCircle className="h-4 w-4 text-green-500" />
           </div>
-          <p className="text-2xl font-semibold">99.9%</p>
+          <p className="text-2xl font-semibold" data-testid="text-uptime">{metrics.uptime}%</p>
           <span className="text-xs text-muted-foreground">Últimos 30 días</span>
         </div>
       </div>
       <div className="rounded-lg border p-4">
         <h3 className="text-sm font-medium mb-4">Actividad reciente</h3>
         <div className="space-y-3">
-          {[
-            { action: "Nuevo usuario registrado", time: "Hace 2 min", type: "user" },
-            { action: "Pago recibido - €99", time: "Hace 15 min", type: "payment" },
-            { action: "Modelo GPT-4 actualizado", time: "Hace 1 hora", type: "model" },
-            { action: "Backup completado", time: "Hace 3 horas", type: "system" },
-          ].map((item, i) => (
-            <div key={i} className="flex items-center justify-between py-2 text-sm">
-              <span>{item.action}</span>
-              <span className="text-xs text-muted-foreground">{item.time}</span>
-            </div>
-          ))}
+          {recentActivity.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No hay actividad reciente</p>
+          ) : (
+            recentActivity.slice(0, 5).map((item: any, i: number) => (
+              <div key={i} className="flex items-center justify-between py-2 text-sm">
+                <span>{item.action} - {item.resource}</span>
+                <span className="text-xs text-muted-foreground">
+                  {item.createdAt ? format(new Date(item.createdAt), "dd/MM HH:mm") : ""}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
@@ -117,23 +141,55 @@ function DashboardSection() {
 }
 
 function UsersSection() {
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
-  const users = [
-    { id: 1, name: "Carlos García", email: "carlos@empresa.com", plan: "Enterprise", status: "active", queries: 1247 },
-    { id: 2, name: "María López", email: "maria@startup.io", plan: "Pro", status: "active", queries: 892 },
-    { id: 3, name: "Juan Martínez", email: "juan@tech.com", plan: "Basic", status: "inactive", queries: 234 },
-    { id: 4, name: "Ana Rodríguez", email: "ana@corp.es", plan: "Enterprise", status: "active", queries: 2341 },
-    { id: 5, name: "Pedro Sánchez", email: "pedro@mail.com", plan: "Free", status: "active", queries: 45 },
-  ];
+  const [editingUser, setEditingUser] = useState<any>(null);
+
+  const { data: users = [], isLoading } = useQuery({
+    queryKey: ["/api/admin/users"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/users");
+      return res.json();
+    }
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: any }) => {
+      const res = await fetch(`/api/admin/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      setEditingUser(null);
+    }
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+    }
+  });
+
+  const filteredUsers = users.filter((u: any) => 
+    u.username?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    u.email?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Users</h2>
-        <Button size="sm" data-testid="button-add-user">
-          <Plus className="h-4 w-4 mr-2" />
-          Añadir
-        </Button>
+        <h2 className="text-lg font-medium">Users ({users.length})</h2>
       </div>
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
@@ -148,105 +204,314 @@ function UsersSection() {
         </div>
       </div>
       <div className="rounded-lg border">
-        <div className="grid grid-cols-5 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
+        <div className="grid grid-cols-6 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
           <span>Usuario</span>
           <span>Plan</span>
+          <span>Rol</span>
           <span>Estado</span>
           <span>Consultas</span>
-          <span></span>
+          <span>Acciones</span>
         </div>
-        {users.filter(u => u.name.toLowerCase().includes(searchQuery.toLowerCase()) || u.email.toLowerCase().includes(searchQuery.toLowerCase())).map((user) => (
-          <div key={user.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
-            <div>
-              <p className="font-medium">{user.name}</p>
-              <p className="text-xs text-muted-foreground">{user.email}</p>
+        {filteredUsers.length === 0 ? (
+          <div className="p-4 text-sm text-muted-foreground text-center">No hay usuarios</div>
+        ) : (
+          filteredUsers.map((user: any) => (
+            <div key={user.id} className="grid grid-cols-6 gap-4 p-3 border-b last:border-0 items-center text-sm">
+              <div>
+                <p className="font-medium">{user.username}</p>
+                <p className="text-xs text-muted-foreground">{user.email || "-"}</p>
+              </div>
+              <Badge variant="secondary" className="w-fit">{user.plan || "free"}</Badge>
+              <Badge variant="outline" className="w-fit">{user.role || "user"}</Badge>
+              <Badge variant={user.status === "active" ? "default" : "outline"} className="w-fit">
+                {user.status === "active" ? "Activo" : "Inactivo"}
+              </Badge>
+              <span>{(user.queryCount || 0).toLocaleString()}</span>
+              <div className="flex gap-1">
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditingUser(user)}>
+                      <Edit className="h-3 w-3" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Editar usuario</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label>Plan</Label>
+                        <Select 
+                          defaultValue={user.plan || "free"}
+                          onValueChange={(value) => updateUserMutation.mutate({ id: user.id, updates: { plan: value } })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="free">Free</SelectItem>
+                            <SelectItem value="basic">Basic</SelectItem>
+                            <SelectItem value="pro">Pro</SelectItem>
+                            <SelectItem value="enterprise">Enterprise</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Estado</Label>
+                        <Select 
+                          defaultValue={user.status || "active"}
+                          onValueChange={(value) => updateUserMutation.mutate({ id: user.id, updates: { status: value } })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="active">Activo</SelectItem>
+                            <SelectItem value="inactive">Inactivo</SelectItem>
+                            <SelectItem value="suspended">Suspendido</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Rol</Label>
+                        <Select 
+                          defaultValue={user.role || "user"}
+                          onValueChange={(value) => updateUserMutation.mutate({ id: user.id, updates: { role: value } })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="user">Usuario</SelectItem>
+                            <SelectItem value="admin">Admin</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 w-7 p-0 text-destructive" 
+                  onClick={() => deleteUserMutation.mutate(user.id)}
+                  data-testid={`button-delete-user-${user.id}`}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
-            <Badge variant="secondary" className="w-fit">{user.plan}</Badge>
-            <Badge variant={user.status === "active" ? "default" : "outline"} className="w-fit">
-              {user.status === "active" ? "Activo" : "Inactivo"}
-            </Badge>
-            <span>{user.queries.toLocaleString()}</span>
-            <Button variant="ghost" size="sm" className="w-8 h-8 p-0" data-testid={`button-user-menu-${user.id}`}>
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
 }
 
 function AIModelsSection() {
-  const models = [
-    { name: "GPT-4 Turbo", provider: "OpenAI", status: "active", usage: 78, cost: "€0.03/1K" },
-    { name: "GPT-3.5", provider: "OpenAI", status: "active", usage: 45, cost: "€0.002/1K" },
-    { name: "Grok-3", provider: "xAI", status: "active", usage: 92, cost: "€0.05/1K" },
-    { name: "Claude 3", provider: "Anthropic", status: "inactive", usage: 0, cost: "€0.025/1K" },
-  ];
+  const queryClient = useQueryClient();
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newModel, setNewModel] = useState({ name: "", provider: "", modelId: "", costPer1k: "0.00", description: "" });
+
+  const { data: models = [], isLoading } = useQuery({
+    queryKey: ["/api/admin/models"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/models");
+      return res.json();
+    }
+  });
+
+  const createModelMutation = useMutation({
+    mutationFn: async (model: any) => {
+      const res = await fetch("/api/admin/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(model)
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      setShowAddModal(false);
+      setNewModel({ name: "", provider: "", modelId: "", costPer1k: "0.00", description: "" });
+    }
+  });
+
+  const updateModelMutation = useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: any }) => {
+      const res = await fetch(`/api/admin/models/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+    }
+  });
+
+  const deleteModelMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await fetch(`/api/admin/models/${id}`, { method: "DELETE" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+    }
+  });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">AI Models</h2>
-        <Button size="sm" data-testid="button-add-model">
-          <Plus className="h-4 w-4 mr-2" />
-          Añadir modelo
-        </Button>
+        <h2 className="text-lg font-medium">AI Models ({models.length})</h2>
+        <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+          <DialogTrigger asChild>
+            <Button size="sm" data-testid="button-add-model">
+              <Plus className="h-4 w-4 mr-2" />
+              Añadir modelo
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Añadir modelo AI</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Nombre</Label>
+                <Input 
+                  placeholder="GPT-4 Turbo" 
+                  value={newModel.name}
+                  onChange={(e) => setNewModel({ ...newModel, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Proveedor</Label>
+                <Input 
+                  placeholder="OpenAI" 
+                  value={newModel.provider}
+                  onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Model ID</Label>
+                <Input 
+                  placeholder="gpt-4-turbo" 
+                  value={newModel.modelId}
+                  onChange={(e) => setNewModel({ ...newModel, modelId: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Costo por 1K tokens</Label>
+                <Input 
+                  placeholder="0.03" 
+                  value={newModel.costPer1k}
+                  onChange={(e) => setNewModel({ ...newModel, costPer1k: e.target.value })}
+                />
+              </div>
+              <Button 
+                className="w-full" 
+                onClick={() => createModelMutation.mutate(newModel)}
+                disabled={!newModel.name || !newModel.provider || !newModel.modelId}
+              >
+                Crear modelo
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
       <div className="grid gap-4">
-        {models.map((model, i) => (
-          <div key={i} className="rounded-lg border p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-3">
-                <Bot className="h-5 w-5" />
-                <div>
-                  <p className="font-medium">{model.name}</p>
-                  <p className="text-xs text-muted-foreground">{model.provider}</p>
+        {models.length === 0 ? (
+          <div className="rounded-lg border p-8 text-center text-muted-foreground">
+            No hay modelos configurados. Añade uno para empezar.
+          </div>
+        ) : (
+          models.map((model: any) => (
+            <div key={model.id} className="rounded-lg border p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <Bot className="h-5 w-5" />
+                  <div>
+                    <p className="font-medium">{model.name}</p>
+                    <p className="text-xs text-muted-foreground">{model.provider} - {model.modelId}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">€{model.costPer1k}/1K</span>
+                  <Switch 
+                    checked={model.status === "active"} 
+                    onCheckedChange={(checked) => updateModelMutation.mutate({ 
+                      id: model.id, 
+                      updates: { status: checked ? "active" : "inactive" } 
+                    })}
+                    data-testid={`switch-model-${model.id}`}
+                  />
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-7 w-7 p-0 text-destructive"
+                    onClick={() => deleteModelMutation.mutate(model.id)}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground">{model.cost}</span>
-                <Switch checked={model.status === "active"} data-testid={`switch-model-${i}`} />
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Uso este mes</span>
+                  <span>{model.usagePercent || 0}%</span>
+                </div>
+                <Progress value={model.usagePercent || 0} className="h-1.5" />
               </div>
             </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Uso este mes</span>
-                <span>{model.usage}%</span>
-              </div>
-              <Progress value={model.usage} className="h-1.5" />
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
 }
 
 function PaymentsSection() {
-  const payments = [
-    { id: "PAY-001", user: "Carlos García", amount: "€99.00", date: "15 Dic 2024", status: "completed" },
-    { id: "PAY-002", user: "María López", amount: "€49.00", date: "14 Dic 2024", status: "completed" },
-    { id: "PAY-003", user: "Juan Martínez", amount: "€19.00", date: "14 Dic 2024", status: "pending" },
-    { id: "PAY-004", user: "Ana Rodríguez", amount: "€99.00", date: "13 Dic 2024", status: "completed" },
-    { id: "PAY-005", user: "Pedro Sánchez", amount: "€19.00", date: "12 Dic 2024", status: "failed" },
-  ];
+  const queryClient = useQueryClient();
+
+  const { data: payments = [], isLoading } = useQuery({
+    queryKey: ["/api/admin/payments"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/payments");
+      return res.json();
+    }
+  });
+
+  const { data: stats } = useQuery({
+    queryKey: ["/api/admin/payments/stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/payments/stats");
+      return res.json();
+    }
+  });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
 
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Payments</h2>
       <div className="grid grid-cols-3 gap-4">
         <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Ingresos del mes</p>
-          <p className="text-xl font-semibold">€12,450</p>
+          <p className="text-xs text-muted-foreground mb-1">Total ingresos</p>
+          <p className="text-xl font-semibold" data-testid="text-total-payments">€{stats?.total || "0"}</p>
         </div>
         <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Pagos pendientes</p>
-          <p className="text-xl font-semibold">€380</p>
+          <p className="text-xs text-muted-foreground mb-1">Este mes</p>
+          <p className="text-xl font-semibold">€{stats?.thisMonth || "0"}</p>
         </div>
         <div className="rounded-lg border p-4">
-          <p className="text-xs text-muted-foreground mb-1">Tasa de éxito</p>
-          <p className="text-xl font-semibold">98.2%</p>
+          <p className="text-xs text-muted-foreground mb-1">Transacciones</p>
+          <p className="text-xl font-semibold">{stats?.count || 0}</p>
         </div>
       </div>
       <div className="rounded-lg border">
@@ -257,38 +522,102 @@ function PaymentsSection() {
           <span>Fecha</span>
           <span>Estado</span>
         </div>
-        {payments.map((payment) => (
-          <div key={payment.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
-            <span className="font-mono text-xs">{payment.id}</span>
-            <span>{payment.user}</span>
-            <span className="font-medium">{payment.amount}</span>
-            <span className="text-muted-foreground">{payment.date}</span>
-            <Badge variant={payment.status === "completed" ? "default" : payment.status === "pending" ? "secondary" : "destructive"}>
-              {payment.status === "completed" ? "Completado" : payment.status === "pending" ? "Pendiente" : "Fallido"}
-            </Badge>
-          </div>
-        ))}
+        {payments.length === 0 ? (
+          <div className="p-4 text-sm text-muted-foreground text-center">No hay pagos registrados</div>
+        ) : (
+          payments.map((payment: any) => (
+            <div key={payment.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
+              <span className="font-mono text-xs">{payment.id.slice(0, 8)}</span>
+              <span>{payment.userId || "N/A"}</span>
+              <span className="font-medium">€{payment.amount}</span>
+              <span className="text-muted-foreground">
+                {payment.createdAt ? format(new Date(payment.createdAt), "dd MMM yyyy") : "-"}
+              </span>
+              <Badge variant={payment.status === "completed" ? "default" : payment.status === "pending" ? "secondary" : "destructive"}>
+                {payment.status === "completed" ? "Completado" : payment.status === "pending" ? "Pendiente" : "Fallido"}
+              </Badge>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
 }
 
 function InvoicesSection() {
-  const invoices = [
-    { id: "INV-2024-001", client: "Empresa ABC", amount: "€2,970", date: "01 Dic 2024", status: "paid" },
-    { id: "INV-2024-002", client: "Startup XYZ", amount: "€1,470", date: "01 Dic 2024", status: "paid" },
-    { id: "INV-2024-003", client: "Corp 123", amount: "€990", date: "01 Dic 2024", status: "pending" },
-    { id: "INV-2024-004", client: "Tech Solutions", amount: "€2,970", date: "01 Nov 2024", status: "paid" },
-  ];
+  const queryClient = useQueryClient();
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
+
+  const { data: invoices = [], isLoading } = useQuery({
+    queryKey: ["/api/admin/invoices"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/invoices");
+      return res.json();
+    }
+  });
+
+  const createInvoiceMutation = useMutation({
+    mutationFn: async (invoice: any) => {
+      const res = await fetch("/api/admin/invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(invoice)
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/invoices"] });
+      setShowAddModal(false);
+    }
+  });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Invoices</h2>
-        <Button size="sm" data-testid="button-create-invoice">
-          <Plus className="h-4 w-4 mr-2" />
-          Crear factura
-        </Button>
+        <h2 className="text-lg font-medium">Invoices ({invoices.length})</h2>
+        <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+          <DialogTrigger asChild>
+            <Button size="sm" data-testid="button-create-invoice">
+              <Plus className="h-4 w-4 mr-2" />
+              Crear factura
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Crear factura</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Número de factura</Label>
+                <Input 
+                  placeholder="INV-2024-001" 
+                  value={newInvoice.invoiceNumber}
+                  onChange={(e) => setNewInvoice({ ...newInvoice, invoiceNumber: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Importe</Label>
+                <Input 
+                  placeholder="99.00" 
+                  value={newInvoice.amount}
+                  onChange={(e) => setNewInvoice({ ...newInvoice, amount: e.target.value })}
+                />
+              </div>
+              <Button 
+                className="w-full" 
+                onClick={() => createInvoiceMutation.mutate(newInvoice)}
+                disabled={!newInvoice.invoiceNumber || !newInvoice.amount}
+              >
+                Crear factura
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
       <div className="rounded-lg border">
         <div className="grid grid-cols-5 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
@@ -298,68 +627,66 @@ function InvoicesSection() {
           <span>Fecha</span>
           <span>Estado</span>
         </div>
-        {invoices.map((invoice) => (
-          <div key={invoice.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
-            <span className="font-mono text-xs">{invoice.id}</span>
-            <span>{invoice.client}</span>
-            <span className="font-medium">{invoice.amount}</span>
-            <span className="text-muted-foreground">{invoice.date}</span>
-            <div className="flex items-center gap-2">
-              <Badge variant={invoice.status === "paid" ? "default" : "secondary"}>
-                {invoice.status === "paid" ? "Pagada" : "Pendiente"}
-              </Badge>
-              <Button variant="ghost" size="sm" className="h-6 px-2" data-testid={`button-download-invoice-${invoice.id}`}>
-                <Download className="h-3 w-3" />
-              </Button>
+        {invoices.length === 0 ? (
+          <div className="p-4 text-sm text-muted-foreground text-center">No hay facturas</div>
+        ) : (
+          invoices.map((invoice: any) => (
+            <div key={invoice.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
+              <span className="font-mono text-xs">{invoice.invoiceNumber}</span>
+              <span>{invoice.userId || "N/A"}</span>
+              <span className="font-medium">€{invoice.amount}</span>
+              <span className="text-muted-foreground">
+                {invoice.createdAt ? format(new Date(invoice.createdAt), "dd MMM yyyy") : "-"}
+              </span>
+              <div className="flex items-center gap-2">
+                <Badge variant={invoice.status === "paid" ? "default" : "secondary"}>
+                  {invoice.status === "paid" ? "Pagada" : "Pendiente"}
+                </Badge>
+                <Button variant="ghost" size="sm" className="h-6 px-2" data-testid={`button-download-invoice-${invoice.id}`}>
+                  <Download className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
 }
 
 function AnalyticsSection() {
+  const { data: snapshots = [], isLoading } = useQuery({
+    queryKey: ["/api/admin/analytics"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/analytics?days=30");
+      return res.json();
+    }
+  });
+
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Analytics</h2>
       <div className="grid grid-cols-2 gap-4">
         <div className="rounded-lg border p-4 space-y-4">
-          <h3 className="text-sm font-medium">Consultas por día</h3>
+          <h3 className="text-sm font-medium">Actividad reciente</h3>
           <div className="h-32 flex items-end justify-between gap-1">
-            {[40, 65, 45, 80, 55, 90, 75].map((h, i) => (
-              <div key={i} className="flex-1 bg-primary/20 rounded-t" style={{ height: `${h}%` }} />
+            {(snapshots.length > 0 ? snapshots.slice(-7) : [1,2,3,4,5,6,7].map(() => ({ totalQueries: Math.random() * 100 }))).map((s: any, i: number) => (
+              <div key={i} className="flex-1 bg-primary/20 rounded-t" style={{ height: `${Math.max(10, (s.totalQueries || 0) % 100)}%` }} />
             ))}
           </div>
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>Lun</span>
-            <span>Mar</span>
-            <span>Mié</span>
-            <span>Jue</span>
-            <span>Vie</span>
-            <span>Sáb</span>
-            <span>Dom</span>
-          </div>
+          <p className="text-xs text-muted-foreground text-center">Últimos 7 días</p>
         </div>
         <div className="rounded-lg border p-4 space-y-4">
-          <h3 className="text-sm font-medium">Uso por modelo</h3>
+          <h3 className="text-sm font-medium">Resumen</h3>
           <div className="space-y-3">
-            {[
-              { name: "Grok-3", value: 45, color: "bg-blue-500" },
-              { name: "GPT-4", value: 30, color: "bg-green-500" },
-              { name: "GPT-3.5", value: 20, color: "bg-yellow-500" },
-              { name: "Otros", value: 5, color: "bg-gray-400" },
-            ].map((item) => (
-              <div key={item.name} className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span>{item.name}</span>
-                  <span>{item.value}%</span>
-                </div>
-                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                  <div className={cn("h-full rounded-full", item.color)} style={{ width: `${item.value}%` }} />
-                </div>
-              </div>
-            ))}
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Registros de analytics</span>
+              <span className="font-medium">{snapshots.length}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Período</span>
+              <span className="font-medium">30 días</span>
+            </div>
           </div>
         </div>
       </div>
@@ -375,12 +702,12 @@ function AnalyticsSection() {
             <p className="text-xs text-muted-foreground">Satisfacción</p>
           </div>
           <div>
-            <p className="text-2xl font-semibold">1.2M</p>
-            <p className="text-xs text-muted-foreground">Tokens/día</p>
+            <p className="text-2xl font-semibold">{snapshots.reduce((sum: number, s: any) => sum + (s.totalQueries || 0), 0).toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground">Consultas totales</p>
           </div>
           <div>
-            <p className="text-2xl font-semibold">€0.08</p>
-            <p className="text-xs text-muted-foreground">Costo/consulta</p>
+            <p className="text-2xl font-semibold">€{snapshots.reduce((sum: number, s: any) => sum + parseFloat(s.revenue || "0"), 0).toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground">Ingresos período</p>
           </div>
         </div>
       </div>
@@ -389,59 +716,53 @@ function AnalyticsSection() {
 }
 
 function DatabaseSection() {
+  const { data: dbInfo, isLoading, refetch } = useQuery({
+    queryKey: ["/api/admin/database/info"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/database/info");
+      return res.json();
+    }
+  });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Database</h2>
-        <Button variant="outline" size="sm" data-testid="button-backup-db">
+        <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh-db">
           <RefreshCw className="h-4 w-4 mr-2" />
-          Backup
+          Actualizar
         </Button>
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="rounded-lg border p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <HardDrive className="h-4 w-4 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">Almacenamiento</span>
+          <div className="flex items-center gap-2 mb-4">
+            <Database className="h-5 w-5 text-muted-foreground" />
+            <span className="font-medium">Estado</span>
           </div>
-          <p className="text-xl font-semibold">24.5 GB</p>
-          <Progress value={49} className="h-1.5 mt-2" />
-          <p className="text-xs text-muted-foreground mt-1">de 50 GB</p>
+          <Badge variant={dbInfo?.status === "healthy" ? "default" : "destructive"} className="mb-2">
+            {dbInfo?.status === "healthy" ? "Saludable" : "Error"}
+          </Badge>
+          <p className="text-xs text-muted-foreground">
+            Último backup: {dbInfo?.lastBackup ? format(new Date(dbInfo.lastBackup), "dd/MM/yyyy HH:mm") : "N/A"}
+          </p>
         </div>
         <div className="rounded-lg border p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Activity className="h-4 w-4 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">Conexiones</span>
+          <div className="flex items-center gap-2 mb-4">
+            <HardDrive className="h-5 w-5 text-muted-foreground" />
+            <span className="font-medium">Tablas</span>
           </div>
-          <p className="text-xl font-semibold">47 / 100</p>
-          <Progress value={47} className="h-1.5 mt-2" />
-        </div>
-        <div className="rounded-lg border p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock className="h-4 w-4 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">Último backup</span>
-          </div>
-          <p className="text-xl font-semibold">Hoy</p>
-          <p className="text-xs text-muted-foreground">03:00 AM</p>
-        </div>
-      </div>
-      <div className="rounded-lg border p-4">
-        <h3 className="text-sm font-medium mb-4">Tablas principales</h3>
-        <div className="space-y-2">
-          {[
-            { name: "users", rows: "1,247", size: "2.3 MB" },
-            { name: "chats", rows: "45,892", size: "12.1 MB" },
-            { name: "messages", rows: "234,567", size: "8.7 MB" },
-            { name: "documents", rows: "8,234", size: "1.2 MB" },
-          ].map((table) => (
-            <div key={table.name} className="flex items-center justify-between py-2 text-sm">
-              <span className="font-mono">{table.name}</span>
-              <div className="flex items-center gap-6 text-muted-foreground">
-                <span>{table.rows} filas</span>
-                <span>{table.size}</span>
+          <div className="space-y-2">
+            {dbInfo?.tables && Object.entries(dbInfo.tables).map(([name, info]: [string, any]) => (
+              <div key={name} className="flex justify-between text-sm">
+                <span className="text-muted-foreground">{name}</span>
+                <span>{info.count} registros</span>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -449,73 +770,148 @@ function DatabaseSection() {
 }
 
 function SecuritySection() {
+  const queryClient = useQueryClient();
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newPolicy, setNewPolicy] = useState({ domain: "", allowNavigation: "true", rateLimit: 10 });
+
+  const { data: policies = [], isLoading } = useQuery({
+    queryKey: ["/api/admin/security/policies"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/security/policies");
+      return res.json();
+    }
+  });
+
+  const { data: auditLogs = [] } = useQuery({
+    queryKey: ["/api/admin/security/logs"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/security/logs?limit=20");
+      return res.json();
+    }
+  });
+
+  const createPolicyMutation = useMutation({
+    mutationFn: async (policy: any) => {
+      const res = await fetch("/api/admin/security/policies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(policy)
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/policies"] });
+      setShowAddModal(false);
+    }
+  });
+
+  const deletePolicyMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await fetch(`/api/admin/security/policies/${id}`, { method: "DELETE" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/policies"] });
+    }
+  });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
+
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Security</h2>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-lg border p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <Shield className="h-5 w-5 text-green-500" />
-            <span className="font-medium">Estado del sistema</span>
-          </div>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm">
-              <span>SSL/TLS</span>
-              <Badge variant="default">Activo</Badge>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span>Firewall</span>
-              <Badge variant="default">Activo</Badge>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span>2FA</span>
-              <Badge variant="default">Habilitado</Badge>
-            </div>
-          </div>
+      
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">Políticas de dominio</h3>
+          <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="outline">
+                <Plus className="h-4 w-4 mr-2" />
+                Añadir política
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Nueva política de dominio</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Dominio</Label>
+                  <Input 
+                    placeholder="ejemplo.com" 
+                    value={newPolicy.domain}
+                    onChange={(e) => setNewPolicy({ ...newPolicy, domain: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Límite de peticiones/min</Label>
+                  <Input 
+                    type="number"
+                    value={newPolicy.rateLimit}
+                    onChange={(e) => setNewPolicy({ ...newPolicy, rateLimit: parseInt(e.target.value) })}
+                  />
+                </div>
+                <Button 
+                  className="w-full" 
+                  onClick={() => createPolicyMutation.mutate(newPolicy)}
+                  disabled={!newPolicy.domain}
+                >
+                  Crear política
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
-        <div className="rounded-lg border p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <Key className="h-5 w-5" />
-            <span className="font-medium">API Keys</span>
-          </div>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-mono text-xs">sk-****-1234</span>
-              <Badge variant="secondary">Producción</Badge>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-mono text-xs">sk-****-5678</span>
-              <Badge variant="outline">Desarrollo</Badge>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" className="w-full mt-3" data-testid="button-new-api-key">
-            <Plus className="h-3 w-3 mr-2" />
-            Nueva API Key
-          </Button>
+        
+        <div className="rounded-lg border">
+          {policies.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground text-center">No hay políticas configuradas</div>
+          ) : (
+            policies.map((policy: any) => (
+              <div key={policy.id} className="flex items-center justify-between p-3 border-b last:border-0">
+                <div>
+                  <p className="font-medium">{policy.domain}</p>
+                  <p className="text-xs text-muted-foreground">Límite: {policy.rateLimit} req/min</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={policy.allowNavigation === "true" ? "default" : "secondary"}>
+                    {policy.allowNavigation === "true" ? "Permitido" : "Bloqueado"}
+                  </Badge>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-7 w-7 p-0 text-destructive"
+                    onClick={() => deletePolicyMutation.mutate(policy.id)}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
-      <div className="rounded-lg border p-4">
-        <div className="flex items-center gap-2 mb-4">
-          <AlertTriangle className="h-5 w-5 text-yellow-500" />
-          <span className="font-medium">Actividad reciente</span>
-        </div>
-        <div className="space-y-2">
-          {[
-            { event: "Login exitoso", user: "admin@empresa.com", ip: "192.168.1.1", time: "Hace 5 min" },
-            { event: "API Key creada", user: "admin@empresa.com", ip: "192.168.1.1", time: "Hace 2 horas" },
-            { event: "Intento fallido", user: "unknown", ip: "45.33.32.156", time: "Hace 1 día" },
-          ].map((log, i) => (
-            <div key={i} className="flex items-center justify-between py-2 text-sm">
-              <div>
-                <span>{log.event}</span>
-                <span className="text-muted-foreground ml-2">- {log.user}</span>
+
+      <div className="space-y-4">
+        <h3 className="text-sm font-medium">Registro de auditoría</h3>
+        <div className="rounded-lg border max-h-64 overflow-auto">
+          {auditLogs.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground text-center">No hay registros</div>
+          ) : (
+            auditLogs.map((log: any) => (
+              <div key={log.id} className="flex items-center justify-between p-3 border-b last:border-0 text-sm">
+                <div>
+                  <span className="font-medium">{log.action}</span>
+                  <span className="text-muted-foreground"> - {log.resource}</span>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {log.createdAt ? format(new Date(log.createdAt), "dd/MM HH:mm") : ""}
+                </span>
               </div>
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span>{log.ip}</span>
-                <span>{log.time}</span>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>
@@ -523,107 +919,223 @@ function SecuritySection() {
 }
 
 function ReportsSection() {
-  const reports = [
-    { name: "Informe mensual - Diciembre 2024", type: "Mensual", date: "01 Dic 2024", status: "ready" },
-    { name: "Análisis de uso Q4 2024", type: "Trimestral", date: "01 Oct 2024", status: "ready" },
-    { name: "Reporte de facturación", type: "Semanal", date: "15 Dic 2024", status: "generating" },
-    { name: "Informe de seguridad", type: "Mensual", date: "01 Dic 2024", status: "ready" },
-  ];
+  const queryClient = useQueryClient();
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newReport, setNewReport] = useState({ name: "", type: "usage" });
+
+  const { data: reports = [], isLoading } = useQuery({
+    queryKey: ["/api/admin/reports"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/reports");
+      return res.json();
+    }
+  });
+
+  const createReportMutation = useMutation({
+    mutationFn: async (report: any) => {
+      const res = await fetch("/api/admin/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(report)
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports"] });
+      setShowAddModal(false);
+    }
+  });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Reports</h2>
-        <Button size="sm" data-testid="button-generate-report">
-          <Plus className="h-4 w-4 mr-2" />
-          Generar reporte
-        </Button>
+        <h2 className="text-lg font-medium">Reports ({reports.length})</h2>
+        <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
+          <DialogTrigger asChild>
+            <Button size="sm" data-testid="button-create-report">
+              <Plus className="h-4 w-4 mr-2" />
+              Generar reporte
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Generar reporte</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Nombre</Label>
+                <Input 
+                  placeholder="Reporte mensual" 
+                  value={newReport.name}
+                  onChange={(e) => setNewReport({ ...newReport, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Tipo</Label>
+                <Select value={newReport.type} onValueChange={(value) => setNewReport({ ...newReport, type: value })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="usage">Uso</SelectItem>
+                    <SelectItem value="revenue">Ingresos</SelectItem>
+                    <SelectItem value="users">Usuarios</SelectItem>
+                    <SelectItem value="performance">Rendimiento</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button 
+                className="w-full" 
+                onClick={() => createReportMutation.mutate(newReport)}
+                disabled={!newReport.name}
+              >
+                Generar
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
       <div className="rounded-lg border">
-        {reports.map((report, i) => (
-          <div key={i} className="flex items-center justify-between p-4 border-b last:border-0">
-            <div>
-              <p className="font-medium text-sm">{report.name}</p>
-              <p className="text-xs text-muted-foreground">{report.type} - {report.date}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              {report.status === "ready" ? (
-                <Button variant="outline" size="sm" data-testid={`button-download-report-${i}`}>
-                  <Download className="h-3 w-3 mr-2" />
-                  Descargar
-                </Button>
-              ) : (
-                <Badge variant="secondary">
-                  <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-                  Generando
+        {reports.length === 0 ? (
+          <div className="p-4 text-sm text-muted-foreground text-center">No hay reportes generados</div>
+        ) : (
+          reports.map((report: any) => (
+            <div key={report.id} className="flex items-center justify-between p-3 border-b last:border-0">
+              <div>
+                <p className="font-medium">{report.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {report.type} - {report.createdAt ? format(new Date(report.createdAt), "dd/MM/yyyy") : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant={report.status === "completed" ? "default" : "secondary"}>
+                  {report.status === "completed" ? "Completado" : "Pendiente"}
                 </Badge>
-              )}
+                {report.filePath && (
+                  <Button variant="ghost" size="sm" className="h-7 px-2">
+                    <Download className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
 }
 
 function SettingsSection() {
-  const [maintenanceMode, setMaintenanceMode] = useState(false);
-  const [emailNotifications, setEmailNotifications] = useState(true);
-  const [autoBackup, setAutoBackup] = useState(true);
+  const queryClient = useQueryClient();
+  const [newSetting, setNewSetting] = useState({ key: "", value: "", description: "", category: "general" });
+
+  const { data: settings = [], isLoading } = useQuery({
+    queryKey: ["/api/admin/settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/settings");
+      return res.json();
+    }
+  });
+
+  const upsertSettingMutation = useMutation({
+    mutationFn: async (setting: any) => {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(setting)
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings"] });
+      setNewSetting({ key: "", value: "", description: "", category: "general" });
+    }
+  });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
+
+  const groupedSettings = settings.reduce((acc: any, s: any) => {
+    const cat = s.category || "general";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(s);
+    return acc;
+  }, {});
 
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Settings</h2>
-      <div className="space-y-4">
-        <div className="rounded-lg border p-4">
-          <h3 className="text-sm font-medium mb-4">General</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">Modo mantenimiento</p>
-                <p className="text-xs text-muted-foreground">Desactiva el acceso público</p>
-              </div>
-              <Switch checked={maintenanceMode} onCheckedChange={setMaintenanceMode} data-testid="switch-maintenance" />
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">Notificaciones por email</p>
-                <p className="text-xs text-muted-foreground">Alertas del sistema</p>
-              </div>
-              <Switch checked={emailNotifications} onCheckedChange={setEmailNotifications} data-testid="switch-admin-email" />
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">Backup automático</p>
-                <p className="text-xs text-muted-foreground">Diario a las 03:00</p>
-              </div>
-              <Switch checked={autoBackup} onCheckedChange={setAutoBackup} data-testid="switch-auto-backup" />
-            </div>
-          </div>
+      
+      <div className="rounded-lg border p-4 space-y-4">
+        <h3 className="text-sm font-medium">Añadir configuración</h3>
+        <div className="grid grid-cols-4 gap-4">
+          <Input 
+            placeholder="Clave" 
+            value={newSetting.key}
+            onChange={(e) => setNewSetting({ ...newSetting, key: e.target.value })}
+          />
+          <Input 
+            placeholder="Valor" 
+            value={newSetting.value}
+            onChange={(e) => setNewSetting({ ...newSetting, value: e.target.value })}
+          />
+          <Select value={newSetting.category} onValueChange={(value) => setNewSetting({ ...newSetting, category: value })}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="general">General</SelectItem>
+              <SelectItem value="ai">AI</SelectItem>
+              <SelectItem value="security">Seguridad</SelectItem>
+              <SelectItem value="billing">Facturación</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button 
+            onClick={() => upsertSettingMutation.mutate(newSetting)}
+            disabled={!newSetting.key}
+          >
+            Guardar
+          </Button>
         </div>
-        <div className="rounded-lg border p-4">
-          <h3 className="text-sm font-medium mb-4">Límites</h3>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Consultas por usuario/día</span>
-                <span className="font-medium">100</span>
-              </div>
-              <Input type="number" defaultValue={100} className="h-8" data-testid="input-daily-queries" />
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Tokens máximos por consulta</span>
-                <span className="font-medium">4096</span>
-              </div>
-              <Input type="number" defaultValue={4096} className="h-8" data-testid="input-max-tokens" />
-            </div>
-          </div>
-        </div>
-        <Button className="w-full" data-testid="button-save-admin-settings">Guardar configuración</Button>
       </div>
+
+      {Object.entries(groupedSettings).map(([category, items]: [string, any]) => (
+        <div key={category} className="space-y-2">
+          <h3 className="text-sm font-medium capitalize">{category}</h3>
+          <div className="rounded-lg border divide-y">
+            {items.map((setting: any) => (
+              <div key={setting.id} className="flex items-center justify-between p-3">
+                <div>
+                  <p className="font-medium text-sm">{setting.key}</p>
+                  <p className="text-xs text-muted-foreground">{setting.description || "Sin descripción"}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input 
+                    className="w-48 h-8 text-sm"
+                    defaultValue={setting.value}
+                    onBlur={(e) => {
+                      if (e.target.value !== setting.value) {
+                        upsertSettingMutation.mutate({ ...setting, value: e.target.value });
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {settings.length === 0 && (
+        <div className="rounded-lg border p-8 text-center text-muted-foreground">
+          No hay configuraciones guardadas
+        </div>
+      )}
     </div>
   );
 }
@@ -634,61 +1146,72 @@ export default function AdminPage() {
 
   const renderSection = () => {
     switch (activeSection) {
-      case "dashboard": return <DashboardSection />;
-      case "users": return <UsersSection />;
-      case "ai-models": return <AIModelsSection />;
-      case "payments": return <PaymentsSection />;
-      case "invoices": return <InvoicesSection />;
-      case "analytics": return <AnalyticsSection />;
-      case "database": return <DatabaseSection />;
-      case "security": return <SecuritySection />;
-      case "reports": return <ReportsSection />;
-      case "settings": return <SettingsSection />;
-      default: return <DashboardSection />;
+      case "dashboard":
+        return <DashboardSection />;
+      case "users":
+        return <UsersSection />;
+      case "ai-models":
+        return <AIModelsSection />;
+      case "payments":
+        return <PaymentsSection />;
+      case "invoices":
+        return <InvoicesSection />;
+      case "analytics":
+        return <AnalyticsSection />;
+      case "database":
+        return <DatabaseSection />;
+      case "security":
+        return <SecuritySection />;
+      case "reports":
+        return <ReportsSection />;
+      case "settings":
+        return <SettingsSection />;
+      default:
+        return <DashboardSection />;
     }
   };
 
   return (
-    <div className="min-h-screen bg-background flex">
-      <div className="w-56 border-r bg-muted/30 p-3 flex flex-col">
-        <div className="flex items-center gap-3 p-3 mb-2">
+    <div className="flex h-screen bg-background">
+      <aside className="w-56 border-r flex flex-col">
+        <div className="p-4 border-b">
           <Button 
             variant="ghost" 
-            size="icon"
-            className="h-8 w-8"
+            size="sm" 
+            className="w-full justify-start gap-2"
             onClick={() => setLocation("/")}
-            data-testid="button-back-admin"
+            data-testid="button-back-to-app"
           >
             <ArrowLeft className="h-4 w-4" />
+            Volver a la app
           </Button>
-          <h2 className="font-semibold text-sm">Administration</h2>
         </div>
-        <nav className="space-y-0.5 flex-1">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveSection(item.id)}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors",
-                activeSection === item.id
-                  ? "bg-background shadow-sm font-medium"
-                  : "text-muted-foreground hover:bg-background/50"
-              )}
-              data-testid={`button-admin-nav-${item.id}`}
-            >
-              <item.icon className="h-4 w-4" />
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-screen">
-          <div className="p-8 max-w-5xl">
-            {renderSection()}
-          </div>
-        </ScrollArea>
-      </div>
+        <div className="p-2">
+          <h2 className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Administration
+          </h2>
+          <nav className="space-y-1">
+            {navItems.map((item) => (
+              <Button
+                key={item.id}
+                variant={activeSection === item.id ? "secondary" : "ghost"}
+                size="sm"
+                className="w-full justify-start gap-2"
+                onClick={() => setActiveSection(item.id)}
+                data-testid={`nav-${item.id}`}
+              >
+                <item.icon className="h-4 w-4" />
+                {item.label}
+              </Button>
+            ))}
+          </nav>
+        </div>
+      </aside>
+      <main className="flex-1 overflow-auto">
+        <div className="p-6">
+          {renderSection()}
+        </div>
+      </main>
     </div>
   );
 }

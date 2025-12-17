@@ -11,8 +11,16 @@ import {
   type Gpt, type InsertGpt,
   type GptCategory, type InsertGptCategory,
   type GptVersion, type InsertGptVersion,
+  type AiModel, type InsertAiModel,
+  type Payment, type InsertPayment,
+  type Invoice, type InsertInvoice,
+  type PlatformSetting, type InsertPlatformSetting,
+  type AuditLog, type InsertAuditLog,
+  type AnalyticsSnapshot, type InsertAnalyticsSnapshot,
+  type Report, type InsertReport,
   files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages,
-  gpts, gptCategories, gptVersions
+  gpts, gptCategories, gptVersions, users,
+  aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -65,6 +73,44 @@ export interface IStorage {
   createGptVersion(version: InsertGptVersion): Promise<GptVersion>;
   getGptVersions(gptId: string): Promise<GptVersion[]>;
   getLatestGptVersion(gptId: string): Promise<GptVersion | undefined>;
+  // Admin: User management
+  getAllUsers(): Promise<User[]>;
+  updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
+  deleteUser(id: string): Promise<void>;
+  getUserStats(): Promise<{ total: number; active: number; newThisMonth: number }>;
+  // Admin: AI Models
+  createAiModel(model: InsertAiModel): Promise<AiModel>;
+  getAiModels(): Promise<AiModel[]>;
+  updateAiModel(id: string, updates: Partial<InsertAiModel>): Promise<AiModel | undefined>;
+  deleteAiModel(id: string): Promise<void>;
+  // Admin: Payments
+  createPayment(payment: InsertPayment): Promise<Payment>;
+  getPayments(): Promise<Payment[]>;
+  updatePayment(id: string, updates: Partial<InsertPayment>): Promise<Payment | undefined>;
+  getPaymentStats(): Promise<{ total: string; thisMonth: string; count: number }>;
+  // Admin: Invoices
+  createInvoice(invoice: InsertInvoice): Promise<Invoice>;
+  getInvoices(): Promise<Invoice[]>;
+  updateInvoice(id: string, updates: Partial<InsertInvoice>): Promise<Invoice | undefined>;
+  // Admin: Settings
+  getSetting(key: string): Promise<PlatformSetting | undefined>;
+  getSettings(): Promise<PlatformSetting[]>;
+  upsertSetting(key: string, value: string, description?: string, category?: string): Promise<PlatformSetting>;
+  // Admin: Audit Logs
+  createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+  getAuditLogs(limit?: number): Promise<AuditLog[]>;
+  // Admin: Analytics
+  createAnalyticsSnapshot(snapshot: InsertAnalyticsSnapshot): Promise<AnalyticsSnapshot>;
+  getAnalyticsSnapshots(days?: number): Promise<AnalyticsSnapshot[]>;
+  getDashboardMetrics(): Promise<{ users: number; queries: number; revenue: string; uptime: number }>;
+  // Admin: Reports
+  createReport(report: InsertReport): Promise<Report>;
+  getReports(): Promise<Report[]>;
+  updateReport(id: string, updates: Partial<InsertReport>): Promise<Report | undefined>;
+  // Admin: Domain Policies
+  getDomainPolicies(): Promise<DomainPolicy[]>;
+  updateDomainPolicy(id: string, updates: Partial<InsertDomainPolicy>): Promise<DomainPolicy | undefined>;
+  deleteDomainPolicy(id: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -309,6 +355,181 @@ export class MemStorage implements IStorage {
       .orderBy(desc(gptVersions.versionNumber))
       .limit(1);
     return result;
+  }
+
+  // Admin: User management
+  async getAllUsers(): Promise<User[]> {
+    return db.select().from(users).orderBy(desc(users.createdAt));
+  }
+
+  async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
+    const [result] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+    return result;
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await db.delete(users).where(eq(users.id, id));
+  }
+
+  async getUserStats(): Promise<{ total: number; active: number; newThisMonth: number }> {
+    const allUsers = await db.select().from(users);
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const total = allUsers.length;
+    const active = allUsers.filter(u => u.status === "active").length;
+    const newThisMonth = allUsers.filter(u => u.createdAt && u.createdAt >= monthStart).length;
+    return { total, active, newThisMonth };
+  }
+
+  // Admin: AI Models
+  async createAiModel(model: InsertAiModel): Promise<AiModel> {
+    const [result] = await db.insert(aiModels).values(model).returning();
+    return result;
+  }
+
+  async getAiModels(): Promise<AiModel[]> {
+    return db.select().from(aiModels).orderBy(desc(aiModels.createdAt));
+  }
+
+  async updateAiModel(id: string, updates: Partial<InsertAiModel>): Promise<AiModel | undefined> {
+    const [result] = await db.update(aiModels).set(updates).where(eq(aiModels.id, id)).returning();
+    return result;
+  }
+
+  async deleteAiModel(id: string): Promise<void> {
+    await db.delete(aiModels).where(eq(aiModels.id, id));
+  }
+
+  // Admin: Payments
+  async createPayment(payment: InsertPayment): Promise<Payment> {
+    const [result] = await db.insert(payments).values(payment).returning();
+    return result;
+  }
+
+  async getPayments(): Promise<Payment[]> {
+    return db.select().from(payments).orderBy(desc(payments.createdAt));
+  }
+
+  async updatePayment(id: string, updates: Partial<InsertPayment>): Promise<Payment | undefined> {
+    const [result] = await db.update(payments).set(updates).where(eq(payments.id, id)).returning();
+    return result;
+  }
+
+  async getPaymentStats(): Promise<{ total: string; thisMonth: string; count: number }> {
+    const allPayments = await db.select().from(payments);
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const completedPayments = allPayments.filter(p => p.status === "completed");
+    const thisMonthPayments = completedPayments.filter(p => p.createdAt >= monthStart);
+    const total = completedPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+    const thisMonth = thisMonthPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+    return { total: total.toFixed(2), thisMonth: thisMonth.toFixed(2), count: completedPayments.length };
+  }
+
+  // Admin: Invoices
+  async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
+    const [result] = await db.insert(invoices).values(invoice).returning();
+    return result;
+  }
+
+  async getInvoices(): Promise<Invoice[]> {
+    return db.select().from(invoices).orderBy(desc(invoices.createdAt));
+  }
+
+  async updateInvoice(id: string, updates: Partial<InsertInvoice>): Promise<Invoice | undefined> {
+    const [result] = await db.update(invoices).set(updates).where(eq(invoices.id, id)).returning();
+    return result;
+  }
+
+  // Admin: Settings
+  async getSetting(key: string): Promise<PlatformSetting | undefined> {
+    const [result] = await db.select().from(platformSettings).where(eq(platformSettings.key, key));
+    return result;
+  }
+
+  async getSettings(): Promise<PlatformSetting[]> {
+    return db.select().from(platformSettings).orderBy(platformSettings.category);
+  }
+
+  async upsertSetting(key: string, value: string, description?: string, category?: string): Promise<PlatformSetting> {
+    const existing = await this.getSetting(key);
+    if (existing) {
+      const [result] = await db.update(platformSettings)
+        .set({ value, description, category, updatedAt: new Date() })
+        .where(eq(platformSettings.key, key))
+        .returning();
+      return result;
+    }
+    const [result] = await db.insert(platformSettings)
+      .values({ key, value, description, category })
+      .returning();
+    return result;
+  }
+
+  // Admin: Audit Logs
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const [result] = await db.insert(auditLogs).values(log).returning();
+    return result;
+  }
+
+  async getAuditLogs(limit: number = 100): Promise<AuditLog[]> {
+    return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(limit);
+  }
+
+  // Admin: Analytics
+  async createAnalyticsSnapshot(snapshot: InsertAnalyticsSnapshot): Promise<AnalyticsSnapshot> {
+    const [result] = await db.insert(analyticsSnapshots).values(snapshot).returning();
+    return result;
+  }
+
+  async getAnalyticsSnapshots(days: number = 30): Promise<AnalyticsSnapshot[]> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    return db.select().from(analyticsSnapshots)
+      .where(sql`${analyticsSnapshots.date} >= ${cutoff}`)
+      .orderBy(analyticsSnapshots.date);
+  }
+
+  async getDashboardMetrics(): Promise<{ users: number; queries: number; revenue: string; uptime: number }> {
+    const userStats = await this.getUserStats();
+    const paymentStats = await this.getPaymentStats();
+    const allUsers = await db.select().from(users);
+    const totalQueries = allUsers.reduce((sum, u) => sum + (u.queryCount || 0), 0);
+    return {
+      users: userStats.total,
+      queries: totalQueries,
+      revenue: paymentStats.total,
+      uptime: 99.9
+    };
+  }
+
+  // Admin: Reports
+  async createReport(report: InsertReport): Promise<Report> {
+    const [result] = await db.insert(reports).values(report).returning();
+    return result;
+  }
+
+  async getReports(): Promise<Report[]> {
+    return db.select().from(reports).orderBy(desc(reports.createdAt));
+  }
+
+  async updateReport(id: string, updates: Partial<InsertReport>): Promise<Report | undefined> {
+    const [result] = await db.update(reports).set(updates).where(eq(reports.id, id)).returning();
+    return result;
+  }
+
+  // Admin: Domain Policies
+  async getDomainPolicies(): Promise<DomainPolicy[]> {
+    return db.select().from(domainPolicies).orderBy(desc(domainPolicies.createdAt));
+  }
+
+  async updateDomainPolicy(id: string, updates: Partial<InsertDomainPolicy>): Promise<DomainPolicy | undefined> {
+    const [result] = await db.update(domainPolicies).set(updates).where(eq(domainPolicies.id, id)).returning();
+    return result;
+  }
+
+  async deleteDomainPolicy(id: string): Promise<void> {
+    await db.delete(domainPolicies).where(eq(domainPolicies.id, id));
   }
 }
 

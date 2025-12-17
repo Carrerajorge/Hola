@@ -19,6 +19,12 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  email: text("email"),
+  role: text("role").default("user"),
+  plan: text("plan").default("free"),
+  status: text("status").default("active"),
+  queryCount: integer("query_count").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -290,3 +296,160 @@ export const insertGptVersionSchema = createInsertSchema(gptVersions).omit({
 
 export type InsertGptVersion = z.infer<typeof insertGptVersionSchema>;
 export type GptVersion = typeof gptVersions.$inferSelect;
+
+// Admin Tables
+
+// AI Models Registry
+export const aiModels = pgTable("ai_models", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  provider: text("provider").notNull(),
+  modelId: text("model_id").notNull(),
+  status: text("status").default("active"),
+  costPer1k: text("cost_per_1k").default("0.00"),
+  usagePercent: integer("usage_percent").default(0),
+  description: text("description"),
+  capabilities: jsonb("capabilities"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertAiModelSchema = createInsertSchema(aiModels).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAiModel = z.infer<typeof insertAiModelSchema>;
+export type AiModel = typeof aiModels.$inferSelect;
+
+// Payments
+export const payments = pgTable("payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  amount: text("amount").notNull(),
+  currency: text("currency").default("EUR"),
+  status: text("status").default("pending"),
+  method: text("method"),
+  description: text("description"),
+  stripePaymentId: text("stripe_payment_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("payments_user_idx").on(table.userId),
+]);
+
+export const insertPaymentSchema = createInsertSchema(payments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPayment = z.infer<typeof insertPaymentSchema>;
+export type Payment = typeof payments.$inferSelect;
+
+// Invoices
+export const invoices = pgTable("invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  paymentId: varchar("payment_id").references(() => payments.id),
+  invoiceNumber: text("invoice_number").notNull(),
+  amount: text("amount").notNull(),
+  currency: text("currency").default("EUR"),
+  status: text("status").default("pending"),
+  dueDate: timestamp("due_date"),
+  paidAt: timestamp("paid_at"),
+  pdfPath: text("pdf_path"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("invoices_user_idx").on(table.userId),
+]);
+
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+export type Invoice = typeof invoices.$inferSelect;
+
+// Platform Settings
+export const platformSettings = pgTable("platform_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  value: text("value"),
+  description: text("description"),
+  category: text("category").default("general"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertPlatformSettingSchema = createInsertSchema(platformSettings).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type InsertPlatformSetting = z.infer<typeof insertPlatformSettingSchema>;
+export type PlatformSetting = typeof platformSettings.$inferSelect;
+
+// Audit Logs
+export const auditLogs = pgTable("audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id"),
+  action: text("action").notNull(),
+  resource: text("resource"),
+  resourceId: varchar("resource_id"),
+  details: jsonb("details"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("audit_logs_user_idx").on(table.userId),
+  index("audit_logs_action_idx").on(table.action),
+]);
+
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type AuditLog = typeof auditLogs.$inferSelect;
+
+// Analytics Snapshots
+export const analyticsSnapshots = pgTable("analytics_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  date: timestamp("date").notNull(),
+  totalUsers: integer("total_users").default(0),
+  activeUsers: integer("active_users").default(0),
+  totalQueries: integer("total_queries").default(0),
+  revenue: text("revenue").default("0"),
+  newSignups: integer("new_signups").default(0),
+  churnedUsers: integer("churned_users").default(0),
+  avgResponseTime: integer("avg_response_time").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertAnalyticsSnapshotSchema = createInsertSchema(analyticsSnapshots).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAnalyticsSnapshot = z.infer<typeof insertAnalyticsSnapshotSchema>;
+export type AnalyticsSnapshot = typeof analyticsSnapshots.$inferSelect;
+
+// Reports
+export const reports = pgTable("reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  status: text("status").default("pending"),
+  parameters: jsonb("parameters"),
+  filePath: text("file_path"),
+  generatedBy: varchar("generated_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const insertReportSchema = createInsertSchema(reports).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertReport = z.infer<typeof insertReportSchema>;
+export type Report = typeof reports.$inferSelect;
