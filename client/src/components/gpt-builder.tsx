@@ -51,7 +51,10 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     capabilities: {
       webBrowsing: true,
       codeInterpreter: true,
-      imageGeneration: false
+      imageGeneration: false,
+      wordCreation: true,
+      excelCreation: true,
+      pptCreation: true
     }
   });
 
@@ -73,7 +76,10 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
         capabilities: editingGpt.capabilities || {
           webBrowsing: true,
           codeInterpreter: true,
-          imageGeneration: false
+          imageGeneration: false,
+          wordCreation: true,
+          excelCreation: true,
+          pptCreation: true
         }
       });
     } else {
@@ -91,7 +97,10 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
         capabilities: {
           webBrowsing: true,
           codeInterpreter: true,
-          imageGeneration: false
+          imageGeneration: false,
+          wordCreation: true,
+          excelCreation: true,
+          pptCreation: true
         }
       });
     }
@@ -484,6 +493,51 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                               capabilities: { ...prev.capabilities, imageGeneration: checked }
                             }))}
                             data-testid="switch-image-generation"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between p-4 border rounded-lg">
+                          <div>
+                            <p className="font-medium">Crear en Word</p>
+                            <p className="text-sm text-muted-foreground">Permite crear documentos de Word.</p>
+                          </div>
+                          <Switch
+                            checked={formData.capabilities.wordCreation}
+                            onCheckedChange={(checked) => setFormData(prev => ({
+                              ...prev,
+                              capabilities: { ...prev.capabilities, wordCreation: checked }
+                            }))}
+                            data-testid="switch-word-creation"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between p-4 border rounded-lg">
+                          <div>
+                            <p className="font-medium">Crear en Excel</p>
+                            <p className="text-sm text-muted-foreground">Permite crear hojas de cálculo en Excel.</p>
+                          </div>
+                          <Switch
+                            checked={formData.capabilities.excelCreation}
+                            onCheckedChange={(checked) => setFormData(prev => ({
+                              ...prev,
+                              capabilities: { ...prev.capabilities, excelCreation: checked }
+                            }))}
+                            data-testid="switch-excel-creation"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between p-4 border rounded-lg">
+                          <div>
+                            <p className="font-medium">Crear en PowerPoint</p>
+                            <p className="text-sm text-muted-foreground">Permite crear presentaciones de PowerPoint.</p>
+                          </div>
+                          <Switch
+                            checked={formData.capabilities.pptCreation}
+                            onCheckedChange={(checked) => setFormData(prev => ({
+                              ...prev,
+                              capabilities: { ...prev.capabilities, pptCreation: checked }
+                            }))}
+                            data-testid="switch-ppt-creation"
                           />
                         </div>
                       </div>
