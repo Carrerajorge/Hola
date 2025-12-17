@@ -18,6 +18,16 @@ export default function Home() {
   const [, setLocation] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
 
+  // Check for OAuth success and set localStorage
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('auth') === 'success') {
+      localStorage.setItem("sira_logged_in", "true");
+      // Clean up URL
+      window.history.replaceState({}, '', '/');
+    }
+  }, []);
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       setLocation("/welcome");

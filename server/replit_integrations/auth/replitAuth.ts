@@ -126,7 +126,8 @@ export async function setupAuth(app: Express) {
           console.error("[Auth] Login error:", loginErr);
           return res.redirect("/login?error=login_failed");
         }
-        return res.redirect("/");
+        // Redirect with success flag so client can set localStorage
+        return res.redirect("/?auth=success");
       });
     })(req, res, next);
   });
