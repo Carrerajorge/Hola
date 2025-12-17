@@ -1,4 +1,3 @@
-import { openai, MODELS } from "./lib/openai";
 import { LIMITS } from "./lib/constants";
 
 export interface TextChunk {
@@ -41,44 +40,81 @@ export function chunkText(text: string, chunkSize = 1000, overlap = 200): TextCh
   return chunks;
 }
 
-export async function generateEmbedding(text: string): Promise<number[]> {
-  try {
-    const response = await openai.embeddings.create({
-      model: MODELS.EMBEDDING,
-      input: text.slice(0, LIMITS.MAX_EMBEDDING_INPUT),
-    });
-    return response.data[0].embedding;
-  } catch (error) {
-    console.error("Embedding generation error:", error);
-    return new Array(1536).fill(0);
+function simpleHash(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
   }
+  return hash;
+}
+
+function extractKeywords(text: string): string[] {
+  const stopWords = new Set([
+    'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del', 'al',
+    'y', 'o', 'a', 'en', 'que', 'es', 'por', 'para', 'con', 'no', 'se', 'su',
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of',
+    'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+    'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might',
+    'this', 'that', 'these', 'those', 'it', 'its', 'as', 'if', 'then', 'than'
+  ]);
+  
+  return text
+    .toLowerCase()
+    .replace(/[^\w\sáéíóúñü]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length > 2 && !stopWords.has(word));
+}
+
+const EMBEDDING_DIMENSIONS = 1536;
+
+export async function generateEmbedding(text: string): Promise<number[]> {
+  const keywords = extractKeywords(text.slice(0, LIMITS.MAX_EMBEDDING_INPUT));
+  const embedding = new Array(EMBEDDING_DIMENSIONS).fill(0);
+  
+  keywords.forEach((word, idx) => {
+    const hash = Math.abs(simpleHash(word));
+    const position = hash % embedding.length;
+    embedding[position] += 1 / (idx + 1);
+  });
+  
+  const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+  if (magnitude > 0) {
+    for (let i = 0; i < embedding.length; i++) {
+      embedding[i] /= magnitude;
+    }
+  }
+  
+  return embedding;
 }
 
 export async function generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   
-  const allEmbeddings: number[][] = [];
+  const embeddings: number[][] = [];
   
-  for (let i = 0; i < texts.length; i += LIMITS.EMBEDDING_BATCH_SIZE) {
-    const batch = texts.slice(i, i + LIMITS.EMBEDDING_BATCH_SIZE)
-      .map(t => t.slice(0, LIMITS.MAX_EMBEDDING_INPUT));
-    
-    try {
-      const response = await openai.embeddings.create({
-        model: MODELS.EMBEDDING,
-        input: batch,
-      });
-      
-      const batchEmbeddings = response.data
-        .sort((a, b) => a.index - b.index)
-        .map(d => d.embedding);
-      
-      allEmbeddings.push(...batchEmbeddings);
-    } catch (error) {
-      console.error("Batch embedding error:", error);
-      allEmbeddings.push(...batch.map(() => new Array(1536).fill(0)));
-    }
+  for (const text of texts) {
+    const embedding = await generateEmbedding(text);
+    embeddings.push(embedding);
   }
   
-  return allEmbeddings;
+  return embeddings;
+}
+
+export function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) return 0;
+  
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  
+  const magnitude = Math.sqrt(normA) * Math.sqrt(normB);
+  return magnitude === 0 ? 0 : dotProduct / magnitude;
 }
