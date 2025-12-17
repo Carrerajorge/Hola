@@ -2744,6 +2744,66 @@ export function ChatInterface({
               selectedDocText && "ring-2 ring-primary/50"
             )}>
               <div className="flex flex-col gap-2">
+                {uploadedFiles.length > 0 && (
+                  <div className="flex items-center gap-2 pl-2">
+                    {uploadedFiles.map((file, index) => {
+                      const isWord = file.type === "word" || file.name.endsWith('.doc') || file.name.endsWith('.docx');
+                      const isExcel = file.type === "excel" || file.name.endsWith('.xls') || file.name.endsWith('.xlsx');
+                      const isPpt = file.type === "ppt" || file.name.endsWith('.ppt') || file.name.endsWith('.pptx');
+                      const isPdf = file.type === "pdf" || file.name.endsWith('.pdf');
+                      const isImage = file.type === "image" || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+                      
+                      return (
+                        <TooltipProvider key={file.id}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div 
+                                className={cn(
+                                  "relative group flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all duration-200 cursor-pointer",
+                                  file.status === "uploading" && "bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800",
+                                  file.status === "processing" && "bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800",
+                                  file.status === "ready" && "bg-muted/50 border border-border hover:bg-muted",
+                                  file.status === "error" && "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
+                                )}
+                              >
+                                <div className={cn(
+                                  "flex items-center justify-center w-7 h-7 rounded shrink-0",
+                                  isWord && "bg-blue-600",
+                                  isExcel && "bg-green-600",
+                                  isPpt && "bg-orange-500",
+                                  isPdf && "bg-red-600",
+                                  isImage && "bg-purple-500",
+                                  !isWord && !isExcel && !isPpt && !isPdf && !isImage && "bg-gray-500"
+                                )}>
+                                  {file.status === "uploading" || file.status === "processing" ? (
+                                    <Loader2 className="h-4 w-4 text-white animate-spin" />
+                                  ) : (
+                                    <span className="text-white text-xs font-bold">
+                                      {isWord ? "W" : isExcel ? "X" : isPpt ? "P" : isPdf ? "PDF" : isImage ? "IMG" : "F"}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="max-w-[100px] truncate font-medium">{file.name}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 shrink-0 text-muted-foreground hover:text-red-500 transition-colors"
+                                  onClick={(e) => { e.stopPropagation(); removeFile(index); }}
+                                  data-testid={`button-remove-file-${index}`}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              <p className="text-xs">{file.name} ({formatFileSize(file.size)})</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
                 <Popover>
                   <PopoverTrigger asChild>
@@ -2989,67 +3049,6 @@ export function ChatInterface({
                   )}
                 </div>
                 </div>
-                
-                {uploadedFiles.length > 0 && (
-                  <div className="flex items-center gap-2 pl-12 pt-1">
-                    {uploadedFiles.map((file, index) => {
-                      const isWord = file.type === "word" || file.name.endsWith('.doc') || file.name.endsWith('.docx');
-                      const isExcel = file.type === "excel" || file.name.endsWith('.xls') || file.name.endsWith('.xlsx');
-                      const isPpt = file.type === "ppt" || file.name.endsWith('.ppt') || file.name.endsWith('.pptx');
-                      const isPdf = file.type === "pdf" || file.name.endsWith('.pdf');
-                      const isImage = file.type === "image" || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
-                      
-                      return (
-                        <TooltipProvider key={file.id}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div 
-                                className={cn(
-                                  "relative group flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all duration-200 cursor-pointer",
-                                  file.status === "uploading" && "bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800",
-                                  file.status === "processing" && "bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800",
-                                  file.status === "ready" && "bg-muted/50 border border-border hover:bg-muted",
-                                  file.status === "error" && "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
-                                )}
-                              >
-                                <div className={cn(
-                                  "flex items-center justify-center w-7 h-7 rounded shrink-0",
-                                  isWord && "bg-blue-600",
-                                  isExcel && "bg-green-600",
-                                  isPpt && "bg-orange-500",
-                                  isPdf && "bg-red-600",
-                                  isImage && "bg-purple-500",
-                                  !isWord && !isExcel && !isPpt && !isPdf && !isImage && "bg-gray-500"
-                                )}>
-                                  {file.status === "uploading" || file.status === "processing" ? (
-                                    <Loader2 className="h-4 w-4 text-white animate-spin" />
-                                  ) : (
-                                    <span className="text-white text-xs font-bold">
-                                      {isWord ? "W" : isExcel ? "X" : isPpt ? "P" : isPdf ? "PDF" : isImage ? "IMG" : "F"}
-                                    </span>
-                                  )}
-                                </div>
-                                <span className="max-w-[100px] truncate font-medium">{file.name}</span>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-5 w-5 shrink-0 text-muted-foreground hover:text-red-500 transition-colors"
-                                  onClick={(e) => { e.stopPropagation(); removeFile(index); }}
-                                  data-testid={`button-remove-file-${index}`}
-                                >
-                                  <X className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">
-                              <p className="text-xs">{file.name} ({formatFileSize(file.size)})</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </div>
             <div className="text-center text-xs text-muted-foreground mt-3">
