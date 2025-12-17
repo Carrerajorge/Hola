@@ -310,8 +310,7 @@ El usuario podrá descargar el documento generado directamente.`;
     
     return { 
       content: gatewayResponse.content,
-      role: "assistant",
-      sources: sources.length > 0 ? sources : undefined
+      role: "assistant"
     };
   }
 
@@ -319,7 +318,6 @@ El usuario podrá descargar el documento generado directamente.`;
   
   return { 
     content,
-    role: "assistant",
-    sources: sources.length > 0 ? sources : undefined
+    role: "assistant"
   };
 }
