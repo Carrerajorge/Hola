@@ -230,32 +230,42 @@ FORMATO OBLIGATORIO PARA EXCEL:
 
 COMANDOS DE HOJAS:
 - Para crear una NUEVA hoja: [NUEVA_HOJA:Nombre de la Hoja]
-- Para cambiar a una hoja existente: [HOJA:Nombre de la Hoja]
+- Puedes crear múltiples hojas en una sola respuesta.
 
-EJEMPLO con múltiples hojas:
-[NUEVA_HOJA:Datos 2020-2025]
-Año,Valor,Gráfico
-2020,45,█████████
-2021,62,████████████
-2022,78,████████████████
-2023,85,█████████████████
-2024,92,██████████████████
-2025,98,████████████████████
+EJEMPLO DE GRÁFICOS DE BARRAS con múltiples hojas:
+[NUEVA_HOJA:Ventas 2020-2025]
+Año,Ventas,Gráfico
+2020,45000,█████████
+2021,62000,████████████
+2022,78000,████████████████
+2023,85000,█████████████████
+2024,92000,██████████████████
+2025,98000,████████████████████
 
-[NUEVA_HOJA:Datos 2030-2035]
-Año,Valor,Gráfico
-2030,110,██████████████████████
-2031,125,█████████████████████████
-2032,140,████████████████████████████
-2033,155,███████████████████████████████
-2034,170,██████████████████████████████████
-2035,185,█████████████████████████████████████
+[NUEVA_HOJA:Proyección 2030-2035]
+Año,Proyección,Gráfico
+2030,150000,██████████████████████
+2031,175000,█████████████████████████
+2032,200000,████████████████████████████
+2033,225000,███████████████████████████████
+2034,250000,██████████████████████████████████
+2035,280000,█████████████████████████████████████
 
-REGLAS:
-1. Usa [NUEVA_HOJA:nombre] para crear cada hoja nueva con su nombre.
-2. Después del comando de hoja, escribe los datos CSV directamente.
-3. Para barras visuales, usa █ repetido proporcionalmente al valor.
-4. Fórmula: número de █ = (valor / valor_máximo) * 20
+[NUEVA_HOJA:Balance de Ventas]
+Concepto,Q1,Q2,Q3,Q4,Total
+Ingresos,25000,28000,32000,35000,=B2+C2+D2+E2
+Costos,15000,16000,18000,20000,=B3+C3+D3+E3
+Utilidad Bruta,=B2-B3,=C2-C3,=D2-D3,=E2-E3,=B4+C4+D4+E4
+Gastos Operativos,3000,3500,4000,4500,=B5+C5+D5+E5
+Utilidad Neta,=B4-B5,=C4-C5,=D4-D5,=E4-E5,=B6+C6+D6+E6
+
+REGLAS IMPORTANTES:
+1. Usa [NUEVA_HOJA:nombre] para crear cada hoja nueva.
+2. Después del comando de hoja, escribe los datos CSV directamente SIN líneas vacías.
+3. Para gráficos de barras visuales, usa █ repetido proporcionalmente.
+4. Para fórmulas usa el formato =CELDA+CELDA (ej: =B2+C2 o =SUM(B2:E2)).
+5. Las celdas se nombran como en Excel: A1, B2, C3, etc.
+6. NO incluyas explicaciones, solo los comandos y datos.
 `;
 
   const documentModePrompt = documentMode ? (
