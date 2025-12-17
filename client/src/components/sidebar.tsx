@@ -31,7 +31,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { SearchModal } from "@/components/search-modal";
-import { ProfileModal, BillingModal, SettingsModal, PrivacyModal, AdminPanelModal } from "@/components/user-modals";
+import { ProfileModal, BillingModal, SettingsModal, PrivacyModal } from "@/components/user-modals";
+import { AdminPanel } from "@/components/admin-panel";
 
 import { Chat } from "@/hooks/use-chats";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
@@ -396,7 +397,7 @@ export function Sidebar({
       <BillingModal open={isBillingOpen} onOpenChange={setIsBillingOpen} />
       <SettingsModal open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
       <PrivacyModal open={isPrivacyOpen} onOpenChange={setIsPrivacyOpen} />
-      <AdminPanelModal open={isAdminPanelOpen} onOpenChange={setIsAdminPanelOpen} />
+      <AdminPanel open={isAdminPanelOpen} onOpenChange={setIsAdminPanelOpen} />
     </div>
   );
 }
