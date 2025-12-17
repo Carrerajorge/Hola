@@ -9,12 +9,16 @@ import BillingPage from "@/pages/billing";
 import SettingsPage from "@/pages/settings";
 import PrivacyPage from "@/pages/privacy";
 import AdminPage from "@/pages/admin";
+import LoginPage from "@/pages/login";
+import SignupPage from "@/pages/signup";
 import NotFound from "@/pages/not-found";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      <Route path="/login" component={LoginPage} />
+      <Route path="/signup" component={SignupPage} />
       <Route path="/profile" component={ProfilePage} />
       <Route path="/billing" component={BillingPage} />
       <Route path="/settings" component={SettingsPage} />

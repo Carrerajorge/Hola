@@ -371,7 +371,7 @@ export function Sidebar({
                 Admin Panel
               </Button>
               <Separator className="my-1" />
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" onClick={() => setIsUserMenuOpen(false)} data-testid="button-logout">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/login"); }} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
                 Cerrar sesión
               </Button>
