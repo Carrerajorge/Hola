@@ -85,3 +85,42 @@ The application includes a centralized LLM Gateway that provides enterprise-grad
 - `POST /api/chat` - Standard chat request (uses gateway for non-image requests)
 - `POST /api/chat/stream` - SSE streaming chat with resilience
 - `GET /api/admin/llm/metrics` - Gateway metrics dashboard
+
+## ETL Agent Architecture
+
+### Automated Economic Data Agent (`server/etl/`)
+The application includes a production-ready ETL agent for downloading and processing economic data from official sources:
+
+**Data Sources (Official/Multilateral Only):**
+- **World Bank API V2**: Primary source for GDP, inflation, population, trade indicators
+- **FRED API**: US Federal Reserve economic data (planned)
+- **IMF SDMX**: International Monetary Fund data (planned)
+
+**Normalized Schema:**
+All data is normalized to a standard long schema: `Date, Country, Indicator, Value, Unit, Frequency, Source_ID`
+
+**7-Sheet Excel Workbook Structure:**
+- `00_README`: Documentation and data dictionary
+- `01_SOURCES`: Full source metadata with API endpoints and fetch timestamps
+- `02_RAW`: Original data as fetched from APIs
+- `03_CLEAN`: Deduplicated and normalized data
+- `04_MODEL`: Calculated metrics (YoY changes, growth rates, averages)
+- `05_DASHBOARD`: Summary statistics and key figures
+- `06_AUDIT`: Data quality test results with PASS/FAIL status
+
+**Audit Engine (6 Test Categories):**
+- Coverage: ≥80% of expected date range
+- Duplicates: Zero tolerance for duplicate records
+- Units: Consistent unit formatting per indicator
+- Reconciliation: RAW vs CLEAN record count match
+- Extremes: Statistical outlier detection (>3σ)
+- Last-complete-month: Data recency validation
+
+**API Endpoints:**
+- `GET /api/etl/config` - Available countries and indicators
+- `POST /api/etl/run` - Execute ETL pipeline and download workbook
+
+**Frontend Integration:**
+- `ETLDialog` component (`client/src/components/etl-dialog.tsx`)
+- Accessible via + menu → "ETL Datos Económicos"
+- Results appear in chat transcript after download
