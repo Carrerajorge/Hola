@@ -231,7 +231,7 @@ ${documentModeInstructions}${contextInfo}`
 ${documentModeInstructions}${contextInfo}`
   ) : null;
 
-  const defaultSystemContent = `Eres Sira GPT, un asistente de IA avanzado con conexión a Internet. Puedes buscar información actualizada en la web. Responde de manera útil y profesional en el idioma del usuario. Si usas información de la web, cita las fuentes.
+  const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.
 
 CAPACIDADES DE GENERACIÓN DE DOCUMENTOS:
 Puedes crear documentos Word, Excel y PowerPoint. Cuando el usuario solicite crear un documento, incluye en tu respuesta un bloque especial con el formato:

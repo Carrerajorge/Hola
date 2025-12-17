@@ -102,6 +102,18 @@ export default function Home() {
     return "default-chat";
   }, [activeChat?.stableKey, newChatStableKey]);
 
+  // Get messages from either activeChat or pending chat
+  const currentMessages = useMemo(() => {
+    if (activeChat?.messages) return activeChat.messages;
+    // Check if there's a pending chat with messages
+    const pendingId = pendingChatIdRef.current;
+    if (pendingId) {
+      const pendingChat = chats.find(c => c.id === pendingId);
+      if (pendingChat?.messages) return pendingChat.messages;
+    }
+    return [];
+  }, [activeChat?.messages, chats]);
+
   const handleOpenGpts = () => {
     setIsGptExplorerOpen(true);
   };
@@ -179,7 +191,7 @@ export default function Home() {
         {(activeChat || isNewChatMode || chats.length === 0) && (
           <ChatInterface 
             key={chatInterfaceKey} 
-            messages={activeChat?.messages || []}
+            messages={currentMessages}
             onSendMessage={handleSendMessage}
             isSidebarOpen={isSidebarOpen} 
             onToggleSidebar={() => setIsSidebarOpen(true)}
