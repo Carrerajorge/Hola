@@ -585,6 +585,14 @@ export function ChatInterface({
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
   const speechRecognitionRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when AI is thinking or streaming
+  useEffect(() => {
+    if (aiState !== "idle" || streamingContent) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [aiState, streamingContent, messages.length]);
 
   useEffect(() => {
     return () => {
@@ -2607,6 +2615,8 @@ export function ChatInterface({
                   </div>
                 </motion.div>
               )}
+              
+              <div ref={messagesEndRef} />
 
             </div>
           )}
