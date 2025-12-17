@@ -175,37 +175,68 @@ export function SpreadsheetEditor({
   useEffect(() => {
     if (onInsertContent) {
       const insertContent = (text: string) => {
-        const lines = text.split('\n').filter(line => line.trim());
-        if (lines.length === 0) return;
+        console.log('[SpreadsheetEditor] insertContent called with:', text.substring(0, 100));
         
-        const startRow = selectedCell ? parseInt(selectedCell.split('-')[0]) : 0;
-        const startCol = selectedCell ? parseInt(selectedCell.split('-')[1]) : 0;
+        // Clean markdown formatting if present
+        let cleanText = text
+          .replace(/^\*\*[^*]+\*\*\s*/gm, '') // Remove **Title**
+          .replace(/^-\s+\*\*([^*]+)\*\*:\s*/gm, '$1,') // Convert - **Year**: value to Year,value
+          .replace(/^\s*-\s+/gm, '') // Remove leading dashes
+          .trim();
+        
+        const lines = cleanText.split('\n').filter(line => line.trim());
+        if (lines.length === 0) {
+          console.log('[SpreadsheetEditor] No lines to insert');
+          return;
+        }
+        
+        console.log('[SpreadsheetEditor] Inserting', lines.length, 'lines');
         
         setData(prev => {
           const newCells = { ...prev.cells };
           let maxColInserted = 0;
           
+          // Find first empty row to append data
+          let startRow = 0;
+          for (let r = 0; r < prev.rowCount; r++) {
+            let rowHasData = false;
+            for (let c = 0; c < prev.colCount; c++) {
+              if (prev.cells[getCellKey(r, c)]?.value) {
+                rowHasData = true;
+                break;
+              }
+            }
+            if (!rowHasData) {
+              startRow = r;
+              break;
+            }
+            startRow = r + 1;
+          }
+          
           lines.forEach((line, rowOffset) => {
             const values = line.split(/[,\t]/).map(v => v.trim());
             values.forEach((value, colOffset) => {
               if (value) {
-                newCells[getCellKey(startRow + rowOffset, startCol + colOffset)] = { value };
+                newCells[getCellKey(startRow + rowOffset, colOffset)] = { value };
                 maxColInserted = Math.max(maxColInserted, colOffset);
               }
             });
           });
           
+          console.log('[SpreadsheetEditor] Data updated, rows:', startRow + lines.length);
+          
           return {
             ...prev,
             cells: newCells,
-            rowCount: Math.max(prev.rowCount, startRow + lines.length),
-            colCount: Math.max(prev.colCount, startCol + maxColInserted + 1)
+            rowCount: Math.max(prev.rowCount, startRow + lines.length + 1),
+            colCount: Math.max(prev.colCount, maxColInserted + 1)
           };
         });
       };
       onInsertContent(insertContent);
+      console.log('[SpreadsheetEditor] Insert function registered');
     }
-  }, [onInsertContent, selectedCell]);
+  }, [onInsertContent]);
 
   const updateCell = useCallback((key: string, updates: Partial<CellData>) => {
     setData(prev => ({
