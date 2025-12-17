@@ -143,7 +143,7 @@ export async function generateExcelDocument(title: string, data: any[][]): Promi
   
   const safeData = data.length > 0 ? data : [["Contenido"], ["No hay datos disponibles"]];
   
-  const sheetName = title.replace(/[\\/:*?[\]]/g, "").slice(0, 31) || "Hoja1";
+  const sheetName = title.replace(/[\\/:*?\[\]]/g, "").slice(0, 31) || "Hoja1";
   const worksheet = workbook.addWorksheet(sheetName);
   
   worksheet.addRows(safeData);

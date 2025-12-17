@@ -63,14 +63,32 @@ export async function extractText(content: Buffer, mimeType: string): Promise<st
         const sheetName = worksheet.name;
         text += `Sheet: ${sheetName}\n`;
         
-        worksheet.eachRow((row) => {
-          const values = row.values as any[];
-          const csvRow = values.slice(1).map(val => {
-            if (val === null || val === undefined) return '';
-            if (typeof val === 'object' && 'text' in val) return val.text;
-            return String(val);
-          }).join(',');
-          text += csvRow + "\n";
+        worksheet.eachRow({ includeEmpty: false }, (row) => {
+          const values: string[] = [];
+          row.eachCell({ includeEmpty: true }, (cell) => {
+            let cellValue = '';
+            if (cell.value === null || cell.value === undefined) {
+              cellValue = '';
+            } else if (typeof cell.value === 'object') {
+              if ('text' in cell.value) {
+                cellValue = cell.value.text;
+              } else if ('result' in cell.value) {
+                cellValue = String(cell.value.result ?? '');
+              } else if ('richText' in cell.value) {
+                cellValue = cell.value.richText.map((rt: any) => rt.text).join('');
+              } else {
+                cellValue = cell.text ?? String(cell.value);
+              }
+            } else {
+              cellValue = String(cell.value);
+            }
+            
+            if (cellValue.includes(',') || cellValue.includes('\n') || cellValue.includes('"')) {
+              cellValue = '"' + cellValue.replace(/"/g, '""') + '"';
+            }
+            values.push(cellValue);
+          });
+          text += values.join(',') + "\n";
         });
         
         text += "\n";
