@@ -1,10 +1,9 @@
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
-import { createRequire } from "module";
+import * as pdfParse from "pdf-parse";
+import officeParser from "officeparser";
 
-const require = createRequire(import.meta.url);
-const pdf = require("pdf-parse");
-const officeParser = require("officeparser");
+const pdf = (pdfParse as any).default || pdfParse;
 
 export async function extractText(content: Buffer, mimeType: string): Promise<string> {
   if (mimeType === "text/plain") {

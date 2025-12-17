@@ -1,8 +1,5 @@
-import { createRequire } from "module";
+import officeParser from "officeparser";
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
-
-const require = createRequire(import.meta.url);
-const officeParser = require("officeparser");
 
 export class PptxParser implements FileParser {
   name = "pptx";

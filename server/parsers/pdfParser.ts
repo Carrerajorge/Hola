@@ -1,8 +1,6 @@
-import { createRequire } from "module";
+import * as pdfParse from "pdf-parse";
+const pdf = (pdfParse as any).default || pdfParse;
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
-
-const require = createRequire(import.meta.url);
-const pdf = require("pdf-parse");
 
 export class PdfParser implements FileParser {
   name = "pdf";
