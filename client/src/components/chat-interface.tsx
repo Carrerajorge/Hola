@@ -2839,15 +2839,6 @@ export function ChatInterface({
                         <Bot className="h-4 w-4" />
                         Agente
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        className="justify-start gap-2 text-sm h-9"
-                        onClick={() => setIsETLDialogOpen(true)}
-                        data-testid="button-etl-agent"
-                      >
-                        <Database className="h-4 w-4" />
-                        ETL Datos Económicos
-                      </Button>
                       <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
                         <Plug className="h-4 w-4" />
                         Connectors MPC
