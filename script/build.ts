@@ -58,7 +58,11 @@ async function buildAll() {
     banner: {
       js: `
 import { createRequire } from 'module';
+import { fileURLToPath as __fileURLToPath } from 'url';
+import { dirname as __pathDirname } from 'path';
 const require = createRequire(import.meta.url);
+const __filename = __fileURLToPath(import.meta.url);
+const __dirname = __pathDirname(__filename);
       `.trim(),
     },
     minify: true,
@@ -66,15 +70,25 @@ const require = createRequire(import.meta.url);
     logLevel: "info",
   });
 
-  // Create a CJS wrapper that imports the ESM module
+  // Create a CJS wrapper that imports the ESM module using dynamic import
   console.log("creating CJS wrapper...");
-  const wrapperContent = `
-// CJS wrapper to import the ESM module
-import('./index.mjs').catch(err => {
-  console.error('Failed to load application:', err);
-  process.exit(1);
-});
-`.trim();
+  const wrapperContent = `#!/usr/bin/env node
+const { pathToFileURL } = require('url');
+const { join } = require('path');
+
+const modulePath = join(__dirname, 'index.mjs');
+const moduleURL = pathToFileURL(modulePath).href;
+
+// Use dynamic import to load ESM from CJS
+(async () => {
+  try {
+    await import(moduleURL);
+  } catch (err) {
+    console.error('Failed to load application:', err);
+    process.exit(1);
+  }
+})();
+`;
   await writeFile("dist/index.cjs", wrapperContent, "utf-8");
 }
 
