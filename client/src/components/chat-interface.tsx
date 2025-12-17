@@ -2634,15 +2634,21 @@ export function ChatInterface({
                 </div>
               )}
               
-              {aiState === "thinking" && !streamingContent && (
+              {aiState !== "idle" && !streamingContent && (
                 <motion.div 
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
                 >
-                  <div className="flex items-center gap-2 py-2 px-3 text-sm text-muted-foreground">
-                    <span>Thinking...</span>
-                    <span className="inline-block w-0.5 h-4 bg-primary animate-[pulse_0.33s_ease-in-out_infinite]" />
+                  <div className="flex items-center gap-3 py-3 px-4 text-sm text-muted-foreground bg-muted/30 rounded-lg">
+                    <div className="flex gap-1">
+                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <span className="font-medium">
+                      {aiState === "thinking" ? "Pensando..." : "Escribiendo..."}
+                    </span>
                   </div>
                 </motion.div>
               )}
@@ -2675,9 +2681,15 @@ export function ChatInterface({
                   animate={{ opacity: 1, y: 0 }}
                   className="w-full max-w-3xl mx-auto"
                 >
-                  <div className="flex items-center gap-2 py-2 px-3 text-sm text-muted-foreground">
-                    <span>Thinking...</span>
-                    <span className="inline-block w-0.5 h-4 bg-primary animate-[pulse_0.33s_ease-in-out_infinite]" />
+                  <div className="flex items-center gap-3 py-3 px-4 text-sm text-muted-foreground bg-muted/30 rounded-lg">
+                    <div className="flex gap-1">
+                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <span className="font-medium">
+                      {aiState === "thinking" ? "Pensando..." : "Escribiendo..."}
+                    </span>
                   </div>
                 </motion.div>
               )}
