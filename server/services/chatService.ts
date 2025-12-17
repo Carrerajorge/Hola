@@ -278,10 +278,14 @@ ${documentModeInstructions}${documentMode.type === 'excel' ? excelChartInstructi
 ${documentModeInstructions}${documentMode.type === 'excel' ? excelChartInstructions : ''}${contextInfo}`
   ) : null;
 
-  const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.
+  // Check if user explicitly requests document creation
+  const lastUserMsgText = messages.filter(m => m.role === "user").pop()?.content?.toLowerCase() || "";
+  const wantsDocument = /\b(crea|crear|genera|generar|haz|hacer|escribe|escribir|redacta|redactar|elabora|elaborar)\b.*(documento|word|excel|powerpoint|ppt|archivo|docx|xlsx|pptx)/i.test(lastUserMsgText) ||
+                        /\b(documento|word|excel|powerpoint|ppt)\b.*(crea|crear|genera|generar|haz|hacer)/i.test(lastUserMsgText);
 
+  const documentCapabilitiesPrompt = wantsDocument ? `
 CAPACIDADES DE GENERACIÓN DE DOCUMENTOS:
-Puedes crear documentos Word, Excel y PowerPoint. Cuando el usuario solicite crear un documento, incluye en tu respuesta un bloque especial con el formato:
+Puedes crear documentos Word, Excel y PowerPoint. Incluye en tu respuesta un bloque especial con el formato:
 
 \`\`\`document
 {
@@ -295,7 +299,13 @@ Para Word: usa markdown simple (## para títulos, - para listas).
 Para Excel: usa formato de tabla con | columna1 | columna2 | o CSV.
 Para PPT: usa ## para títulos de diapositivas y - para puntos.
 
-El usuario podrá descargar el documento generado directamente.`;
+El usuario podrá descargar el documento generado directamente.` : `
+IMPORTANTE: Cuando el usuario pida un resumen, análisis o información, responde directamente en texto plano en el chat. 
+NO generes documentos Word/Excel/PPT a menos que el usuario lo pida EXPLÍCITAMENTE con frases como "crea un documento", "genera un Word", "haz un PowerPoint", etc.
+Si el usuario dice "dame un resumen" o "analiza esto", responde en texto, NO como documento.`;
+
+  const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.
+${documentCapabilitiesPrompt}`;
 
   // Use document mode prompt when in document editing mode
   const systemContent = documentModePrompt 
