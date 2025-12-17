@@ -10,6 +10,7 @@ import {
   FileText,
   FileSpreadsheet,
   FileIcon,
+  Check,
   CheckCircle2,
   Loader2,
   MoreHorizontal,
@@ -550,6 +551,7 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
+  const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
   const [streamingContent, setStreamingContent] = useState("");
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
@@ -1237,6 +1239,17 @@ export function ChatInterface({
     
     const userInput = input;
     const currentFiles = [...uploadedFiles];
+    
+    // Initialize process steps based on context
+    const hasFiles = currentFiles.length > 0;
+    const initialSteps: {step: string; status: "pending" | "active" | "done"}[] = [];
+    if (hasFiles) {
+      initialSteps.push({ step: "Analizando archivos adjuntos", status: "active" });
+    }
+    initialSteps.push({ step: "Procesando tu mensaje", status: hasFiles ? "pending" : "active" });
+    initialSteps.push({ step: "Buscando información relevante", status: "pending" });
+    initialSteps.push({ step: "Generando respuesta", status: "pending" });
+    setAiProcessSteps(initialSteps);
     setInput("");
     setUploadedFiles([]);
 
@@ -1293,11 +1306,26 @@ export function ChatInterface({
         signal: abortControllerRef.current.signal
       });
 
+      // Update steps: mark processing done, searching active
+      setAiProcessSteps(prev => prev.map((s, i) => {
+        if (s.step.includes("Analizando")) return { ...s, status: "done" };
+        if (s.step.includes("Procesando")) return { ...s, status: "done" };
+        if (s.step.includes("Buscando")) return { ...s, status: "active" };
+        return s;
+      }));
+      
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to get response");
       }
+      
+      // Update steps: mark searching done, generating active
+      setAiProcessSteps(prev => prev.map(s => {
+        if (s.step.includes("Buscando")) return { ...s, status: "done" };
+        if (s.step.includes("Generando")) return { ...s, status: "active" };
+        return { ...s, status: s.status === "pending" ? "pending" : "done" };
+      }));
 
       // Note: Not subscribing to agent/browser updates to keep simple thinking → streaming flow
 
@@ -1352,6 +1380,7 @@ export function ChatInterface({
             streamingContentRef.current = "";
             setStreamingContent("");
             setAiState("idle");
+            setAiProcessSteps([]);
             agent.complete();
             abortControllerRef.current = null;
           }
@@ -1386,6 +1415,7 @@ export function ChatInterface({
             streamingContentRef.current = "";
             setStreamingContent("");
             setAiState("idle");
+            setAiProcessSteps([]);
             agent.complete();
             abortControllerRef.current = null;
           }
@@ -1405,6 +1435,7 @@ export function ChatInterface({
       };
       onSendMessage(errorMsg);
       setAiState("idle");
+      setAiProcessSteps([]);
       abortControllerRef.current = null;
     }
   };
@@ -2551,12 +2582,46 @@ export function ChatInterface({
               )}
               
               {aiState === "thinking" && !streamingContent && (
-                <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Pensando...</span>
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
+                >
+                  <div className="flex flex-col gap-1 py-3 px-4 rounded-xl bg-muted/30 border border-border/50">
+                    {aiProcessSteps.length > 0 ? (
+                      aiProcessSteps.map((step, idx) => (
+                        <motion.div 
+                          key={idx}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: idx * 0.1 }}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          {step.status === "done" ? (
+                            <Check className="h-4 w-4 text-green-500" />
+                          ) : step.status === "active" ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                          ) : (
+                            <div className="h-4 w-4 rounded-full border border-muted-foreground/30" />
+                          )}
+                          <span className={cn(
+                            "transition-colors",
+                            step.status === "done" && "text-muted-foreground line-through",
+                            step.status === "active" && "text-foreground font-medium",
+                            step.status === "pending" && "text-muted-foreground/60"
+                          )}>
+                            {step.step}
+                          </span>
+                        </motion.div>
+                      ))
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Pensando...</span>
+                      </div>
+                    )}
                   </div>
-                </div>
+                </motion.div>
               )}
 
             </div>
