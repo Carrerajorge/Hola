@@ -3,23 +3,21 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X, Chrome, Apple, Building2, Phone } from "lucide-react";
-import { useAuth } from "@/App";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
   const [email, setEmail] = useState("");
-  const { login } = useAuth();
 
   const handleContinue = () => {
     if (email) {
-      login();
-      setLocation("/");
+      // Redirect to auth with email hint
+      window.location.href = "/api/login";
     }
   };
 
-  const handleSocialLogin = () => {
-    login();
-    setLocation("/");
+  const handleGoogleLogin = () => {
+    // Redirect to Replit Auth (supports Google login)
+    window.location.href = "/api/login";
   };
 
   return (
@@ -46,7 +44,7 @@ export default function LoginPage() {
           <Button 
             variant="outline" 
             className="w-full h-14 justify-center gap-3 text-base font-medium border-2 hover:bg-muted/50 hover:border-primary/30 transition-all duration-200 rounded-xl shadow-sm"
-            onClick={handleSocialLogin}
+            onClick={handleGoogleLogin}
             data-testid="button-login-google"
           >
             <svg className="h-6 w-6" viewBox="0 0 24 24">

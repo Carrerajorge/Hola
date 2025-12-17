@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { X, Chrome, Apple, Building2, Phone, ArrowLeft, Eye, EyeOff } from "lucide-react";
-import { useAuth } from "@/App";
 
 export default function SignupPage() {
   const [, setLocation] = useLocation();
@@ -14,7 +13,6 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const { login } = useAuth();
 
   const handleEmailContinue = () => {
     if (email) {
@@ -24,14 +22,14 @@ export default function SignupPage() {
 
   const handleSignup = () => {
     if (password && password === confirmPassword) {
-      login();
-      setLocation("/");
+      // Redirect to Replit Auth
+      window.location.href = "/api/login";
     }
   };
 
   const handleSocialSignup = () => {
-    login();
-    setLocation("/");
+    // Redirect to Replit Auth (supports Google, Apple, etc.)
+    window.location.href = "/api/login";
   };
 
   if (step === "email") {

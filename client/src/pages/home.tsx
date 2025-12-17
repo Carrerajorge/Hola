@@ -11,18 +11,18 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useChats, Message } from "@/hooks/use-chats";
 import { toast } from "sonner";
-import { useAuth } from "@/App";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function Home() {
   const isMobile = useIsMobile();
   const [, setLocation] = useLocation();
-  const { isLoggedIn } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
-    if (!isLoggedIn) {
+    if (!isLoading && !isAuthenticated) {
       setLocation("/welcome");
     }
-  }, [isLoggedIn, setLocation]);
+  }, [isAuthenticated, isLoading, setLocation]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);

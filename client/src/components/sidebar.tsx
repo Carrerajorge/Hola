@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { useLocation } from "wouter";
-import { useAuth } from "@/App";
+import { useAuth } from "@/hooks/use-auth";
 import { 
   Menu, 
   Search, 
@@ -67,7 +67,10 @@ export function Sidebar({
   onOpenGpts
 }: SidebarProps) {
   const [, setLocation] = useLocation();
-  const { logout } = useAuth();
+  const { user } = useAuth();
+  const handleLogout = () => {
+    window.location.href = "/api/logout";
+  };
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [showHidden, setShowHidden] = useState(false);
@@ -373,7 +376,7 @@ export function Sidebar({
                 Admin Panel
               </Button>
               <Separator className="my-1" />
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" onClick={() => { setIsUserMenuOpen(false); logout(); setLocation("/welcome"); }} data-testid="button-logout">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
                 Cerrar sesión
               </Button>

@@ -16,6 +16,7 @@ import {
   parseExcelFromText,
   parseSlidesFromText
 } from "./services/documentGeneration";
+import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -24,6 +25,10 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Setup authentication BEFORE other routes
+  await setupAuth(app);
+  registerAuthRoutes(app);
+
   const objectStorageService = new ObjectStorageService();
 
   // Register global event listener for ALL browser sessions (including pipeline-created ones)
