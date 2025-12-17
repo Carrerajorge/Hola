@@ -28,7 +28,6 @@ export default function LandingPage() {
 
         <nav className="hidden md:flex items-center gap-6 text-sm">
           <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">Sobre nosotros</a>
-          <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">Funciones</a>
           <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">Aprender</a>
           <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">Business</a>
           <a href="#" className="text-muted-foreground hover:text-foreground transition-colors">Precios</a>
