@@ -28,9 +28,16 @@ interface SpreadsheetEditorProps {
 
 interface CellData {
   value: string;
+  formula?: string;
   bold?: boolean;
   italic?: boolean;
   align?: 'left' | 'center' | 'right';
+}
+
+interface ChartConfig {
+  type: 'bar' | 'line' | 'pie';
+  visible: boolean;
+  title?: string;
 }
 
 interface SpreadsheetData {
@@ -43,6 +50,7 @@ interface SheetData {
   id: string;
   name: string;
   data: SpreadsheetData;
+  chartConfig?: ChartConfig;
 }
 
 interface WorkbookData {
@@ -61,6 +69,103 @@ const getColumnLabel = (index: number): string => {
 };
 
 const getCellKey = (row: number, col: number): string => `${row}-${col}`;
+
+const parseCellRef = (ref: string): { row: number; col: number } | null => {
+  const match = ref.match(/^([A-Z]+)(\d+)$/i);
+  if (!match) return null;
+  const colStr = match[1].toUpperCase();
+  const rowNum = parseInt(match[2], 10) - 1;
+  let colNum = 0;
+  for (let i = 0; i < colStr.length; i++) {
+    colNum = colNum * 26 + (colStr.charCodeAt(i) - 64);
+  }
+  colNum -= 1;
+  return { row: rowNum, col: colNum };
+};
+
+const parseRange = (range: string): Array<{ row: number; col: number }> => {
+  const [start, end] = range.split(':');
+  const startCell = parseCellRef(start);
+  const endCell = end ? parseCellRef(end) : startCell;
+  if (!startCell || !endCell) return [];
+  const cells: Array<{ row: number; col: number }> = [];
+  for (let r = Math.min(startCell.row, endCell.row); r <= Math.max(startCell.row, endCell.row); r++) {
+    for (let c = Math.min(startCell.col, endCell.col); c <= Math.max(startCell.col, endCell.col); c++) {
+      cells.push({ row: r, col: c });
+    }
+  }
+  return cells;
+};
+
+const evaluateFormula = (formula: string, cells: { [key: string]: CellData }): string => {
+  if (!formula.startsWith('=')) return formula;
+  const expr = formula.substring(1).toUpperCase().trim();
+  
+  const getCellValue = (ref: string): number => {
+    const parsed = parseCellRef(ref);
+    if (!parsed) return 0;
+    const cell = cells[getCellKey(parsed.row, parsed.col)];
+    if (!cell) return 0;
+    const val = parseFloat(cell.value.replace(/[^\d.-]/g, ''));
+    return isNaN(val) ? 0 : val;
+  };
+  
+  const getRangeValues = (rangeStr: string): number[] => {
+    const rangeCells = parseRange(rangeStr);
+    return rangeCells.map(c => {
+      const cell = cells[getCellKey(c.row, c.col)];
+      if (!cell) return 0;
+      const val = parseFloat(cell.value.replace(/[^\d.-]/g, ''));
+      return isNaN(val) ? 0 : val;
+    });
+  };
+  
+  const sumMatch = expr.match(/^SUM\(([^)]+)\)$/);
+  if (sumMatch) {
+    const values = getRangeValues(sumMatch[1]);
+    return values.reduce((a, b) => a + b, 0).toString();
+  }
+  
+  const avgMatch = expr.match(/^AVERAGE\(([^)]+)\)$/);
+  if (avgMatch) {
+    const values = getRangeValues(avgMatch[1]);
+    if (values.length === 0) return '0';
+    const sum = values.reduce((a, b) => a + b, 0);
+    return (sum / values.length).toFixed(2);
+  }
+  
+  const countMatch = expr.match(/^COUNT\(([^)]+)\)$/);
+  if (countMatch) {
+    const rangeCells = parseRange(countMatch[1]);
+    let count = 0;
+    rangeCells.forEach(c => {
+      const cell = cells[getCellKey(c.row, c.col)];
+      if (cell && cell.value.trim() !== '') count++;
+    });
+    return count.toString();
+  }
+  
+  const minMatch = expr.match(/^MIN\(([^)]+)\)$/);
+  if (minMatch) {
+    const values = getRangeValues(minMatch[1]).filter(v => !isNaN(v));
+    if (values.length === 0) return '0';
+    return Math.min(...values).toString();
+  }
+  
+  const maxMatch = expr.match(/^MAX\(([^)]+)\)$/);
+  if (maxMatch) {
+    const values = getRangeValues(maxMatch[1]).filter(v => !isNaN(v));
+    if (values.length === 0) return '0';
+    return Math.max(...values).toString();
+  }
+  
+  const cellRefMatch = expr.match(/^([A-Z]+\d+)$/);
+  if (cellRefMatch) {
+    return getCellValue(cellRefMatch[1]).toString();
+  }
+  
+  return '#ERROR';
+};
 
 const createEmptySheet = (id: string, name: string): SheetData => ({
   id,
@@ -240,7 +345,17 @@ export function SpreadsheetEditor({
   }, [workbook.sheets.length]);
 
   const switchSheet = useCallback((sheetId: string) => {
-    setWorkbook(prev => ({ ...prev, activeSheetId: sheetId }));
+    setWorkbook(prev => {
+      const newWorkbook = { ...prev, activeSheetId: sheetId };
+      const targetSheet = newWorkbook.sheets.find(s => s.id === sheetId);
+      if (targetSheet?.chartConfig?.visible) {
+        setShowChart(true);
+        setChartType(targetSheet.chartConfig.type);
+      } else {
+        setShowChart(false);
+      }
+      return newWorkbook;
+    });
     setSelectedCell(null);
     setEditingCell(null);
   }, []);
@@ -315,9 +430,25 @@ export function SpreadsheetEditor({
       .replace(/^\*\*[^*]+\*\*\s*/gm, '')
       .replace(/^-\s+\*\*([^*]+)\*\*:\s*/gm, '$1,')
       .replace(/^\s*-\s+/gm, '')
+      .replace(/\[GRAFICO:[^\]]+\]/g, '')
       .trim();
     
-    // Parse lines and insert into a sheet
+    // Parse GRAFICO command from content
+    const parseGraficoCommand = (content: string): ChartConfig | null => {
+      const graficoMatch = content.match(/\[GRAFICO:(barras|lineas|pastel)\]/i);
+      if (!graficoMatch) return null;
+      const tipoMap: { [k: string]: 'bar' | 'line' | 'pie' } = {
+        'barras': 'bar',
+        'lineas': 'line',
+        'pastel': 'pie'
+      };
+      return {
+        type: tipoMap[graficoMatch[1].toLowerCase()] || 'bar',
+        visible: true
+      };
+    };
+    
+    // Parse lines and insert into a sheet, handling formulas
     const insertLines = (lines: string[], sheetData: SpreadsheetData): SpreadsheetData => {
       const newCells = { ...sheetData.cells };
       let maxColInserted = 0;
@@ -342,10 +473,23 @@ export function SpreadsheetEditor({
         const values = line.split(/[,\t]/).map(v => v.trim());
         values.forEach((value, colOffset) => {
           if (value) {
-            newCells[getCellKey(startRow + rowOffset, colOffset)] = { value };
+            const key = getCellKey(startRow + rowOffset, colOffset);
+            if (value.startsWith('=')) {
+              newCells[key] = { value: value, formula: value };
+            } else {
+              newCells[key] = { value };
+            }
             maxColInserted = Math.max(maxColInserted, colOffset);
           }
         });
+      });
+      
+      // Evaluate formulas after all cells are inserted
+      Object.keys(newCells).forEach(key => {
+        const cell = newCells[key];
+        if (cell.formula && cell.formula.startsWith('=')) {
+          cell.value = evaluateFormula(cell.formula, newCells);
+        }
       });
       
       return {
@@ -356,6 +500,9 @@ export function SpreadsheetEditor({
       };
     };
     
+    // Check for chart command in text
+    const chartConfig = parseGraficoCommand(text);
+    
     // Check if there are sheet commands
     const hasSheetCommands = /\[(NUEVA_HOJA|HOJA):/.test(text);
     
@@ -363,10 +510,26 @@ export function SpreadsheetEditor({
     if (!hasSheetCommands) {
       const cleanText = cleanMarkdown(text);
       const lines = cleanText.split('\n').filter(line => line.trim());
-      if (lines.length === 0) return;
+      if (lines.length === 0 && !chartConfig) return;
       
       console.log('[SpreadsheetEditor] Inserting', lines.length, 'lines into active sheet');
-      setData(prev => insertLines(lines, prev));
+      if (lines.length > 0) {
+        setData(prev => insertLines(lines, prev));
+      }
+      
+      // Apply chart config to active sheet
+      if (chartConfig) {
+        setWorkbook(prev => ({
+          ...prev,
+          sheets: prev.sheets.map(s => 
+            s.id === prev.activeSheetId 
+              ? { ...s, chartConfig } 
+              : s
+          )
+        }));
+        setShowChart(true);
+        setChartType(chartConfig.type);
+      }
       return;
     }
     
@@ -384,18 +547,37 @@ export function SpreadsheetEditor({
       });
     }
     
+    // Pre-calculate chart configs for each command section
+    const commandChartConfigs: (ChartConfig | null)[] = commands.map((cmd, idx) => {
+      const contentStart = cmd.endIndex;
+      const contentEnd = idx < commands.length - 1 ? commands[idx + 1].startIndex : text.length;
+      const content = text.substring(contentStart, contentEnd);
+      return parseGraficoCommand(content);
+    });
+    
+    // Find the last chart config for showing after update
+    let finalChartConfig: ChartConfig | null = null;
+    for (let i = commandChartConfigs.length - 1; i >= 0; i--) {
+      if (commandChartConfigs[i]) {
+        finalChartConfig = commandChartConfigs[i];
+        break;
+      }
+    }
+    
     // Process multiple sheets
     setWorkbook(prev => {
-      let newWorkbook = { ...prev, sheets: [...prev.sheets.map(s => ({ ...s, data: { ...s.data, cells: { ...s.data.cells } } }))] };
+      const newSheets: SheetData[] = prev.sheets.map(s => ({ ...s, data: { ...s.data, cells: { ...s.data.cells } } }));
+      let newWorkbook: WorkbookData = { ...prev, sheets: newSheets };
       let lastSheetId = prev.activeSheetId;
       
       commands.forEach((cmd, idx) => {
-        // Get content between this command and the next (or end of text)
         const contentStart = cmd.endIndex;
         const contentEnd = idx < commands.length - 1 ? commands[idx + 1].startIndex : text.length;
         const content = text.substring(contentStart, contentEnd);
-        const cleanText = cleanMarkdown(content);
-        const lines = cleanText.split('\n').filter(line => line.trim());
+        const sectionChartConfig = commandChartConfigs[idx];
+        
+        const cleanedText = cleanMarkdown(content);
+        const lines = cleanedText.split('\n').filter(line => line.trim());
         
         if (cmd.type === 'NUEVA_HOJA') {
           const newId = `sheet${Date.now()}_${idx}`;
@@ -405,15 +587,24 @@ export function SpreadsheetEditor({
             newSheet.data = insertLines(lines, newSheet.data);
           }
           
+          if (sectionChartConfig) {
+            newSheet.chartConfig = sectionChartConfig;
+          }
+          
           newWorkbook.sheets.push(newSheet);
           lastSheetId = newId;
-          console.log('[SpreadsheetEditor] Created sheet:', cmd.name, 'with', lines.length, 'lines');
+          console.log('[SpreadsheetEditor] Created sheet:', cmd.name, 'with', lines.length, 'lines', sectionChartConfig ? 'with chart' : '');
         } else if (cmd.type === 'HOJA') {
           const targetSheet = newWorkbook.sheets.find(s => s.name.toLowerCase() === cmd.name.toLowerCase());
-          if (targetSheet && lines.length > 0) {
+          if (targetSheet) {
             const sheetIndex = newWorkbook.sheets.findIndex(s => s.id === targetSheet.id);
             if (sheetIndex >= 0) {
-              newWorkbook.sheets[sheetIndex].data = insertLines(lines, newWorkbook.sheets[sheetIndex].data);
+              if (lines.length > 0) {
+                newWorkbook.sheets[sheetIndex].data = insertLines(lines, newWorkbook.sheets[sheetIndex].data);
+              }
+              if (sectionChartConfig) {
+                newWorkbook.sheets[sheetIndex].chartConfig = sectionChartConfig;
+              }
             }
             lastSheetId = targetSheet.id;
           }
@@ -424,6 +615,12 @@ export function SpreadsheetEditor({
       console.log('[SpreadsheetEditor] Workbook updated with', newWorkbook.sheets.length, 'sheets');
       return newWorkbook;
     });
+    
+    // Show chart if any sheet had chart config
+    if (finalChartConfig) {
+      setShowChart(true);
+      setChartType(finalChartConfig.type);
+    }
   }, [setData]);
 
   useEffect(() => {
@@ -455,8 +652,13 @@ export function SpreadsheetEditor({
   }, []);
 
   const handleCellChange = useCallback((key: string, value: string) => {
-    updateCell(key, { value });
-  }, [updateCell]);
+    if (value.startsWith('=')) {
+      const computedValue = evaluateFormula(value, data.cells);
+      updateCell(key, { value: computedValue, formula: value });
+    } else {
+      updateCell(key, { value, formula: undefined });
+    }
+  }, [updateCell, data.cells]);
 
   const handleCellBlur = useCallback(() => {
     setEditingCell(null);
@@ -578,6 +780,66 @@ export function SpreadsheetEditor({
     updateCell(selectedCell, { ...cell, align });
   }, [selectedCell, data.cells, updateCell]);
 
+  const updateChartConfig = useCallback((type: 'bar' | 'line' | 'pie', visible: boolean) => {
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: prev.sheets.map(s => 
+        s.id === prev.activeSheetId 
+          ? { ...s, chartConfig: { type, visible, title: s.chartConfig?.title } } 
+          : s
+      )
+    }));
+    setChartType(type);
+    setShowChart(visible);
+  }, []);
+
+  const hideChart = useCallback(() => {
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: prev.sheets.map(s => 
+        s.id === prev.activeSheetId && s.chartConfig
+          ? { ...s, chartConfig: { ...s.chartConfig, visible: false } } 
+          : s
+      )
+    }));
+    setShowChart(false);
+  }, []);
+
+  // Recalculate formulas when cells change
+  const recalculateFormulas = useCallback(() => {
+    setData(prev => {
+      const newCells = { ...prev.cells };
+      let changed = false;
+      Object.keys(newCells).forEach(key => {
+        const cell = newCells[key];
+        if (cell.formula && cell.formula.startsWith('=')) {
+          const newValue = evaluateFormula(cell.formula, newCells);
+          if (newValue !== cell.value) {
+            newCells[key] = { ...cell, value: newValue };
+            changed = true;
+          }
+        }
+      });
+      return changed ? { ...prev, cells: newCells } : prev;
+    });
+  }, [setData]);
+
+  // Recalculate formulas when data changes
+  useEffect(() => {
+    const hasFormulas = Object.values(data.cells).some(cell => cell.formula);
+    if (hasFormulas) {
+      recalculateFormulas();
+    }
+  }, [data.cells, recalculateFormulas]);
+
+  // Auto-show chart on initial load if chartConfig.visible is true
+  useEffect(() => {
+    if (activeSheet?.chartConfig?.visible) {
+      setShowChart(true);
+      setChartType(activeSheet.chartConfig.type);
+    }
+  }, []);
+
   const selectedCellData = selectedCell ? data.cells[selectedCell] : null;
   const selectedCellLabel = selectedCell 
     ? `${getColumnLabel(parseInt(selectedCell.split('-')[1]))}${parseInt(selectedCell.split('-')[0]) + 1}`
@@ -618,7 +880,7 @@ export function SpreadsheetEditor({
           type="text"
           className="flex-1 max-w-md px-3 py-1 text-sm border rounded bg-white dark:bg-black focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white"
           placeholder="Ingresa un valor o fórmula"
-          value={selectedCellData?.value || ''}
+          value={selectedCellData?.formula || selectedCellData?.value || ''}
           onChange={(e) => selectedCell && handleCellChange(selectedCell, e.target.value)}
         />
 
@@ -693,7 +955,7 @@ export function SpreadsheetEditor({
           variant={showChart && chartType === 'bar' ? 'default' : 'ghost'}
           size="icon"
           className="h-8 w-8"
-          onClick={() => { setChartType('bar'); setShowChart(true); }}
+          onClick={() => updateChartConfig('bar', true)}
           title="Gráfico de barras"
           data-testid="btn-bar-chart"
         >
@@ -703,7 +965,7 @@ export function SpreadsheetEditor({
           variant={showChart && chartType === 'line' ? 'default' : 'ghost'}
           size="icon"
           className="h-8 w-8"
-          onClick={() => { setChartType('line'); setShowChart(true); }}
+          onClick={() => updateChartConfig('line', true)}
           title="Gráfico de líneas"
           data-testid="btn-line-chart"
         >
@@ -713,7 +975,7 @@ export function SpreadsheetEditor({
           variant={showChart && chartType === 'pie' ? 'default' : 'ghost'}
           size="icon"
           className="h-8 w-8"
-          onClick={() => { setChartType('pie'); setShowChart(true); }}
+          onClick={() => updateChartConfig('pie', true)}
           title="Gráfico circular"
           data-testid="btn-pie-chart"
         >
@@ -724,7 +986,7 @@ export function SpreadsheetEditor({
             variant="ghost"
             size="sm"
             className="text-xs text-gray-500"
-            onClick={() => setShowChart(false)}
+            onClick={hideChart}
           >
             Ocultar
           </Button>
