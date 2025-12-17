@@ -222,11 +222,13 @@ REGLAS DE ESCRITURA DE DOCUMENTOS:
 Escribe contenido limpio y directo.`;
 
   const excelChartInstructions = `
-INSTRUCCIONES PARA GRÁFICOS EN EXCEL:
-Cuando el usuario pida un gráfico de barras o datos visuales, genera los datos en formato de tabla CSV.
-Usa caracteres de barra (█) para crear una representación visual del gráfico.
+FORMATO OBLIGATORIO PARA EXCEL:
+- SIEMPRE usa formato CSV con valores separados por comas.
+- NUNCA uses markdown, asteriscos (**), guiones (-), ni bloques de código.
+- Cada línea es una fila de la hoja de cálculo.
+- Los valores se separan con comas.
 
-Ejemplo de gráfico de barras con datos del 2020 al 2025:
+EJEMPLO CORRECTO para gráfico de barras 2020-2025:
 Año,Valor,Gráfico
 2020,45,█████████
 2021,62,████████████
@@ -235,10 +237,12 @@ Año,Valor,Gráfico
 2024,92,██████████████████
 2025,98,████████████████████
 
-Las barras deben ser proporcionales al valor máximo.
-Para valores negativos, usa caracteres vacíos o el símbolo ○.
-Siempre incluye una columna con los valores numéricos reales.
-No uses formato markdown ni bloques de código, solo datos CSV separados por comas.
+EJEMPLO INCORRECTO (NO HAGAS ESTO):
+- **2020**: 45
+- **2021**: 62
+
+Para crear barras visuales, usa el carácter █ repetido proporcionalmente al valor.
+Fórmula: número de █ = (valor / valor_máximo) * 20
 `;
 
   const documentModePrompt = documentMode ? (
