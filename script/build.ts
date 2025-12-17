@@ -20,6 +20,7 @@ const allowlist = [
   "multer",
   "nanoid",
   "nodemailer",
+  "officeparser",
   "openai",
   "passport",
   "passport-local",
@@ -27,7 +28,6 @@ const allowlist = [
   "stripe",
   "uuid",
   "ws",
-  "xlsx",
   "zod",
   "zod-validation-error",
 ];
