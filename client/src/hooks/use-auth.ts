@@ -7,18 +7,21 @@ async function fetchUser(): Promise<User | null> {
   });
 
   if (response.status === 401) {
-    // Check if user is logged in via localStorage (admin login)
-    const localLoggedIn = localStorage.getItem("sira_logged_in") === "true";
-    if (localLoggedIn) {
-      // Return a mock admin user for localStorage-based auth
+    // Check if admin is logged in via localStorage (admin login fallback)
+    const adminLoggedIn = localStorage.getItem("sira_admin_logged_in") === "true";
+    if (adminLoggedIn) {
+      // Return admin user data for localStorage-based admin auth only
       return {
         id: "admin-user-id",
-        email: "admin@gmail.com",
+        email: localStorage.getItem("sira_admin_email") || "admin@gmail.com",
         firstName: "Admin",
         lastName: "User",
         profileImageUrl: null,
+        role: "admin",
       } as User;
     }
+    // Clear any stale login state
+    localStorage.removeItem("sira_logged_in");
     return null;
   }
 

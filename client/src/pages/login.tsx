@@ -24,8 +24,11 @@ export default function LoginPage() {
         });
         
         if (response.ok) {
-          // Set localStorage to mark as logged in
-          localStorage.setItem("sira_logged_in", "true");
+          // Set localStorage to mark ADMIN as logged in (not regular users)
+          localStorage.setItem("sira_admin_logged_in", "true");
+          localStorage.setItem("sira_admin_email", email);
+          // Clear any regular user login state
+          localStorage.removeItem("sira_logged_in");
           // Invalidate auth query cache
           queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
           // Navigate to home

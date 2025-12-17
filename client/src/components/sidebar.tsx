@@ -69,10 +69,16 @@ export function Sidebar({
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const handleLogout = () => {
-    // Clear localStorage
+    // Clear all auth-related localStorage
     localStorage.removeItem("sira_logged_in");
-    // Redirect to welcome page
-    window.location.href = "/welcome";
+    localStorage.removeItem("sira_admin_logged_in");
+    localStorage.removeItem("sira_admin_email");
+    // Call server logout to clear session then redirect
+    fetch("/api/logout").then(() => {
+      window.location.href = "/welcome";
+    }).catch(() => {
+      window.location.href = "/welcome";
+    });
   };
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
