@@ -2,16 +2,39 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { X, Chrome, Apple, Building2, Phone } from "lucide-react";
+import { X, Chrome, Apple, Building2, Phone, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleContinue = () => {
-    if (email) {
-      // Redirect to auth with email hint
-      window.location.href = "/api/login";
+  const handleContinue = async () => {
+    if (email && password) {
+      setIsLoading(true);
+      setError("");
+      try {
+        const response = await fetch("/api/auth/admin-login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        
+        if (response.ok) {
+          window.location.href = "/";
+        } else {
+          const data = await response.json();
+          setError(data.message || "Credenciales inválidas");
+        }
+      } catch (err) {
+        setError("Error al iniciar sesión");
+      } finally {
+        setIsLoading(false);
+      }
+    } else if (email && !password) {
+      setError("Por favor ingresa tu contraseña");
     }
   };
 
@@ -107,12 +130,25 @@ export default function LoginPage() {
             className="h-12 text-base"
             data-testid="input-login-email"
           />
+          <Input 
+            type="password"
+            placeholder="Contraseña"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="h-12 text-base"
+            data-testid="input-login-password"
+            onKeyDown={(e) => e.key === 'Enter' && handleContinue()}
+          />
+          {error && (
+            <p className="text-sm text-red-500 text-center" data-testid="text-login-error">{error}</p>
+          )}
           <Button 
             className="w-full h-12 text-base"
             onClick={handleContinue}
+            disabled={isLoading}
             data-testid="button-login-continue"
           >
-            Continuar
+            {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Continuar"}
           </Button>
         </div>
 
