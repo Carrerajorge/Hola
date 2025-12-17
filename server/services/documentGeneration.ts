@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import PptxGenJS from "pptxgenjs";
+import { JSDOM } from "jsdom";
 import { generateWordFromMarkdown } from "./markdownToDocx";
 
 export interface DocumentContent {
@@ -8,8 +9,133 @@ export interface DocumentContent {
   content: any;
 }
 
+function isHtmlContent(content: string): boolean {
+  return /<[a-z][\s\S]*>/i.test(content);
+}
+
+function htmlToMarkdown(html: string): string {
+  const dom = new JSDOM(html);
+  const document = dom.window.document;
+  
+  const katexElements = document.querySelectorAll('.katex');
+  katexElements.forEach((katex) => {
+    const annotation = katex.querySelector('annotation[encoding="application/x-tex"]');
+    if (annotation && annotation.textContent) {
+      const latex = annotation.textContent;
+      const isBlock = katex.closest('.math-display') || 
+                     katex.closest('div.katex') ||
+                     katex.closest('span.katex-display');
+      const replacement = document.createTextNode(isBlock ? `$$${latex}$$` : `$${latex}$`);
+      katex.replaceWith(replacement);
+    }
+  });
+  
+  const mathDisplays = document.querySelectorAll('.math-display, .katex-display');
+  mathDisplays.forEach((el) => {
+    const text = el.textContent || '';
+    if (text.includes('$$')) {
+      const replacement = document.createTextNode('\n\n' + text + '\n\n');
+      el.replaceWith(replacement);
+    }
+  });
+  
+  function processNode(node: Node): string {
+    if (node.nodeType === 3) {
+      return node.textContent || '';
+    }
+    
+    if (node.nodeType !== 1) return '';
+    
+    const element = node as Element;
+    const tagName = element.tagName.toLowerCase();
+    const children = Array.from(element.childNodes).map(processNode).join('');
+    
+    switch (tagName) {
+      case 'p':
+        return children.trim() + '\n\n';
+      case 'br':
+        return '\n';
+      case 'strong':
+      case 'b':
+        return `**${children}**`;
+      case 'em':
+      case 'i':
+        return `*${children}*`;
+      case 'u':
+        return children;
+      case 'code':
+        return `\`${children}\``;
+      case 'h1':
+        return `# ${children}\n\n`;
+      case 'h2':
+        return `## ${children}\n\n`;
+      case 'h3':
+        return `### ${children}\n\n`;
+      case 'h4':
+        return `#### ${children}\n\n`;
+      case 'h5':
+        return `##### ${children}\n\n`;
+      case 'h6':
+        return `###### ${children}\n\n`;
+      case 'ul':
+        return '\n' + Array.from(element.children)
+          .map(li => `- ${processNode(li).trim()}`)
+          .join('\n') + '\n\n';
+      case 'ol':
+        return '\n' + Array.from(element.children)
+          .map((li, i) => `${i + 1}. ${processNode(li).trim()}`)
+          .join('\n') + '\n\n';
+      case 'li':
+        return children;
+      case 'blockquote':
+        return children.split('\n').map(line => `> ${line}`).join('\n') + '\n\n';
+      case 'pre':
+        const codeEl = element.querySelector('code');
+        const lang = codeEl?.className.match(/language-(\w+)/)?.[1] || '';
+        return `\`\`\`${lang}\n${codeEl?.textContent || children}\n\`\`\`\n\n`;
+      case 'a':
+        const href = element.getAttribute('href') || '';
+        return `[${children}](${href})`;
+      case 'table':
+        return processTable(element);
+      case 'div':
+      case 'span':
+        return children;
+      default:
+        return children;
+    }
+  }
+  
+  function processTable(table: Element): string {
+    const rows = table.querySelectorAll('tr');
+    if (rows.length === 0) return '';
+    
+    let result = '';
+    rows.forEach((row, rowIndex) => {
+      const cells = row.querySelectorAll('th, td');
+      const cellContents = Array.from(cells).map(cell => processNode(cell).trim());
+      result += '| ' + cellContents.join(' | ') + ' |\n';
+      
+      if (rowIndex === 0) {
+        result += '| ' + cellContents.map(() => '---').join(' | ') + ' |\n';
+      }
+    });
+    
+    return result + '\n';
+  }
+  
+  return processNode(document.body).trim();
+}
+
 export async function generateWordDocument(title: string, content: string): Promise<Buffer> {
-  return generateWordFromMarkdown(title, content);
+  let markdownContent = content;
+  
+  if (isHtmlContent(content)) {
+    markdownContent = htmlToMarkdown(content);
+    console.log('[generateWordDocument] Converted HTML to Markdown for export');
+  }
+  
+  return generateWordFromMarkdown(title, markdownContent);
 }
 
 export async function generateExcelDocument(title: string, data: any[][]): Promise<Buffer> {
