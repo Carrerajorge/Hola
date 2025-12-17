@@ -232,8 +232,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[100vw] max-w-[100vw] h-[100vh] p-0 gap-0 overflow-hidden rounded-none" data-testid="gpt-builder-dialog">
-        <div className="flex h-full">
-          <div className="flex-1 flex flex-col">
+        <div className="flex h-full overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0">
             <div className="flex items-center justify-between px-6 py-4 border-b">
               <div className="flex items-center gap-4">
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
