@@ -191,8 +191,8 @@ export default function SignupPage() {
 
           <Button 
             variant="outline" 
-            className="w-full h-12 justify-start gap-3 text-base font-normal"
-            onClick={handleSocialSignup}
+            className="w-full h-12 justify-start gap-3 text-base font-normal opacity-50 cursor-not-allowed"
+            disabled
             data-testid="button-signup-apple"
           >
             <Apple className="h-5 w-5" />
@@ -201,8 +201,8 @@ export default function SignupPage() {
 
           <Button 
             variant="outline" 
-            className="w-full h-12 justify-start gap-3 text-base font-normal"
-            onClick={handleSocialSignup}
+            className="w-full h-12 justify-start gap-3 text-base font-normal opacity-50 cursor-not-allowed"
+            disabled
             data-testid="button-signup-microsoft"
           >
             <svg className="h-5 w-5" viewBox="0 0 23 23">
@@ -216,8 +216,8 @@ export default function SignupPage() {
 
           <Button 
             variant="outline" 
-            className="w-full h-12 justify-start gap-3 text-base font-normal"
-            onClick={handleSocialSignup}
+            className="w-full h-12 justify-start gap-3 text-base font-normal opacity-50 cursor-not-allowed"
+            disabled
             data-testid="button-signup-phone"
           >
             <Phone className="h-5 w-5" />
