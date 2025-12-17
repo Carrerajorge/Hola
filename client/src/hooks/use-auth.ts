@@ -7,6 +7,18 @@ async function fetchUser(): Promise<User | null> {
   });
 
   if (response.status === 401) {
+    // Check if user is logged in via localStorage (admin login)
+    const localLoggedIn = localStorage.getItem("sira_logged_in") === "true";
+    if (localLoggedIn) {
+      // Return a mock admin user for localStorage-based auth
+      return {
+        id: "admin-user-id",
+        email: "admin@gmail.com",
+        firstName: "Admin",
+        lastName: "User",
+        profileImageUrl: null,
+      } as User;
+    }
     return null;
   }
 
