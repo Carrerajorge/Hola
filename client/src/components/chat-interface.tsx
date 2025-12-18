@@ -63,7 +63,8 @@ import { ETLDialog } from "@/components/etl-dialog";
 import { FigmaBlock } from "@/components/figma-block";
 import { SiraLogo } from "@/components/sira-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
-import { Database } from "lucide-react";
+import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
+import { Database, Sparkles } from "lucide-react";
 
 const processLatex = (content: string): string => {
   return content
@@ -599,6 +600,7 @@ export function ChatInterface({
   const [selectedProvider, setSelectedProvider] = useState<"xai" | "gemini">("gemini");
   const [selectedModel, setSelectedModel] = useState<string>("gemini-3-flash-preview");
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
+  const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
@@ -1647,6 +1649,16 @@ export function ChatInterface({
           )}
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
+            onClick={() => setIsUpgradeDialogOpen(true)}
+            data-testid="button-upgrade-header"
+          >
+            <Sparkles className="h-3 w-3 text-primary" />
+            Mejorar el plan a Go
+          </Button>
           <ShareChatDialog chatId={chatId || "new"} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
             <Button variant="ghost" size="icon" data-testid="button-share-chat">
               <ShareIcon size={20} />
@@ -3408,6 +3420,11 @@ export function ChatInterface({
             timestamp: new Date()
           });
         }}
+      />
+
+      <UpgradePlanDialog 
+        open={isUpgradeDialogOpen} 
+        onOpenChange={setIsUpgradeDialogOpen} 
       />
 
     </div>
