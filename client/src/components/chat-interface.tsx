@@ -587,6 +587,10 @@ export function ChatInterface({
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isETLDialogOpen, setIsETLDialogOpen] = useState(false);
+  const [figmaTokenInput, setFigmaTokenInput] = useState("");
+  const [isFigmaConnecting, setIsFigmaConnecting] = useState(false);
+  const [isFigmaConnected, setIsFigmaConnected] = useState(false);
+  const [showFigmaTokenInput, setShowFigmaTokenInput] = useState(false);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
@@ -617,6 +621,46 @@ export function ChatInterface({
   
   // Document editor is now only opened manually by the user clicking the buttons
   // Removed auto-open behavior to prevent unwanted document creation
+  
+  // Figma connection handler
+  const handleFigmaConnect = async () => {
+    if (!showFigmaTokenInput) {
+      setShowFigmaTokenInput(true);
+      return;
+    }
+    
+    if (!figmaTokenInput.trim()) {
+      return;
+    }
+    
+    setIsFigmaConnecting(true);
+    try {
+      const response = await fetch("/api/figma/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: figmaTokenInput.trim() }),
+      });
+      
+      if (response.ok) {
+        setIsFigmaConnected(true);
+        setShowFigmaTokenInput(false);
+        setFigmaTokenInput("");
+      }
+    } catch (error) {
+      console.error("Error connecting to Figma:", error);
+    } finally {
+      setIsFigmaConnecting(false);
+    }
+  };
+  
+  const handleFigmaDisconnect = async () => {
+    try {
+      await fetch("/api/figma/disconnect", { method: "POST" });
+      setIsFigmaConnected(false);
+    } catch (error) {
+      console.error("Error disconnecting from Figma:", error);
+    }
+  };
   
   // Function to open blank document editor - preserves existing messages
   const openBlankDocEditor = (type: "word" | "excel" | "ppt") => {
