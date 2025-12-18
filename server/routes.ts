@@ -2,6 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
+import { db } from "./db";
+import { users } from "@shared/schema";
 import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
@@ -1006,17 +1008,18 @@ export async function registerRoutes(
       if (!email || !password) {
         return res.status(400).json({ message: "Email y contraseña son requeridos" });
       }
-      const existingUser = await storage.getUserByUsername(email);
+      const existingUsers = await storage.getAllUsers();
+      const existingUser = existingUsers.find(u => u.email === email);
       if (existingUser) {
         return res.status(400).json({ message: "Ya existe un usuario con este email" });
       }
-      const user = await storage.createUser({
-        username: email,
-        password
-      });
-      if (plan || role) {
-        await storage.updateUser(user.id, { plan: plan || "free", role: role || "user", status: "active" });
-      }
+      const [user] = await db.insert(users).values({
+        email,
+        password,
+        plan: plan || "free",
+        role: role || "user",
+        status: "active"
+      }).returning();
       await storage.createAuditLog({
         action: "user_create",
         resource: "users",
