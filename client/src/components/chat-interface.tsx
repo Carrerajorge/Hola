@@ -622,35 +622,36 @@ export function ChatInterface({
   // Document editor is now only opened manually by the user clicking the buttons
   // Removed auto-open behavior to prevent unwanted document creation
   
-  // Figma connection handler
-  const handleFigmaConnect = async () => {
-    if (!showFigmaTokenInput) {
-      setShowFigmaTokenInput(true);
-      return;
-    }
-    
-    if (!figmaTokenInput.trim()) {
-      return;
-    }
-    
-    setIsFigmaConnecting(true);
-    try {
-      const response = await fetch("/api/figma/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken: figmaTokenInput.trim() }),
-      });
-      
-      if (response.ok) {
-        setIsFigmaConnected(true);
-        setShowFigmaTokenInput(false);
-        setFigmaTokenInput("");
+  // Check Figma connection status and handle OAuth callback
+  useEffect(() => {
+    const checkFigmaStatus = async () => {
+      try {
+        const response = await fetch("/api/figma/status");
+        const data = await response.json();
+        setIsFigmaConnected(data.connected);
+      } catch (error) {
+        console.error("Error checking Figma status:", error);
       }
-    } catch (error) {
-      console.error("Error connecting to Figma:", error);
-    } finally {
+    };
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('figma_connected') === 'true') {
+      setIsFigmaConnected(true);
       setIsFigmaConnecting(false);
+      window.history.replaceState({}, '', window.location.pathname);
     }
+    if (urlParams.get('figma_error')) {
+      setIsFigmaConnecting(false);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    
+    checkFigmaStatus();
+  }, []);
+  
+  // Figma connection handler - OAuth flow
+  const handleFigmaConnect = () => {
+    setIsFigmaConnecting(true);
+    window.location.href = "/api/auth/figma";
   };
   
   const handleFigmaDisconnect = async () => {
@@ -3057,25 +3058,12 @@ export function ChatInterface({
                                   >
                                     {isFigmaConnecting ? (
                                       <Loader2 className="h-3 w-3 animate-spin" />
-                                    ) : showFigmaTokenInput ? (
-                                      "Guardar"
                                     ) : (
                                       "Conectar"
                                     )}
                                   </Button>
                                 )}
                               </div>
-                              {showFigmaTokenInput && !isFigmaConnected && (
-                                <input
-                                  type="password"
-                                  placeholder="Pega tu token de Figma aquí..."
-                                  value={figmaTokenInput}
-                                  onChange={(e) => setFigmaTokenInput(e.target.value)}
-                                  onKeyDown={(e) => e.key === "Enter" && handleFigmaConnect()}
-                                  className="w-full px-2 py-1 text-xs border rounded bg-background"
-                                  autoFocus
-                                />
-                              )}
                             </div>
                           </div>
                         </HoverCardContent>
