@@ -473,3 +473,25 @@ export const insertReportSchema = createInsertSchema(reports).omit({
 
 export type InsertReport = z.infer<typeof insertReportSchema>;
 export type Report = typeof reports.$inferSelect;
+
+// Chat Participants for sharing chats
+export const chatParticipants = pgTable("chat_participants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  role: text("role").notNull().default("viewer"), // owner, editor, viewer
+  invitedBy: varchar("invited_by"),
+  invitedAt: timestamp("invited_at").defaultNow().notNull(),
+  acceptedAt: timestamp("accepted_at"),
+}, (table) => [
+  index("chat_participants_chat_idx").on(table.chatId),
+  index("chat_participants_email_idx").on(table.email),
+]);
+
+export const insertChatParticipantSchema = createInsertSchema(chatParticipants).omit({
+  id: true,
+  invitedAt: true,
+});
+
+export type InsertChatParticipant = z.infer<typeof insertChatParticipantSchema>;
+export type ChatParticipant = typeof chatParticipants.$inferSelect;
