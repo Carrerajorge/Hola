@@ -1413,7 +1413,6 @@ export function ChatInterface({
       
       // If Figma diagram was generated, add it to chat immediately
       if (figmaDiagram) {
-        console.log('[ChatInterface] Figma diagram received from API:', figmaDiagram);
         setAiState("responding");
         
         // Quick streaming effect for the text part
@@ -1437,7 +1436,6 @@ export function ChatInterface({
               timestamp: new Date(),
               figmaDiagram,
             };
-            console.log('[ChatInterface] Sending AI message with figmaDiagram:', aiMsg);
             onSendMessage(aiMsg);
             
             streamingContentRef.current = "";
@@ -1828,10 +1826,6 @@ export function ChatInterface({
                   })()}
                   
                   {/* Figma Diagram Block */}
-                  {(() => {
-                    console.log('[ChatInterface] Message render:', { msgId: msg.id, hasFigmaDiagram: !!msg.figmaDiagram, figmaDiagram: msg.figmaDiagram });
-                    return null;
-                  })()}
                   {msg.figmaDiagram && (
                     <div className="mt-3 w-full">
                       <FigmaBlock diagram={msg.figmaDiagram} />

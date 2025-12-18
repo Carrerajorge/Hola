@@ -109,19 +109,14 @@ export default function Home() {
 
   // Get messages from either activeChat or pending chat
   const currentMessages = useMemo(() => {
-    let messages: Message[] = [];
-    if (activeChat?.messages) {
-      messages = activeChat.messages;
-    } else {
-      // Check if there's a pending chat with messages
-      const pendingId = pendingChatIdRef.current;
-      if (pendingId) {
-        const pendingChat = chats.find(c => c.id === pendingId);
-        if (pendingChat?.messages) messages = pendingChat.messages;
-      }
+    if (activeChat?.messages) return activeChat.messages;
+    // Check if there's a pending chat with messages
+    const pendingId = pendingChatIdRef.current;
+    if (pendingId) {
+      const pendingChat = chats.find(c => c.id === pendingId);
+      if (pendingChat?.messages) return pendingChat.messages;
     }
-    console.log('[Home] currentMessages:', messages.map(m => ({ id: m.id, role: m.role, hasFigmaDiagram: !!m.figmaDiagram })));
-    return messages;
+    return [];
   }, [activeChat?.messages, chats]);
 
   const handleOpenGpts = () => {
