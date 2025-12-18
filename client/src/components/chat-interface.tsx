@@ -1662,11 +1662,23 @@ export function ChatInterface({
               <span className="sm:hidden">Mejorar</span>
             </Button>
           )}
-          <ShareChatDialog chatId={chatId || "new"} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
-            <Button variant="ghost" size="icon" data-testid="button-share-chat">
+          {chatId && !chatId.startsWith("pending-") ? (
+            <ShareChatDialog chatId={chatId} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
+              <Button variant="ghost" size="icon" data-testid="button-share-chat">
+                <ShareIcon size={20} />
+              </Button>
+            </ShareChatDialog>
+          ) : (
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              data-testid="button-share-chat-disabled"
+              disabled
+              title="Envía un mensaje para poder compartir este chat"
+            >
               <ShareIcon size={20} />
             </Button>
-          </ShareChatDialog>
+          )}
           <Button variant="ghost" size="icon">
             <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
           </Button>
