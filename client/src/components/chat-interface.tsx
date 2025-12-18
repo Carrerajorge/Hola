@@ -603,6 +603,9 @@ export function ChatInterface({
   const [selectedModel, setSelectedModel] = useState<string>("gemini-3-flash-preview");
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
+  const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
@@ -1372,6 +1375,7 @@ export function ChatInterface({
       
       // Generate image if needed
       if (shouldGenerateImage) {
+        setIsGeneratingImage(true);
         setAiProcessSteps([
           { step: "Analizando tu petición", status: "done" },
           { step: "Generando imagen con IA", status: "active" },
@@ -1393,8 +1397,16 @@ export function ChatInterface({
             setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
             
             const msgId = (Date.now() + 1).toString();
+            console.log("[ImageGen] Creating message with ID:", msgId);
+            
             // Store image in separate memory store to prevent loss during localStorage sync
             storeGeneratedImage(msgId, imageData.imageData);
+            
+            // Also store in local component state and ref for persistence across remounts
+            const pendingImage = { messageId: msgId, imageData: imageData.imageData };
+            setPendingGeneratedImage(pendingImage);
+            latestGeneratedImageRef.current = pendingImage;
+            console.log("[ImageGen] Stored in pendingGeneratedImage and ref:", msgId);
             
             const aiMsg: Message = {
               id: msgId,
@@ -1406,6 +1418,7 @@ export function ChatInterface({
             console.log("[ImageGen] Sending message with generatedImage:", { msgId: aiMsg.id, hasImage: !!aiMsg.generatedImage });
             onSendMessage(aiMsg);
             
+            setIsGeneratingImage(false);
             setAiState("idle");
             setAiProcessSteps([]);
             setSelectedTool(null);
@@ -1415,6 +1428,7 @@ export function ChatInterface({
             throw new Error(imageData.error || "Error al generar imagen");
           }
         } catch (imgError: any) {
+          setIsGeneratingImage(false);
           if (imgError.name === "AbortError") {
             setAiState("idle");
             setAiProcessSteps([]);
@@ -1467,7 +1481,7 @@ export function ChatInterface({
             topP: parseFloat(activeGpt.topP || "1")
           } : undefined
         }),
-        signal: abortControllerRef.current.signal
+        signal: abortControllerRef.current?.signal
       });
 
       // Update steps: mark processing done, searching active
@@ -2016,12 +2030,42 @@ export function ChatInterface({
 
                   {/* Generated Image Block */}
                   {(() => {
-                    // Check message first, then fallback to store
-                    let imageData = msg.generatedImage || getGeneratedImage(msg.id);
+                    // Debug: Log all attempts to find the image
+                    const msgImage = msg.generatedImage;
+                    const storeImage = getGeneratedImage(msg.id);
+                    const pendingMatch = pendingGeneratedImage?.messageId === msg.id ? pendingGeneratedImage.imageData : null;
+                    const refMatch = latestGeneratedImageRef.current?.messageId === msg.id ? latestGeneratedImageRef.current.imageData : null;
                     
-                    // Sync to store if message has image but store doesn't
-                    if (msg.generatedImage && !getGeneratedImage(msg.id)) {
-                      storeGeneratedImage(msg.id, msg.generatedImage);
+                    console.log("[ImageRender] Message ID:", msg.id, {
+                      hasMessageImage: !!msgImage,
+                      hasStoreImage: !!storeImage,
+                      hasPendingMatch: !!pendingMatch,
+                      hasRefMatch: !!refMatch,
+                      pendingImageId: pendingGeneratedImage?.messageId,
+                      refImageId: latestGeneratedImageRef.current?.messageId
+                    });
+                    
+                    // Try multiple sources for the image data
+                    let imageData = msgImage || storeImage || pendingMatch || refMatch;
+                    
+                    // Sync to store if we found image from any source but store doesn't have it
+                    if (imageData && !storeImage) {
+                      storeGeneratedImage(msg.id, imageData);
+                      console.log("[ImageRender] Synced image to store for msg:", msg.id);
+                    }
+                    
+                    // Show loading skeleton if generating image and this is the last assistant message
+                    const isLastAssistantMessage = msgIndex === messages.filter(m => m.role === "assistant").length - 1 + messages.filter(m => m.role === "user").length;
+                    const showSkeleton = isGeneratingImage && msg.role === "assistant" && msgIndex === messages.length - 1 && !imageData;
+                    
+                    if (showSkeleton) {
+                      return (
+                        <div className="mt-3 px-4">
+                          <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                          </div>
+                        </div>
+                      );
                     }
                     
                     return imageData ? (
@@ -2186,8 +2230,27 @@ export function ChatInterface({
           </div>
         )}
 
+        {/* Image Generation Loading Skeleton */}
+        {isGeneratingImage && (
+          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+            <div className="flex flex-col gap-2 items-start">
+              <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Generando imagen...</span>
+                </div>
+              </div>
+              <div className="px-4">
+                <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                  <Image className="h-8 w-8 text-muted-foreground" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Thinking/Responding State */}
-        {aiState !== "idle" && (
+        {aiState !== "idle" && !isGeneratingImage && (
           <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
             <div className="flex flex-col gap-2 items-start">
               {aiState === "thinking" && (
