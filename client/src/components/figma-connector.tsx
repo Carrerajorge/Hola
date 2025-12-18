@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, Check } from "lucide-react";
 
 interface FigmaConnectorProps {
   onConnectionChange?: (connected: boolean) => void;
@@ -11,13 +10,45 @@ interface FigmaConnectorProps {
 export function FigmaConnector({ onConnectionChange }: FigmaConnectorProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showTokenInput, setShowTokenInput] = useState(false);
-  const [accessToken, setAccessToken] = useState("");
   const { toast } = useToast();
 
   useEffect(() => {
     checkConnectionStatus();
+    handleOAuthCallback();
   }, []);
+
+  const handleOAuthCallback = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    
+    if (urlParams.get('figma_connected') === 'true') {
+      setIsConnected(true);
+      onConnectionChange?.(true);
+      toast({
+        title: "Conectado",
+        description: "Figma conectado exitosamente",
+      });
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    
+    const error = urlParams.get('figma_error');
+    if (error) {
+      toast({
+        title: "Error de conexión",
+        description: getErrorMessage(error),
+        variant: "destructive",
+      });
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  };
+
+  const getErrorMessage = (error: string) => {
+    switch (error) {
+      case 'no_code': return 'Autorización cancelada';
+      case 'not_configured': return 'OAuth de Figma no configurado';
+      case 'token_exchange_failed': return 'Error al obtener token de acceso';
+      default: return 'Error de conexión con Figma';
+    }
+  };
 
   const checkConnectionStatus = async () => {
     try {
@@ -30,50 +61,9 @@ export function FigmaConnector({ onConnectionChange }: FigmaConnectorProps) {
     }
   };
 
-  const handleConnect = async () => {
-    if (!showTokenInput) {
-      setShowTokenInput(true);
-      return;
-    }
-
-    if (!accessToken.trim()) {
-      toast({
-        title: "Error",
-        description: "Por favor ingresa tu token de acceso de Figma",
-        variant: "destructive",
-      });
-      return;
-    }
-
+  const handleConnect = () => {
     setIsLoading(true);
-    try {
-      const response = await fetch("/api/figma/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken: accessToken.trim() }),
-      });
-
-      if (!response.ok) {
-        throw new Error("No se pudo conectar a Figma");
-      }
-
-      setIsConnected(true);
-      setShowTokenInput(false);
-      setAccessToken("");
-      onConnectionChange?.(true);
-      toast({
-        title: "Conectado",
-        description: "Conexión con Figma establecida",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "No se pudo conectar",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    window.location.href = "/api/auth/figma";
   };
 
   const handleDisconnect = async () => {
@@ -117,35 +107,24 @@ export function FigmaConnector({ onConnectionChange }: FigmaConnectorProps) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        {showTokenInput && !isConnected && (
-          <Input
-            type="password"
-            placeholder="Token de acceso..."
-            value={accessToken}
-            onChange={(e) => setAccessToken(e.target.value)}
-            className="w-48"
-            data-testid="input-figma-token"
-            onKeyDown={(e) => e.key === "Enter" && handleConnect()}
-          />
+      <Button
+        variant={isConnected ? "outline" : "default"}
+        onClick={isConnected ? handleDisconnect : handleConnect}
+        disabled={isLoading}
+        className={isConnected ? "gap-2" : "bg-black text-white hover:bg-gray-800 rounded-full px-6"}
+        data-testid={isConnected ? "button-disconnect-figma" : "button-connect-figma"}
+      >
+        {isLoading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : isConnected ? (
+          <>
+            <Check className="h-4 w-4 text-green-500" />
+            Desconectar
+          </>
+        ) : (
+          "Conectar"
         )}
-        
-        <Button
-          variant={isConnected ? "outline" : "default"}
-          onClick={isConnected ? handleDisconnect : handleConnect}
-          disabled={isLoading}
-          className={isConnected ? "" : "bg-black text-white hover:bg-gray-800 rounded-full px-6"}
-          data-testid={isConnected ? "button-disconnect-figma" : "button-connect-figma"}
-        >
-          {isLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : isConnected ? (
-            "Desconectar"
-          ) : (
-            "Conectar"
-          )}
-        </Button>
-      </div>
+      </Button>
     </div>
   );
 }
