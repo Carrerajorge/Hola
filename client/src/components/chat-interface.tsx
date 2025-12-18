@@ -1966,6 +1966,7 @@ export function ChatInterface({
                                 h2: ({children}) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
                                 h3: ({children}) => <h3 className="text-base font-semibold mb-2">{children}</h3>,
                                 blockquote: ({children}) => <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-3">{children}</blockquote>,
+                                img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
                               }}
                             >
                               {processLatex(text)}
@@ -2178,6 +2179,7 @@ export function ChatInterface({
                       a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
                       pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
                       code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
+                      img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
                     }}
                   >
                     {processLatex(streamingContent)}
@@ -2757,6 +2759,9 @@ export function ChatInterface({
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkMath]}
                             rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                            components={{
+                              img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
+                            }}
                           >
                             {processLatex(parseDocumentBlocks(msg.content).text)}
                           </ReactMarkdown>
