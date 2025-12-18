@@ -74,6 +74,7 @@ export function useChats() {
               timestamp: new Date(msg.createdAt),
               attachments: msg.attachments,
               sources: msg.sources,
+              figmaDiagram: msg.figmaDiagram,
             })),
           };
         })
@@ -181,7 +182,8 @@ export function useChats() {
               role: msg.role,
               content: msg.content,
               attachments: msg.attachments,
-              sources: msg.sources
+              sources: msg.sources,
+              figmaDiagram: msg.figmaDiagram
             })
           });
         } catch (error) {
@@ -270,7 +272,8 @@ export function useChats() {
             role: message.role,
             content: message.content,
             attachments: message.attachments,
-            sources: message.sources
+            sources: message.sources,
+            figmaDiagram: message.figmaDiagram
           })
         });
       } catch (error) {

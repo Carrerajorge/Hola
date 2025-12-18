@@ -224,6 +224,7 @@ export const chatMessages = pgTable("chat_messages", {
   content: text("content").notNull(),
   attachments: jsonb("attachments"), // array of attachments
   sources: jsonb("sources"), // array of sources
+  figmaDiagram: jsonb("figma_diagram"), // Figma diagram data
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("chat_messages_chat_idx").on(table.chatId),
