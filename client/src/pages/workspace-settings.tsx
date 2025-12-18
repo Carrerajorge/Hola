@@ -22,7 +22,9 @@ import {
   Search,
   Plus,
   MoreHorizontal,
-  ChevronDown
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -423,10 +425,127 @@ export default function WorkspaceSettingsPage() {
       case "billing":
         return (
           <div className="space-y-6">
-            <h1 className="text-2xl font-semibold">Facturación</h1>
-            <p className="text-sm text-muted-foreground">
-              Administra la facturación de tu espacio de trabajo.
-            </p>
+            <div>
+              <h1 className="text-2xl font-semibold">Facturación</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Ciclo actual: Nov 28 - Dec 28
+              </p>
+            </div>
+
+            <Tabs defaultValue="plan" className="w-full">
+              <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0">
+                <TabsTrigger 
+                  value="plan" 
+                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                  data-testid="tab-billing-plan"
+                >
+                  Plan
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="invoices" 
+                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                  data-testid="tab-billing-invoices"
+                >
+                  Facturas
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="plan" className="mt-6 space-y-6">
+                <div className="border rounded-lg p-6 space-y-4">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-lg">Plan Business</span>
+                        <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Mensualmente</Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">Se desactiva el 28 de diciembre de 2025</p>
+                    </div>
+                    <Select>
+                      <SelectTrigger className="w-auto gap-2" data-testid="select-manage-plan">
+                        <SelectValue placeholder="Administrar plan" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="change">Cambiar plan</SelectItem>
+                        <SelectItem value="cancel">Cancelar plan</SelectItem>
+                        <SelectItem value="reactivate">Reactivar plan</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="pt-2">
+                    <div className="flex items-baseline">
+                      <span className="text-4xl font-bold">$30</span>
+                      <span className="text-muted-foreground ml-1">/participante</span>
+                    </div>
+                  </div>
+                  
+                  <p className="text-sm text-muted-foreground">1/2 participantes en uso</p>
+                </div>
+
+                <div className="border rounded-lg p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold">Uso de créditos</h3>
+                      <p className="text-sm text-muted-foreground">Próximo ciclo en 9 días</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-credits-menu">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-credits-prev">
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-credits-next">
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <p className="text-sm">
+                    <span className="font-semibold">0</span>
+                    <span className="text-muted-foreground"> / 0 créditos usados (100%)</span>
+                  </p>
+                </div>
+
+                <div className="border rounded-lg p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <h3 className="font-semibold">Agregar más créditos</h3>
+                      <p className="text-sm text-muted-foreground max-w-md">
+                        Permite que tu equipo siga teniendo acceso incluso después de alcanzar los límites de su plan. Los créditos son válidos durante 12 meses.
+                      </p>
+                    </div>
+                    <Button variant="outline" data-testid="button-add-credits">
+                      Agregar créditos
+                    </Button>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="border rounded-lg p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <h3 className="font-semibold">Alertas de uso de créditos</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Enviar alertas a los propietarios cuando estén por agotarse los créditos
+                      </p>
+                    </div>
+                    <Button variant="outline" data-testid="button-manage-alerts">
+                      Administrar
+                    </Button>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="invoices" className="mt-6">
+                <div className="border rounded-lg p-6">
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    No hay facturas disponibles
+                  </p>
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         );
 
