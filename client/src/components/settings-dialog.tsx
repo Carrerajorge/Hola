@@ -574,16 +574,72 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         return (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Controles de datos</h2>
-            <p className="text-sm text-muted-foreground">
-              Administra tus datos y privacidad.
-            </p>
-            <div className="space-y-4">
-              <Button variant="outline" className="w-full justify-start">
-                Exportar mis datos
-              </Button>
-              <Button variant="outline" className="w-full justify-start text-red-500 hover:text-red-600">
-                Eliminar historial de chats
-              </Button>
+            
+            <div className="space-y-1">
+              <button 
+                className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
+                data-testid="data-improve-model"
+              >
+                <span className="text-sm">Mejora el modelo para todos</span>
+                <span className="text-sm text-muted-foreground flex items-center gap-1">
+                  Desactivado <ChevronRight className="h-4 w-4" />
+                </span>
+              </button>
+
+              <button 
+                className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
+                data-testid="data-remote-browser"
+              >
+                <span className="text-sm">Datos del navegador remoto</span>
+                <span className="text-sm text-muted-foreground flex items-center gap-1">
+                  Activado <ChevronRight className="h-4 w-4" />
+                </span>
+              </button>
+
+              <div className="flex items-center justify-between py-3 px-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Comparte tu ubicación precisa</span>
+                  <span className="text-xs text-muted-foreground">
+                    Permite que Sira utilice la ubicación precisa de tu dispositivo al responder preguntas.
+                  </span>
+                </div>
+                <Switch data-testid="switch-location" />
+              </div>
+
+              <Separator />
+
+              <div className="flex items-center justify-between py-3 px-2">
+                <span className="text-sm">Enlaces compartidos</span>
+                <Button variant="outline" size="sm" data-testid="button-manage-links">
+                  Administrar
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between py-3 px-2">
+                <span className="text-sm">Chats archivados</span>
+                <Button variant="outline" size="sm" data-testid="button-manage-archived">
+                  Administrar
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between py-3 px-2">
+                <span className="text-sm">Archivar todos los chats</span>
+                <Button variant="outline" size="sm" data-testid="button-archive-all">
+                  Archivar todo
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between py-3 px-2">
+                <span className="text-sm">Eliminar todos los chats</span>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600"
+                  data-testid="button-delete-all"
+                >
+                  Eliminar todo
+                </Button>
+              </div>
             </div>
           </div>
         );
