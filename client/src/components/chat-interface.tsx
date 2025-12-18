@@ -1387,6 +1387,7 @@ export function ChatInterface({
           });
           
           const imageData = await imageRes.json();
+          console.log("[ImageGen] Response:", { success: imageData.success, hasImageData: !!imageData.imageData, imageDataLength: imageData.imageData?.length });
           
           if (imageRes.ok && imageData.success) {
             setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
@@ -1398,6 +1399,7 @@ export function ChatInterface({
               generatedImage: imageData.imageData,
               timestamp: new Date(),
             };
+            console.log("[ImageGen] Sending message with generatedImage:", { msgId: aiMsg.id, hasImage: !!aiMsg.generatedImage });
             onSendMessage(aiMsg);
             
             setAiState("idle");
