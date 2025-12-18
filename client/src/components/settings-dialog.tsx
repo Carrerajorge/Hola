@@ -16,7 +16,10 @@ import {
   Shield, 
   User,
   X,
-  Play
+  Play,
+  ChevronRight,
+  Plus,
+  Github
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -495,12 +498,60 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       case "apps":
         return (
           <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Aplicaciones</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Aplicaciones habilitadas</h2>
+              <Button variant="outline" size="sm" className="gap-2" data-testid="button-add-app">
+                <Plus className="h-4 w-4" />
+                Agregar más
+              </Button>
+            </div>
             <p className="text-sm text-muted-foreground">
-              Administra las aplicaciones conectadas y los GPTs personalizados.
+              Administra las aplicaciones habilitadas que Sira puede usar en tus chats.
             </p>
-            <div className="text-sm text-muted-foreground">
-              No tienes aplicaciones conectadas aún.
+            
+            <div className="space-y-1">
+              <button 
+                className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors"
+                data-testid="app-github"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center">
+                    <Github className="h-5 w-5 text-white" />
+                  </div>
+                  <span className="text-sm font-medium">GitHub</span>
+                </div>
+                <ChevronRight className="h-5 w-5 text-muted-foreground" />
+              </button>
+
+              <Separator />
+
+              <button 
+                className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors"
+                data-testid="app-teams"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-[#464EB8] flex items-center justify-center">
+                    <span className="text-white font-bold text-sm">T</span>
+                  </div>
+                  <span className="text-sm font-medium">Teams</span>
+                </div>
+                <ChevronRight className="h-5 w-5 text-muted-foreground" />
+              </button>
+
+              <Separator />
+
+              <button 
+                className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors"
+                data-testid="app-advanced-config"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                    <Settings className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <span className="text-sm font-medium">Configuración avanzada</span>
+                </div>
+                <ChevronRight className="h-5 w-5 text-muted-foreground" />
+              </button>
             </div>
           </div>
         );
