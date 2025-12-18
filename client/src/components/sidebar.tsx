@@ -34,6 +34,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { SearchModal } from "@/components/search-modal";
+import { SettingsDialog } from "@/components/settings-dialog";
 
 import { Chat } from "@/hooks/use-chats";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
@@ -86,6 +87,7 @@ export function Sidebar({
   const [showHidden, setShowHidden] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   
   const handleStartEdit = (chat: Chat, e: React.MouseEvent) => {
@@ -377,7 +379,7 @@ export function Sidebar({
                 <CreditCard className="h-4 w-4" />
                 Facturación
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/settings"); }} data-testid="button-settings">
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setIsSettingsOpen(true); }} data-testid="button-settings">
                 <Settings className="h-4 w-4" />
                 Configuración
               </Button>
@@ -407,6 +409,11 @@ export function Sidebar({
         chats={chats}
         onSelectChat={onSelectChat}
         triggerRef={searchButtonRef}
+      />
+
+      <SettingsDialog
+        open={isSettingsOpen}
+        onOpenChange={setIsSettingsOpen}
       />
     </div>
   );
