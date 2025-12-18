@@ -3,6 +3,9 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
 import { 
   Settings, 
   Bell, 
@@ -48,6 +51,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [notifTasks, setNotifTasks] = useState("push_email");
   const [notifProjects, setNotifProjects] = useState("email");
   const [notifRecommendations, setNotifRecommendations] = useState("push_email");
+  const [styleAndTone, setStyleAndTone] = useState("default");
+  const [customInstructions, setCustomInstructions] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [occupation, setOccupation] = useState("");
+  const [aboutYou, setAboutYou] = useState("");
+  const [allowMemories, setAllowMemories] = useState(true);
+  const [allowRecordings, setAllowRecordings] = useState(false);
+  const [webSearch, setWebSearch] = useState(true);
+  const [codeInterpreter, setCodeInterpreter] = useState(true);
+  const [canvas, setCanvas] = useState(true);
+  const [voiceMode, setVoiceMode] = useState(true);
+  const [advancedVoice, setAdvancedVoice] = useState(false);
+  const [connectorSearch, setConnectorSearch] = useState(false);
 
   const renderSectionContent = () => {
     switch (activeSection) {
@@ -283,11 +299,195 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         return (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Personalización</h2>
-            <p className="text-sm text-muted-foreground">
-              Personaliza cómo Sira responde y se comporta contigo.
-            </p>
-            <div className="text-sm text-muted-foreground">
-              Próximamente: instrucciones personalizadas, memoria y preferencias de estilo.
+            
+            <div className="space-y-2">
+              <div className="flex items-start justify-between">
+                <div>
+                  <span className="text-sm font-medium">Estilo y tonos de base</span>
+                  <p className="text-sm text-muted-foreground">
+                    Configura el estilo y el tono que Sira utiliza al responder.
+                  </p>
+                </div>
+                <Select value={styleAndTone} onValueChange={setStyleAndTone}>
+                  <SelectTrigger className="w-40" data-testid="select-style-tone">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">Predeterminada</SelectItem>
+                    <SelectItem value="formal">Formal</SelectItem>
+                    <SelectItem value="casual">Casual</SelectItem>
+                    <SelectItem value="concise">Conciso</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-sm font-medium">Instrucciones personalizadas</span>
+              <Textarea 
+                placeholder="Preferencias adicionales de comportamiento, estilo y tono"
+                value={customInstructions}
+                onChange={(e) => setCustomInstructions(e.target.value)}
+                className="min-h-[80px]"
+                data-testid="textarea-custom-instructions"
+              />
+            </div>
+
+            <Separator />
+
+            <h3 className="text-lg font-medium">Acerca de ti</h3>
+
+            <div className="space-y-2">
+              <span className="text-sm font-medium">Apodo</span>
+              <Input 
+                placeholder="¿Cómo debería llamarte Sira?"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                data-testid="input-nickname"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-sm font-medium">Ocupación</span>
+              <Input 
+                placeholder="Estudiante de ingeniería, diseñador, etc."
+                value={occupation}
+                onChange={(e) => setOccupation(e.target.value)}
+                data-testid="input-occupation"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-sm font-medium">Más acerca de ti</span>
+              <Textarea 
+                placeholder="Intereses, valores o preferencias para tener en cuenta"
+                value={aboutYou}
+                onChange={(e) => setAboutYou(e.target.value)}
+                className="min-h-[80px]"
+                data-testid="textarea-about-you"
+              />
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium block">Administrar</span>
+                  <button className="text-sm text-primary hover:underline" data-testid="link-manage-memories">
+                    Consultar memorias guardadas
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Permite que Sira guarde y use memorias al responder.</span>
+                </div>
+                <Switch 
+                  checked={allowMemories} 
+                  onCheckedChange={setAllowMemories}
+                  data-testid="switch-memories"
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Consultar el historial de grabaciones</span>
+                  <span className="text-xs text-muted-foreground">
+                    Permite que Sira consulte todas las transcripciones y notas de grabaciones anteriores al responder.
+                  </span>
+                </div>
+                <Switch 
+                  checked={allowRecordings} 
+                  onCheckedChange={setAllowRecordings}
+                  data-testid="switch-recordings"
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Búsqueda en la web</span>
+                  <span className="text-xs text-muted-foreground">
+                    Dejar que Sira busque automáticamente las respuestas en la web.
+                  </span>
+                </div>
+                <Switch 
+                  checked={webSearch} 
+                  onCheckedChange={setWebSearch}
+                  data-testid="switch-web-search"
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Código</span>
+                  <span className="text-xs text-muted-foreground">
+                    Dejar que Sira ejecute el código con el Intérprete de código.
+                  </span>
+                </div>
+                <Switch 
+                  checked={codeInterpreter} 
+                  onCheckedChange={setCodeInterpreter}
+                  data-testid="switch-code"
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Lienzo</span>
+                  <span className="text-xs text-muted-foreground">
+                    Colaborar con Sira en texto y código.
+                  </span>
+                </div>
+                <Switch 
+                  checked={canvas} 
+                  onCheckedChange={setCanvas}
+                  data-testid="switch-canvas"
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Sira Voice</span>
+                  <span className="text-xs text-muted-foreground">
+                    Habilitar el modo de voz en Sira
+                  </span>
+                </div>
+                <Switch 
+                  checked={voiceMode} 
+                  onCheckedChange={setVoiceMode}
+                  data-testid="switch-voice"
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Modo de voz avanzado</span>
+                  <span className="text-xs text-muted-foreground">
+                    Ten conversaciones más naturales en el modo de voz.
+                  </span>
+                </div>
+                <Switch 
+                  checked={advancedVoice} 
+                  onCheckedChange={setAdvancedVoice}
+                  data-testid="switch-advanced-voice"
+                />
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Búsqueda del conector</span>
+                  <span className="text-xs text-muted-foreground">
+                    Dejar que Sira busque automáticamente las respuestas en las fuentes conectadas.
+                  </span>
+                </div>
+                <Switch 
+                  checked={connectorSearch} 
+                  onCheckedChange={setConnectorSearch}
+                  data-testid="switch-connector-search"
+                />
+              </div>
             </div>
           </div>
         );
