@@ -7,7 +7,7 @@ import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
 import { agentOrchestrator, StepUpdate, ProgressUpdate, guardrails } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
-import { handleChatRequest } from "./services/chatService";
+import { handleChatRequest, AVAILABLE_MODELS } from "./services/chatService";
 import { llmGateway } from "./lib/llmGateway";
 import { ALLOWED_MIME_TYPES } from "./lib/constants";
 import { 
@@ -133,9 +133,13 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/models", (req, res) => {
+    res.json(AVAILABLE_MODELS);
+  });
+
   app.post("/api/chat", async (req, res) => {
     try {
-      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode } = req.body;
+      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode, provider = "xai", model } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -153,6 +157,8 @@ export async function registerRoutes(
         gptConfig,
         documentMode,
         figmaMode,
+        provider,
+        model,
         onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update as any)
       });
       

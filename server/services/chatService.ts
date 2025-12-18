@@ -1,10 +1,30 @@
 import { openai, MODELS } from "../lib/openai";
 import { llmGateway } from "../lib/llmGateway";
+import { geminiChat, geminiStreamChat, GEMINI_MODELS, GeminiChatMessage } from "../lib/gemini";
 import { LIMITS } from "../lib/constants";
 import { storage } from "../storage";
 import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
 import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective } from "../agent";
+
+export type LLMProvider = "xai" | "gemini";
+
+export const AVAILABLE_MODELS = {
+  xai: {
+    name: "xAI Grok",
+    models: [
+      { id: "grok-3-fast", name: "Grok 3 Fast", description: "Fastest responses" },
+      { id: "grok-2-vision-1212", name: "Grok 2 Vision", description: "Image understanding" },
+    ]
+  },
+  gemini: {
+    name: "Google Gemini",
+    models: [
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Fast and efficient" },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "Most capable" },
+    ]
+  }
+} as const;
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -68,9 +88,11 @@ export async function handleChatRequest(
     gptConfig?: GptConfig;
     documentMode?: DocumentMode;
     figmaMode?: boolean;
+    provider?: LLMProvider;
+    model?: string;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, images, onAgentProgress, gptConfig, documentMode, figmaMode } = options;
+  const { useRag = true, conversationId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = "xai", model } = options;
   const hasImages = images && images.length > 0;
   
   let validatedGptConfig = gptConfig;
@@ -434,7 +456,50 @@ Genera el diagrama basándote en la solicitud del usuario.`;
 
   let response;
   
-  if (hasImages) {
+  if (provider === "gemini") {
+    if (hasImages) {
+      return {
+        content: "Gemini actualmente no soporta análisis de imágenes en esta versión. Por favor, selecciona xAI Grok 2 Vision para analizar imágenes.",
+        role: "assistant"
+      };
+    }
+    
+
+    const geminiMessages: GeminiChatMessage[] = [];
+    
+    if (systemMessage.content) {
+      geminiMessages.push({
+        role: "user",
+        parts: [{ text: `[System Instructions]\n${systemMessage.content}\n\n[End System Instructions]` }]
+      });
+      geminiMessages.push({
+        role: "model",
+        parts: [{ text: "Entendido. Seguiré estas instrucciones." }]
+      });
+    }
+    
+    for (const msg of messages) {
+      geminiMessages.push({
+        role: msg.role === "assistant" ? "model" : "user",
+        parts: [{ text: msg.content }]
+      });
+    }
+    
+    const geminiModel = (model as typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]) || GEMINI_MODELS.FLASH;
+    
+    const geminiResponse = await geminiChat(geminiMessages, {
+      model: geminiModel,
+      temperature,
+      topP,
+    });
+    
+    console.log(`[ChatService] Gemini response: model=${geminiResponse.model}`);
+    
+    return { 
+      content: geminiResponse.content,
+      role: "assistant"
+    };
+  } else if (hasImages) {
     const imageContents = images!.map((img: string) => ({
       type: "image_url" as const,
       image_url: { url: img }
@@ -461,11 +526,18 @@ Genera el diagrama basándote en la solicitud del usuario.`;
       temperature,
       top_p: topP,
     });
+    
+    const content = response.choices[0]?.message?.content || "No response generated";
+    
+    return { 
+      content,
+      role: "assistant"
+    };
   } else {
     const gatewayResponse = await llmGateway.chat(
       [systemMessage, ...messages],
       {
-        model: MODELS.TEXT,
+        model: model || MODELS.TEXT,
         temperature,
         topP,
         userId: conversationId,
@@ -480,11 +552,4 @@ Genera el diagrama basándote en la solicitud del usuario.`;
       role: "assistant"
     };
   }
-
-  const content = response.choices[0]?.message?.content || "No response generated";
-  
-  return { 
-    content,
-    role: "assistant"
-  };
 }

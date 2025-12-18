@@ -596,6 +596,9 @@ export function ChatInterface({
   const [isFigmaConnecting, setIsFigmaConnecting] = useState(false);
   const [isFigmaConnected, setIsFigmaConnected] = useState(false);
   const [showFigmaTokenInput, setShowFigmaTokenInput] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<"xai" | "gemini">("xai");
+  const [selectedModel, setSelectedModel] = useState<string>("grok-3-fast");
+  const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
@@ -976,7 +979,7 @@ export function ChatInterface({
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chatHistory }),
+        body: JSON.stringify({ messages: chatHistory, provider: selectedProvider, model: selectedModel }),
         signal: abortControllerRef.current.signal
       });
 
@@ -1269,7 +1272,9 @@ export function ChatInterface({
             messages: [{
               role: "user",
               content: `Reescribe el siguiente texto según esta instrucción: "${rewritePrompt}"\n\nTexto original:\n${selectedDocText}\n\nDevuelve SOLO el texto reescrito, sin explicaciones ni comentarios adicionales.`
-            }]
+            }],
+            provider: selectedProvider,
+            model: selectedModel
           }),
           signal: abortControllerRef.current.signal
         });
@@ -1374,6 +1379,8 @@ export function ChatInterface({
           images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
           documentMode: isDocumentMode ? { type: documentType } : undefined,
           figmaMode: isFigmaMode,
+          provider: selectedProvider,
+          model: selectedModel,
           gptConfig: activeGpt ? {
             id: activeGpt.id,
             systemPrompt: activeGpt.systemPrompt,
@@ -1570,11 +1577,65 @@ export function ChatInterface({
     <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
       <header className="flex h-14 items-center justify-between px-4 border-b border-white/20 glass-card-light rounded-none z-10 sticky top-0 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 px-2 py-1 rounded-md transition-colors">
-            <span className="font-semibold text-sm">xAI: Grok 4.1 Fast</span>
+        <div className="flex items-center gap-2 relative">
+          <div 
+            className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 px-2 py-1 rounded-md transition-colors"
+            onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
+            data-testid="button-model-selector"
+          >
+            <span className="font-semibold text-sm">
+              {selectedProvider === "xai" ? "xAI" : "Gemini"}: {
+                selectedProvider === "xai" 
+                  ? (selectedModel === "grok-3-fast" ? "Grok 3 Fast" : "Grok 2 Vision")
+                  : (selectedModel === "gemini-2.5-flash" ? "Gemini 2.5 Flash" : "Gemini 2.5 Pro")
+              }
+            </span>
             <ChevronDown className="h-3 w-3 text-muted-foreground" />
           </div>
+          
+          {isModelSelectorOpen && (
+            <div className="absolute top-full left-0 mt-1 w-64 bg-popover border border-border rounded-lg shadow-lg z-50">
+              <div className="p-2">
+                <div className="text-xs font-medium text-muted-foreground mb-2 px-2">xAI</div>
+                <button
+                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "xai" && selectedModel === "grok-3-fast" ? "bg-muted" : ""}`}
+                  onClick={() => { setSelectedProvider("xai"); setSelectedModel("grok-3-fast"); setIsModelSelectorOpen(false); }}
+                  data-testid="model-option-grok-3-fast"
+                >
+                  <div className="font-medium">Grok 3 Fast</div>
+                  <div className="text-xs text-muted-foreground">Respuestas más rápidas</div>
+                </button>
+                <button
+                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "xai" && selectedModel === "grok-2-vision-1212" ? "bg-muted" : ""}`}
+                  onClick={() => { setSelectedProvider("xai"); setSelectedModel("grok-2-vision-1212"); setIsModelSelectorOpen(false); }}
+                  data-testid="model-option-grok-2-vision"
+                >
+                  <div className="font-medium">Grok 2 Vision</div>
+                  <div className="text-xs text-muted-foreground">Análisis de imágenes</div>
+                </button>
+                
+                <div className="border-t border-border my-2"></div>
+                
+                <div className="text-xs font-medium text-muted-foreground mb-2 px-2">Google Gemini</div>
+                <button
+                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "gemini" && selectedModel === "gemini-2.5-flash" ? "bg-muted" : ""}`}
+                  onClick={() => { setSelectedProvider("gemini"); setSelectedModel("gemini-2.5-flash"); setIsModelSelectorOpen(false); }}
+                  data-testid="model-option-gemini-flash"
+                >
+                  <div className="font-medium">Gemini 2.5 Flash</div>
+                  <div className="text-xs text-muted-foreground">Rápido y eficiente</div>
+                </button>
+                <button
+                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "gemini" && selectedModel === "gemini-2.5-pro" ? "bg-muted" : ""}`}
+                  onClick={() => { setSelectedProvider("gemini"); setSelectedModel("gemini-2.5-pro"); setIsModelSelectorOpen(false); }}
+                  data-testid="model-option-gemini-pro"
+                >
+                  <div className="font-medium">Gemini 2.5 Pro</div>
+                  <div className="text-xs text-muted-foreground">Más capaz y avanzado</div>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <ShareChatDialog chatId={chatId || "new"} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
