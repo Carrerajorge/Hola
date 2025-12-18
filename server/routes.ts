@@ -22,6 +22,7 @@ import {
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "./etl";
 import { figmaService } from "./services/figmaService";
+import { sendShareNotificationEmail } from "./services/emailService";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -716,6 +717,141 @@ export async function registerRoutes(
       }
       
       res.json(message);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Chat Share API routes
+  app.get("/api/chats/:id/shares", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      const chat = await storage.getChat(req.params.id);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      if (!chat.userId || chat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      const shares = await storage.getChatShares(req.params.id);
+      res.json(shares);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/chats/:id/shares", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      const userEmail = user?.claims?.email;
+      
+      const chat = await storage.getChat(req.params.id);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      if (!chat.userId || chat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      const { participants } = req.body;
+      if (!participants || !Array.isArray(participants)) {
+        return res.status(400).json({ error: "participants array is required" });
+      }
+      
+      const createdShares = [];
+      const emailsToNotify = [];
+      
+      for (const p of participants) {
+        if (!p.email || !p.role) continue;
+        
+        // Check if already exists
+        const existing = await storage.getChatShareByEmailAndChat(p.email, req.params.id);
+        if (existing) {
+          // Update role if changed
+          if (existing.role !== p.role) {
+            await storage.updateChatShare(existing.id, { role: p.role });
+          }
+          continue;
+        }
+        
+        const share = await storage.createChatShare({
+          chatId: req.params.id,
+          email: p.email,
+          role: p.role,
+          invitedBy: userId,
+          notificationSent: "false"
+        });
+        createdShares.push(share);
+        emailsToNotify.push({ email: p.email, role: p.role, shareId: share.id });
+      }
+      
+      // Send email notifications
+      for (const notify of emailsToNotify) {
+        try {
+          await sendShareNotificationEmail({
+            toEmail: notify.email,
+            chatTitle: chat.title,
+            chatId: req.params.id,
+            role: notify.role,
+            inviterEmail: userEmail || "Un usuario"
+          });
+          await storage.updateChatShare(notify.shareId, { notificationSent: "true" });
+        } catch (emailError) {
+          console.error("Failed to send share notification:", emailError);
+        }
+      }
+      
+      res.json({ success: true, created: createdShares.length });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/chats/:id/shares/:shareId", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      const chat = await storage.getChat(req.params.id);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      if (!chat.userId || chat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      await storage.deleteChatShare(req.params.shareId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get chats shared with the current user
+  app.get("/api/shared-chats", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userEmail = user?.claims?.email;
+      
+      if (!userEmail) {
+        return res.json([]);
+      }
+      
+      const shares = await storage.getChatSharesByEmail(userEmail);
+      const sharedChats = [];
+      
+      for (const share of shares) {
+        const chat = await storage.getChat(share.chatId);
+        if (chat) {
+          sharedChats.push({ ...chat, shareRole: share.role, shareId: share.id });
+        }
+      }
+      
+      res.json(sharedChats);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
