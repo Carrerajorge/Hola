@@ -75,9 +75,9 @@ export default function Home() {
   const handleSendNewChatMessage = useCallback((message: Message) => {
     const { pendingId, stableKey } = createChat();
     pendingChatIdRef.current = pendingId;
+    // Keep the new chat stable key to prevent component remount
+    setNewChatStableKey(prev => prev || stableKey);
     setIsNewChatMode(false);
-    // DON'T change the stableKey immediately to prevent component remount
-    // setNewChatStableKey(stableKey); 
     addMessage(pendingId, message);
   }, [createChat, addMessage]);
   
@@ -101,6 +101,7 @@ export default function Home() {
   };
 
   const chatInterfaceKey = useMemo(() => {
+    // Prioritize newChatStableKey to prevent component remount during new chat creation
     if (newChatStableKey) return newChatStableKey;
     if (activeChat) return activeChat.stableKey;
     return "default-chat";
