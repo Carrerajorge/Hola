@@ -2016,7 +2016,14 @@ export function ChatInterface({
 
                   {/* Generated Image Block */}
                   {(() => {
-                    const imageData = msg.generatedImage || getGeneratedImage(msg.id);
+                    // Check message first, then fallback to store
+                    let imageData = msg.generatedImage || getGeneratedImage(msg.id);
+                    
+                    // Sync to store if message has image but store doesn't
+                    if (msg.generatedImage && !getGeneratedImage(msg.id)) {
+                      storeGeneratedImage(msg.id, msg.generatedImage);
+                    }
+                    
                     return imageData ? (
                       <div className="mt-3 px-4">
                         <img 
