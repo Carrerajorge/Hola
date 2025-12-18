@@ -722,12 +722,120 @@ export default function WorkspaceSettingsPage() {
         );
 
       case "apps":
+        const appItems = [
+          { id: 1, name: "Adobe Acrobat", description: "Trusted PDF editing tools", icon: "🔴", bgColor: "bg-red-500" },
+          { id: 2, name: "Adobe Express", description: "Design flyers and invites", icon: "A", bgColor: "bg-gradient-to-br from-purple-500 to-pink-500" },
+          { id: 3, name: "Adobe Photoshop", description: "Edit, stylize, refine images", icon: "Ps", bgColor: "bg-blue-600" },
+          { id: 4, name: "Agentforce Sales", description: "Sales insights to close deals", icon: "⚡", bgColor: "bg-blue-500" },
+          { id: 5, name: "Aha!", description: "Connect to sync Aha! product roadmaps and features for use in ChatGPT", icon: "!", bgColor: "bg-blue-600" },
+          { id: 6, name: "Airtable", description: "Add structured data to ChatGPT", icon: "📊", bgColor: "bg-blue-400" },
+          { id: 7, name: "Alpaca", description: "Market data: stocks & crypto", icon: "🦙", bgColor: "bg-yellow-400" },
+        ];
         return (
           <div className="space-y-6">
-            <h1 className="text-2xl font-semibold">Aplicaciones</h1>
-            <p className="text-sm text-muted-foreground">
-              Administra las aplicaciones conectadas a tu espacio de trabajo.
-            </p>
+            <div>
+              <h1 className="text-2xl font-semibold">Aplicaciones</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Administra a qué aplicaciones pueden conectarse los usuarios de este espacio de trabajo.{" "}
+                <button className="text-primary hover:underline">Obtener más información</button>
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input 
+                  placeholder="Buscar" 
+                  className="pl-9"
+                  data-testid="input-apps-search"
+                />
+              </div>
+              <Button variant="outline" className="gap-2" data-testid="button-apps-filters">
+                <Filter className="h-4 w-4" />
+                Filtros
+              </Button>
+              <Button className="gap-2" data-testid="button-apps-create">
+                <Plus className="h-4 w-4" />
+                Crear
+              </Button>
+            </div>
+
+            <Tabs defaultValue="enabled" className="w-full">
+              <div className="flex items-center justify-between">
+                <TabsList className="bg-transparent border-b rounded-none h-auto p-0">
+                  <TabsTrigger 
+                    value="enabled" 
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                    data-testid="tab-apps-enabled"
+                  >
+                    Enabled (70)
+                  </TabsTrigger>
+                  <TabsTrigger 
+                    value="directory" 
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                    data-testid="tab-apps-directory"
+                  >
+                    Directorio
+                  </TabsTrigger>
+                  <TabsTrigger 
+                    value="drafts" 
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                    data-testid="tab-apps-drafts"
+                  >
+                    Drafts (0)
+                  </TabsTrigger>
+                </TabsList>
+                <button className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1" data-testid="button-explore-directory">
+                  Explorar directorio
+                  <span className="text-xs">↗</span>
+                </button>
+              </div>
+
+              <TabsContent value="enabled" className="mt-4">
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="flex items-center px-4 py-3 bg-muted/50 border-b">
+                    <input type="checkbox" className="h-4 w-4 rounded border-gray-300 mr-4" data-testid="checkbox-apps-all" />
+                    <button className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
+                      Nombre
+                      <ChevronDown className="h-3 w-3 rotate-180" />
+                    </button>
+                  </div>
+                  <div className="divide-y">
+                    {appItems.map((app) => (
+                      <div key={app.id} className="flex items-center px-4 py-3 hover:bg-muted/30">
+                        <input type="checkbox" className="h-4 w-4 rounded border-gray-300 mr-4" data-testid={`checkbox-app-${app.id}`} />
+                        <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold mr-4", app.bgColor)}>
+                          {app.icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium">{app.name}</p>
+                          <p className="text-sm text-muted-foreground truncate">{app.description}</p>
+                        </div>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="directory" className="mt-4">
+                <div className="border rounded-lg p-6">
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    Explora el directorio de aplicaciones disponibles
+                  </p>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="drafts" className="mt-4">
+                <div className="border rounded-lg p-6">
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    No hay borradores de aplicaciones
+                  </p>
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         );
 
