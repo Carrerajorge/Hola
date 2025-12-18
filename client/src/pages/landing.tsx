@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle } from "lucide-react";
+import { SiraLogo } from "@/components/sira-logo";
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
@@ -19,9 +20,7 @@ export default function LandingPage() {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="flex items-center justify-between px-4 md:px-8 h-16 border-b">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-foreground flex items-center justify-center">
-            <span className="text-background text-sm font-bold">S</span>
-          </div>
+          <SiraLogo size={32} />
           <span className="font-semibold">Sira GPT</span>
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
         </div>

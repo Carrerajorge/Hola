@@ -24,6 +24,7 @@ import {
   Check,
   X
 } from "lucide-react";
+import { SiraLogo } from "@/components/sira-logo";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -134,9 +135,7 @@ export function Sidebar({
     <div className={cn("flex h-screen w-[260px] flex-col liquid-sidebar-light text-sidebar-foreground", className)}>
       <div className="flex h-14 items-center justify-between px-4 py-2">
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-violet-500/20 to-purple-600/20 backdrop-blur-sm">
-             <Bot className="h-5 w-5 text-violet-600" />
-          </div>
+          <SiraLogo size={32} />
           <div className="flex flex-col">
             <span className="text-sm font-semibold leading-none liquid-text-gradient">Sira GPT</span>
             <span className="text-[10px] text-muted-foreground">AI Platform</span>
