@@ -44,9 +44,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [voice, setVoice] = useState("cove");
   const [independentVoiceMode, setIndependentVoiceMode] = useState(false);
   const [showAdditionalModels, setShowAdditionalModels] = useState(true);
-  const [pushNotifications, setPushNotifications] = useState(true);
-  const [emailNotifications, setEmailNotifications] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [notifResponses, setNotifResponses] = useState("push");
+  const [notifTasks, setNotifTasks] = useState("push_email");
+  const [notifProjects, setNotifProjects] = useState("email");
+  const [notifRecommendations, setNotifRecommendations] = useState("push_email");
 
   const renderSectionContent = () => {
     switch (activeSection) {
@@ -191,47 +192,88 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Notificaciones</h2>
             
-            <div className="space-y-4">
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <span className="text-sm block">Notificaciones push</span>
-                  <span className="text-xs text-muted-foreground">
-                    Recibir alertas en el navegador
-                  </span>
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <div className="flex items-start justify-between">
+                  <span className="text-sm font-medium">Respuestas</span>
+                  <Select value={notifResponses} onValueChange={setNotifResponses}>
+                    <SelectTrigger className="w-48" data-testid="select-notif-responses">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="push">Push</SelectItem>
+                      <SelectItem value="email">Correo electrónico</SelectItem>
+                      <SelectItem value="push_email">Push, correo electrónico</SelectItem>
+                      <SelectItem value="none">Ninguna</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Switch 
-                  checked={pushNotifications} 
-                  onCheckedChange={setPushNotifications}
-                  data-testid="switch-push-notifications"
-                />
+                <p className="text-sm text-muted-foreground">
+                  Recibe notificaciones cuando Sira responda a solicitudes que tomen tiempo, como investigaciones o generación de imágenes.
+                </p>
               </div>
 
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <span className="text-sm block">Notificaciones por email</span>
-                  <span className="text-xs text-muted-foreground">
-                    Recibir resúmenes y alertas importantes
-                  </span>
+              <div className="space-y-2">
+                <div className="flex items-start justify-between">
+                  <span className="text-sm font-medium">Tareas</span>
+                  <Select value={notifTasks} onValueChange={setNotifTasks}>
+                    <SelectTrigger className="w-48" data-testid="select-notif-tasks">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="push">Push</SelectItem>
+                      <SelectItem value="email">Correo electrónico</SelectItem>
+                      <SelectItem value="push_email">Push, correo electrónico</SelectItem>
+                      <SelectItem value="none">Ninguna</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Switch 
-                  checked={emailNotifications} 
-                  onCheckedChange={setEmailNotifications}
-                  data-testid="switch-email-notifications"
-                />
+                <p className="text-sm text-muted-foreground">
+                  Recibe una notificación cuando haya actualizaciones de las tareas que creaste.
+                </p>
+                <button className="text-sm text-primary hover:underline" data-testid="link-manage-tasks">
+                  Administrar tareas
+                </button>
               </div>
 
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <span className="text-sm block">Sonidos</span>
-                  <span className="text-xs text-muted-foreground">
-                    Reproducir sonidos al enviar y recibir mensajes
-                  </span>
+              <div className="space-y-2">
+                <div className="flex items-start justify-between">
+                  <span className="text-sm font-medium">Projects</span>
+                  <Select value={notifProjects} onValueChange={setNotifProjects}>
+                    <SelectTrigger className="w-48" data-testid="select-notif-projects">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="push">Push</SelectItem>
+                      <SelectItem value="email">Correo electrónico</SelectItem>
+                      <SelectItem value="push_email">Push, correo electrónico</SelectItem>
+                      <SelectItem value="none">Ninguna</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Switch 
-                  checked={soundEnabled} 
-                  onCheckedChange={setSoundEnabled}
-                  data-testid="switch-sound"
-                />
+                <p className="text-sm text-muted-foreground">
+                  Recibe una notificación cuando te llegue una invitación por correo electrónico a un proyecto compartido.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-start justify-between">
+                  <span className="text-sm font-medium">Recomendaciones</span>
+                  <Select value={notifRecommendations} onValueChange={setNotifRecommendations}>
+                    <SelectTrigger className="w-48" data-testid="select-notif-recommendations">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="push">Push</SelectItem>
+                      <SelectItem value="email">Correo electrónico</SelectItem>
+                      <SelectItem value="push_email">Push, correo electrónico</SelectItem>
+                      <SelectItem value="none">Ninguna</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Mantente al tanto de las nuevas herramientas, consejos y características de Sira.
+                </p>
               </div>
             </div>
           </div>
