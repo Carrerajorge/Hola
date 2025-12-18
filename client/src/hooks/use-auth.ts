@@ -10,7 +10,6 @@ async function fetchUser(): Promise<User | null> {
     // Check if admin is logged in via localStorage (admin login fallback)
     const adminLoggedIn = localStorage.getItem("sira_admin_logged_in") === "true";
     if (adminLoggedIn) {
-      // Return admin user data for localStorage-based admin auth only
       return {
         id: "admin-user-id",
         email: localStorage.getItem("sira_admin_email") || "admin@gmail.com",
@@ -20,8 +19,20 @@ async function fetchUser(): Promise<User | null> {
         role: "admin",
       } as User;
     }
+    // Check if regular user is logged in via localStorage
+    const userLoggedIn = localStorage.getItem("sira_logged_in") === "true";
+    const userDataStr = localStorage.getItem("sira_user_data");
+    if (userLoggedIn && userDataStr) {
+      try {
+        return JSON.parse(userDataStr) as User;
+      } catch {
+        localStorage.removeItem("sira_logged_in");
+        localStorage.removeItem("sira_user_data");
+      }
+    }
     // Clear any stale login state
     localStorage.removeItem("sira_logged_in");
+    localStorage.removeItem("sira_user_data");
     return null;
   }
 

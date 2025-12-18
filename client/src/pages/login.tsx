@@ -33,6 +33,10 @@ export default function LoginPage() {
           } else {
             localStorage.setItem("sira_logged_in", "true");
             localStorage.setItem("sira_user_email", email);
+            // Save user data for fallback auth
+            const userData = { ...user };
+            delete userData.password; // Don't store password
+            localStorage.setItem("sira_user_data", JSON.stringify(userData));
           }
           // Invalidate auth query cache
           queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });

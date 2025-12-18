@@ -31,11 +31,11 @@ export function getSession() {
   return session({
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
-    resave: false,
-    saveUninitialized: false,
+    resave: true,
+    saveUninitialized: true,
     cookie: {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === "production" || process.env.REPL_SLUG !== undefined,
       sameSite: "lax",
       maxAge: sessionTtl,
     },
