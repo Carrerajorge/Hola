@@ -37,6 +37,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { SearchModal } from "@/components/search-modal";
 import { SettingsDialog } from "@/components/settings-dialog";
+import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 
 import { Chat } from "@/hooks/use-chats";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
@@ -92,6 +93,7 @@ export function Sidebar({
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   
   const handleStartEdit = (chat: Chat, e: React.MouseEvent) => {
@@ -382,12 +384,11 @@ export function Sidebar({
               </div>
               {user?.email !== "infosiragpt@gmail.com" && (
                 <Button
-                  variant="outline"
                   size="sm"
-                  className="rounded-full text-xs px-3 py-1 h-auto whitespace-nowrap"
+                  className="rounded-full text-xs px-4 py-1 h-auto whitespace-nowrap bg-purple-600 hover:bg-purple-700 text-white border-0"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setLocation("/billing");
+                    setIsUpgradeDialogOpen(true);
                   }}
                   data-testid="button-upgrade-plan"
                 >
@@ -445,6 +446,11 @@ export function Sidebar({
       <SettingsDialog
         open={isSettingsOpen}
         onOpenChange={setIsSettingsOpen}
+      />
+
+      <UpgradePlanDialog
+        open={isUpgradeDialogOpen}
+        onOpenChange={setIsUpgradeDialogOpen}
       />
     </div>
   );
