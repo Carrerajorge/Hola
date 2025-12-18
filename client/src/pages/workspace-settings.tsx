@@ -18,8 +18,14 @@ import {
   Copy,
   Upload,
   AlertTriangle,
-  Info
+  Info,
+  Search,
+  Plus,
+  MoreHorizontal,
+  ChevronDown
 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { SiraLogo } from "@/components/sira-logo";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
@@ -135,10 +141,90 @@ export default function WorkspaceSettingsPage() {
       case "members":
         return (
           <div className="space-y-6">
-            <h1 className="text-2xl font-semibold">Miembros</h1>
-            <p className="text-sm text-muted-foreground">
-              Administra los miembros de tu espacio de trabajo.
-            </p>
+            <div>
+              <h1 className="text-2xl font-semibold">Miembros</h1>
+              <p className="text-sm text-muted-foreground">Empresa · 1 miembro</p>
+            </div>
+
+            <Tabs defaultValue="users" className="w-full">
+              <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0 gap-6">
+                <TabsTrigger 
+                  value="users" 
+                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
+                  data-testid="tab-users"
+                >
+                  Usuarios
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="pending-invites" 
+                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
+                  data-testid="tab-pending-invites"
+                >
+                  Invitaciones pendientes
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="pending-requests" 
+                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
+                  data-testid="tab-pending-requests"
+                >
+                  Solicitudes pendientes
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="users" className="mt-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input 
+                      placeholder="Filtrar por nombre" 
+                      className="pl-9 w-64"
+                      data-testid="input-filter-members"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" className="gap-2" data-testid="button-invite-member">
+                      <Plus className="h-4 w-4" />
+                      Invitar a un miembro
+                    </Button>
+                    <Button variant="ghost" size="icon" data-testid="button-members-more">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="border rounded-lg">
+                  <div className="grid grid-cols-3 gap-4 px-4 py-3 border-b bg-muted/30 text-sm font-medium text-muted-foreground">
+                    <span>Nombre</span>
+                    <span>Tipo de cuenta</span>
+                    <span>Fecha agregada</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 px-4 py-3 items-center">
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-9 w-9">
+                        <AvatarFallback className="bg-blue-100 text-blue-700 text-sm">JC</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <span className="text-sm font-medium block">Jorge Carrera (Tú)</span>
+                        <span className="text-xs text-muted-foreground">carrerajorge874@gmail.com</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm">Propietario</span>
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <span className="text-sm">28 ago 2025</span>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="pending-invites" className="mt-6">
+                <p className="text-sm text-muted-foreground">No hay invitaciones pendientes.</p>
+              </TabsContent>
+
+              <TabsContent value="pending-requests" className="mt-6">
+                <p className="text-sm text-muted-foreground">No hay solicitudes pendientes.</p>
+              </TabsContent>
+            </Tabs>
           </div>
         );
 
