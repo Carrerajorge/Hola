@@ -7,6 +7,7 @@ export type UpsertUser = {
   firstName?: string | null;
   lastName?: string | null;
   profileImageUrl?: string | null;
+  role?: string | null;
 };
 import { eq } from "drizzle-orm";
 

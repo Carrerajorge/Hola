@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAuth } from "@/hooks/use-auth";
 
 interface MiniSidebarProps {
   className?: string;
@@ -11,6 +12,10 @@ interface MiniSidebarProps {
 }
 
 export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const displayName = isAdmin ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario");
+  const avatarInitial = isAdmin ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase();
   return (
     <TooltipProvider delayDuration={100}>
       <div className={cn(
@@ -114,12 +119,12 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
                 data-testid="mini-button-user"
               >
                 <Avatar className="h-8 w-8">
-                  <AvatarFallback className="bg-gradient-to-br from-violet-500/20 to-purple-600/20 text-violet-600 text-sm">A</AvatarFallback>
+                  <AvatarFallback className="bg-gradient-to-br from-violet-500/20 to-purple-600/20 text-violet-600 text-sm">{avatarInitial}</AvatarFallback>
                 </Avatar>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              <p>Admin</p>
+              <p>{displayName}</p>
             </TooltipContent>
           </Tooltip>
         </div>

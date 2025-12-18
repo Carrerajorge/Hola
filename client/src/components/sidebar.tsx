@@ -354,11 +354,17 @@ export function Sidebar({
           <PopoverTrigger asChild>
             <button className="flex w-full items-center gap-3 rounded-lg p-2 liquid-button cursor-pointer" data-testid="button-user-menu">
               <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-muted text-muted-foreground">A</AvatarFallback>
+                <AvatarFallback className="bg-muted text-muted-foreground">
+                  {user?.role === "admin" ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
+                </AvatarFallback>
               </Avatar>
               <div className="flex flex-1 flex-col overflow-hidden text-left">
-                <span className="truncate text-sm font-medium">Admin</span>
-                <span className="truncate text-xs text-muted-foreground">ENTERPRISE</span>
+                <span className="truncate text-sm font-medium">
+                  {user?.role === "admin" ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
+                </span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {user?.role === "admin" ? "ENTERPRISE" : (user?.email || "")}
+                </span>
               </div>
             </button>
           </PopoverTrigger>
@@ -380,10 +386,12 @@ export function Sidebar({
                 <Shield className="h-4 w-4" />
                 Privacidad
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/admin"); }} data-testid="button-admin-panel">
-                <Settings className="h-4 w-4" />
-                Admin Panel
-              </Button>
+              {user?.role === "admin" && (
+                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/admin"); }} data-testid="button-admin-panel">
+                  <Settings className="h-4 w-4" />
+                  Admin Panel
+                </Button>
+              )}
               <Separator className="my-1" />
               <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />

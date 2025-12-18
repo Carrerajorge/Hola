@@ -30,6 +30,7 @@ export function registerAuthRoutes(app: Express): void {
         firstName: "Admin",
         lastName: "User",
         profileImageUrl: null,
+        role: "admin",
       });
       
       // Set up session for admin
@@ -63,7 +64,7 @@ export function registerAuthRoutes(app: Express): void {
           console.error("Failed to create audit log:", auditError);
         }
         
-        res.json({ success: true, user: { id: adminId, email: ADMIN_EMAIL, firstName: "Admin", lastName: "User" } });
+        res.json({ success: true, user: { id: adminId, email: ADMIN_EMAIL, firstName: "Admin", lastName: "User", role: "admin" } });
       });
     } catch (error) {
       console.error("Admin login error:", error);
