@@ -2996,6 +2996,43 @@ export function ChatInterface({
                             <FigmaBlock diagram={msg.figmaDiagram} />
                           </div>
                         )}
+
+                        {/* Generated Image Block in normal chat mode */}
+                        {(() => {
+                          const msgImage = msg.generatedImage;
+                          const storeImage = getGeneratedImage(msg.id);
+                          const pendingMatch = pendingGeneratedImage?.messageId === msg.id ? pendingGeneratedImage.imageData : null;
+                          const refMatch = latestGeneratedImageRef.current?.messageId === msg.id ? latestGeneratedImageRef.current.imageData : null;
+                          
+                          let imageData = msgImage || storeImage || pendingMatch || refMatch;
+                          
+                          if (imageData && !storeImage) {
+                            storeGeneratedImage(msg.id, imageData);
+                          }
+                          
+                          const showSkeleton = isGeneratingImage && msg.role === "assistant" && msgIndex === messages.length - 1 && !imageData;
+                          
+                          if (showSkeleton) {
+                            return (
+                              <div className="mt-3">
+                                <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                </div>
+                              </div>
+                            );
+                          }
+                          
+                          return imageData ? (
+                            <div className="mt-3">
+                              <img 
+                                src={imageData} 
+                                alt="Imagen generada" 
+                                className="max-w-full h-auto rounded-lg shadow-md"
+                                style={{ maxHeight: "400px" }}
+                              />
+                            </div>
+                          ) : null;
+                        })()}
                       </div>
                     )}
                   </div>
