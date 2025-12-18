@@ -1394,7 +1394,7 @@ export async function registerRoutes(
     
     console.log("Starting Figma OAuth with redirect_uri:", redirectUri);
     
-    const authUrl = `https://www.figma.com/oauth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=file_content:read&state=${state}&response_type=code`;
+    const authUrl = `https://www.figma.com/oauth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=files:read&state=${state}&response_type=code`;
     
     res.redirect(authUrl);
   });
