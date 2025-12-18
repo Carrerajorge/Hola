@@ -370,7 +370,7 @@ export function Sidebar({
               </div>
             </button>
           </PopoverTrigger>
-          <PopoverContent className="w-56 p-2" align="start" side="top">
+          <PopoverContent className="w-auto min-w-56 p-2" align="start" side="top">
             <div className="flex flex-col">
               <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/profile"); }} data-testid="button-profile">
                 <User className="h-4 w-4" />
