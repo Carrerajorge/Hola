@@ -688,7 +688,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Access denied" });
       }
       
-      const { role, content, attachments, sources } = req.body;
+      const { role, content, attachments, sources, figmaDiagram } = req.body;
       if (!role || !content) {
         return res.status(400).json({ error: "role and content are required" });
       }
@@ -697,7 +697,8 @@ export async function registerRoutes(
         role,
         content,
         attachments: attachments || null,
-        sources: sources || null
+        sources: sources || null,
+        figmaDiagram: figmaDiagram || null
       });
       
       // Update chat title if first user message
