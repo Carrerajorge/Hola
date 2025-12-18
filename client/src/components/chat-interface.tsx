@@ -1580,22 +1580,22 @@ export function ChatInterface({
   return (
     <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
-      <header className="flex h-14 items-center justify-between px-4 border-b border-white/20 glass-card-light rounded-none z-10 sticky top-0 flex-shrink-0">
-        <div className="flex items-center gap-2 relative">
+      <header className="flex h-14 items-center justify-between px-2 sm:px-4 border-b border-white/20 glass-card-light rounded-none z-10 sticky top-0 flex-shrink-0 safe-area-top">
+        <div className="flex items-center gap-1 sm:gap-2 relative min-w-0">
           <div 
-            className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 px-2 py-1 rounded-md transition-colors"
+            className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors"
             onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
             data-testid="button-model-selector"
           >
-            <span className="font-semibold text-sm">
+            <span className="font-semibold text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none">
               {selectedProvider === "xai" ? "xAI" : "Gemini"}: {
                 selectedProvider === "xai" 
-                  ? (selectedModel === "grok-3-fast" ? "Grok 3 Fast" : "Grok 2 Vision")
-                  : (selectedModel === "gemini-3-flash-preview" ? "Gemini 3 Flash" 
-                     : selectedModel === "gemini-2.5-flash" ? "Gemini 2.5 Flash" : "Gemini 2.5 Pro")
+                  ? (selectedModel === "grok-3-fast" ? "Grok 3" : "Vision")
+                  : (selectedModel === "gemini-3-flash-preview" ? "3 Flash" 
+                     : selectedModel === "gemini-2.5-flash" ? "2.5 Flash" : "2.5 Pro")
               }
             </span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
           </div>
           
           {isModelSelectorOpen && (
@@ -1650,15 +1650,16 @@ export function ChatInterface({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 sm:gap-1">
           {user?.email !== "infosiragpt@gmail.com" && (
             <Button
               size="sm"
-              className="rounded-full text-xs px-4 bg-purple-600 hover:bg-purple-700 text-white border-0"
+              className="rounded-full text-[10px] sm:text-xs px-2 sm:px-4 bg-purple-600 hover:bg-purple-700 text-white border-0"
               onClick={() => setIsUpgradeDialogOpen(true)}
               data-testid="button-upgrade-header"
             >
-              Mejorar el plan a Go
+              <span className="hidden sm:inline">Mejorar el plan a Go</span>
+              <span className="sm:hidden">Mejorar</span>
             </Button>
           )}
           <ShareChatDialog chatId={chatId || "new"} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
