@@ -219,18 +219,16 @@ export default function WorkspaceSettingsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="border-b bg-amber-50 dark:bg-amber-950/30">
-        <div className="flex items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-3">
-            <AlertTriangle className="h-5 w-5 text-amber-600" />
-            <div>
-              <span className="font-medium text-sm">Este espacio de trabajo se desactivará.</span>
-              <span className="text-sm text-muted-foreground ml-2">
-                Tendrás acceso al espacio de trabajo hasta que finalice el ciclo de facturación el 28 de diciembre de 2025.
-              </span>
-            </div>
+      <div className="flex justify-end px-6 py-3">
+        <div className="inline-flex items-center gap-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2">
+          <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
+          <div className="text-sm">
+            <span className="font-medium">Este espacio de trabajo se desactivará.</span>
+            <span className="text-muted-foreground ml-1">
+              Tendrás acceso al espacio de trabajo hasta que finalice el ciclo de facturación el 28 de diciembre de 2025.
+            </span>
           </div>
-          <Button variant="outline" size="sm" data-testid="button-reactivate">
+          <Button variant="outline" size="sm" className="ml-2 flex-shrink-0" data-testid="button-reactivate">
             Reactivar
           </Button>
         </div>
