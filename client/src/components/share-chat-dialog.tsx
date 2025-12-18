@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Copy, Check, Link, X, UserPlus } from "lucide-react";
+import { Copy, Check, Link, X, UserPlus, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import shareIconSrc from "@/assets/share-icon.png";
+import { apiRequest } from "@/lib/queryClient";
 
 interface Participant {
   email: string;
@@ -25,9 +26,62 @@ export function ShareChatDialog({ chatId, chatTitle, children }: ShareChatDialog
   const [selectedRole, setSelectedRole] = useState<"editor" | "viewer">("viewer");
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [copied, setCopied] = useState(false);
+  const [sending, setSending] = useState(false);
   const { toast } = useToast();
 
   const shareLink = `${window.location.origin}/chat/${chatId}`;
+
+  useEffect(() => {
+    if (open && chatId) {
+      loadExistingShares();
+    }
+  }, [open, chatId]);
+
+  const loadExistingShares = async () => {
+    try {
+      const response = await fetch(`/api/chats/${chatId}/shares`, { credentials: 'include' });
+      if (response.ok) {
+        const shares = await response.json();
+        setParticipants(shares.map((s: any) => ({ email: s.email, role: s.role })));
+      }
+    } catch (error) {
+      console.error("Failed to load shares:", error);
+    }
+  };
+
+  const handleSendInvitations = async () => {
+    if (participants.length === 0) return;
+    
+    setSending(true);
+    try {
+      const response = await apiRequest("POST", `/api/chats/${chatId}/shares`, {
+        participants
+      });
+      
+      if (response.ok) {
+        toast({
+          title: "Invitaciones enviadas",
+          description: `Se enviaron notificaciones a ${participants.length} participante(s)`,
+        });
+        setOpen(false);
+      } else {
+        const error = await response.json();
+        toast({
+          title: "Error",
+          description: error.error || "No se pudieron enviar las invitaciones",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudieron enviar las invitaciones",
+        variant: "destructive",
+      });
+    } finally {
+      setSending(false);
+    }
+  };
 
   const handleAddParticipant = () => {
     if (!email || !email.includes("@")) {
@@ -205,17 +259,18 @@ export function ShareChatDialog({ chatId, chatTitle, children }: ShareChatDialog
 
           <Button 
             className="w-full" 
-            onClick={() => {
-              toast({
-                title: "Invitaciones enviadas",
-                description: `Se enviaron invitaciones a ${participants.length} participante(s)`,
-              });
-              setOpen(false);
-            }}
-            disabled={participants.length === 0}
+            onClick={handleSendInvitations}
+            disabled={participants.length === 0 || sending}
             data-testid="button-send-invitations"
           >
-            Enviar invitaciones
+            {sending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Enviando...
+              </>
+            ) : (
+              "Enviar invitaciones"
+            )}
           </Button>
         </div>
       </DialogContent>

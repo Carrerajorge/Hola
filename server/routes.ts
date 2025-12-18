@@ -617,19 +617,32 @@ export async function registerRoutes(
     try {
       const user = (req as any).user;
       const userId = user?.claims?.sub;
+      const userEmail = user?.claims?.email;
       
       const chat = await storage.getChat(req.params.id);
       if (!chat) {
         return res.status(404).json({ error: "Chat not found" });
       }
       
-      // Verify ownership - block access to chats without userId (legacy/orphaned) or wrong user
-      if (!chat.userId || chat.userId !== userId) {
+      // Check ownership first
+      const isOwner = chat.userId && chat.userId === userId;
+      
+      // If not owner, check for shared access by userId (secure)
+      let shareRole = null;
+      if (!isOwner && userId) {
+        const share = await storage.getChatShareByUserAndChat(userId, req.params.id);
+        if (share) {
+          shareRole = share.role;
+        }
+      }
+      
+      // Deny access if not owner and no share
+      if (!isOwner && !shareRole) {
         return res.status(403).json({ error: "Access denied" });
       }
       
       const messages = await storage.getChatMessages(req.params.id);
-      res.json({ ...chat, messages });
+      res.json({ ...chat, messages, shareRole, isOwner });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -768,25 +781,36 @@ export async function registerRoutes(
       for (const p of participants) {
         if (!p.email || !p.role) continue;
         
+        const normalizedEmail = p.email.toLowerCase().trim();
+        
+        // Look up user by email to get their userId (secure authorization)
+        const recipientUser = await storage.getUserByEmail(normalizedEmail);
+        
         // Check if already exists
-        const existing = await storage.getChatShareByEmailAndChat(p.email, req.params.id);
+        const existing = await storage.getChatShareByEmailAndChat(normalizedEmail, req.params.id);
         if (existing) {
-          // Update role if changed
-          if (existing.role !== p.role) {
-            await storage.updateChatShare(existing.id, { role: p.role });
+          // Update role and recipientUserId if needed
+          const updates: any = {};
+          if (existing.role !== p.role) updates.role = p.role;
+          if (recipientUser && existing.recipientUserId !== recipientUser.id) {
+            updates.recipientUserId = recipientUser.id;
+          }
+          if (Object.keys(updates).length > 0) {
+            await storage.updateChatShare(existing.id, updates);
           }
           continue;
         }
         
         const share = await storage.createChatShare({
           chatId: req.params.id,
-          email: p.email,
+          email: normalizedEmail,
+          recipientUserId: recipientUser?.id || null,
           role: p.role,
           invitedBy: userId,
           notificationSent: "false"
         });
         createdShares.push(share);
-        emailsToNotify.push({ email: p.email, role: p.role, shareId: share.id });
+        emailsToNotify.push({ email: normalizedEmail, role: p.role, shareId: share.id });
       }
       
       // Send email notifications
@@ -831,17 +855,17 @@ export async function registerRoutes(
     }
   });
 
-  // Get chats shared with the current user
+  // Get chats shared with the current user (uses userId for secure auth)
   app.get("/api/shared-chats", async (req, res) => {
     try {
       const user = (req as any).user;
-      const userEmail = user?.claims?.email;
+      const userId = user?.claims?.sub;
       
-      if (!userEmail) {
+      if (!userId) {
         return res.json([]);
       }
       
-      const shares = await storage.getChatSharesByEmail(userEmail);
+      const shares = await storage.getChatSharesByUserId(userId);
       const sharedChats = [];
       
       for (const share of shares) {

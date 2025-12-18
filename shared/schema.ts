@@ -244,6 +244,7 @@ export type ChatMessage = typeof chatMessages.$inferSelect;
 export const chatShares = pgTable("chat_shares", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  recipientUserId: varchar("recipient_user_id"),
   email: text("email").notNull(),
   role: text("role").notNull().default("viewer"), // owner, editor, viewer
   invitedBy: varchar("invited_by"),
@@ -253,6 +254,7 @@ export const chatShares = pgTable("chat_shares", {
 }, (table) => [
   index("chat_shares_chat_idx").on(table.chatId),
   index("chat_shares_email_idx").on(table.email),
+  index("chat_shares_recipient_idx").on(table.recipientUserId),
 ]);
 
 export const insertChatShareSchema = createInsertSchema(chatShares).omit({

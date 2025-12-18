@@ -62,9 +62,12 @@ export interface IStorage {
   createChatShare(share: InsertChatShare): Promise<ChatShare>;
   getChatShares(chatId: string): Promise<ChatShare[]>;
   getChatSharesByEmail(email: string): Promise<ChatShare[]>;
+  getChatSharesByUserId(userId: string): Promise<ChatShare[]>;
   getChatShareByEmailAndChat(email: string, chatId: string): Promise<ChatShare | undefined>;
+  getChatShareByUserAndChat(userId: string, chatId: string): Promise<ChatShare | undefined>;
   updateChatShare(id: string, updates: Partial<InsertChatShare>): Promise<ChatShare | undefined>;
   deleteChatShare(id: string): Promise<void>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   // GPT CRUD operations
   createGpt(gpt: InsertGpt): Promise<Gpt>;
   getGpt(id: string): Promise<Gpt | undefined>;
@@ -299,12 +302,30 @@ export class MemStorage implements IStorage {
   }
 
   async getChatSharesByEmail(email: string): Promise<ChatShare[]> {
-    return db.select().from(chatShares).where(eq(chatShares.email, email)).orderBy(desc(chatShares.createdAt));
+    const normalizedEmail = email.toLowerCase().trim();
+    return db.select().from(chatShares).where(sql`LOWER(${chatShares.email}) = ${normalizedEmail}`).orderBy(desc(chatShares.createdAt));
+  }
+
+  async getChatSharesByUserId(userId: string): Promise<ChatShare[]> {
+    return db.select().from(chatShares).where(eq(chatShares.recipientUserId, userId)).orderBy(desc(chatShares.createdAt));
   }
 
   async getChatShareByEmailAndChat(email: string, chatId: string): Promise<ChatShare | undefined> {
+    const normalizedEmail = email.toLowerCase().trim();
     const [result] = await db.select().from(chatShares)
-      .where(sql`${chatShares.email} = ${email} AND ${chatShares.chatId} = ${chatId}`);
+      .where(sql`LOWER(${chatShares.email}) = ${normalizedEmail} AND ${chatShares.chatId} = ${chatId}`);
+    return result;
+  }
+
+  async getChatShareByUserAndChat(userId: string, chatId: string): Promise<ChatShare | undefined> {
+    const [result] = await db.select().from(chatShares)
+      .where(sql`${chatShares.recipientUserId} = ${userId} AND ${chatShares.chatId} = ${chatId}`);
+    return result;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const normalizedEmail = email.toLowerCase().trim();
+    const [result] = await db.select().from(users).where(sql`LOWER(${users.email}) = ${normalizedEmail}`);
     return result;
   }
 
