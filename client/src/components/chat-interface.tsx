@@ -932,7 +932,7 @@ export function ChatInterface({
     if (navigator.share) {
       try {
         await navigator.share({
-          title: "Sira GPT Response",
+          title: "MICHAT Response",
           text: content
         });
       } catch (e) {
@@ -2481,7 +2481,7 @@ export function ChatInterface({
               </div>
             </div>
             <div className="text-center text-xs text-muted-foreground mt-3">
-              Sira GPT can make mistakes. Check important info.
+              MICHAT can make mistakes. Check important info.
             </div>
           </div>
             </div>
@@ -2921,7 +2921,7 @@ export function ChatInterface({
               >
                 {activeGpt 
                   ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
-                  : "Soy Sira GPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                  : "Soy MICHAT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
                 }
               </motion.p>
               {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
@@ -3391,7 +3391,7 @@ export function ChatInterface({
               </div>
             </div>
             <div className="text-center text-xs text-muted-foreground mt-3">
-              Sira GPT can make mistakes. Check important info.
+              MICHAT can make mistakes. Check important info.
             </div>
           </div>
         </div>

@@ -190,7 +190,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div>
                   <span className="text-sm block">Modo de voz independiente</span>
                   <span className="text-xs text-muted-foreground">
-                    Mantén Sira Voice en una pantalla completa independiente, sin transcripciones ni elementos visuales en tiempo real.
+                    Mantén MICHAT Voice en una pantalla completa independiente, sin transcripciones ni elementos visuales en tiempo real.
                   </span>
                 </div>
                 <Switch 
@@ -234,7 +234,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   </Select>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Recibe notificaciones cuando Sira responda a solicitudes que tomen tiempo, como investigaciones o generación de imágenes.
+                  Recibe notificaciones cuando MICHAT responda a solicitudes que tomen tiempo, como investigaciones o generación de imágenes.
                 </p>
               </div>
 
@@ -297,7 +297,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   </Select>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Mantente al tanto de las nuevas herramientas, consejos y características de Sira.
+                  Mantente al tanto de las nuevas herramientas, consejos y características de MICHAT.
                 </p>
               </div>
             </div>
@@ -314,7 +314,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div>
                   <span className="text-sm font-medium">Estilo y tonos de base</span>
                   <p className="text-sm text-muted-foreground">
-                    Configura el estilo y el tono que Sira utiliza al responder.
+                    Configura el estilo y el tono que MICHAT utiliza al responder.
                   </p>
                 </div>
                 <Select value={styleAndTone} onValueChange={setStyleAndTone}>
@@ -349,7 +349,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <div className="space-y-2">
               <span className="text-sm font-medium">Apodo</span>
               <Input 
-                placeholder="¿Cómo debería llamarte Sira?"
+                placeholder="¿Cómo debería llamarte MICHAT?"
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
                 data-testid="input-nickname"
@@ -391,7 +391,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <div className="flex items-center justify-between py-2">
                 <div className="flex-1 pr-4">
-                  <span className="text-sm block">Permite que Sira guarde y use memorias al responder.</span>
+                  <span className="text-sm block">Permite que MICHAT guarde y use memorias al responder.</span>
                 </div>
                 <Switch 
                   checked={allowMemories} 
@@ -404,7 +404,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Consultar el historial de grabaciones</span>
                   <span className="text-xs text-muted-foreground">
-                    Permite que Sira consulte todas las transcripciones y notas de grabaciones anteriores al responder.
+                    Permite que MICHAT consulte todas las transcripciones y notas de grabaciones anteriores al responder.
                   </span>
                 </div>
                 <Switch 
@@ -418,7 +418,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Búsqueda en la web</span>
                   <span className="text-xs text-muted-foreground">
-                    Dejar que Sira busque automáticamente las respuestas en la web.
+                    Dejar que MICHAT busque automáticamente las respuestas en la web.
                   </span>
                 </div>
                 <Switch 
@@ -432,7 +432,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Código</span>
                   <span className="text-xs text-muted-foreground">
-                    Dejar que Sira ejecute el código con el Intérprete de código.
+                    Dejar que MICHAT ejecute el código con el Intérprete de código.
                   </span>
                 </div>
                 <Switch 
@@ -446,7 +446,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Lienzo</span>
                   <span className="text-xs text-muted-foreground">
-                    Colaborar con Sira en texto y código.
+                    Colaborar con MICHAT en texto y código.
                   </span>
                 </div>
                 <Switch 
@@ -458,9 +458,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <div className="flex items-center justify-between py-2">
                 <div className="flex-1 pr-4">
-                  <span className="text-sm block">Sira Voice</span>
+                  <span className="text-sm block">MICHAT Voice</span>
                   <span className="text-xs text-muted-foreground">
-                    Habilitar el modo de voz en Sira
+                    Habilitar el modo de voz en MICHAT
                   </span>
                 </div>
                 <Switch 
@@ -488,7 +488,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Búsqueda del conector</span>
                   <span className="text-xs text-muted-foreground">
-                    Dejar que Sira busque automáticamente las respuestas en las fuentes conectadas.
+                    Dejar que MICHAT busque automáticamente las respuestas en las fuentes conectadas.
                   </span>
                 </div>
                 <Switch 
@@ -512,7 +512,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </Button>
             </div>
             <p className="text-sm text-muted-foreground">
-              Administra las aplicaciones habilitadas que Sira puede usar en tus chats.
+              Administra las aplicaciones habilitadas que MICHAT puede usar en tus chats.
             </p>
             
             <div className="space-y-1">
@@ -567,7 +567,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Programaciones</h2>
             <p className="text-sm text-muted-foreground">
-              Sira puede programarse para ejecutarse nuevamente después de completar una tarea. 
+              MICHAT puede programarse para ejecutarse nuevamente después de completar una tarea. 
               Selecciona <span className="inline-flex items-center"><Calendar className="h-3 w-3 mx-1" /></span> Programar en el menú de <span className="font-medium">⋯</span> en una conversación para configurar ejecuciones futuras.
             </p>
             <Button variant="outline" data-testid="button-manage-schedules">
@@ -606,7 +606,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Comparte tu ubicación precisa</span>
                   <span className="text-xs text-muted-foreground">
-                    Permite que Sira utilice la ubicación precisa de tu dispositivo al responder preguntas.
+                    Permite que MICHAT utilice la ubicación precisa de tu dispositivo al responder preguntas.
                   </span>
                 </div>
                 <Switch data-testid="switch-location" />
@@ -717,9 +717,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               <Separator />
 
               <div className="pt-2">
-                <h3 className="text-base font-medium">Inicio de sesión seguro con Sira</h3>
+                <h3 className="text-base font-medium">Inicio de sesión seguro con MICHAT</h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Inicia sesión en sitios web y aplicaciones en toda la red con la seguridad confiable de Sira.{" "}
+                  Inicia sesión en sitios web y aplicaciones en toda la red con la seguridad confiable de MICHAT.{" "}
                   <button className="text-primary hover:underline" data-testid="link-more-info">
                     Obtener más información
                   </button>

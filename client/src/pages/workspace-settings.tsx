@@ -307,7 +307,7 @@ export default function WorkspaceSettingsPage() {
                       <div className="flex-1 pr-4">
                         <span className="text-sm block">Permitir a los miembros usar la memoria</span>
                         <span className="text-xs text-muted-foreground">
-                          Administra si los miembros pueden activar la memoria. Esto permite que Sira se vuelva más útil recordando detalles y preferencias a través de los chats.{" "}
+                          Administra si los miembros pueden activar la memoria. Esto permite que MICHAT se vuelva más útil recordando detalles y preferencias a través de los chats.{" "}
                           <button className="text-primary hover:underline">Obtener más información</button>
                         </span>
                       </div>
@@ -354,20 +354,20 @@ export default function WorkspaceSettingsPage() {
                   <Separator />
 
                   <div className="space-y-4">
-                    <h3 className="font-medium">Sira Record</h3>
+                    <h3 className="font-medium">MICHAT Record</h3>
                     <p className="text-xs text-muted-foreground">
-                      Administra si los usuarios pueden usar Sira para grabar, transcribir y resumir audio de formato largo. Las grabaciones solo se usarán para fines de transcripción y no las almacenará.{" "}
+                      Administra si los usuarios pueden usar MICHAT para grabar, transcribir y resumir audio de formato largo. Las grabaciones solo se usarán para fines de transcripción y no las almacenará.{" "}
                       <button className="text-primary hover:underline">Obtener más información</button>
                     </p>
                     <div className="flex items-center justify-between py-2">
-                      <span className="text-sm">Permitir que los miembros usen Sira Record</span>
+                      <span className="text-sm">Permitir que los miembros usen MICHAT Record</span>
                       <Switch defaultChecked data-testid="switch-record" />
                     </div>
                     <div className="flex items-center justify-between py-2">
                       <div className="flex-1 pr-4">
-                        <span className="text-sm block">Permitir que Sira consulte notas y transcripciones anteriores.</span>
+                        <span className="text-sm block">Permitir que MICHAT consulte notas y transcripciones anteriores.</span>
                         <span className="text-xs text-muted-foreground">
-                          Permitir que los miembros consulten notas y transcripciones anteriores en Sira Record.
+                          Permitir que los miembros consulten notas y transcripciones anteriores en MICHAT Record.
                         </span>
                       </div>
                       <Switch defaultChecked data-testid="switch-record-notes" />
@@ -394,7 +394,7 @@ export default function WorkspaceSettingsPage() {
                       <div className="flex-1 pr-4">
                         <span className="text-sm block">Permitir la edición de código en macOS</span>
                         <span className="text-xs text-muted-foreground">
-                          Controla si los usuarios de este espacio de trabajo pueden permitir que Sira edite archivos de código al usar la aplicación de escritorio para macOS. Esto permite que Sira lea y edite el contenido de aplicaciones específicas en su escritorio para dar mejores respuestas.{" "}
+                          Controla si los usuarios de este espacio de trabajo pueden permitir que MICHAT edite archivos de código al usar la aplicación de escritorio para macOS. Esto permite que MICHAT lea y edite el contenido de aplicaciones específicas en su escritorio para dar mejores respuestas.{" "}
                           <button className="text-primary hover:underline">Obtener más información</button>
                         </span>
                       </div>

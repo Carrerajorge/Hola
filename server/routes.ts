@@ -284,7 +284,7 @@ export async function registerRoutes(
 
       const systemMessage = {
         role: "system" as const,
-        content: `Eres Sira GPT, un asistente de IA avanzado. Responde de manera útil y profesional en el idioma del usuario.`
+        content: `Eres MICHAT, un asistente de IA avanzado. Responde de manera útil y profesional en el idioma del usuario.`
       };
 
       const user = (req as any).user;

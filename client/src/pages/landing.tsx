@@ -21,7 +21,7 @@ export default function LandingPage() {
       <header className="flex items-center justify-between px-4 md:px-8 h-16 border-b">
         <div className="flex items-center gap-2">
           <SiraLogo size={32} />
-          <span className="font-semibold">Sira GPT</span>
+          <span className="font-semibold">MICHAT</span>
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
         </div>
 
@@ -184,7 +184,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="py-4 text-center text-sm text-muted-foreground border-t">
-        Al enviar un mensaje a Sira GPT, un chatbot de IA, aceptas nuestros{" "}
+        Al enviar un mensaje a MICHAT, un chatbot de IA, aceptas nuestros{" "}
         <a href="#" className="underline hover:text-foreground">Términos</a>
         {" "}y reconoces que leíste nuestra{" "}
         <a href="#" className="underline hover:text-foreground">Política de privacidad</a>.
