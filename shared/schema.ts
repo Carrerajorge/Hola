@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, customType } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -486,6 +486,7 @@ export const chatParticipants = pgTable("chat_participants", {
 }, (table) => [
   index("chat_participants_chat_idx").on(table.chatId),
   index("chat_participants_email_idx").on(table.email),
+  uniqueIndex("chat_participants_unique_idx").on(table.chatId, table.email),
 ]);
 
 export const insertChatParticipantSchema = createInsertSchema(chatParticipants).omit({
