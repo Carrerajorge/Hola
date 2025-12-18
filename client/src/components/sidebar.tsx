@@ -368,7 +368,7 @@ export function Sidebar({
           <PopoverTrigger asChild>
             <button className="flex w-full items-center gap-3 rounded-lg p-2 liquid-button cursor-pointer" data-testid="button-user-menu">
               <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-muted text-muted-foreground">
+                <AvatarFallback className="bg-amber-100 text-amber-700">
                   {user?.role === "admin" ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
                 </AvatarFallback>
               </Avatar>
@@ -377,9 +377,23 @@ export function Sidebar({
                   {user?.role === "admin" ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
                 </span>
                 <span className="truncate text-xs text-muted-foreground">
-                  {user?.role === "admin" ? "ENTERPRISE" : (user?.email || "")}
+                  {user?.email === "infosiragpt@gmail.com" ? "ENTERPRISE" : "Cuenta personal"}
                 </span>
               </div>
+              {user?.email !== "infosiragpt@gmail.com" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full text-xs px-3 py-1 h-auto whitespace-nowrap"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLocation("/billing");
+                  }}
+                  data-testid="button-upgrade-plan"
+                >
+                  Mejorar el plan
+                </Button>
+              )}
             </button>
           </PopoverTrigger>
           <PopoverContent className="w-auto min-w-56 p-2" align="start" side="top">
