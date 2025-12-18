@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useLocation } from "wouter";
+import { useState, useEffect } from "react";
+import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -52,11 +52,20 @@ const menuItems: { id: WorkspaceSection; label: string; icon: React.ReactNode }[
 
 export default function WorkspaceSettingsPage() {
   const [, setLocation] = useLocation();
+  const searchString = useSearch();
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
   const [workspaceName, setWorkspaceName] = useState("Espacio de trabajo de Usuario");
   
   const orgId = "org-jafx80c2QSREjgK800cnLCwe";
   const workspaceId = "09c512b0-ee54-4546-9016-b5f13fa0477a";
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchString);
+    const section = params.get("section") as WorkspaceSection | null;
+    if (section && menuItems.some(item => item.id === section)) {
+      setActiveSection(section);
+    }
+  }, [searchString]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);

@@ -23,7 +23,8 @@ import {
   Eye,
   Check,
   X,
-  Monitor
+  Monitor,
+  LayoutGrid
 } from "lucide-react";
 import { SiraLogo } from "@/components/sira-logo";
 import { cn } from "@/lib/utils";
@@ -53,6 +54,7 @@ interface SidebarProps {
   onArchiveChat?: (id: string, e: React.MouseEvent) => void;
   onHideChat?: (id: string, e: React.MouseEvent) => void;
   onOpenGpts?: () => void;
+  onOpenApps?: () => void;
 }
 
 export function Sidebar({ 
@@ -67,7 +69,8 @@ export function Sidebar({
   onEditChat,
   onArchiveChat,
   onHideChat,
-  onOpenGpts
+  onOpenGpts,
+  onOpenApps
 }: SidebarProps) {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
@@ -189,6 +192,15 @@ export function Sidebar({
         >
           <Bot className="h-4 w-4" />
           GPTs
+        </Button>
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          onClick={onOpenApps}
+          data-testid="button-apps"
+        >
+          <LayoutGrid className="h-4 w-4" />
+          Aplicaciones
         </Button>
       </div>
 

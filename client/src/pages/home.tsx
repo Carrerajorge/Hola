@@ -123,6 +123,10 @@ export default function Home() {
     setIsGptExplorerOpen(true);
   };
 
+  const handleOpenApps = () => {
+    setLocation("/workspace-settings?section=apps");
+  };
+
   const handleSelectGpt = (gpt: Gpt) => {
     setActiveGpt(gpt);
     handleNewChat();
@@ -154,6 +158,7 @@ export default function Home() {
           onArchiveChat={archiveChat}
           onHideChat={hideChat}
           onOpenGpts={handleOpenGpts}
+          onOpenApps={handleOpenApps}
         />
       </div>
 
@@ -186,6 +191,7 @@ export default function Home() {
               onArchiveChat={archiveChat}
               onHideChat={hideChat}
               onOpenGpts={handleOpenGpts}
+              onOpenApps={handleOpenApps}
             />
           </SheetContent>
         </Sheet>
