@@ -1000,6 +1000,35 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/admin/users", async (req, res) => {
+    try {
+      const { email, password, plan, role } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ message: "Email y contraseña son requeridos" });
+      }
+      const existingUser = await storage.getUserByUsername(email);
+      if (existingUser) {
+        return res.status(400).json({ message: "Ya existe un usuario con este email" });
+      }
+      const user = await storage.createUser({
+        username: email,
+        password
+      });
+      if (plan || role) {
+        await storage.updateUser(user.id, { plan: plan || "free", role: role || "user", status: "active" });
+      }
+      await storage.createAuditLog({
+        action: "user_create",
+        resource: "users",
+        resourceId: user.id,
+        details: { email, plan, role }
+      });
+      res.json(user);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.patch("/api/admin/users/:id", async (req, res) => {
     try {
       const user = await storage.updateUser(req.params.id, req.body);

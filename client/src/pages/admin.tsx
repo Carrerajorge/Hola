@@ -144,6 +144,8 @@ function UsersSection() {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [editingUser, setEditingUser] = useState<any>(null);
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUser, setNewUser] = useState({ email: "", password: "", plan: "free", role: "user" });
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["/api/admin/users"],
@@ -177,6 +179,26 @@ function UsersSection() {
     }
   });
 
+  const createUserMutation = useMutation({
+    mutationFn: async (userData: { email: string; password: string; plan: string; role: string }) => {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(userData)
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || "Error al crear usuario");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      setShowAddUserModal(false);
+      setNewUser({ email: "", password: "", plan: "free", role: "user" });
+    }
+  });
+
   const filteredUsers = users.filter((u: any) => 
     u.username?.toLowerCase().includes(searchQuery.toLowerCase()) || 
     u.email?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -190,6 +212,89 @@ function UsersSection() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Users ({users.length})</h2>
+        <Dialog open={showAddUserModal} onOpenChange={setShowAddUserModal}>
+          <DialogTrigger asChild>
+            <Button size="sm" className="gap-1" data-testid="button-add-user">
+              <Plus className="h-4 w-4" />
+              Agregar usuario
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Agregar nuevo usuario</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input 
+                  type="email"
+                  placeholder="usuario@ejemplo.com"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                  data-testid="input-new-user-email"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Contraseña</Label>
+                <Input 
+                  type="password"
+                  placeholder="••••••••"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                  data-testid="input-new-user-password"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Plan</Label>
+                <Select 
+                  value={newUser.plan}
+                  onValueChange={(value) => setNewUser({ ...newUser, plan: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="free">Free</SelectItem>
+                    <SelectItem value="go">Go</SelectItem>
+                    <SelectItem value="plus">Plus</SelectItem>
+                    <SelectItem value="pro">Pro</SelectItem>
+                    <SelectItem value="business">Business</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Rol</Label>
+                <Select 
+                  value={newUser.role}
+                  onValueChange={(value) => setNewUser({ ...newUser, role: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">Usuario</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button 
+                className="w-full" 
+                onClick={() => createUserMutation.mutate(newUser)}
+                disabled={!newUser.email || !newUser.password || createUserMutation.isPending}
+                data-testid="button-submit-new-user"
+              >
+                {createUserMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Creando...
+                  </>
+                ) : (
+                  "Crear usuario"
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
