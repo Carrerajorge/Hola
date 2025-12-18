@@ -8,6 +8,7 @@ import {
   type DomainPolicy, type InsertDomainPolicy,
   type Chat, type InsertChat,
   type ChatMessage, type InsertChatMessage,
+  type ChatShare, type InsertChatShare,
   type Gpt, type InsertGpt,
   type GptCategory, type InsertGptCategory,
   type GptVersion, type InsertGptVersion,
@@ -18,7 +19,7 @@ import {
   type AuditLog, type InsertAuditLog,
   type AnalyticsSnapshot, type InsertAnalyticsSnapshot,
   type Report, type InsertReport,
-  files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages,
+  files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   gpts, gptCategories, gptVersions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports
 } from "@shared/schema";
@@ -57,6 +58,13 @@ export interface IStorage {
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessages(chatId: string): Promise<ChatMessage[]>;
+  // Chat Share operations
+  createChatShare(share: InsertChatShare): Promise<ChatShare>;
+  getChatShares(chatId: string): Promise<ChatShare[]>;
+  getChatSharesByEmail(email: string): Promise<ChatShare[]>;
+  getChatShareByEmailAndChat(email: string, chatId: string): Promise<ChatShare | undefined>;
+  updateChatShare(id: string, updates: Partial<InsertChatShare>): Promise<ChatShare | undefined>;
+  deleteChatShare(id: string): Promise<void>;
   // GPT CRUD operations
   createGpt(gpt: InsertGpt): Promise<Gpt>;
   getGpt(id: string): Promise<Gpt | undefined>;
@@ -278,6 +286,35 @@ export class MemStorage implements IStorage {
 
   async getChatMessages(chatId: string): Promise<ChatMessage[]> {
     return db.select().from(chatMessages).where(eq(chatMessages.chatId, chatId)).orderBy(chatMessages.createdAt);
+  }
+
+  // Chat Share operations
+  async createChatShare(share: InsertChatShare): Promise<ChatShare> {
+    const [result] = await db.insert(chatShares).values(share).returning();
+    return result;
+  }
+
+  async getChatShares(chatId: string): Promise<ChatShare[]> {
+    return db.select().from(chatShares).where(eq(chatShares.chatId, chatId)).orderBy(desc(chatShares.createdAt));
+  }
+
+  async getChatSharesByEmail(email: string): Promise<ChatShare[]> {
+    return db.select().from(chatShares).where(eq(chatShares.email, email)).orderBy(desc(chatShares.createdAt));
+  }
+
+  async getChatShareByEmailAndChat(email: string, chatId: string): Promise<ChatShare | undefined> {
+    const [result] = await db.select().from(chatShares)
+      .where(sql`${chatShares.email} = ${email} AND ${chatShares.chatId} = ${chatId}`);
+    return result;
+  }
+
+  async updateChatShare(id: string, updates: Partial<InsertChatShare>): Promise<ChatShare | undefined> {
+    const [result] = await db.update(chatShares).set(updates).where(eq(chatShares.id, id)).returning();
+    return result;
+  }
+
+  async deleteChatShare(id: string): Promise<void> {
+    await db.delete(chatShares).where(eq(chatShares.id, id));
   }
 
   // GPT operations

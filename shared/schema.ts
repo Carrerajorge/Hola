@@ -240,6 +240,29 @@ export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 
+// Chat sharing - participantes con acceso a chats específicos
+export const chatShares = pgTable("chat_shares", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  role: text("role").notNull().default("viewer"), // owner, editor, viewer
+  invitedBy: varchar("invited_by"),
+  notificationSent: text("notification_sent").default("false"),
+  acceptedAt: timestamp("accepted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("chat_shares_chat_idx").on(table.chatId),
+  index("chat_shares_email_idx").on(table.email),
+]);
+
+export const insertChatShareSchema = createInsertSchema(chatShares).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertChatShare = z.infer<typeof insertChatShareSchema>;
+export type ChatShare = typeof chatShares.$inferSelect;
+
 // GPT Categories
 export const gptCategories = pgTable("gpt_categories", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
