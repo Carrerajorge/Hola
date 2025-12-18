@@ -605,6 +605,7 @@ export function ChatInterface({
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
@@ -926,6 +927,15 @@ export function ChatInterface({
     } catch (error) {
       console.error("Document download error:", error);
     }
+  };
+
+  const handleDownloadImage = (imageData: string) => {
+    const link = document.createElement("a");
+    link.href = imageData;
+    link.download = `imagen-generada-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleFeedback = (msgId: string, value: "up" | "down") => {
@@ -2875,7 +2885,56 @@ export function ChatInterface({
                             ))}
                           </div>
                         )}
-                                                {/* Assistant Message Actions Toolbar */}
+                        
+                        {/* Generated Image Block - BEFORE toolbar */}
+                        {(() => {
+                          const msgImage = msg.generatedImage;
+                          const storeImage = getGeneratedImage(msg.id);
+                          const pendingMatch = pendingGeneratedImage?.messageId === msg.id ? pendingGeneratedImage.imageData : null;
+                          const refMatch = latestGeneratedImageRef.current?.messageId === msg.id ? latestGeneratedImageRef.current.imageData : null;
+                          
+                          let imageData = msgImage || storeImage || pendingMatch || refMatch;
+                          
+                          if (imageData && !storeImage) {
+                            storeGeneratedImage(msg.id, imageData);
+                          }
+                          
+                          const showSkeleton = isGeneratingImage && msg.role === "assistant" && msgIndex === messages.length - 1 && !imageData;
+                          
+                          if (showSkeleton) {
+                            return (
+                              <div className="mt-3">
+                                <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                </div>
+                              </div>
+                            );
+                          }
+                          
+                          return imageData ? (
+                            <div className="mt-3 relative group inline-block">
+                              <img 
+                                src={imageData} 
+                                alt="Imagen generada" 
+                                className="max-w-full h-auto rounded-lg shadow-md cursor-pointer hover:opacity-95 transition-opacity"
+                                style={{ maxHeight: "400px" }}
+                                onClick={() => setLightboxImage(imageData)}
+                                data-testid={`generated-image-${msg.id}`}
+                              />
+                              <Button
+                                variant="secondary"
+                                size="icon"
+                                className="absolute top-2 right-2 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 hover:bg-black/80 text-white"
+                                onClick={(e) => { e.stopPropagation(); handleDownloadImage(imageData); }}
+                                data-testid={`button-download-image-${msg.id}`}
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : null;
+                        })()}
+                        
+                        {/* Assistant Message Actions Toolbar */}
                         {msg.content && !msg.isThinking && (
                           <TooltipProvider delayDuration={300}>
                             <div className="flex items-center gap-1 mt-2" data-testid={`message-actions-main-${msg.id}`}>
@@ -2996,43 +3055,6 @@ export function ChatInterface({
                             <FigmaBlock diagram={msg.figmaDiagram} />
                           </div>
                         )}
-
-                        {/* Generated Image Block in normal chat mode */}
-                        {(() => {
-                          const msgImage = msg.generatedImage;
-                          const storeImage = getGeneratedImage(msg.id);
-                          const pendingMatch = pendingGeneratedImage?.messageId === msg.id ? pendingGeneratedImage.imageData : null;
-                          const refMatch = latestGeneratedImageRef.current?.messageId === msg.id ? latestGeneratedImageRef.current.imageData : null;
-                          
-                          let imageData = msgImage || storeImage || pendingMatch || refMatch;
-                          
-                          if (imageData && !storeImage) {
-                            storeGeneratedImage(msg.id, imageData);
-                          }
-                          
-                          const showSkeleton = isGeneratingImage && msg.role === "assistant" && msgIndex === messages.length - 1 && !imageData;
-                          
-                          if (showSkeleton) {
-                            return (
-                              <div className="mt-3">
-                                <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
-                                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                                </div>
-                              </div>
-                            );
-                          }
-                          
-                          return imageData ? (
-                            <div className="mt-3">
-                              <img 
-                                src={imageData} 
-                                alt="Imagen generada" 
-                                className="max-w-full h-auto rounded-lg shadow-md"
-                                style={{ maxHeight: "400px" }}
-                              />
-                            </div>
-                          ) : null;
-                        })()}
                       </div>
                     )}
                   </div>
@@ -3643,6 +3665,41 @@ export function ChatInterface({
         open={isUpgradeDialogOpen} 
         onOpenChange={setIsUpgradeDialogOpen} 
       />
+
+      {/* Image Lightbox Modal */}
+      {lightboxImage && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setLightboxImage(null)}
+        >
+          <div className="relative max-w-[90vw] max-h-[90vh]">
+            <img 
+              src={lightboxImage} 
+              alt="Imagen ampliada" 
+              className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <Button
+              variant="secondary"
+              size="icon"
+              className="absolute top-4 right-4 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
+              onClick={() => setLightboxImage(null)}
+              data-testid="button-close-lightbox"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              className="absolute top-4 right-16 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
+              onClick={(e) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
+              data-testid="button-download-lightbox"
+            >
+              <Download className="h-5 w-5" />
+            </Button>
+          </div>
+        </div>
+      )}
 
     </div>
   );
