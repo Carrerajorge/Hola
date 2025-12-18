@@ -38,10 +38,10 @@ export default function LoginPage() {
             delete userData.password; // Don't store password
             localStorage.setItem("sira_user_data", JSON.stringify(userData));
           }
-          // Invalidate auth query cache
-          queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-          // Navigate to home
-          window.location.href = "/";
+          // Set user data in query cache directly for immediate access
+          queryClient.setQueryData(["/api/auth/user"], user);
+          // Navigate to home using React router (no page reload)
+          setLocation("/");
         } else {
           const data = await response.json();
           setError(data.message || "Credenciales inválidas");
