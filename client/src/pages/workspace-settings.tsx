@@ -24,7 +24,8 @@ import {
   MoreHorizontal,
   ChevronDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Filter
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -550,12 +551,173 @@ export default function WorkspaceSettingsPage() {
         );
 
       case "gpt":
+        const gptItems = [
+          { id: 1, name: "1.3 Discusiones de tesis. 2", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 508, created: "Jan 21", updated: "Dec 18", icon: "T20" },
+          { id: 2, name: "REALIDAD PROBLEMATICA LOCAL", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 400, created: "Jan 21", updated: "Dec 18", icon: "T20" },
+          { id: 3, name: "ANTECENTE DE TESIS", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 5779, created: "Jan 21", updated: "Dec 17", icon: "T20" },
+          { id: 4, name: "REALIDAD PROBLEMATICA GLOBAL", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 669, created: "Jan 21", updated: "Dec 17", icon: "T20" },
+          { id: 5, name: "BASES TEORICAS", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 821, created: "Jan 21", updated: "Dec 17", icon: "T20" },
+          { id: 6, name: "TSP CAPÍTULO III. - Problema actual.", constructor: "Jorge Carrera", actions: "—", access: "Enlace", chats: 73, created: "Feb 5", updated: "Dec 17", icon: "doc" },
+          { id: 7, name: "1.6. - Justificación", constructor: "Sin asignar", actions: "—", access: "Público", chats: 845, created: "Feb 20", updated: "Dec 17", icon: "doc" },
+        ];
         return (
-          <div className="space-y-6">
+          <div className="space-y-8">
             <h1 className="text-2xl font-semibold">GPT</h1>
-            <p className="text-sm text-muted-foreground">
-              Configura los GPTs de tu espacio de trabajo.
-            </p>
+
+            <div className="space-y-4">
+              <h2 className="font-medium">Terceros</h2>
+              <p className="text-sm text-muted-foreground">
+                Administra si los miembros pueden usar GPT creados fuera de tu espacio de trabajo.
+              </p>
+              <Select defaultValue="allow">
+                <SelectTrigger className="w-40" data-testid="select-third-party">
+                  <SelectValue placeholder="Permitir todo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="allow">Permitir todo</SelectItem>
+                  <SelectItem value="restrict">Restringir</SelectItem>
+                  <SelectItem value="block">Bloquear</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-4">
+              <h2 className="font-medium">GPT</h2>
+              
+              <Tabs defaultValue="workspace" className="w-full">
+                <div className="flex items-center justify-between">
+                  <TabsList className="bg-transparent border-b rounded-none h-auto p-0">
+                    <TabsTrigger 
+                      value="workspace" 
+                      className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                      data-testid="tab-gpt-workspace"
+                    >
+                      Espacio de trabajo
+                    </TabsTrigger>
+                    <TabsTrigger 
+                      value="unassigned" 
+                      className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2"
+                      data-testid="tab-gpt-unassigned"
+                    >
+                      Sin asignar
+                    </TabsTrigger>
+                  </TabsList>
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-gpt-filter">
+                      <Filter className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-gpt-search">
+                      <Search className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <TabsContent value="workspace" className="mt-4">
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr className="text-left text-muted-foreground">
+                          <th className="px-4 py-3 font-medium">Nombre</th>
+                          <th className="px-4 py-3 font-medium">Constructor</th>
+                          <th className="px-4 py-3 font-medium">Acciones personalizadas</th>
+                          <th className="px-4 py-3 font-medium">Quién tiene acceso</th>
+                          <th className="px-4 py-3 font-medium">Chats</th>
+                          <th className="px-4 py-3 font-medium">Creado</th>
+                          <th className="px-4 py-3 font-medium">Actualiz.</th>
+                          <th className="px-4 py-3"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {gptItems.map((item) => (
+                          <tr key={item.id} className="border-t hover:bg-muted/30">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className={cn(
+                                  "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold",
+                                  item.icon === "T20" ? "bg-red-100 text-red-600" : "bg-gray-100 text-gray-600"
+                                )}>
+                                  {item.icon === "T20" ? "T20" : "📄"}
+                                </div>
+                                <span className="font-medium text-primary hover:underline cursor-pointer">{item.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">{item.constructor}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{item.actions}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{item.access}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{item.chats}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{item.created}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{item.updated}</td>
+                            <td className="px-4 py-3">
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center justify-center gap-4 mt-4">
+                    <Button variant="ghost" size="sm" data-testid="button-gpt-prev">Anterior</Button>
+                    <span className="text-sm text-muted-foreground">Página 1</span>
+                    <Button variant="ghost" size="sm" className="font-medium" data-testid="button-gpt-next">Siguiente</Button>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="unassigned" className="mt-4">
+                  <div className="border rounded-lg p-6">
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      No hay GPTs sin asignar
+                    </p>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <h2 className="font-medium">Compartir</h2>
+                <Badge variant="secondary" className="text-xs">Enterprise</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Los GPT se pueden compartir con...</span>
+                <Select defaultValue="anyone">
+                  <SelectTrigger className="w-48" data-testid="select-gpt-share">
+                    <SelectValue placeholder="Cualquier persona" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="anyone">Cualquier persona</SelectItem>
+                    <SelectItem value="workspace">Solo espacio de trabajo</SelectItem>
+                    <SelectItem value="restricted">Restringido</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <h2 className="font-medium">Acciones de GPT</h2>
+              <p className="text-sm text-muted-foreground">
+                Las acciones de GPT permiten que los GPT utilicen API de terceros para tareas como recuperar o modificar datos. Las acciones de GPT son definidas por los constructores de los GPT, por lo que puedes limitar los dominios que se pueden usar para los GPT creados en tu espacio de trabajo.
+              </p>
+              <div className="flex items-center gap-2">
+                <input 
+                  type="checkbox" 
+                  id="allow-domains" 
+                  defaultChecked 
+                  className="h-4 w-4 rounded border-gray-300"
+                  data-testid="checkbox-allow-domains"
+                />
+                <label htmlFor="allow-domains" className="text-sm">
+                  Permitir todos los dominios para acciones de GPT
+                </label>
+                <Info className="h-3 w-3 text-muted-foreground" />
+              </div>
+            </div>
           </div>
         );
 
