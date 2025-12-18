@@ -725,13 +725,76 @@ export default function WorkspaceSettingsPage() {
 
       case "apps":
         const appItems = [
-          { id: 1, name: "Adobe Acrobat", description: "Trusted PDF editing tools", icon: "🔴", bgColor: "bg-red-500" },
-          { id: 2, name: "Adobe Express", description: "Design flyers and invites", icon: "A", bgColor: "bg-gradient-to-br from-purple-500 to-pink-500" },
+          { id: 1, name: "Adobe Acrobat", description: "Trusted PDF editing tools", icon: "Ac", bgColor: "bg-red-600" },
+          { id: 2, name: "Adobe Express", description: "Design flyers and invites", icon: "Ae", bgColor: "bg-gradient-to-br from-purple-500 to-pink-500" },
           { id: 3, name: "Adobe Photoshop", description: "Edit, stylize, refine images", icon: "Ps", bgColor: "bg-blue-600" },
           { id: 4, name: "Agentforce Sales", description: "Sales insights to close deals", icon: "⚡", bgColor: "bg-blue-500" },
-          { id: 5, name: "Aha!", description: "Connect to sync Aha! product roadmaps and features for use in ChatGPT", icon: "!", bgColor: "bg-blue-600" },
+          { id: 5, name: "Aha!", description: "Connect to sync Aha! product roadmaps and features for use in ChatGPT.", icon: "!", bgColor: "bg-blue-600" },
           { id: 6, name: "Airtable", description: "Add structured data to ChatGPT", icon: "📊", bgColor: "bg-blue-400" },
           { id: 7, name: "Alpaca", description: "Market data: stocks & crypto", icon: "🦙", bgColor: "bg-yellow-400" },
+          { id: 8, name: "Apple Music", description: "Build playlists and find music", icon: "♪", bgColor: "bg-pink-500" },
+          { id: 9, name: "Asana", description: "Convierte las tareas de Asana en actualizaciones y planes claros", icon: "◉", bgColor: "bg-orange-500" },
+          { id: 10, name: "Atlassian Rovo", description: "Manage Jira and Confluence fast", icon: "A", bgColor: "bg-blue-600" },
+          { id: 11, name: "Azure Boards", description: "Connect to sync Azure DevOps work items and repos for use in ChatGPT.", icon: "Az", bgColor: "bg-blue-500" },
+          { id: 12, name: "Basecamp", description: "Connect to sync Basecamp projects and to-dos for use in ChatGPT.", icon: "⛺", bgColor: "bg-green-600" },
+          { id: 13, name: "BioRender", description: "Science visuals on demand", icon: "🧬", bgColor: "bg-teal-500" },
+          { id: 14, name: "Booking.com", description: "Search stays worldwide", icon: "B", bgColor: "bg-blue-700" },
+          { id: 15, name: "Box", description: "Busca y consulta tus documentos", icon: "📦", bgColor: "bg-blue-500" },
+          { id: 16, name: "Calendario de Outlook", description: "Consulta eventos y disponibilidad.", icon: "📅", bgColor: "bg-blue-600" },
+          { id: 17, name: "Canva", description: "Search, create, edit designs", icon: "C", bgColor: "bg-cyan-500" },
+          { id: 18, name: "Clay", description: "Find and engage prospects", icon: "🏺", bgColor: "bg-orange-400" },
+          { id: 19, name: "ClickUp", description: "Connect to sync ClickUp tasks and docs for use in ChatGPT.", icon: "✓", bgColor: "bg-purple-600" },
+          { id: 20, name: "Cloudinary", description: "Manage, modify, and host your images & videos", icon: "☁", bgColor: "bg-blue-500" },
+          { id: 21, name: "Conductor", description: "Track brand sentiment in AI", icon: "C", bgColor: "bg-indigo-600" },
+          { id: 22, name: "Contactos de Google", description: "Consulta detalles de contacto guardados.", icon: "👤", bgColor: "bg-blue-500" },
+          { id: 23, name: "Correo electrónico de Outlook", description: "Busca y consulta tus correos electrónicos de Outlook.", icon: "✉", bgColor: "bg-blue-600" },
+          { id: 24, name: "Coupler.io", description: "Unified business data access", icon: "⚡", bgColor: "bg-purple-500" },
+          { id: 25, name: "Coursera", description: "Skill-building course videos", icon: "C", bgColor: "bg-blue-600" },
+          { id: 26, name: "Coveo", description: "Search your enterprise content", icon: "C", bgColor: "bg-orange-500" },
+          { id: 27, name: "Daloopa", description: "Financial KPIs with links", icon: "D", bgColor: "bg-blue-700" },
+          { id: 28, name: "Dropbox", description: "Encuentra y accede a tus archivos almacenados.", icon: "📁", bgColor: "bg-blue-500" },
+          { id: 29, name: "Egnyte", description: "Explore and analyze your content", icon: "E", bgColor: "bg-green-600" },
+          { id: 30, name: "Figma", description: "Make diagrams, slides, assets", icon: "F", bgColor: "bg-purple-600" },
+          { id: 31, name: "Fireflies", description: "Search meeting transcripts", icon: "🔥", bgColor: "bg-purple-500" },
+          { id: 32, name: "GitHub", description: "Accede a repositorios, problemas y solicitudes de extracción.", icon: "🐙", bgColor: "bg-gray-800" },
+          { id: 33, name: "GitLab Issues", description: "Connect to sync GitLab Issues and merge requests for use in ChatGPT.", icon: "🦊", bgColor: "bg-orange-600" },
+          { id: 34, name: "Gmail", description: "Busca y consulta correos electrónicos en tu bandeja de entrada.", icon: "✉", bgColor: "bg-red-500" },
+          { id: 35, name: "Google Drive", description: "Upload Google Drive files in messages sent to ChatGPT.", icon: "📁", bgColor: "bg-yellow-500", badge: "CARGAS DE ARCHIVOS" },
+          { id: 36, name: "Google Calendar", description: "Consulta eventos y disponibilidad.", icon: "📅", bgColor: "bg-blue-500" },
+          { id: 37, name: "Google Drive", description: "Busca y consulta archivos de tu Drive.", icon: "📁", bgColor: "bg-green-500", hasSync: true },
+          { id: 38, name: "Help Scout", description: "Connect to sync Help Scout mailboxes and conversations for use in ChatGPT.", icon: "H", bgColor: "bg-blue-500" },
+          { id: 39, name: "Hex", description: "Ask questions, run analyses", icon: "⬡", bgColor: "bg-purple-600" },
+          { id: 40, name: "HighLevel", description: "Interact with your CRM business data", icon: "H", bgColor: "bg-blue-600" },
+          { id: 41, name: "HubSpot", description: "Analiza datos de CRM y destaca insights", icon: "H", bgColor: "bg-orange-500" },
+          { id: 42, name: "Hugging Face", description: "Inspect models, datasets, Spaces, and research", icon: "🤗", bgColor: "bg-yellow-400" },
+          { id: 43, name: "Intercom", description: "Look up past user chats and tickets.", icon: "💬", bgColor: "bg-blue-500" },
+          { id: 44, name: "Jam", description: "Screen record with context", icon: "🍇", bgColor: "bg-purple-600" },
+          { id: 45, name: "Jotform", description: "Build forms, analyze responses", icon: "J", bgColor: "bg-orange-500" },
+          { id: 46, name: "Klaviyo", description: "Marketing performance insights", icon: "K", bgColor: "bg-green-600" },
+          { id: 47, name: "LSEG", description: "LSEG financial data access", icon: "L", bgColor: "bg-blue-700" },
+          { id: 48, name: "Linear", description: "Busca y consulta incidencias y proyectos.", icon: "◇", bgColor: "bg-indigo-600" },
+          { id: 49, name: "Lovable", description: "Build apps and websites", icon: "♥", bgColor: "bg-pink-500" },
+          { id: 50, name: "Microsoft OneDrive (personal)", description: "Upload personal OneDrive files in messages sent to ChatGPT.", icon: "☁", bgColor: "bg-blue-500", badge: "CARGAS DE ARCHIVOS" },
+          { id: 51, name: "Microsoft OneDrive (work/school)", description: "Upload SharePoint and OneDrive for Business files in messages sent to ChatGPT.", icon: "☁", bgColor: "bg-blue-600", badge: "CARGAS DE ARCHIVOS" },
+          { id: 52, name: "Monday.com", description: "Manage work in monday.com", icon: "M", bgColor: "bg-red-500" },
+          { id: 53, name: "Netlify", description: "Build and deploy on Netlify", icon: "N", bgColor: "bg-teal-500" },
+          { id: 54, name: "Notion", description: "Busca y consulta tus páginas de Notion.", icon: "N", bgColor: "bg-gray-800" },
+          { id: 55, name: "OpenTable", description: "Find restaurant reservations", icon: "🍽", bgColor: "bg-red-600" },
+          { id: 56, name: "Pipedrive", description: "Connect to sync Pipedrive deals and contacts for use in ChatGPT.", icon: "P", bgColor: "bg-green-500" },
+          { id: 57, name: "PitchBook", description: "Faster workflows with market intelligence", icon: "P", bgColor: "bg-blue-700" },
+          { id: 58, name: "Replit", description: "Build web apps with AI", icon: "R", bgColor: "bg-orange-500" },
+          { id: 59, name: "Semrush", description: "Site metrics and traffic data", icon: "S", bgColor: "bg-orange-600" },
+          { id: 60, name: "SharePoint", description: "Busca y extrae datos de sitios compartidos y OneDrive.", icon: "S", bgColor: "bg-teal-600" },
+          { id: 61, name: "Slack", description: "Consulta chats y mensajes.", icon: "S", bgColor: "bg-purple-600" },
+          { id: 62, name: "Spaceship", description: "Search domain availability", icon: "🚀", bgColor: "bg-indigo-600" },
+          { id: 63, name: "Stripe", description: "Payments and business tools", icon: "S", bgColor: "bg-purple-500" },
+          { id: 64, name: "Teams", description: "Consulta chats y mensajes.", icon: "T", bgColor: "bg-purple-700" },
+          { id: 65, name: "Teamwork.com", description: "Connect to sync Teamwork projects and tasks for use in ChatGPT.", icon: "T", bgColor: "bg-purple-500" },
+          { id: 66, name: "Tripadvisor", description: "Book top-rated hotels", icon: "🦉", bgColor: "bg-green-500" },
+          { id: 67, name: "Vercel", description: "Search docs and deploy apps", icon: "▲", bgColor: "bg-gray-800" },
+          { id: 68, name: "Zoho", description: "Connect to sync Zoho CRM records and activities for use in ChatGPT.", icon: "Z", bgColor: "bg-red-600" },
+          { id: 69, name: "Zoho Desk", description: "Connect to sync Zoho Desk tickets and customer conversations for use in ChatGPT.", icon: "Z", bgColor: "bg-green-600" },
+          { id: 70, name: "Zoom", description: "Smart meeting insights from Zoom", icon: "Z", bgColor: "bg-blue-500" },
         ];
         return (
           <div className="space-y-6">
@@ -846,15 +909,23 @@ export default function WorkspaceSettingsPage() {
                     </button>
                   </div>
                   <div className="divide-y">
-                    {appItems.map((app) => (
+                    {appItems.map((app: any) => (
                       <div key={app.id} className="flex items-center px-4 py-3 hover:bg-muted/30">
                         <input type="checkbox" className="h-4 w-4 rounded border-gray-300 mr-4" data-testid={`checkbox-app-${app.id}`} />
                         <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold mr-4", app.bgColor)}>
                           {app.icon}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium">{app.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{app.name}</p>
+                            {app.badge && (
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{app.badge}</Badge>
+                            )}
+                          </div>
                           <p className="text-sm text-muted-foreground truncate">{app.description}</p>
+                          {app.hasSync && (
+                            <button className="text-xs text-primary hover:underline mt-1">Habilitar sincronización</button>
+                          )}
                         </div>
                         <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
                           <MoreHorizontal className="h-4 w-4" />
