@@ -52,7 +52,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 
-import { Message, FigmaDiagram } from "@/hooks/use-chats";
+import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage } from "@/hooks/use-chats";
 import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
@@ -1392,8 +1392,12 @@ export function ChatInterface({
           if (imageRes.ok && imageData.success) {
             setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
             
+            const msgId = (Date.now() + 1).toString();
+            // Store image in separate memory store to prevent loss during localStorage sync
+            storeGeneratedImage(msgId, imageData.imageData);
+            
             const aiMsg: Message = {
-              id: (Date.now() + 1).toString(),
+              id: msgId,
               role: "assistant",
               content: "Aquí está la imagen que generé basada en tu descripción:",
               generatedImage: imageData.imageData,
@@ -2011,16 +2015,19 @@ export function ChatInterface({
                   )}
 
                   {/* Generated Image Block */}
-                  {msg.generatedImage && (
-                    <div className="mt-3 px-4">
-                      <img 
-                        src={msg.generatedImage} 
-                        alt="Imagen generada" 
-                        className="max-w-full h-auto rounded-lg shadow-md"
-                        style={{ maxHeight: "400px" }}
-                      />
-                    </div>
-                  )}
+                  {(() => {
+                    const imageData = msg.generatedImage || getGeneratedImage(msg.id);
+                    return imageData ? (
+                      <div className="mt-3 px-4">
+                        <img 
+                          src={imageData} 
+                          alt="Imagen generada" 
+                          className="max-w-full h-auto rounded-lg shadow-md"
+                          style={{ maxHeight: "400px" }}
+                        />
+                      </div>
+                    ) : null;
+                  })()}
 
                   {msg.attachments && (
                     <div className="flex gap-2 flex-wrap mt-2">

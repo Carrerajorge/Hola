@@ -46,6 +46,17 @@ const pendingToRealIdMap = new Map<string, string>();
 const pendingMessageQueue = new Map<string, Message[]>();
 const chatCreationInProgress = new Set<string>();
 
+// Separate in-memory store for generated images (not persisted to localStorage)
+const generatedImagesStore = new Map<string, string>();
+
+export function storeGeneratedImage(messageId: string, imageData: string): void {
+  generatedImagesStore.set(messageId, imageData);
+}
+
+export function getGeneratedImage(messageId: string): string | undefined {
+  return generatedImagesStore.get(messageId);
+}
+
 export function useChats() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
