@@ -1826,6 +1826,10 @@ export function ChatInterface({
                   })()}
                   
                   {/* Figma Diagram Block */}
+                  {(() => {
+                    console.log('[ChatInterface] Message render:', { msgId: msg.id, hasFigmaDiagram: !!msg.figmaDiagram, figmaDiagram: msg.figmaDiagram });
+                    return null;
+                  })()}
                   {msg.figmaDiagram && (
                     <div className="mt-3 w-full">
                       <FigmaBlock diagram={msg.figmaDiagram} />
