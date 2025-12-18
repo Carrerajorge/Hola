@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/hooks/use-language";
 
 type SettingsSection = "general" | "notifications" | "personalization" | "apps" | "schedules" | "data" | "security" | "account";
 
@@ -51,8 +52,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [appearance, setAppearance] = useState("system");
   const [accentColor, setAccentColor] = useState("default");
-  const [language, setLanguage] = useState("auto");
+  const { language: currentLanguage, setLanguage: setAppLanguage, supportedLanguages } = useLanguage();
   const [spokenLanguage, setSpokenLanguage] = useState("auto");
+  
+  const handleLanguageChange = (value: string) => {
+    if (value !== "auto") {
+      setAppLanguage(value as any);
+    }
+  };
   const [voice, setVoice] = useState("cove");
   const [independentVoiceMode, setIndependentVoiceMode] = useState(false);
   const [showAdditionalModels, setShowAdditionalModels] = useState(true);
@@ -133,15 +140,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <div className="flex items-center justify-between py-2">
                 <span className="text-sm">Idioma</span>
-                <Select value={language} onValueChange={setLanguage}>
+                <Select value={currentLanguage} onValueChange={handleLanguageChange}>
                   <SelectTrigger className="w-40" data-testid="select-language">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="auto">Automático</SelectItem>
-                    <SelectItem value="es">Español</SelectItem>
-                    <SelectItem value="en">English</SelectItem>
-                    <SelectItem value="pt">Português</SelectItem>
+                    {supportedLanguages.map(lang => (
+                      <SelectItem key={lang.code} value={lang.code}>{lang.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
