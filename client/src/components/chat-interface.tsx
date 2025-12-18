@@ -2724,6 +2724,13 @@ export function ChatInterface({
                             </div>
                           </TooltipProvider>
                         )}
+                        
+                        {/* Figma Diagram Block in normal chat mode */}
+                        {msg.figmaDiagram && (
+                          <div className="mt-3 w-full">
+                            <FigmaBlock diagram={msg.figmaDiagram} />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
