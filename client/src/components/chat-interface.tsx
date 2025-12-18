@@ -1653,13 +1653,11 @@ export function ChatInterface({
         <div className="flex items-center gap-1">
           {user?.email !== "infosiragpt@gmail.com" && (
             <Button
-              variant="outline"
               size="sm"
-              className="rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
+              className="rounded-full text-xs px-4 bg-purple-600 hover:bg-purple-700 text-white border-0"
               onClick={() => setIsUpgradeDialogOpen(true)}
               data-testid="button-upgrade-header"
             >
-              <Sparkles className="h-3 w-3 text-primary" />
               Mejorar el plan a Go
             </Button>
           )}
