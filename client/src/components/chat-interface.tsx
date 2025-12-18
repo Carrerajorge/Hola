@@ -1413,6 +1413,7 @@ export function ChatInterface({
       
       // If Figma diagram was generated, add it to chat immediately
       if (figmaDiagram) {
+        console.log('[ChatInterface] Figma diagram received from API:', figmaDiagram);
         setAiState("responding");
         
         // Quick streaming effect for the text part
@@ -1436,6 +1437,7 @@ export function ChatInterface({
               timestamp: new Date(),
               figmaDiagram,
             };
+            console.log('[ChatInterface] Sending AI message with figmaDiagram:', aiMsg);
             onSendMessage(aiMsg);
             
             streamingContentRef.current = "";

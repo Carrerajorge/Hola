@@ -203,19 +203,25 @@ export function useChats() {
       ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
       : "Nuevo Chat";
 
-    setChats(prev => prev.map(chat => {
-      const matchId = chat.id === chatId || chat.id === resolvedChatId;
-      if (matchId) {
-        const isFirstMessage = chat.messages.length === 0;
-        return {
-          ...chat,
-          messages: [...chat.messages, message],
-          title: isFirstMessage && message.role === "user" ? title : chat.title,
-          timestamp: Date.now()
-        };
-      }
-      return chat;
-    }));
+    console.log('[useChats] addMessage called:', { chatId, resolvedChatId, role: message.role, hasFigmaDiagram: !!message.figmaDiagram });
+    setChats(prev => {
+      const updatedChats = prev.map(chat => {
+        const matchId = chat.id === chatId || chat.id === resolvedChatId;
+        if (matchId) {
+          const isFirstMessage = chat.messages.length === 0;
+          const updated = {
+            ...chat,
+            messages: [...chat.messages, message],
+            title: isFirstMessage && message.role === "user" ? title : chat.title,
+            timestamp: Date.now()
+          };
+          console.log('[useChats] Updated chat messages:', { chatId: chat.id, messageCount: updated.messages.length, lastMessage: updated.messages[updated.messages.length - 1] });
+          return updated;
+        }
+        return chat;
+      });
+      return updatedChats;
+    });
 
     if (isPending && message.role === "user" && !isCreatingChat) {
       chatCreationInProgress.add(chatId);
