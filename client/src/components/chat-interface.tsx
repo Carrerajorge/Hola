@@ -1394,7 +1394,8 @@ export function ChatInterface({
             const aiMsg: Message = {
               id: (Date.now() + 1).toString(),
               role: "assistant",
-              content: `Aquí está la imagen que generé basada en tu descripción:\n\n![Imagen generada](${imageData.imageData})`,
+              content: "Aquí está la imagen que generé basada en tu descripción:",
+              generatedImage: imageData.imageData,
               timestamp: new Date(),
             };
             onSendMessage(aiMsg);
@@ -2004,6 +2005,18 @@ export function ChatInterface({
                   {msg.figmaDiagram && (
                     <div className="mt-3 w-full">
                       <FigmaBlock diagram={msg.figmaDiagram} />
+                    </div>
+                  )}
+
+                  {/* Generated Image Block */}
+                  {msg.generatedImage && (
+                    <div className="mt-3 px-4">
+                      <img 
+                        src={msg.generatedImage} 
+                        alt="Imagen generada" 
+                        className="max-w-full h-auto rounded-lg shadow-md"
+                        style={{ maxHeight: "400px" }}
+                      />
                     </div>
                   )}
 

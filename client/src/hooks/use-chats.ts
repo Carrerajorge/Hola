@@ -27,6 +27,7 @@ export interface Message {
   attachments?: { type: "word" | "excel" | "ppt" | "image"; name: string; imageUrl?: string; storagePath?: string; fileId?: string }[];
   sources?: { fileName: string; content: string }[];
   figmaDiagram?: FigmaDiagram;
+  generatedImage?: string;
 }
 
 export interface Chat {
@@ -140,7 +141,8 @@ export function useChats() {
         ...chat,
         messages: chat.messages.map(msg => ({
           ...msg,
-          sources: undefined // Don't store sources in localStorage - they take too much space
+          sources: undefined, // Don't store sources in localStorage - they take too much space
+          generatedImage: undefined // Don't store generated images in localStorage - they're too large
         }))
       }));
       try {
