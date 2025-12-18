@@ -43,14 +43,15 @@ Preferred communication style: Simple, everyday language.
   - `grok-3-fast`: Fast text generation model
   - `grok-2-vision-1212`: Vision model for image analysis
   - **API Key**: `XAI_API_KEY` environment variable required
-- **Google Gemini API**: Alternative AI model provider via @google/genai SDK
+- **Google Gemini API**: Default AI model provider via @google/genai SDK
+  - `gemini-3-flash-preview`: Newest and fastest model (DEFAULT)
   - `gemini-2.5-flash`: Fast and efficient model
   - `gemini-2.5-pro`: Most capable model
   - **API Key**: `GEMINI_API_KEY` environment variable required
   - Note: Gemini does not support image analysis in current integration
 
 **Model Selection:**
-Users can switch between xAI and Gemini models via the dropdown in the chat header. The selected provider and model are passed to `/api/chat` endpoint.
+Users can switch between xAI and Gemini models via the dropdown in the chat header. The selected provider and model are passed to `/api/chat` endpoint. Default model is `gemini-3-flash-preview`.
 
 ### Database
 - **PostgreSQL**: Primary database, connection via `DATABASE_URL` environment variable

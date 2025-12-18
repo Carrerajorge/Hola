@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export const GEMINI_MODELS = {
+  FLASH_PREVIEW: "gemini-3-flash-preview",
   FLASH: "gemini-2.5-flash",
   PRO: "gemini-2.5-pro",
 } as const;
@@ -31,7 +32,7 @@ export async function geminiChat(
   messages: GeminiChatMessage[],
   options: GeminiChatOptions = {}
 ): Promise<GeminiResponse> {
-  const model = options.model || GEMINI_MODELS.FLASH;
+  const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
   
   const contents = messages.map(msg => ({
     role: msg.role,
@@ -66,7 +67,7 @@ export async function* geminiStreamChat(
   messages: GeminiChatMessage[],
   options: GeminiChatOptions = {}
 ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
-  const model = options.model || GEMINI_MODELS.FLASH;
+  const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
   
   const contents = messages.map(msg => ({
     role: msg.role,

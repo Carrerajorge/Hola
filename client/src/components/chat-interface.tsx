@@ -596,8 +596,8 @@ export function ChatInterface({
   const [isFigmaConnecting, setIsFigmaConnecting] = useState(false);
   const [isFigmaConnected, setIsFigmaConnected] = useState(false);
   const [showFigmaTokenInput, setShowFigmaTokenInput] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<"xai" | "gemini">("xai");
-  const [selectedModel, setSelectedModel] = useState<string>("grok-3-fast");
+  const [selectedProvider, setSelectedProvider] = useState<"xai" | "gemini">("gemini");
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-3-flash-preview");
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
@@ -1587,7 +1587,8 @@ export function ChatInterface({
               {selectedProvider === "xai" ? "xAI" : "Gemini"}: {
                 selectedProvider === "xai" 
                   ? (selectedModel === "grok-3-fast" ? "Grok 3 Fast" : "Grok 2 Vision")
-                  : (selectedModel === "gemini-2.5-flash" ? "Gemini 2.5 Flash" : "Gemini 2.5 Pro")
+                  : (selectedModel === "gemini-3-flash-preview" ? "Gemini 3 Flash" 
+                     : selectedModel === "gemini-2.5-flash" ? "Gemini 2.5 Flash" : "Gemini 2.5 Pro")
               }
             </span>
             <ChevronDown className="h-3 w-3 text-muted-foreground" />
@@ -1617,6 +1618,14 @@ export function ChatInterface({
                 <div className="border-t border-border my-2"></div>
                 
                 <div className="text-xs font-medium text-muted-foreground mb-2 px-2">Google Gemini</div>
+                <button
+                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "gemini" && selectedModel === "gemini-3-flash-preview" ? "bg-muted" : ""}`}
+                  onClick={() => { setSelectedProvider("gemini"); setSelectedModel("gemini-3-flash-preview"); setIsModelSelectorOpen(false); }}
+                  data-testid="model-option-gemini-3-flash"
+                >
+                  <div className="font-medium">Gemini 3 Flash Preview</div>
+                  <div className="text-xs text-muted-foreground">Más nuevo y rápido (predeterminado)</div>
+                </button>
                 <button
                   className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "gemini" && selectedModel === "gemini-2.5-flash" ? "bg-muted" : ""}`}
                   onClick={() => { setSelectedProvider("gemini"); setSelectedModel("gemini-2.5-flash"); setIsModelSelectorOpen(false); }}

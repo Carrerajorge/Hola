@@ -7,7 +7,7 @@ import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
 import { agentOrchestrator, StepUpdate, ProgressUpdate, guardrails } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
-import { handleChatRequest, AVAILABLE_MODELS } from "./services/chatService";
+import { handleChatRequest, AVAILABLE_MODELS, DEFAULT_PROVIDER, DEFAULT_MODEL } from "./services/chatService";
 import { llmGateway } from "./lib/llmGateway";
 import { ALLOWED_MIME_TYPES } from "./lib/constants";
 import { 
@@ -139,7 +139,7 @@ export async function registerRoutes(
 
   app.post("/api/chat", async (req, res) => {
     try {
-      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode, provider = "xai", model } = req.body;
+      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });

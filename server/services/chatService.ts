@@ -20,11 +20,15 @@ export const AVAILABLE_MODELS = {
   gemini: {
     name: "Google Gemini",
     models: [
+      { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", description: "Newest and fastest", default: true },
       { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Fast and efficient" },
       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "Most capable" },
     ]
   }
 } as const;
+
+export const DEFAULT_PROVIDER = "gemini";
+export const DEFAULT_MODEL = "gemini-3-flash-preview";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -92,7 +96,7 @@ export async function handleChatRequest(
     model?: string;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = "xai", model } = options;
+  const { useRag = true, conversationId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL } = options;
   const hasImages = images && images.length > 0;
   
   let validatedGptConfig = gptConfig;
