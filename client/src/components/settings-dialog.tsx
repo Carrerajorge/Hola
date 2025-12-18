@@ -19,8 +19,14 @@ import {
   Play,
   ChevronRight,
   Plus,
-  Github
+  Github,
+  Globe,
+  Linkedin,
+  Info,
+  Mail,
+  Box
 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 type SettingsSection = "general" | "notifications" | "personalization" | "apps" | "schedules" | "data" | "security" | "account";
@@ -726,20 +732,94 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       case "account":
         return (
           <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Cuenta</h2>
+            <h2 className="text-xl font-semibold">Perfil de constructor de GPT</h2>
             <p className="text-sm text-muted-foreground">
-              Administra tu información de cuenta.
+              Personaliza tu perfil de constructor para conectarte con usuarios de los GPT. Esta configuración se aplica en los GPT compartidos públicamente.
             </p>
+            
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
+                  <Box className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <div>
+                  <span className="text-sm font-medium block">PlaceholderGPT</span>
+                  <span className="text-xs text-muted-foreground">Por Usuario</span>
+                </div>
+              </div>
+              <span className="text-sm text-muted-foreground">Vista previa</span>
+            </div>
+
+            <Separator />
+
             <div className="space-y-4">
-              <Button variant="outline" className="w-full justify-start">
-                Editar perfil
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                Plan y facturación
-              </Button>
-              <Button variant="outline" className="w-full justify-start text-red-500 hover:text-red-600">
-                Eliminar cuenta
-              </Button>
+              <div className="flex items-center justify-between">
+                <span className="font-medium">Nombre</span>
+                <Switch defaultChecked data-testid="switch-show-name" />
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm">Usuario</span>
+                <Info className="h-4 w-4 text-muted-foreground" />
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <span className="font-medium">Enlaces</span>
+              
+              <div className="flex items-center justify-between py-2">
+                <div className="flex items-center gap-3">
+                  <Globe className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <Select>
+                  <SelectTrigger className="w-48" data-testid="select-domain">
+                    <SelectValue placeholder="Seleccionar un dominio" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Ninguno</SelectItem>
+                    <SelectItem value="custom">Dominio personalizado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex items-center gap-3">
+                  <Linkedin className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-sm">LinkedIn</span>
+                </div>
+                <Button variant="outline" size="sm" data-testid="button-add-linkedin">
+                  Agregar
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex items-center gap-3">
+                  <Github className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-sm">GitHub</span>
+                </div>
+                <Button variant="outline" size="sm" data-testid="button-add-github">
+                  Agregar
+                </Button>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <span className="font-medium">Correo electrónico</span>
+              
+              <div className="flex items-center gap-3 py-2">
+                <Mail className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm">usuario@ejemplo.com</span>
+              </div>
+
+              <div className="flex items-center gap-3 py-2">
+                <Checkbox id="email-comments" data-testid="checkbox-email-comments" />
+                <label htmlFor="email-comments" className="text-sm">
+                  Recibir correos electrónicos con comentarios
+                </label>
+              </div>
             </div>
           </div>
         );
