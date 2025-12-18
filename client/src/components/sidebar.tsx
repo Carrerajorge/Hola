@@ -22,7 +22,8 @@ import {
   EyeOff,
   Eye,
   Check,
-  X
+  X,
+  Monitor
 } from "lucide-react";
 import { SiraLogo } from "@/components/sira-logo";
 import { cn } from "@/lib/utils";
@@ -378,6 +379,10 @@ export function Sidebar({
               <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/billing"); }} data-testid="button-billing">
                 <CreditCard className="h-4 w-4" />
                 Facturación
+              </Button>
+              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/workspace-settings"); }} data-testid="button-workspace-settings">
+                <Monitor className="h-4 w-4" />
+                Configuración del espacio de trabajo
               </Button>
               <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setIsSettingsOpen(true); }} data-testid="button-settings">
                 <Settings className="h-4 w-4" />
