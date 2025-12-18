@@ -26,6 +26,9 @@ import {
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { SiraLogo } from "@/components/sira-logo";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
@@ -231,10 +234,189 @@ export default function WorkspaceSettingsPage() {
       case "permissions":
         return (
           <div className="space-y-6">
-            <h1 className="text-2xl font-semibold">Permisos y roles</h1>
-            <p className="text-sm text-muted-foreground">
-              Configura los permisos y roles de tu espacio de trabajo.
-            </p>
+            <div>
+              <h1 className="text-2xl font-semibold">Permisos y roles</h1>
+              <p className="text-sm text-muted-foreground">
+                Configura los permisos básicos para tu espacio de trabajo y personaliza el acceso con roles personalizados.
+              </p>
+            </div>
+
+            <Tabs defaultValue="workspace" className="w-full">
+              <TabsList className="bg-transparent border-b rounded-none w-full justify-start h-auto p-0">
+                <TabsTrigger 
+                  value="workspace" 
+                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-0 pb-2"
+                >
+                  Espacio de trabajo
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="workspace" className="mt-6 space-y-6">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input 
+                    placeholder="Buscar 13 permisos" 
+                    className="pl-9 w-64"
+                    data-testid="input-search-permissions"
+                  />
+                </div>
+
+                <div className="space-y-8">
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-medium">Compartir</h3>
+                      <Badge variant="secondary" className="text-xs">Enterprise</Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Permitir que los miembros compartan un chat, canvas o un proyecto con...</span>
+                      <Select defaultValue="members">
+                        <SelectTrigger className="w-64" data-testid="select-share-permission">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="members">Solo miembros del espacio de trabajo</SelectItem>
+                          <SelectItem value="anyone">Cualquier persona</SelectItem>
+                          <SelectItem value="none">Nadie</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-medium">Memoria</h3>
+                      <Badge variant="secondary" className="text-xs">Enterprise</Badge>
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex-1 pr-4">
+                        <span className="text-sm block">Permitir a los miembros usar la memoria</span>
+                        <span className="text-xs text-muted-foreground">
+                          Administra si los miembros pueden activar la memoria. Esto permite que Sira se vuelva más útil recordando detalles y preferencias a través de los chats.{" "}
+                          <button className="text-primary hover:underline">Obtener más información</button>
+                        </span>
+                      </div>
+                      <Switch defaultChecked data-testid="switch-memory" />
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex-1 pr-4">
+                        <span className="text-sm block">Política de retención del chat</span>
+                        <span className="text-xs text-muted-foreground">
+                          Comunícate con el administrador de la cuenta para modificar esta configuración.
+                        </span>
+                      </div>
+                      <span className="text-sm">Infinito</span>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-medium">Canvas</h3>
+                      <Badge variant="secondary" className="text-xs">Enterprise</Badge>
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex-1 pr-4">
+                        <span className="text-sm block">Ejecución del código del lienzo</span>
+                        <span className="text-xs text-muted-foreground">
+                          Permitir que los miembros ejecuten fragmentos de código dentro de Canvas.
+                        </span>
+                      </div>
+                      <Switch defaultChecked data-testid="switch-canvas-code" />
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex-1 pr-4">
+                        <span className="text-sm block">Acceso a red del código en Canvas</span>
+                        <span className="text-xs text-muted-foreground">
+                          Permitir que los miembros ejecuten código con acceso a red dentro de Canvas.
+                        </span>
+                      </div>
+                      <Switch defaultChecked data-testid="switch-canvas-network" />
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  <div className="space-y-4">
+                    <h3 className="font-medium">Sira Record</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Administra si los usuarios pueden usar Sira para grabar, transcribir y resumir audio de formato largo. Las grabaciones solo se usarán para fines de transcripción y no las almacenará.{" "}
+                      <button className="text-primary hover:underline">Obtener más información</button>
+                    </p>
+                    <div className="flex items-center justify-between py-2">
+                      <span className="text-sm">Permitir que los miembros usen Sira Record</span>
+                      <Switch defaultChecked data-testid="switch-record" />
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex-1 pr-4">
+                        <span className="text-sm block">Permitir que Sira consulte notas y transcripciones anteriores.</span>
+                        <span className="text-xs text-muted-foreground">
+                          Permitir que los miembros consulten notas y transcripciones anteriores en Sira Record.
+                        </span>
+                      </div>
+                      <Switch defaultChecked data-testid="switch-record-notes" />
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex-1 pr-4">
+                        <span className="text-sm block">Permite que los miembros compartan su pantalla o video mientras usan el modo de voz.</span>
+                        <span className="text-xs text-muted-foreground">
+                          Permite que los miembros compartan su pantalla o video mientras usan el modo de voz.
+                        </span>
+                      </div>
+                      <Switch defaultChecked data-testid="switch-screen-share" />
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-medium">Código en macOS</h3>
+                      <Badge variant="secondary" className="text-xs">Enterprise</Badge>
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex-1 pr-4">
+                        <span className="text-sm block">Permitir la edición de código en macOS</span>
+                        <span className="text-xs text-muted-foreground">
+                          Controla si los usuarios de este espacio de trabajo pueden permitir que Sira edite archivos de código al usar la aplicación de escritorio para macOS. Esto permite que Sira lea y edite el contenido de aplicaciones específicas en su escritorio para dar mejores respuestas.{" "}
+                          <button className="text-primary hover:underline">Obtener más información</button>
+                        </span>
+                      </div>
+                      <Switch data-testid="switch-macos-code" />
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex-1 pr-4">
+                        <span className="text-sm block">Permitir que los miembros vinculen Apple Intelligence</span>
+                        <span className="text-xs text-muted-foreground">
+                          Administra si los miembros pueden vincularse con Apple Intelligence.
+                        </span>
+                      </div>
+                      <Switch defaultChecked data-testid="switch-apple-intelligence" />
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="font-medium">Modelos</h3>
+                      <p className="text-xs text-muted-foreground">Administra el acceso de los miembros a los modelos</p>
+                    </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div className="flex-1 pr-4">
+                        <span className="text-sm block">Habilitar modelos adicionales</span>
+                        <span className="text-xs text-muted-foreground">
+                          Permite que los miembros usen modelos adicionales.
+                        </span>
+                      </div>
+                      <Switch defaultChecked data-testid="switch-additional-models" />
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         );
 
