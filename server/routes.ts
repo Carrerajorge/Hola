@@ -1390,7 +1390,7 @@ export async function registerRoutes(
     const state = Math.random().toString(36).substring(7);
     const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/figma/callback`;
     
-    const authUrl = `https://www.figma.com/oauth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=files:read&state=${state}&response_type=code`;
+    const authUrl = `https://www.figma.com/oauth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=file_content:read&state=${state}&response_type=code`;
     
     res.redirect(authUrl);
   });
