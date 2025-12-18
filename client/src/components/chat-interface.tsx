@@ -64,6 +64,7 @@ import { FigmaBlock } from "@/components/figma-block";
 import { SiraLogo } from "@/components/sira-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
+import { useAuth } from "@/hooks/use-auth";
 import { Database, Sparkles } from "lucide-react";
 
 const processLatex = (content: string): string => {
@@ -571,6 +572,7 @@ export function ChatInterface({
   setAiProcessSteps,
   chatId
 }: ChatInterfaceProps) {
+  const { user } = useAuth();
   const [input, setInput] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
@@ -1649,16 +1651,18 @@ export function ChatInterface({
           )}
         </div>
         <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
-            onClick={() => setIsUpgradeDialogOpen(true)}
-            data-testid="button-upgrade-header"
-          >
-            <Sparkles className="h-3 w-3 text-primary" />
-            Mejorar el plan a Go
-          </Button>
+          {user?.email !== "infosiragpt@gmail.com" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
+              onClick={() => setIsUpgradeDialogOpen(true)}
+              data-testid="button-upgrade-header"
+            >
+              <Sparkles className="h-3 w-3 text-primary" />
+              Mejorar el plan a Go
+            </Button>
+          )}
           <ShareChatDialog chatId={chatId || "new"} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
             <Button variant="ghost" size="icon" data-testid="button-share-chat">
               <ShareIcon size={20} />
