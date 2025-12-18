@@ -648,19 +648,77 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         return (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Seguridad</h2>
-            <p className="text-sm text-muted-foreground">
-              Configura la seguridad de tu cuenta.
-            </p>
+            
             <div className="space-y-4">
-              <Button variant="outline" className="w-full justify-start">
-                Cambiar contraseña
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                Autenticación de dos factores
-              </Button>
-              <Button variant="outline" className="w-full justify-start">
-                Sesiones activas
-              </Button>
+              <h3 className="text-base font-medium">Autenticación multifactor (MFA)</h3>
+              
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Aplicación de autenticación</span>
+                  <span className="text-xs text-muted-foreground">
+                    Usa códigos únicos desde una aplicación de autenticación.
+                  </span>
+                </div>
+                <Switch data-testid="switch-auth-app" />
+              </div>
+
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Notificaciones push</span>
+                  <span className="text-xs text-muted-foreground">
+                    Aprueba los inicios de sesión con una notificación push enviada a tu dispositivo de confianza
+                  </span>
+                </div>
+                <Switch data-testid="switch-push-notif" />
+              </div>
+
+              <button 
+                className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
+                data-testid="security-trusted-devices"
+              >
+                <span className="text-sm">Dispositivos de confianza</span>
+                <span className="text-sm text-muted-foreground flex items-center gap-1">
+                  1 <ChevronRight className="h-4 w-4" />
+                </span>
+              </button>
+
+              <Separator />
+
+              <div className="flex items-center justify-between py-2">
+                <span className="text-sm">Cerrar la sesión en este dispositivo</span>
+                <Button variant="outline" size="sm" data-testid="button-logout">
+                  Cerrar sesión
+                </Button>
+              </div>
+
+              <div className="flex items-start justify-between py-2">
+                <div className="flex-1 pr-4">
+                  <span className="text-sm block">Cerrar sesión en todos los dispositivos</span>
+                  <span className="text-xs text-muted-foreground">
+                    Cierra todas las sesiones activas en todos los dispositivos, incluida tu sesión actual. En los otros dispositivos, el cierre de sesión puede demorar hasta 30 minutos.
+                  </span>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 whitespace-nowrap"
+                  data-testid="button-logout-all"
+                >
+                  Cerrar todas las sesiones
+                </Button>
+              </div>
+
+              <Separator />
+
+              <div className="pt-2">
+                <h3 className="text-base font-medium">Inicio de sesión seguro con Sira</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Inicia sesión en sitios web y aplicaciones en toda la red con la seguridad confiable de Sira.{" "}
+                  <button className="text-primary hover:underline" data-testid="link-more-info">
+                    Obtener más información
+                  </button>
+                </p>
+              </div>
             </div>
           </div>
         );
