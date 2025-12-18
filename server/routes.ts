@@ -23,6 +23,7 @@ import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "./etl";
 import { figmaService } from "./services/figmaService";
 import { sendShareNotificationEmail } from "./services/emailService";
+import { generateImage, detectImageRequest, extractImagePrompt } from "./services/imageGeneration";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -195,6 +196,46 @@ export async function registerRoutes(
         details: error.message 
       });
     }
+  });
+
+  // Image Generation API
+  app.post("/api/image/generate", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+
+      console.log("[ImageGen] Generating image for prompt:", prompt);
+      
+      const result = await generateImage(prompt);
+      
+      res.json({
+        success: true,
+        imageData: `data:${result.mimeType};base64,${result.imageBase64}`,
+        prompt: result.prompt
+      });
+    } catch (error: any) {
+      console.error("Image generation error:", error);
+      res.status(500).json({ 
+        error: "Failed to generate image",
+        details: error.message 
+      });
+    }
+  });
+
+  // Detect if message is an image request
+  app.post("/api/image/detect", (req, res) => {
+    const { message } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+    
+    const isImageRequest = detectImageRequest(message);
+    const extractedPrompt = isImageRequest ? extractImagePrompt(message) : null;
+    
+    res.json({ isImageRequest, extractedPrompt });
   });
 
   // ETL Agent Routes

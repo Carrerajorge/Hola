@@ -1351,6 +1351,74 @@ export function ChatInterface({
     try {
       abortControllerRef.current = new AbortController();
       
+      // Check if this is an image generation request (manual tool selection or auto-detect)
+      const isImageTool = selectedTool === "image";
+      let shouldGenerateImage = isImageTool;
+      
+      // Auto-detect image requests if no tool is selected
+      if (!isImageTool && !selectedTool) {
+        try {
+          const detectRes = await fetch("/api/image/detect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userInput })
+          });
+          const detectData = await detectRes.json();
+          shouldGenerateImage = detectData.isImageRequest;
+        } catch (e) {
+          console.error("Image detection error:", e);
+        }
+      }
+      
+      // Generate image if needed
+      if (shouldGenerateImage) {
+        setAiProcessSteps([
+          { step: "Analizando tu petición", status: "done" },
+          { step: "Generando imagen con IA", status: "active" },
+          { step: "Procesando resultado", status: "pending" }
+        ]);
+        
+        try {
+          const imageRes = await fetch("/api/image/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: userInput }),
+            signal: abortControllerRef.current.signal
+          });
+          
+          const imageData = await imageRes.json();
+          
+          if (imageRes.ok && imageData.success) {
+            setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
+            
+            const aiMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: `Aquí está la imagen que generé basada en tu descripción:\n\n![Imagen generada](${imageData.imageData})`,
+              timestamp: new Date(),
+            };
+            onSendMessage(aiMsg);
+            
+            setAiState("idle");
+            setAiProcessSteps([]);
+            setSelectedTool(null);
+            abortControllerRef.current = null;
+            return;
+          } else {
+            throw new Error(imageData.error || "Error al generar imagen");
+          }
+        } catch (imgError: any) {
+          if (imgError.name === "AbortError") {
+            setAiState("idle");
+            setAiProcessSteps([]);
+            abortControllerRef.current = null;
+            return;
+          }
+          // If image generation fails, continue with normal chat to explain
+          console.error("Image generation failed:", imgError);
+        }
+      }
+      
       const fileContents = currentFiles
         .filter(f => f.content && f.status === "ready")
         .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
