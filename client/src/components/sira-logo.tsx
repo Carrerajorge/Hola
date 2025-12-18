@@ -12,7 +12,7 @@ export function SiraLogo({ size = 32, className = "" }: SiraLogoProps) {
       alt="Sira Logo" 
       width={size} 
       height={size}
-      className={className}
+      className={`${className} mix-blend-multiply dark:mix-blend-screen dark:invert`}
       style={{ objectFit: "contain" }}
     />
   );
