@@ -61,6 +61,7 @@ import { DocumentEditor } from "@/components/document-editor";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 import { ETLDialog } from "@/components/etl-dialog";
 import { FigmaBlock } from "@/components/figma-block";
+import { SiraLogo } from "@/components/sira-logo";
 import { Database } from "lucide-react";
 
 const processLatex = (content: string): string => {
@@ -2818,13 +2819,13 @@ export function ChatInterface({
                 transition={{ duration: 0.5, ease: "easeOut" }}
                 className="mb-8"
               >
-                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
-                  {activeGpt?.avatar ? (
+                {activeGpt?.avatar ? (
+                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
                     <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
-                  ) : (
-                    <BotIcon className="h-10 w-10 text-primary-foreground" />
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <SiraLogo size={80} />
+                )}
               </motion.div>
               <motion.h1 
                 initial={{ y: 20, opacity: 0 }}
