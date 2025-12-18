@@ -135,7 +135,7 @@ export async function registerRoutes(
 
   app.post("/api/chat", async (req, res) => {
     try {
-      const { messages, useRag = true, conversationId, images, gptConfig, documentMode } = req.body;
+      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -152,6 +152,7 @@ export async function registerRoutes(
         images,
         gptConfig,
         documentMode,
+        figmaMode,
         onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update as any)
       });
       

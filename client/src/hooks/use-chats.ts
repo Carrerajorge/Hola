@@ -1,6 +1,22 @@
 import { useState, useEffect, useCallback } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 
+export interface FigmaDiagram {
+  nodes: Array<{
+    id: string;
+    type: "start" | "end" | "process" | "decision";
+    label: string;
+    x: number;
+    y: number;
+  }>;
+  connections: Array<{
+    from: string;
+    to: string;
+    label?: string;
+  }>;
+  title?: string;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -10,6 +26,7 @@ export interface Message {
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
   attachments?: { type: "word" | "excel" | "ppt" | "image"; name: string; imageUrl?: string; storagePath?: string; fileId?: string }[];
   sources?: { fileName: string; content: string }[];
+  figmaDiagram?: FigmaDiagram;
 }
 
 export interface Chat {

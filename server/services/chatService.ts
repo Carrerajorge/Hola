@@ -22,6 +22,22 @@ interface DocumentMode {
   type: "word" | "excel" | "ppt";
 }
 
+interface FigmaDiagram {
+  nodes: Array<{
+    id: string;
+    type: "start" | "end" | "process" | "decision";
+    label: string;
+    x: number;
+    y: number;
+  }>;
+  connections: Array<{
+    from: string;
+    to: string;
+    label?: string;
+  }>;
+  title?: string;
+}
+
 interface ChatSource {
   fileName: string;
   content: string;
@@ -36,6 +52,7 @@ interface ChatResponse {
   pipelineSteps?: number;
   pipelineSuccess?: boolean;
   browserSessionId?: string | null;
+  figmaDiagram?: FigmaDiagram;
 }
 
 function broadcastAgentUpdate(runId: string, update: any) {
@@ -50,9 +67,10 @@ export async function handleChatRequest(
     onAgentProgress?: (update: ProgressUpdate) => void;
     gptConfig?: GptConfig;
     documentMode?: DocumentMode;
+    figmaMode?: boolean;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, images, onAgentProgress, gptConfig, documentMode } = options;
+  const { useRag = true, conversationId, images, onAgentProgress, gptConfig, documentMode, figmaMode } = options;
   const hasImages = images && images.length > 0;
   
   let validatedGptConfig = gptConfig;
@@ -321,6 +339,98 @@ ${documentCapabilitiesPrompt}`;
 
   const temperature = validatedGptConfig?.temperature ?? 0.7;
   const topP = validatedGptConfig?.topP ?? 1;
+
+  // Handle Figma diagram generation mode
+  if (figmaMode && lastUserMessage) {
+    const figmaSystemPrompt = `Eres un generador de diagramas de flujo. Analiza la solicitud del usuario y genera un diagrama de flujo estructurado.
+
+DEBES responder ÚNICAMENTE con un objeto JSON válido en el siguiente formato:
+{
+  "title": "Título del diagrama",
+  "nodes": [
+    { "id": "node1", "type": "start", "label": "Inicio", "x": 100, "y": 50 },
+    { "id": "node2", "type": "process", "label": "Paso 1", "x": 100, "y": 150 },
+    { "id": "node3", "type": "decision", "label": "¿Condición?", "x": 100, "y": 250 },
+    { "id": "node4", "type": "process", "label": "Paso Sí", "x": 250, "y": 350 },
+    { "id": "node5", "type": "process", "label": "Paso No", "x": -50, "y": 350 },
+    { "id": "node6", "type": "end", "label": "Fin", "x": 100, "y": 450 }
+  ],
+  "connections": [
+    { "from": "node1", "to": "node2" },
+    { "from": "node2", "to": "node3" },
+    { "from": "node3", "to": "node4", "label": "Sí" },
+    { "from": "node3", "to": "node5", "label": "No" },
+    { "from": "node4", "to": "node6" },
+    { "from": "node5", "to": "node6" }
+  ]
+}
+
+TIPOS DE NODOS:
+- "start": Nodo de inicio (óvalo verde)
+- "end": Nodo de fin (óvalo rojo)  
+- "process": Proceso o acción (rectángulo azul)
+- "decision": Decisión/bifurcación (rombo amarillo)
+
+REGLAS:
+1. Cada diagrama DEBE tener exactamente UN nodo "start" y al menos UN nodo "end"
+2. Posiciona los nodos verticalmente con Y incrementando hacia abajo (separación de ~100px)
+3. Para bifurcaciones, usa X negativo para "No" y X positivo para "Sí"
+4. Los labels deben ser concisos (máximo 5 palabras)
+5. SOLO responde con el JSON, sin explicaciones ni texto adicional
+
+Genera el diagrama basándote en la solicitud del usuario.`;
+
+    try {
+      const figmaResponse = await llmGateway.chat(
+        [
+          { role: "system", content: figmaSystemPrompt },
+          { role: "user", content: lastUserMessage.content }
+        ],
+        {
+          model: MODELS.TEXT,
+          temperature: 0.3,
+          topP: 1,
+          userId: conversationId,
+          requestId: `figma_${Date.now()}`,
+        }
+      );
+
+      // Parse the JSON response
+      let figmaDiagram: FigmaDiagram | undefined;
+      try {
+        const jsonMatch = figmaResponse.content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          figmaDiagram = {
+            title: parsed.title || "Diagrama",
+            nodes: parsed.nodes || [],
+            connections: parsed.connections || []
+          };
+        }
+      } catch (parseError) {
+        console.error("Failed to parse Figma diagram JSON:", parseError);
+      }
+
+      if (figmaDiagram && figmaDiagram.nodes.length > 0) {
+        return {
+          content: `He creado el diagrama "${figmaDiagram.title}". Puedes verlo abajo y editarlo en Figma.`,
+          role: "assistant",
+          figmaDiagram
+        };
+      } else {
+        return {
+          content: "No pude generar el diagrama. Por favor, describe el proceso o flujo que quieres visualizar con más detalle.",
+          role: "assistant"
+        };
+      }
+    } catch (error) {
+      console.error("Figma diagram generation error:", error);
+      return {
+        content: "Hubo un error al generar el diagrama. Por favor, intenta de nuevo.",
+        role: "assistant"
+      };
+    }
+  }
 
   let response;
   

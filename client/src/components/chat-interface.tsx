@@ -52,7 +52,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 
-import { Message } from "@/hooks/use-chats";
+import { Message, FigmaDiagram } from "@/hooks/use-chats";
 import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
@@ -60,6 +60,7 @@ import { VirtualComputer } from "@/components/virtual-computer";
 import { DocumentEditor } from "@/components/document-editor";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 import { ETLDialog } from "@/components/etl-dialog";
+import { FigmaBlock } from "@/components/figma-block";
 import { Database } from "lucide-react";
 
 const processLatex = (content: string): string => {
@@ -582,7 +583,7 @@ export function ChatInterface({
   const [editingSelectionText, setEditingSelectionText] = useState<string>("");
   const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
   const [selectedDocText, setSelectedDocText] = useState<string>("");
-  const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | null>(null);
+  const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -1359,6 +1360,7 @@ export function ChatInterface({
       // Determine if we're in document mode for special AI behavior
       const isDocumentMode = !!activeDocEditorRef.current;
       const documentType = activeDocEditorRef.current?.type || null;
+      const isFigmaMode = selectedDocTool === "figma";
       
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -1367,6 +1369,7 @@ export function ChatInterface({
           messages: chatHistory,
           images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
           documentMode: isDocumentMode ? { type: documentType } : undefined,
+          figmaMode: isFigmaMode,
           gptConfig: activeGpt ? {
             id: activeGpt.id,
             systemPrompt: activeGpt.systemPrompt,
@@ -1406,6 +1409,46 @@ export function ChatInterface({
       
       const fullContent = data.content;
       const responseSources = data.sources || [];
+      const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
+      
+      // If Figma diagram was generated, add it to chat immediately
+      if (figmaDiagram) {
+        setAiState("responding");
+        
+        // Quick streaming effect for the text part
+        let currentIndex = 0;
+        streamIntervalRef.current = setInterval(() => {
+          if (currentIndex < fullContent.length) {
+            const chunkSize = Math.floor(Math.random() * 5) + 3;
+            currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
+            streamingContentRef.current = fullContent.slice(0, currentIndex);
+            setStreamingContent(fullContent.slice(0, currentIndex));
+          } else {
+            if (streamIntervalRef.current) {
+              clearInterval(streamIntervalRef.current);
+              streamIntervalRef.current = null;
+            }
+            
+            const aiMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: fullContent,
+              timestamp: new Date(),
+              figmaDiagram,
+            };
+            onSendMessage(aiMsg);
+            
+            streamingContentRef.current = "";
+            setStreamingContent("");
+            setAiState("idle");
+            setAiProcessSteps([]);
+            setSelectedDocTool(null); // Reset tool selection
+            agent.complete();
+            abortControllerRef.current = null;
+          }
+        }, 10);
+        return;
+      }
       
       // If document mode is active: Buffer approach - show progress in chat, single write to document at end
       if (shouldWriteToDoc && docInsertContentRef.current) {
@@ -1781,6 +1824,13 @@ export function ChatInterface({
                       </>
                     );
                   })()}
+                  
+                  {/* Figma Diagram Block */}
+                  {msg.figmaDiagram && (
+                    <div className="mt-3 w-full">
+                      <FigmaBlock diagram={msg.figmaDiagram} />
+                    </div>
+                  )}
 
                   {msg.attachments && (
                     <div className="flex gap-2 flex-wrap mt-2">
@@ -2263,13 +2313,24 @@ export function ChatInterface({
                       "hover:shadow-lg hover:shadow-current/30",
                       selectedDocTool === "word" && "bg-gradient-to-br from-blue-500 to-blue-700",
                       selectedDocTool === "excel" && "bg-gradient-to-br from-green-500 to-green-700",
-                      selectedDocTool === "ppt" && "bg-gradient-to-br from-orange-400 to-orange-600"
+                      selectedDocTool === "ppt" && "bg-gradient-to-br from-orange-400 to-orange-600",
+                      selectedDocTool === "figma" && "bg-gradient-to-br from-purple-500 to-pink-500"
                     )}
                     style={{ animation: "liquid-float 3s ease-in-out infinite" }}
                   >
-                    <span className="text-white text-base font-bold z-10 drop-shadow-md">
-                      {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "X" : "P"}
-                    </span>
+                    {selectedDocTool === "figma" ? (
+                      <svg width="16" height="24" viewBox="0 0 38 57" fill="none" className="z-10 drop-shadow-md">
+                        <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE"/>
+                        <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83"/>
+                        <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262"/>
+                        <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E"/>
+                        <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF"/>
+                      </svg>
+                    ) : (
+                      <span className="text-white text-base font-bold z-10 drop-shadow-md">
+                        {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "X" : "P"}
+                      </span>
+                    )}
                   </div>
                   <button
                     onClick={closeDocEditor}
@@ -2949,6 +3010,22 @@ export function ChatInterface({
                               </div>
                               Presentación PPT
                             </Button>
+                            <Button 
+                                variant="ghost" 
+                                className="justify-start gap-2 text-sm h-9"
+                                onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
+                              >
+                                <div className="flex items-center justify-center w-5 h-5 rounded bg-white border">
+                                  <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
+                                    <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE"/>
+                                    <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83"/>
+                                    <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262"/>
+                                    <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E"/>
+                                    <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF"/>
+                                  </svg>
+                                </div>
+                                Diagrama Figma
+                              </Button>
                           </div>
                         </HoverCardContent>
                       </HoverCard>
@@ -3133,16 +3210,27 @@ export function ChatInterface({
                         "hover:after:opacity-100 after:animate-pulse",
                         selectedDocTool === "word" && "bg-gradient-to-br from-blue-500 to-blue-700 after:bg-blue-400/20",
                         selectedDocTool === "excel" && "bg-gradient-to-br from-green-500 to-green-700 after:bg-green-400/20",
-                        selectedDocTool === "ppt" && "bg-gradient-to-br from-orange-400 to-orange-600 after:bg-orange-400/20"
+                        selectedDocTool === "ppt" && "bg-gradient-to-br from-orange-400 to-orange-600 after:bg-orange-400/20",
+                        selectedDocTool === "figma" && "bg-gradient-to-br from-purple-500 to-pink-500 after:bg-purple-400/20"
                       )}
                       style={{
                         animation: "liquid-float 3s ease-in-out infinite"
                       }}
                       data-testid="button-selected-doc-tool"
                     >
-                      <span className="text-white text-base font-bold z-10 drop-shadow-md">
-                        {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "X" : "P"}
-                      </span>
+                      {selectedDocTool === "figma" ? (
+                        <svg width="16" height="24" viewBox="0 0 38 57" fill="none" className="z-10 drop-shadow-md">
+                          <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE"/>
+                          <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83"/>
+                          <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262"/>
+                          <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E"/>
+                          <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF"/>
+                        </svg>
+                      ) : (
+                        <span className="text-white text-base font-bold z-10 drop-shadow-md">
+                          {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "X" : "P"}
+                        </span>
+                      )}
                     </div>
                     {/* Close button on hover */}
                     <button
