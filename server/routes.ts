@@ -1388,7 +1388,11 @@ export async function registerRoutes(
     }
     
     const state = Math.random().toString(36).substring(7);
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/figma/callback`;
+    const host = req.get('host');
+    const protocol = host?.includes('replit') ? 'https' : req.protocol;
+    const redirectUri = `${protocol}://${host}/api/auth/figma/callback`;
+    
+    console.log("Starting Figma OAuth with redirect_uri:", redirectUri);
     
     const authUrl = `https://www.figma.com/oauth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=file_content:read&state=${state}&response_type=code`;
     
@@ -1397,9 +1401,16 @@ export async function registerRoutes(
   
   // Figma OAuth - Callback
   app.get("/api/auth/figma/callback", async (req, res) => {
-    const { code, state } = req.query;
+    console.log("Figma OAuth callback received:", req.query);
+    const { code, state, error, error_description } = req.query;
+    
+    if (error) {
+      console.error("Figma OAuth error from Figma:", error, error_description);
+      return res.redirect(`/?figma_error=${encodeURIComponent(error as string)}`);
+    }
     
     if (!code) {
+      console.error("No code received from Figma");
       return res.redirect("/?figma_error=no_code");
     }
     
@@ -1407,11 +1418,17 @@ export async function registerRoutes(
     const clientSecret = process.env.FIGMA_CLIENT_SECRET;
     
     if (!clientId || !clientSecret) {
+      console.error("Figma OAuth not configured");
       return res.redirect("/?figma_error=not_configured");
     }
     
     try {
-      const redirectUri = `${req.protocol}://${req.get('host')}/api/auth/figma/callback`;
+      // Use https for Replit
+      const host = req.get('host');
+      const protocol = host?.includes('replit') ? 'https' : req.protocol;
+      const redirectUri = `${protocol}://${host}/api/auth/figma/callback`;
+      
+      console.log("Exchanging code for token with redirect_uri:", redirectUri);
       
       // Exchange code for access token
       const tokenResponse = await fetch("https://api.figma.com/v1/oauth/token", {
@@ -1435,6 +1452,7 @@ export async function registerRoutes(
       }
       
       const tokenData = await tokenResponse.json();
+      console.log("Figma token received successfully");
       const { access_token } = tokenData;
       
       // Store the token
