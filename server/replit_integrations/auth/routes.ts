@@ -9,6 +9,102 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "123456";
 
 // Register auth-specific routes
 export function registerAuthRoutes(app: Express): void {
+  // User login with email/password (for users created by admin)
+  app.post("/api/auth/login", async (req: any, res) => {
+    try {
+      const { email, password } = req.body;
+      
+      if (!email || !password) {
+        return res.status(400).json({ message: "Email y contraseña son requeridos" });
+      }
+      
+      // Check if it's the admin
+      if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+        const adminId = "admin-user-id";
+        await authStorage.upsertUser({
+          id: adminId,
+          email: ADMIN_EMAIL,
+          firstName: "Admin",
+          lastName: "User",
+          profileImageUrl: null,
+          role: "admin",
+        });
+        
+        const adminUser = {
+          claims: {
+            sub: adminId,
+            email: ADMIN_EMAIL,
+            first_name: "Admin",
+            last_name: "User",
+          },
+          expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
+        };
+        
+        return req.login(adminUser, async (err: any) => {
+          if (err) {
+            return res.status(500).json({ message: "Error al iniciar sesión" });
+          }
+          const user = await authStorage.getUser(adminId);
+          res.json({ success: true, user });
+        });
+      }
+      
+      // Find user in database by email
+      const allUsers = await storage.getAllUsers();
+      const dbUser = allUsers.find(u => u.email?.toLowerCase() === email.toLowerCase());
+      
+      if (!dbUser) {
+        return res.status(401).json({ message: "Usuario no encontrado" });
+      }
+      
+      // Verify password
+      if (dbUser.password !== password) {
+        return res.status(401).json({ message: "Contraseña incorrecta" });
+      }
+      
+      // Check if user is active
+      if (dbUser.status !== "active") {
+        return res.status(401).json({ message: "Usuario inactivo" });
+      }
+      
+      // Set up session
+      const sessionUser = {
+        claims: {
+          sub: dbUser.id,
+          email: dbUser.email,
+          first_name: dbUser.firstName || "",
+          last_name: dbUser.lastName || "",
+        },
+        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
+      };
+      
+      req.login(sessionUser, async (err: any) => {
+        if (err) {
+          return res.status(500).json({ message: "Error al iniciar sesión" });
+        }
+        
+        // Track login
+        try {
+          await storage.createAuditLog({
+            userId: dbUser.id,
+            action: "user_login",
+            resource: "auth",
+            details: { email: dbUser.email },
+            ipAddress: req.ip || req.socket.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null
+          });
+        } catch (auditError) {
+          console.error("Failed to create audit log:", auditError);
+        }
+        
+        res.json({ success: true, user: dbUser });
+      });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ message: "Error al iniciar sesión" });
+    }
+  });
+
   // Admin login with email/password
   app.post("/api/auth/admin-login", async (req: any, res) => {
     try {

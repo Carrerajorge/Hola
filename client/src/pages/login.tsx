@@ -17,18 +17,23 @@ export default function LoginPage() {
       setIsLoading(true);
       setError("");
       try {
-        const response = await fetch("/api/auth/admin-login", {
+        const response = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, password }),
         });
         
         if (response.ok) {
-          // Set localStorage to mark ADMIN as logged in (not regular users)
-          localStorage.setItem("sira_admin_logged_in", "true");
-          localStorage.setItem("sira_admin_email", email);
-          // Clear any regular user login state
-          localStorage.removeItem("sira_logged_in");
+          const data = await response.json();
+          const user = data.user;
+          // Check if user is admin
+          if (user?.role === "admin") {
+            localStorage.setItem("sira_admin_logged_in", "true");
+            localStorage.setItem("sira_admin_email", email);
+          } else {
+            localStorage.setItem("sira_logged_in", "true");
+            localStorage.setItem("sira_user_email", email);
+          }
           // Invalidate auth query cache
           queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
           // Navigate to home
