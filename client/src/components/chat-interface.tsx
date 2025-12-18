@@ -62,6 +62,7 @@ import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 import { ETLDialog } from "@/components/etl-dialog";
 import { FigmaBlock } from "@/components/figma-block";
 import { SiraLogo } from "@/components/sira-logo";
+import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { Database } from "lucide-react";
 
 const processLatex = (content: string): string => {
@@ -542,6 +543,7 @@ interface ChatInterfaceProps {
   setAiState: React.Dispatch<React.SetStateAction<AiState>>;
   aiProcessSteps: AiProcessStep[];
   setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
+  chatId?: string | null;
 }
 
 interface UploadedFile {
@@ -565,7 +567,8 @@ export function ChatInterface({
   aiState,
   setAiState,
   aiProcessSteps,
-  setAiProcessSteps
+  setAiProcessSteps,
+  chatId
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
@@ -1573,7 +1576,12 @@ export function ChatInterface({
             <ChevronDown className="h-3 w-3 text-muted-foreground" />
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1">
+          <ShareChatDialog chatId={chatId || "new"} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
+            <Button variant="ghost" size="icon" data-testid="button-share-chat">
+              <ShareIcon size={20} />
+            </Button>
+          </ShareChatDialog>
           <Button variant="ghost" size="icon">
             <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
           </Button>
