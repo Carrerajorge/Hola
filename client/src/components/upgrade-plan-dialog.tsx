@@ -38,6 +38,7 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
       buttonText: "Mejorar el plan a Go",
       buttonVariant: "default" as const,
       highlight: true,
+      buttonColor: "bg-purple-600 hover:bg-purple-700",
       features: [
         { icon: Target, text: "Explora a fondo preguntas más complejas" },
         { icon: Clock, text: "Chatea más tiempo y carga más contenido" },
@@ -45,7 +46,8 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
         { icon: Brain, text: "Almacena más contexto y obtén respuestas más inteligentes" },
         { icon: Zap, text: "Obtén ayuda con la planificación y las tareas" },
         { icon: Star, text: "Explora proyectos, tareas y GPT personalizados" },
-      ]
+      ],
+      footerNote: "Solo disponible en algunas regiones. Se aplican límites"
     },
     {
       name: "Plus",
@@ -62,7 +64,8 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
         { icon: FileText, text: "Organiza proyectos y GPT personalizados" },
         { icon: Video, text: "Produce y comparte videos en Sora" },
         { icon: Code, text: "Escribe código y crea aplicaciones con Codex" },
-      ]
+      ],
+      footerNote: "Se aplican límites"
     },
     {
       name: "Pro",
@@ -78,7 +81,10 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
         { icon: Zap, text: "Ejecuta investigaciones y planifica tareas con agentes" },
         { icon: Target, text: "Adapta tus proyectos y automatiza flujos de trabajo" },
         { icon: Video, text: "Supera tus límites con la creación de videos en Sora" },
-      ]
+        { icon: Code, text: "Implementa código más rápido con Codex" },
+        { icon: Star, text: "Obtén acceso anticipado a características experimentales" },
+      ],
+      footerNote: "Ilimitado, sujeto a medidas de protección contra abusos. Obtener más información"
     },
   ];
 
@@ -205,7 +211,7 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
                   variant={plan.buttonVariant}
                   className={cn(
                     "w-full mb-6",
-                    plan.highlight && "bg-primary hover:bg-primary/90"
+                    (plan as any).buttonColor ? (plan as any).buttonColor : plan.highlight && "bg-primary hover:bg-primary/90"
                   )}
                   disabled={plan.isCurrentPlan}
                   data-testid={`button-${plan.name.toLowerCase()}`}
@@ -221,6 +227,24 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
                     </div>
                   ))}
                 </div>
+
+                {(plan as any).footerNote && (
+                  <p className="text-xs text-muted-foreground mt-4 pt-4 border-t">
+                    {((plan as any).footerNote as string).includes("Obtener más información") ? (
+                      <>
+                        {((plan as any).footerNote as string).replace("Obtener más información", "")}
+                        <button className="underline hover:text-foreground">Obtener más información</button>
+                      </>
+                    ) : ((plan as any).footerNote as string).includes("Se aplican límites") ? (
+                      <>
+                        {((plan as any).footerNote as string).replace("Se aplican límites", "")}
+                        <button className="underline hover:text-foreground">Se aplican límites</button>
+                      </>
+                    ) : (
+                      (plan as any).footerNote
+                    )}
+                  </p>
+                )}
               </div>
             ))}
           </div>
