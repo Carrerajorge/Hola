@@ -33,6 +33,8 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { SiraLogo } from "@/components/sira-logo";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
 
@@ -750,10 +752,53 @@ export default function WorkspaceSettingsPage() {
                   data-testid="input-apps-search"
                 />
               </div>
-              <Button variant="outline" className="gap-2" data-testid="button-apps-filters">
-                <Filter className="h-4 w-4" />
-                Filtros
-              </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="gap-2" data-testid="button-apps-filters">
+                    <Filter className="h-4 w-4" />
+                    Filtros
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-0" align="end">
+                  <div className="p-4 space-y-4">
+                    <Collapsible defaultOpen>
+                      <CollapsibleTrigger className="flex items-center justify-between w-full">
+                        <span className="font-medium">Categorías</span>
+                        <ChevronDown className="h-4 w-4 transition-transform duration-200 [&[data-state=open]]:rotate-180" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-3 space-y-2">
+                        {["Diseño", "Empresa", "Herramientas del desarrollador", "Productividad", "Colaboración", "Finanzas"].map((cat) => (
+                          <label key={cat} className="flex items-center gap-3 cursor-pointer">
+                            <input type="checkbox" className="h-4 w-4 rounded border-gray-300" />
+                            <span className="text-sm">{cat}</span>
+                          </label>
+                        ))}
+                      </CollapsibleContent>
+                    </Collapsible>
+
+                    <Collapsible defaultOpen>
+                      <CollapsibleTrigger className="flex items-center justify-between w-full">
+                        <span className="font-medium">Funcionalidades</span>
+                        <ChevronDown className="h-4 w-4 transition-transform duration-200 [&[data-state=open]]:rotate-180" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-3 space-y-2">
+                        {["Búsqueda de archivos", "Cargas de archivos", "Sincronización", "Capacidad de escritura", "Interactiva"].map((func) => (
+                          <label key={func} className="flex items-center gap-3 cursor-pointer">
+                            <input type="checkbox" className="h-4 w-4 rounded border-gray-300" />
+                            <span className="text-sm">{func}</span>
+                          </label>
+                        ))}
+                      </CollapsibleContent>
+                    </Collapsible>
+
+                    <div className="pt-2 border-t">
+                      <button className="text-sm text-muted-foreground hover:text-foreground w-full text-right">
+                        Borrar todo
+                      </button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
               <Button className="gap-2" data-testid="button-apps-create">
                 <Plus className="h-4 w-4" />
                 Crear
