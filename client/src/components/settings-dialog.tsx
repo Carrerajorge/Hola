@@ -561,11 +561,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Programaciones</h2>
             <p className="text-sm text-muted-foreground">
-              Configura tareas automáticas y recordatorios.
+              Sira puede programarse para ejecutarse nuevamente después de completar una tarea. 
+              Selecciona <span className="inline-flex items-center"><Calendar className="h-3 w-3 mx-1" /></span> Programar en el menú de <span className="font-medium">⋯</span> en una conversación para configurar ejecuciones futuras.
             </p>
-            <div className="text-sm text-muted-foreground">
-              No tienes programaciones activas.
-            </div>
+            <Button variant="outline" data-testid="button-manage-schedules">
+              Administrar
+            </Button>
           </div>
         );
 
