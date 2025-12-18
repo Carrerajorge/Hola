@@ -7,8 +7,7 @@ export const openai = new OpenAI({
 
 export const MODELS = {
   TEXT: "grok-3-fast",
-  VISION: "grok-2-vision-1212",
-  EMBEDDING: "text-embedding-3-small"
+  VISION: "grok-2-vision-1212"
 } as const;
 
 export type ModelType = typeof MODELS[keyof typeof MODELS];
