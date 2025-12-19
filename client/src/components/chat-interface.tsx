@@ -2031,7 +2031,7 @@ export function ChatInterface({
                       activeDocEditor.type === "ppt" && "bg-orange-500"
                     )}>
                       <span className="text-white text-sm font-bold">
-                        {activeDocEditor.type === "word" ? "W" : activeDocEditor.type === "excel" ? "X" : "P"}
+                        {activeDocEditor.type === "word" ? "W" : activeDocEditor.type === "excel" ? "E" : "P"}
                       </span>
                     </div>
                     <div className="flex-1 min-w-0">
@@ -2144,7 +2144,7 @@ export function ChatInterface({
                                 )}>
                                   <span className="text-white text-xs font-bold">
                                     {file.type === "word" ? "W" :
-                                     file.type === "excel" ? "X" :
+                                     file.type === "excel" ? "E" :
                                      file.type === "ppt" ? "P" : "F"}
                                   </span>
                                 </div>
@@ -2833,7 +2833,7 @@ export function ChatInterface({
                       </svg>
                     ) : (
                       <span className="text-white text-base font-bold z-10 drop-shadow-md">
-                        {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "X" : "P"}
+                        {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "E" : "P"}
                       </span>
                     )}
                   </div>
@@ -3046,7 +3046,7 @@ export function ChatInterface({
                                       )}>
                                         <span className="text-white text-xs font-bold">
                                           {att.type === "word" ? "W" :
-                                           att.type === "excel" ? "X" :
+                                           att.type === "excel" ? "E" :
                                            att.type === "ppt" ? "P" : "F"}
                                         </span>
                                       </div>
@@ -3472,7 +3472,7 @@ export function ChatInterface({
                                     <Loader2 className="h-4 w-4 text-white animate-spin" />
                                   ) : (
                                     <span className="text-white text-xs font-bold">
-                                      {isWord ? "W" : isExcel ? "X" : isPpt ? "P" : isPdf ? "PDF" : isImage ? "IMG" : "F"}
+                                      {isWord ? "W" : isExcel ? "E" : isPpt ? "P" : isPdf ? "PDF" : isImage ? "IMG" : "F"}
                                     </span>
                                   )}
                                 </div>
@@ -3798,7 +3798,7 @@ export function ChatInterface({
                         </svg>
                       ) : (
                         <span className="text-white text-base font-bold z-10 drop-shadow-md">
-                          {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "X" : "P"}
+                          {selectedDocTool === "word" ? "W" : selectedDocTool === "excel" ? "E" : "P"}
                         </span>
                       )}
                     </div>
