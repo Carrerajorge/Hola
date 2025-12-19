@@ -3,11 +3,9 @@ import { Button } from "@/components/ui/button";
 import { 
   ChevronDown, 
   ChevronRight, 
-  Play, 
   Copy, 
   Check, 
   AlertCircle,
-  Clock,
   CheckCircle2,
   Loader2,
   Terminal,
@@ -70,7 +68,7 @@ function generateCodeDescription(code: string): string {
   if (lines.includes('requests') || lines.includes('urllib') || lines.includes('fetch')) {
     return 'Realizando petición HTTP';
   }
-  if (lines.includes('open(') && ('write' in lines || 'read' in lines)) {
+  if (lines.includes('open(') && (lines.includes('write') || lines.includes('read'))) {
     return 'Procesando archivo';
   }
   if (lines.includes('def ') || lines.includes('class ')) {
@@ -87,7 +85,7 @@ export function CodeExecutionBlock({
   code,
   language = "python",
   conversationId,
-  autoRun = false,
+  autoRun = true,
   onExecuted,
 }: CodeExecutionBlockProps) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -95,23 +93,20 @@ export function CodeExecutionBlock({
   const [isRunning, setIsRunning] = useState(false);
   const [run, setRun] = useState<CodeRun | null>(null);
   const [artifacts, setArtifacts] = useState<CodeArtifact[]>([]);
+  const [hasAutoRun, setHasAutoRun] = useState(false);
   const { toast } = useToast();
 
   const description = generateCodeDescription(code);
 
-  const handleCopyCode = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    toast({
-      title: "Código copiado",
-      description: "El código ha sido copiado al portapapeles.",
-    });
-    setTimeout(() => setCopied(false), 2000);
-  };
+  // Auto-execute code on mount
+  useEffect(() => {
+    if (autoRun && !hasAutoRun && !isRunning && !run) {
+      setHasAutoRun(true);
+      executeCode();
+    }
+  }, [autoRun, hasAutoRun, isRunning, run]);
 
-  const handleRunCode = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const executeCode = async () => {
     if (isRunning) return;
     
     setIsRunning(true);
@@ -136,24 +131,33 @@ export function CodeExecutionBlock({
       if (onExecuted) {
         onExecuted(result.run, result.artifacts || []);
       }
-
-      if (result.run.status === "error") {
-        toast({
-          title: "Error en ejecución",
-          description: "El código produjo un error. Revisa la salida.",
-          variant: "destructive",
-        });
-      }
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "No se pudo ejecutar el código.",
-        variant: "destructive",
+      console.error("Code execution error:", error);
+      setRun({
+        id: "error",
+        code,
+        language,
+        status: "error",
+        stdout: null,
+        stderr: "No se pudo ejecutar el código. El servidor no está disponible.",
+        executionTimeMs: null,
       });
     } finally {
       setIsRunning(false);
     }
   };
+
+  const handleCopyCode = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    toast({
+      title: "Código copiado",
+      description: "El código ha sido copiado al portapapeles.",
+    });
+    setTimeout(() => setCopied(false), 2000);
+  };
+
 
   const getStatusBadge = () => {
     if (isRunning) {
@@ -229,21 +233,6 @@ export function CodeExecutionBlock({
                 <Check className="w-4 h-4 text-green-400" />
               ) : (
                 <Copy className="w-4 h-4" />
-              )}
-            </Button>
-            
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 text-gray-400 hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50"
-              onClick={handleRunCode}
-              disabled={isRunning}
-              data-testid="run-code"
-            >
-              {isRunning ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Play className="w-4 h-4" />
               )}
             </Button>
           </div>
