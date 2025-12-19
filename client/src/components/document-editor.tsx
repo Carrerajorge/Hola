@@ -175,7 +175,6 @@ export function DocumentEditor({
         
         // Use AST-based markdown to HTML conversion for accurate rendering
         const htmlContent = markdownToHtml(text);
-        console.log('[DocumentEditor] Single write completed');
         
         editor.chain()
           .focus('end')
@@ -183,7 +182,6 @@ export function DocumentEditor({
           .run();
       };
       
-      console.log('[DocumentEditor] Insert function ready');
       onInsertContent(insertContent);
     }
   }, [editor, onInsertContent]);

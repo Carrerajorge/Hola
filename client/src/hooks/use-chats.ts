@@ -261,7 +261,6 @@ export function useChats() {
         } else {
           // If server creation fails (e.g., 401), keep using local-only chat
           // Clear the pending queue to prevent messages from being lost
-          console.log("Server chat creation failed (likely not authenticated), using local-only mode");
           pendingMessageQueue.delete(chatId);
         }
       } catch (error) {

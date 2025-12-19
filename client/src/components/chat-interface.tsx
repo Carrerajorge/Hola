@@ -632,7 +632,6 @@ export function ChatInterface({
   // Keep ref in sync with state
   useEffect(() => {
     activeDocEditorRef.current = activeDocEditor;
-    console.log('[ChatInterface] activeDocEditor changed:', !!activeDocEditor);
   }, [activeDocEditor]);
   
   // Document editor is now only opened manually by the user clicking the buttons
@@ -681,8 +680,6 @@ export function ChatInterface({
   
   // Function to open blank document editor - preserves existing messages
   const openBlankDocEditor = (type: "word" | "excel" | "ppt") => {
-    console.log('[ChatInterface] Opening document editor:', type, 'Current messages:', messages.length);
-    
     const titles = {
       word: "Nuevo Documento Word",
       excel: "Nueva Hoja de Cálculo",
@@ -1401,13 +1398,11 @@ export function ChatInterface({
           });
           
           const imageData = await imageRes.json();
-          console.log("[ImageGen] Response:", { success: imageData.success, hasImageData: !!imageData.imageData, imageDataLength: imageData.imageData?.length });
           
           if (imageRes.ok && imageData.success) {
             setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
             
             const msgId = (Date.now() + 1).toString();
-            console.log("[ImageGen] Creating message with ID:", msgId);
             
             // Store image in separate memory store to prevent loss during localStorage sync
             storeGeneratedImage(msgId, imageData.imageData);
@@ -1416,7 +1411,6 @@ export function ChatInterface({
             const pendingImage = { messageId: msgId, imageData: imageData.imageData };
             setPendingGeneratedImage(pendingImage);
             latestGeneratedImageRef.current = pendingImage;
-            console.log("[ImageGen] Stored in pendingGeneratedImage and ref:", msgId);
             
             const aiMsg: Message = {
               id: msgId,
@@ -1425,7 +1419,6 @@ export function ChatInterface({
               generatedImage: imageData.imageData,
               timestamp: new Date(),
             };
-            console.log("[ImageGen] Sending message with generatedImage:", { msgId: aiMsg.id, hasImage: !!aiMsg.generatedImage });
             onSendMessage(aiMsg);
             
             setIsGeneratingImage(false);
@@ -1519,7 +1512,6 @@ export function ChatInterface({
 
       // Capture document mode state NOW using ref (avoids closure issues)
       const shouldWriteToDoc = !!activeDocEditorRef.current;
-      console.log('[ChatInterface] Document mode:', shouldWriteToDoc, 'Insert ref available:', !!docInsertContentRef.current);
       
       const fullContent = data.content;
       const responseSources = data.sources || [];
@@ -1590,7 +1582,6 @@ export function ChatInterface({
             try {
               if (docInsertContentRef.current) {
                 docInsertContentRef.current(fullContent);
-                console.log('[ChatInterface] Document written with single insert');
               }
             } catch (err) {
               console.error('[ChatInterface] Error writing to document:', err);
@@ -1669,12 +1660,6 @@ export function ChatInterface({
   };
 
   const hasMessages = messages.length > 0;
-  
-  // Debug: Log state changes
-  useEffect(() => {
-    console.log("[ChatInterface] State:", { hasMessages, aiState, aiProcessStepsCount: aiProcessSteps.length, streamingContent: !!streamingContent });
-  }, [hasMessages, aiState, aiProcessSteps.length, streamingContent]);
-
 
   return (
     <div className="flex h-full flex-col bg-transparent relative">
@@ -2040,20 +2025,10 @@ export function ChatInterface({
 
                   {/* Generated Image Block */}
                   {(() => {
-                    // Debug: Log all attempts to find the image
                     const msgImage = msg.generatedImage;
                     const storeImage = getGeneratedImage(msg.id);
                     const pendingMatch = pendingGeneratedImage?.messageId === msg.id ? pendingGeneratedImage.imageData : null;
                     const refMatch = latestGeneratedImageRef.current?.messageId === msg.id ? latestGeneratedImageRef.current.imageData : null;
-                    
-                    console.log("[ImageRender] Message ID:", msg.id, {
-                      hasMessageImage: !!msgImage,
-                      hasStoreImage: !!storeImage,
-                      hasPendingMatch: !!pendingMatch,
-                      hasRefMatch: !!refMatch,
-                      pendingImageId: pendingGeneratedImage?.messageId,
-                      refImageId: latestGeneratedImageRef.current?.messageId
-                    });
                     
                     // Try multiple sources for the image data
                     let imageData = msgImage || storeImage || pendingMatch || refMatch;
@@ -2061,7 +2036,6 @@ export function ChatInterface({
                     // Sync to store if we found image from any source but store doesn't have it
                     if (imageData && !storeImage) {
                       storeGeneratedImage(msg.id, imageData);
-                      console.log("[ImageRender] Synced image to store for msg:", msg.id);
                     }
                     
                     // Show loading skeleton if generating image and this is the last assistant message

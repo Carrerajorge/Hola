@@ -423,8 +423,6 @@ export function SpreadsheetEditor({
   }, [editingCell]);
 
   const insertContentFn = useCallback((text: string) => {
-    console.log('[SpreadsheetEditor] insertContent called with:', text.substring(0, 100));
-    
     // Clean markdown from text
     const cleanMarkdown = (str: string) => str
       .replace(/^\*\*[^*]+\*\*\s*/gm, '')
@@ -512,7 +510,6 @@ export function SpreadsheetEditor({
       const lines = cleanText.split('\n').filter(line => line.trim());
       if (lines.length === 0 && !chartConfig) return;
       
-      console.log('[SpreadsheetEditor] Inserting', lines.length, 'lines into active sheet');
       if (lines.length > 0) {
         setData(prev => insertLines(lines, prev));
       }
@@ -593,7 +590,6 @@ export function SpreadsheetEditor({
           
           newWorkbook.sheets.push(newSheet);
           lastSheetId = newId;
-          console.log('[SpreadsheetEditor] Created sheet:', cmd.name, 'with', lines.length, 'lines', sectionChartConfig ? 'with chart' : '');
         } else if (cmd.type === 'HOJA') {
           const targetSheet = newWorkbook.sheets.find(s => s.name.toLowerCase() === cmd.name.toLowerCase());
           if (targetSheet) {
@@ -612,7 +608,6 @@ export function SpreadsheetEditor({
       });
       
       newWorkbook.activeSheetId = lastSheetId;
-      console.log('[SpreadsheetEditor] Workbook updated with', newWorkbook.sheets.length, 'sheets');
       return newWorkbook;
     });
     
@@ -627,7 +622,6 @@ export function SpreadsheetEditor({
     if (onInsertContent && !insertFnRegisteredRef.current) {
       onInsertContent(insertContentFn);
       insertFnRegisteredRef.current = true;
-      console.log('[SpreadsheetEditor] Insert function registered');
     }
   }, [onInsertContent, insertContentFn]);
 

@@ -205,8 +205,7 @@ export function useBrowserSession() {
       console.error("Browser WebSocket error, using polling fallback:", error);
     };
     
-    ws.onclose = (event) => {
-      console.log("Browser WebSocket closed, polling continues:", event.code);
+    ws.onclose = () => {
       wsRef.current = null;
     };
   }, [startPolling, stopPolling]);
