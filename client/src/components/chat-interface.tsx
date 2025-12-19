@@ -95,30 +95,142 @@ const isNumericValue = (text: string): boolean => {
   return !isNaN(parseFloat(cleaned)) && isFinite(Number(cleaned)) && cleaned.length > 0;
 };
 
-const CleanDataTableComponents = {
-  table: ({children}: {children?: React.ReactNode}) => {
-    const childArray = React.Children.toArray(children);
-    let colCount = 0;
-    childArray.forEach((child: any) => {
-      if (child?.props?.children) {
-        const rows = React.Children.toArray(child.props.children);
-        rows.forEach((row: any) => {
-          if (row?.props?.children) {
-            const cells = React.Children.toArray(row.props.children);
-            colCount = Math.max(colCount, cells.length);
-          }
-        });
-      }
-    });
-    const minWidth = Math.min(Math.max(colCount * 150, 400), 1400);
-    return (
-      <div className="table-wrap">
-        <table className="data-table" style={{ minWidth: `${minWidth}px` }}>
-          {children}
-        </table>
+const extractTableData = (children: React.ReactNode): string[][] => {
+  const data: string[][] = [];
+  const childArray = React.Children.toArray(children);
+  childArray.forEach((section: any) => {
+    if (section?.props?.children) {
+      const rows = React.Children.toArray(section.props.children);
+      rows.forEach((row: any) => {
+        if (row?.props?.children) {
+          const cells = React.Children.toArray(row.props.children);
+          const rowData = cells.map((cell: any) => extractTextFromChildren(cell?.props?.children || ''));
+          data.push(rowData);
+        }
+      });
+    }
+  });
+  return data;
+};
+
+const downloadTableAsExcel = (children: React.ReactNode) => {
+  const data = extractTableData(children);
+  if (data.length === 0) return;
+  
+  let csv = data.map(row => 
+    row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')
+  ).join('\n');
+  
+  const BOM = '\uFEFF';
+  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `tabla_${Date.now()}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
+const DataTableWrapper = ({children}: {children?: React.ReactNode}) => {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const childArray = React.Children.toArray(children);
+  let colCount = 0;
+  childArray.forEach((child: any) => {
+    if (child?.props?.children) {
+      const rows = React.Children.toArray(child.props.children);
+      rows.forEach((row: any) => {
+        if (row?.props?.children) {
+          const cells = React.Children.toArray(row.props.children);
+          colCount = Math.max(colCount, cells.length);
+        }
+      });
+    }
+  });
+  const minWidth = Math.min(Math.max(colCount * 150, 400), 1400);
+  
+  const renderTable = () => (
+    <table className="data-table" style={{ minWidth: `${minWidth}px` }}>
+      {children}
+    </table>
+  );
+
+  return (
+    <>
+      <div className="table-container relative my-4">
+        <div className="table-actions absolute -top-1 right-0 flex gap-1 z-10">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => downloadTableAsExcel(children)}
+                className="p-1.5 rounded-md bg-background/80 backdrop-blur-sm border border-border hover:bg-accent transition-colors"
+                data-testid="button-download-excel"
+              >
+                <Download className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Descargar Excel</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setIsFullscreen(true)}
+                className="p-1.5 rounded-md bg-background/80 backdrop-blur-sm border border-border hover:bg-accent transition-colors"
+                data-testid="button-fullscreen-table"
+              >
+                <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Ampliar tabla</TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="table-wrap pt-6">
+          {renderTable()}
+        </div>
       </div>
-    );
-  },
+      
+      {isFullscreen && (
+        <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b">
+            <h3 className="font-semibold">Vista ampliada</h3>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => downloadTableAsExcel(children)}
+                data-testid="button-download-excel-fullscreen"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Descargar
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsFullscreen(false)}
+                data-testid="button-close-fullscreen"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto p-4">
+            <div className="table-wrap">
+              {renderTable()}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+const CleanDataTableComponents = {
+  table: DataTableWrapper,
   thead: ({children}: {children?: React.ReactNode}) => <thead>{children}</thead>,
   tbody: ({children}: {children?: React.ReactNode}) => <tbody>{children}</tbody>,
   tr: ({children}: {children?: React.ReactNode}) => <tr>{children}</tr>,
