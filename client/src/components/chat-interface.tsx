@@ -816,6 +816,16 @@ export function ChatInterface({
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [previewFileAttachment, setPreviewFileAttachment] = useState<{
+    name: string;
+    type: string;
+    mimeType?: string;
+    imageUrl?: string;
+    storagePath?: string;
+    fileId?: string;
+    content?: string;
+    isLoading?: boolean;
+  } | null>(null);
   const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
@@ -1163,6 +1173,74 @@ export function ChatInterface({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleOpenFileAttachmentPreview = async (att: {
+    type: string;
+    name: string;
+    mimeType?: string;
+    imageUrl?: string;
+    storagePath?: string;
+    fileId?: string;
+  }) => {
+    if (att.type === "image" && att.imageUrl) {
+      setLightboxImage(att.imageUrl);
+      return;
+    }
+    
+    if (att.type === "image" && att.storagePath) {
+      setLightboxImage(att.storagePath);
+      return;
+    }
+
+    setPreviewFileAttachment({
+      ...att,
+      isLoading: true,
+      content: undefined,
+    });
+
+    if (att.fileId) {
+      try {
+        const response = await fetch(`/api/files/${att.fileId}/content`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status === "ready" && data.content) {
+            setPreviewFileAttachment(prev => prev ? {
+              ...prev,
+              content: data.content,
+              isLoading: false,
+            } : null);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching file content:", error);
+      }
+    }
+
+    setPreviewFileAttachment(prev => prev ? {
+      ...prev,
+      isLoading: false,
+      content: "No se pudo cargar el contenido del archivo.",
+    } : null);
+  };
+
+  const handleDownloadFileAttachment = async () => {
+    if (!previewFileAttachment?.storagePath) return;
+    try {
+      const response = await fetch(previewFileAttachment.storagePath);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = previewFileAttachment.name;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error("Download failed:", error);
+    }
   };
 
   const handleFeedback = (msgId: string, value: "up" | "down") => {
@@ -3045,7 +3123,12 @@ export function ChatInterface({
                               <div className="flex flex-wrap gap-2 mb-2 justify-end">
                                 {msg.attachments.map((att, i) => (
                                   att.type === "image" && att.imageUrl ? (
-                                    <div key={i} className="relative max-w-[280px] rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+                                    <div 
+                                      key={i} 
+                                      className="relative max-w-[280px] rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
+                                      onClick={() => handleOpenFileAttachmentPreview(att)}
+                                      data-testid={`attachment-image-${i}`}
+                                    >
                                       <img 
                                         src={att.imageUrl} 
                                         alt={att.name} 
@@ -3058,7 +3141,9 @@ export function ChatInterface({
                                       return (
                                         <div
                                           key={i}
-                                          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                                          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                          onClick={() => handleOpenFileAttachmentPreview(att)}
+                                          data-testid={`attachment-file-${i}`}
                                         >
                                           <div className={cn(
                                             "flex items-center justify-center w-8 h-8 rounded-lg",
@@ -3980,6 +4065,103 @@ export function ChatInterface({
             >
               <Download className="h-5 w-5" />
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* File Attachment Preview Modal */}
+      {previewFileAttachment && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setPreviewFileAttachment(null)}
+          data-testid="file-attachment-preview-overlay"
+        >
+          <div 
+            className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-3">
+                {(() => {
+                  const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
+                  return (
+                    <div className={cn(
+                      "flex items-center justify-center w-10 h-10 rounded-lg",
+                      attTheme.bgColor
+                    )}>
+                      <span className="text-white text-sm font-bold">
+                        {attTheme.icon}
+                      </span>
+                    </div>
+                  );
+                })()}
+                <div>
+                  <h3 className="font-semibold text-lg text-foreground truncate max-w-md" data-testid="preview-file-name">
+                    {previewFileAttachment.name}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {previewFileAttachment.mimeType || "Archivo"}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {previewFileAttachment.storagePath && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadFileAttachment}
+                    data-testid="button-download-attachment"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Descargar
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setPreviewFileAttachment(null)}
+                  data-testid="button-close-attachment-preview"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
+            
+            {/* Content */}
+            <div className="flex-1 overflow-auto p-6">
+              {previewFileAttachment.isLoading ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <p className="text-muted-foreground">Cargando contenido...</p>
+                  </div>
+                </div>
+              ) : previewFileAttachment.content ? (
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
+                    {previewFileAttachment.content}
+                  </pre>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-64 text-center">
+                  <FileText className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                  <p className="text-muted-foreground">
+                    La vista previa no está disponible para este tipo de archivo.
+                  </p>
+                  {previewFileAttachment.storagePath && (
+                    <Button
+                      variant="outline"
+                      className="mt-4"
+                      onClick={handleDownloadFileAttachment}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Descargar archivo
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
