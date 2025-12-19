@@ -1365,8 +1365,8 @@ export function ChatInterface({
       const isImageTool = selectedTool === "image";
       let shouldGenerateImage = isImageTool;
       
-      // Auto-detect image requests if no tool is selected
-      if (!isImageTool && !selectedTool) {
+      // Auto-detect image requests if no tool is selected (also skip if doc tool like Figma is selected)
+      if (!isImageTool && !selectedTool && !selectedDocTool) {
         try {
           const detectRes = await fetch("/api/image/detect", {
             method: "POST",
