@@ -825,7 +825,9 @@ export function ChatInterface({
     fileId?: string;
     content?: string;
     isLoading?: boolean;
+    isProcessing?: boolean;
   } | null>(null);
+  const [copiedAttachmentContent, setCopiedAttachmentContent] = useState(false);
   const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
@@ -848,6 +850,18 @@ export function ChatInterface({
       }
     };
   }, []);
+
+  // Close file attachment preview on Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && previewFileAttachment) {
+        setPreviewFileAttachment(null);
+      }
+    };
+    
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [previewFileAttachment]);
   
   // Keep ref in sync with state
   useEffect(() => {
@@ -1196,6 +1210,7 @@ export function ChatInterface({
     setPreviewFileAttachment({
       ...att,
       isLoading: true,
+      isProcessing: false,
       content: undefined,
     });
 
@@ -1209,6 +1224,15 @@ export function ChatInterface({
               ...prev,
               content: data.content,
               isLoading: false,
+              isProcessing: false,
+            } : null);
+            return;
+          } else if (data.status === "processing" || data.status === "queued") {
+            setPreviewFileAttachment(prev => prev ? {
+              ...prev,
+              isLoading: false,
+              isProcessing: true,
+              content: undefined,
             } : null);
             return;
           }
@@ -1221,8 +1245,17 @@ export function ChatInterface({
     setPreviewFileAttachment(prev => prev ? {
       ...prev,
       isLoading: false,
+      isProcessing: false,
       content: "No se pudo cargar el contenido del archivo.",
     } : null);
+  };
+
+  const handleCopyAttachmentContent = async () => {
+    if (previewFileAttachment?.content) {
+      await navigator.clipboard.writeText(previewFileAttachment.content);
+      setCopiedAttachmentContent(true);
+      setTimeout(() => setCopiedAttachmentContent(false), 2000);
+    }
   };
 
   const handleDownloadFileAttachment = async () => {
@@ -4071,12 +4104,20 @@ export function ChatInterface({
 
       {/* File Attachment Preview Modal */}
       {previewFileAttachment && (
-        <div 
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setPreviewFileAttachment(null)}
           data-testid="file-attachment-preview-overlay"
         >
-          <div 
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
             className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
@@ -4086,14 +4127,19 @@ export function ChatInterface({
                 {(() => {
                   const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
                   return (
-                    <div className={cn(
-                      "flex items-center justify-center w-10 h-10 rounded-lg",
-                      attTheme.bgColor
-                    )}>
+                    <motion.div 
+                      initial={{ scale: 0.8 }}
+                      animate={{ scale: 1 }}
+                      transition={{ delay: 0.1, duration: 0.2 }}
+                      className={cn(
+                        "flex items-center justify-center w-10 h-10 rounded-lg",
+                        attTheme.bgColor
+                      )}
+                    >
                       <span className="text-white text-sm font-bold">
                         {attTheme.icon}
                       </span>
-                    </div>
+                    </motion.div>
                   );
                 })()}
                 <div>
@@ -4106,6 +4152,31 @@ export function ChatInterface({
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {previewFileAttachment.content && !previewFileAttachment.isLoading && !previewFileAttachment.isProcessing && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCopyAttachmentContent}
+                        data-testid="button-copy-attachment-content"
+                      >
+                        {copiedAttachmentContent ? (
+                          <>
+                            <Check className="h-4 w-4 mr-2 text-green-500" />
+                            Copiado
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-4 w-4 mr-2" />
+                            Copiar
+                          </>
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Copiar contenido al portapapeles</TooltipContent>
+                  </Tooltip>
+                )}
                 {previewFileAttachment.storagePath && (
                   <Button
                     variant="outline"
@@ -4131,20 +4202,125 @@ export function ChatInterface({
             {/* Content */}
             <div className="flex-1 overflow-auto p-6">
               {previewFileAttachment.isLoading ? (
-                <div className="flex items-center justify-center h-64">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex items-center justify-center h-64"
+                >
                   <div className="flex flex-col items-center gap-3">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <p className="text-muted-foreground">Cargando contenido...</p>
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    >
+                      <Loader2 className="h-8 w-8 text-primary" />
+                    </motion.div>
+                    <motion.p 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.2 }}
+                      className="text-muted-foreground"
+                    >
+                      Cargando contenido...
+                    </motion.p>
                   </div>
-                </div>
+                </motion.div>
+              ) : previewFileAttachment.isProcessing ? (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex items-center justify-center h-64"
+                >
+                  <div className="flex flex-col items-center gap-4 p-6 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
+                    <motion.div
+                      animate={{ 
+                        scale: [1, 1.1, 1],
+                        rotate: [0, 5, -5, 0]
+                      }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                    >
+                      <RefreshCw className="h-10 w-10 text-amber-600 dark:text-amber-400" />
+                    </motion.div>
+                    <div className="text-center">
+                      <p className="font-medium text-amber-800 dark:text-amber-200">
+                        Procesando archivo...
+                      </p>
+                      <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                        El contenido estará disponible en breve
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
               ) : previewFileAttachment.content ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
-                    {previewFileAttachment.content}
-                  </pre>
-                </div>
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="prose prose-sm dark:prose-invert max-w-none"
+                >
+                  <div className="bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm, remarkMath]}
+                      rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                      components={{
+                        p: ({children}) => <p className="mb-3 leading-relaxed text-sm">{children}</p>,
+                        h1: ({children}) => <h1 className="text-xl font-bold mb-3 mt-4">{children}</h1>,
+                        h2: ({children}) => <h2 className="text-lg font-bold mb-2 mt-3">{children}</h2>,
+                        h3: ({children}) => <h3 className="text-base font-semibold mb-2 mt-2">{children}</h3>,
+                        ul: ({children}) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
+                        ol: ({children}) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
+                        li: ({children}) => <li className="text-sm">{children}</li>,
+                        code: ({className, children, ...props}) => {
+                          const isInline = !className;
+                          return isInline ? (
+                            <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono" {...props}>
+                              {children}
+                            </code>
+                          ) : (
+                            <code className={cn("block text-xs", className)} {...props}>
+                              {children}
+                            </code>
+                          );
+                        },
+                        pre: ({children}) => (
+                          <pre className="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg overflow-x-auto text-xs mb-3">
+                            {children}
+                          </pre>
+                        ),
+                        blockquote: ({children}) => (
+                          <blockquote className="border-l-4 border-primary/50 pl-4 italic my-3 text-muted-foreground">
+                            {children}
+                          </blockquote>
+                        ),
+                        table: ({children}) => (
+                          <div className="overflow-x-auto my-3">
+                            <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600">
+                              {children}
+                            </table>
+                          </div>
+                        ),
+                        th: ({children}) => (
+                          <th className="border border-gray-300 dark:border-gray-600 px-3 py-2 bg-gray-100 dark:bg-gray-700 font-semibold text-left text-sm">
+                            {children}
+                          </th>
+                        ),
+                        td: ({children}) => (
+                          <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm">
+                            {children}
+                          </td>
+                        ),
+                      }}
+                    >
+                      {previewFileAttachment.content}
+                    </ReactMarkdown>
+                  </div>
+                </motion.div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-64 text-center">
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3 }}
+                  className="flex flex-col items-center justify-center h-64 text-center"
+                >
                   <FileText className="h-16 w-16 text-muted-foreground/50 mb-4" />
                   <p className="text-muted-foreground">
                     La vista previa no está disponible para este tipo de archivo.
@@ -4159,11 +4335,11 @@ export function ChatInterface({
                       Descargar archivo
                     </Button>
                   )}
-                </div>
+                </motion.div>
               )}
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
 
     </div>
