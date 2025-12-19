@@ -206,7 +206,28 @@ export async function registerRoutes(
 
       multipartSessions.delete(uploadId);
 
-      res.json({ success: true, storagePath: session.storagePath });
+      const file = await storage.createFile({
+        name: session.fileName,
+        type: session.mimeType,
+        size: session.fileSize,
+        storagePath: session.storagePath,
+        status: "processing",
+        userId: null,
+      });
+
+      await storage.createFileJob({
+        fileId: file.id,
+        status: "pending",
+      });
+
+      fileProcessingQueue.enqueue({
+        fileId: file.id,
+        storagePath: session.storagePath,
+        mimeType: session.mimeType,
+        fileName: session.fileName,
+      });
+
+      res.json({ success: true, storagePath: session.storagePath, fileId: file.id });
     } catch (error: any) {
       console.error("Error completing multipart upload:", error);
       res.status(500).json({ error: "Failed to complete multipart upload" });
@@ -1823,6 +1844,55 @@ export async function registerRoutes(
 
   fileProcessingQueue.setStatusChangeHandler((update: FileStatusUpdate) => {
     broadcastFileStatus(update);
+  });
+
+  fileProcessingQueue.setProcessCallback(async (job) => {
+    try {
+      await storage.updateFileJobStatus(job.fileId, "processing");
+      await storage.updateFileProgress(job.fileId, 10);
+      fileProcessingQueue.updateProgress(job.fileId, 10);
+
+      const objectFile = await objectStorageService.getObjectEntityFile(job.storagePath);
+      const content = await objectStorageService.getFileContent(objectFile);
+      await storage.updateFileProgress(job.fileId, 30);
+      fileProcessingQueue.updateProgress(job.fileId, 30);
+
+      const result = await processDocument(content, job.mimeType, job.fileName);
+      await storage.updateFileProgress(job.fileId, 50);
+      fileProcessingQueue.updateProgress(job.fileId, 50);
+
+      const chunks = chunkText(result.text, 1500, 150);
+      await storage.updateFileProgress(job.fileId, 60);
+      fileProcessingQueue.updateProgress(job.fileId, 60);
+
+      const texts = chunks.map(c => c.content);
+      const embeddings = await generateEmbeddingsBatch(texts);
+      await storage.updateFileProgress(job.fileId, 80);
+      fileProcessingQueue.updateProgress(job.fileId, 80);
+
+      const chunksWithEmbeddings = chunks.map((chunk, i) => ({
+        fileId: job.fileId,
+        content: chunk.content,
+        embedding: embeddings[i],
+        chunkIndex: chunk.chunkIndex,
+        pageNumber: chunk.pageNumber || null,
+        metadata: null,
+      }));
+
+      await storage.createFileChunks(chunksWithEmbeddings);
+      await storage.updateFileProgress(job.fileId, 95);
+      fileProcessingQueue.updateProgress(job.fileId, 95);
+
+      await storage.updateFileCompleted(job.fileId);
+      await storage.updateFileJobStatus(job.fileId, "completed");
+      
+      console.log(`[FileQueue] File ${job.fileId} processed: ${chunks.length} chunks created`);
+    } catch (error: any) {
+      console.error(`[FileQueue] Error processing file ${job.fileId}:`, error);
+      await storage.updateFileError(job.fileId, error.message || "Unknown error");
+      await storage.updateFileJobStatus(job.fileId, "failed", error.message);
+      throw error;
+    }
   });
   
   browserWss.on("connection", (ws) => {

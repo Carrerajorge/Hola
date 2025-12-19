@@ -143,20 +143,25 @@ export class ChunkedFileUploader {
       const useChunked = file.size > config.chunkSize;
 
       let storagePath: string;
+      let actualFileId = fileId;
 
       if (useChunked) {
-        storagePath = await this.uploadChunked(file, config, (percent) => {
+        const result = await this.uploadChunked(file, config, (percent) => {
           onProgress({
-            fileId,
+            fileId: actualFileId,
             phase: 'uploading',
             uploadProgress: percent,
             processingProgress: 0,
           });
         });
+        storagePath = result.storagePath;
+        if (result.fileId) {
+          actualFileId = result.fileId;
+        }
       } else {
         storagePath = await this.uploadSingle(file, (percent) => {
           onProgress({
-            fileId,
+            fileId: actualFileId,
             phase: 'uploading',
             uploadProgress: percent,
             processingProgress: 0,
@@ -165,13 +170,13 @@ export class ChunkedFileUploader {
       }
 
       onProgress({
-        fileId,
+        fileId: actualFileId,
         phase: 'processing',
         uploadProgress: 100,
         processingProgress: 0,
       });
 
-      return { fileId, storagePath };
+      return { fileId: actualFileId, storagePath };
     } catch (error: any) {
       onProgress({
         fileId,
@@ -275,7 +280,7 @@ export class ChunkedFileUploader {
     }
 
     const result = await completeResponse.json();
-    return result.storagePath;
+    return { storagePath: result.storagePath, fileId: result.fileId };
   }
 
   private uploadWithProgress(
