@@ -2195,41 +2195,46 @@ export function ChatInterface({
                   
                   {msg.content && !msg.isThinking && (() => {
                     const { text, documents } = parseDocumentBlocks(msg.content);
+                    
+                    const extractCodeBlocks = (content: string) => {
+                      const pythonBlockRegex = /```(?:python|py)\n([\s\S]*?)```/g;
+                      const blocks: { type: 'text' | 'python', content: string }[] = [];
+                      let lastIndex = 0;
+                      let match;
+                      
+                      while ((match = pythonBlockRegex.exec(content)) !== null) {
+                        if (match.index > lastIndex) {
+                          blocks.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+                        }
+                        blocks.push({ type: 'python', content: match[1] });
+                        lastIndex = match.index + match[0].length;
+                      }
+                      
+                      if (lastIndex < content.length) {
+                        blocks.push({ type: 'text', content: content.slice(lastIndex) });
+                      }
+                      
+                      return blocks.length > 0 ? blocks : [{ type: 'text' as const, content }];
+                    };
+                    
+                    const contentBlocks = extractCodeBlocks(text || '');
+                    
                     return (
                       <>
-                        {text && (
-                          <div className="px-4 py-3 text-foreground liquid-message-ai-light min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
+                        {contentBlocks.map((block, blockIdx) => (
+                          block.type === 'python' ? (
+                            <div key={blockIdx} className="px-4">
+                              <CodeExecutionBlock code={block.content.trim()} language="python" />
+                            </div>
+                          ) : block.content.trim() ? (
+                          <div key={blockIdx} className="px-4 py-3 text-foreground liquid-message-ai-light min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
                             <ReactMarkdown
                               remarkPlugins={[remarkGfm, remarkMath]}
                               rehypePlugins={[rehypeKatex, rehypeHighlight]}
                               components={{
                                 p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
                                 a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
-                                pre: ({children, node}: any) => {
-                                  const codeChild = node?.children?.find((c: any) => c.tagName === 'code');
-                                  const classNameProp = codeChild?.properties?.className;
-                                  let lang = '';
-                                  if (Array.isArray(classNameProp)) {
-                                    lang = classNameProp.find((c: string) => c.startsWith('language-'))?.replace('language-', '') || '';
-                                  } else if (typeof classNameProp === 'string') {
-                                    const match = classNameProp.match(/language-(\w+)/);
-                                    lang = match ? match[1] : '';
-                                  }
-                                  if (lang === 'python' || lang === 'py') {
-                                    const extractText = (nodes: any[]): string => {
-                                      return nodes?.map((n: any) => {
-                                        if (n.type === 'text') return n.value || '';
-                                        if (n.children) return extractText(n.children);
-                                        return '';
-                                      }).join('') || '';
-                                    };
-                                    const codeText = extractText(codeChild?.children || []);
-                                    if (codeText) {
-                                      return <CodeExecutionBlock code={codeText} language="python" />;
-                                    }
-                                  }
-                                  return <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>;
-                                },
+                                pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
                                 code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
                                 ul: ({children}) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
                                 ol: ({children}) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
@@ -2242,10 +2247,11 @@ export function ChatInterface({
                                 ...CleanDataTableComponents,
                               }}
                             >
-                              {processLatex(text)}
+                              {processLatex(block.content)}
                             </ReactMarkdown>
                           </div>
-                        )}
+                          ) : null
+                        ))}
                         {documents.length > 0 && (
                           <div className="flex gap-2 flex-wrap mt-3 px-4">
                             {documents.map((doc, idx) => (
