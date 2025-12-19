@@ -61,6 +61,7 @@ import { DocumentEditor } from "@/components/document-editor";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 import { ETLDialog } from "@/components/etl-dialog";
 import { FigmaBlock } from "@/components/figma-block";
+import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { SiraLogo } from "@/components/sira-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
@@ -2204,7 +2205,16 @@ export function ChatInterface({
                               components={{
                                 p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
                                 a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
-                                pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
+                                pre: ({children, node}: any) => {
+                                  const codeChild = node?.children?.find((c: any) => c.tagName === 'code');
+                                  const className = codeChild?.properties?.className;
+                                  const lang = Array.isArray(className) ? className.find((c: string) => c.startsWith('language-'))?.replace('language-', '') : '';
+                                  if (lang === 'python' || lang === 'py') {
+                                    const codeText = codeChild?.children?.[0]?.value || '';
+                                    return <CodeExecutionBlock code={codeText} language="python" />;
+                                  }
+                                  return <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>;
+                                },
                                 code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
                                 ul: ({children}) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
                                 ol: ({children}) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
