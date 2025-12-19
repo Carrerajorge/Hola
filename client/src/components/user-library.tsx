@@ -238,7 +238,16 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
         }
         throw new Error("Failed to fetch library");
       }
-      return response.json();
+      const data = await response.json();
+      // Map API response fields to MediaItem interface
+      return data.map((item: any) => ({
+        id: item.id,
+        title: item.title,
+        type: item.mediaType as "image" | "video" | "document",
+        url: item.storagePath,
+        thumbnailUrl: item.thumbnailPath,
+        createdAt: item.createdAt,
+      }));
     },
     enabled: open,
   });

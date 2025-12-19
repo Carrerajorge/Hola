@@ -1407,6 +1407,24 @@ export function ChatInterface({
             // Store image in separate memory store to prevent loss during localStorage sync
             storeGeneratedImage(msgId, imageData.imageData);
             
+            // Save generated image to user's library (fire and forget)
+            if (user) {
+              fetch("/api/library", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({
+                  mediaType: "image",
+                  title: `Imagen generada - ${new Date().toLocaleDateString('es-ES')}`,
+                  description: userInput.slice(0, 200),
+                  storagePath: imageData.imageData,
+                  mimeType: "image/png",
+                  sourceChatId: chatId || null,
+                  metadata: { prompt: userInput }
+                })
+              }).catch(err => console.error("Failed to save image to library:", err));
+            }
+            
             // Also store in local component state and ref for persistence across remounts
             const pendingImage = { messageId: msgId, imageData: imageData.imageData };
             setPendingGeneratedImage(pendingImage);
