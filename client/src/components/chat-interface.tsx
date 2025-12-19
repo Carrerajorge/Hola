@@ -66,6 +66,7 @@ import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { Database, Sparkles } from "lucide-react";
+import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
 
 const processLatex = (content: string): string => {
   return content
@@ -759,6 +760,7 @@ interface UploadedFile {
   id?: string;
   name: string;
   type: string;
+  mimeType?: string;
   size: number;
   dataUrl?: string;
   storagePath?: string;
@@ -1333,6 +1335,7 @@ export function ChatInterface({
         id: tempId,
         name: file.name,
         type: file.type,
+        mimeType: file.type,
         size: file.size,
         status: "uploading",
         dataUrl,
@@ -1442,36 +1445,16 @@ export function ChatInterface({
   };
 
   const getFileIcon = (type: string, fileName?: string) => {
-    const lowerType = type.toLowerCase();
-    const lowerName = (fileName || "").toLowerCase();
+    const theme = getFileTheme(fileName, type);
+    const category = getFileCategory(fileName, type);
     
-    // Check by file extension first (more reliable)
-    if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls") || lowerName.endsWith(".csv")) {
-      return <FileSpreadsheet className="h-4 w-4 text-green-600" />;
+    if (category === "excel") {
+      return <FileSpreadsheet className={`h-4 w-4 ${theme.textColor}`} />;
     }
-    if (lowerName.endsWith(".docx") || lowerName.endsWith(".doc")) {
-      return <FileText className="h-4 w-4 text-blue-600" />;
+    if (category === "image") {
+      return <Image className={`h-4 w-4 ${theme.textColor}`} />;
     }
-    if (lowerName.endsWith(".pptx") || lowerName.endsWith(".ppt")) {
-      return <FileText className="h-4 w-4 text-orange-500" />;
-    }
-    if (lowerName.endsWith(".pdf")) {
-      return <FileText className="h-4 w-4 text-red-500" />;
-    }
-    
-    // Check by MIME type
-    if (lowerType.includes("pdf")) return <FileText className="h-4 w-4 text-red-500" />;
-    if (lowerType.includes("word") || lowerType.includes("document") || lowerType.includes("wordprocessing")) {
-      return <FileText className="h-4 w-4 text-blue-600" />;
-    }
-    if (lowerType.includes("sheet") || lowerType.includes("excel") || lowerType.includes("spreadsheet") || lowerType.includes("csv")) {
-      return <FileSpreadsheet className="h-4 w-4 text-green-600" />;
-    }
-    if (lowerType.includes("presentation") || lowerType.includes("powerpoint")) {
-      return <FileText className="h-4 w-4 text-orange-500" />;
-    }
-    if (lowerType.includes("image")) return <Image className="h-4 w-4 text-purple-500" />;
-    return <FileIcon className="h-4 w-4 text-gray-500" />;
+    return <FileText className={`h-4 w-4 ${theme.textColor}`} />;
   };
 
   const formatFileSize = (bytes: number) => {
@@ -2131,25 +2114,25 @@ export function ChatInterface({
                                 />
                               </div>
                             ) : (
-                              <div
-                                key={idx}
-                                className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
-                              >
-                                <div className={cn(
-                                  "flex items-center justify-center w-8 h-8 rounded-lg",
-                                  file.type === "word" ? "bg-blue-600" :
-                                  file.type === "excel" ? "bg-green-600" :
-                                  file.type === "ppt" ? "bg-orange-500" :
-                                  "bg-gray-500"
-                                )}>
-                                  <span className="text-white text-xs font-bold">
-                                    {file.type === "word" ? "W" :
-                                     file.type === "excel" ? "E" :
-                                     file.type === "ppt" ? "P" : "F"}
-                                  </span>
-                                </div>
-                                <span className="max-w-[200px] truncate font-medium">{file.name}</span>
-                              </div>
+                              (() => {
+                                const fileTheme = getFileTheme(file.name, file.mimeType);
+                                return (
+                                  <div
+                                    key={idx}
+                                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                                  >
+                                    <div className={cn(
+                                      "flex items-center justify-center w-8 h-8 rounded-lg",
+                                      fileTheme.bgColor
+                                    )}>
+                                      <span className="text-white text-xs font-bold">
+                                        {fileTheme.icon}
+                                      </span>
+                                    </div>
+                                    <span className="max-w-[200px] truncate font-medium">{file.name}</span>
+                                  </div>
+                                );
+                              })()
                             )
                           ))}
                         </div>
@@ -2315,17 +2298,23 @@ export function ChatInterface({
 
                   {msg.attachments && (
                     <div className="flex gap-2 flex-wrap mt-2">
-                      {msg.attachments.map((file, idx) => (
-                        <div key={idx} className="flex items-center gap-2 p-3 rounded-xl border bg-card hover:bg-accent/50 cursor-pointer transition-colors group">
-                          {file.type === "word" && <FileText className="h-8 w-8 text-blue-600" />}
-                          {file.type === "excel" && <FileSpreadsheet className="h-8 w-8 text-green-600" />}
-                          {file.type === "ppt" && <FileIcon className="h-8 w-8 text-orange-600" />}
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium group-hover:text-blue-600 transition-colors">{file.name}</span>
-                            <span className="text-xs text-muted-foreground">Click to open</span>
+                      {msg.attachments.map((file, idx) => {
+                        const fileTheme = getFileTheme(file.name, file.mimeType);
+                        const category = getFileCategory(file.name, file.mimeType);
+                        return (
+                          <div key={idx} className="flex items-center gap-2 p-3 rounded-xl border bg-card hover:bg-accent/50 cursor-pointer transition-colors group">
+                            {category === "excel" ? (
+                              <FileSpreadsheet className={`h-8 w-8 ${fileTheme.textColor}`} />
+                            ) : (
+                              <FileText className={`h-8 w-8 ${fileTheme.textColor}`} />
+                            )}
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium group-hover:text-blue-600 transition-colors">{file.name}</span>
+                              <span className="text-xs text-muted-foreground">Click to open</span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -3033,25 +3022,25 @@ export function ChatInterface({
                                       />
                                     </div>
                                   ) : (
-                                    <div
-                                      key={i}
-                                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
-                                    >
-                                      <div className={cn(
-                                        "flex items-center justify-center w-8 h-8 rounded-lg",
-                                        att.type === "word" ? "bg-blue-600" :
-                                        att.type === "excel" ? "bg-green-600" :
-                                        att.type === "ppt" ? "bg-orange-500" :
-                                        "bg-gray-500"
-                                      )}>
-                                        <span className="text-white text-xs font-bold">
-                                          {att.type === "word" ? "W" :
-                                           att.type === "excel" ? "E" :
-                                           att.type === "ppt" ? "P" : "F"}
-                                        </span>
-                                      </div>
-                                      <span className="max-w-[200px] truncate font-medium">{att.name}</span>
-                                    </div>
+                                    (() => {
+                                      const attTheme = getFileTheme(att.name, att.mimeType);
+                                      return (
+                                        <div
+                                          key={i}
+                                          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                                        >
+                                          <div className={cn(
+                                            "flex items-center justify-center w-8 h-8 rounded-lg",
+                                            attTheme.bgColor
+                                          )}>
+                                            <span className="text-white text-xs font-bold">
+                                              {attTheme.icon}
+                                            </span>
+                                          </div>
+                                          <span className="max-w-[200px] truncate font-medium">{att.name}</span>
+                                        </div>
+                                      );
+                                    })()
                                   )
                                 ))}
                               </div>
@@ -3440,11 +3429,7 @@ export function ChatInterface({
                 {uploadedFiles.length > 0 && (
                   <div className="flex items-center gap-2 pl-2">
                     {uploadedFiles.map((file, index) => {
-                      const isWord = file.type === "word" || file.name.endsWith('.doc') || file.name.endsWith('.docx');
-                      const isExcel = file.type === "excel" || file.name.endsWith('.xls') || file.name.endsWith('.xlsx');
-                      const isPpt = file.type === "ppt" || file.name.endsWith('.ppt') || file.name.endsWith('.pptx');
-                      const isPdf = file.type === "pdf" || file.name.endsWith('.pdf');
-                      const isImage = file.type === "image" || /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+                      const theme = getFileTheme(file.name, file.mimeType);
                       
                       return (
                         <TooltipProvider key={file.id}>
@@ -3461,18 +3446,13 @@ export function ChatInterface({
                               >
                                 <div className={cn(
                                   "flex items-center justify-center w-7 h-7 rounded shrink-0",
-                                  isWord && "bg-blue-600",
-                                  isExcel && "bg-green-600",
-                                  isPpt && "bg-orange-500",
-                                  isPdf && "bg-red-600",
-                                  isImage && "bg-purple-500",
-                                  !isWord && !isExcel && !isPpt && !isPdf && !isImage && "bg-gray-500"
+                                  theme.bgColor
                                 )}>
                                   {file.status === "uploading" || file.status === "processing" ? (
                                     <Loader2 className="h-4 w-4 text-white animate-spin" />
                                   ) : (
                                     <span className="text-white text-xs font-bold">
-                                      {isWord ? "W" : isExcel ? "E" : isPpt ? "P" : isPdf ? "PDF" : isImage ? "IMG" : "F"}
+                                      {theme.icon}
                                     </span>
                                   )}
                                 </div>

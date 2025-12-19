@@ -24,7 +24,7 @@ export interface Message {
   timestamp: Date;
   isThinking?: boolean;
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
-  attachments?: { type: "word" | "excel" | "ppt" | "image"; name: string; imageUrl?: string; storagePath?: string; fileId?: string }[];
+  attachments?: { type: "word" | "excel" | "ppt" | "image" | "pdf" | "text" | "code" | "archive" | "unknown"; name: string; mimeType?: string; imageUrl?: string; storagePath?: string; fileId?: string }[];
   sources?: { fileName: string; content: string }[];
   figmaDiagram?: FigmaDiagram;
   generatedImage?: string;
