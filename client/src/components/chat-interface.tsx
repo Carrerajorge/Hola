@@ -1984,7 +1984,7 @@ export function ChatInterface({
                     return (
                       <>
                         {text && (
-                          <div className="px-4 py-3 text-foreground liquid-message-ai-light" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
+                          <div className="px-4 py-3 text-foreground liquid-message-ai-light min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
                             <ReactMarkdown
                               remarkPlugins={[remarkGfm, remarkMath]}
                               rehypePlugins={[rehypeKatex, rehypeHighlight]}
@@ -2001,6 +2001,16 @@ export function ChatInterface({
                                 h3: ({children}) => <h3 className="text-base font-semibold mb-2">{children}</h3>,
                                 blockquote: ({children}) => <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-3">{children}</blockquote>,
                                 img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
+                                table: ({children}) => (
+                                  <div className="max-w-full overflow-x-auto my-3">
+                                    <table className="min-w-0 w-full border-collapse text-sm" style={{ tableLayout: "auto" }}>{children}</table>
+                                  </div>
+                                ),
+                                thead: ({children}) => <thead className="bg-muted/50">{children}</thead>,
+                                tbody: ({children}) => <tbody>{children}</tbody>,
+                                tr: ({children}) => <tr className="border-b border-border">{children}</tr>,
+                                th: ({children}) => <th className="px-3 py-2 text-left font-semibold border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</th>,
+                                td: ({children}) => <td className="px-3 py-2 border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</td>,
                               }}
                             >
                               {processLatex(text)}
@@ -2264,7 +2274,7 @@ export function ChatInterface({
                 </div>
               )}
               {aiState === "responding" && streamingContent && (
-                <div className="px-4 py-3 text-foreground" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
+                <div className="px-4 py-3 text-foreground min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm, remarkMath]}
                     rehypePlugins={[rehypeKatex, rehypeHighlight]}
@@ -2274,6 +2284,16 @@ export function ChatInterface({
                       pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
                       code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
                       img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
+                      table: ({children}) => (
+                        <div className="max-w-full overflow-x-auto my-3">
+                          <table className="min-w-0 w-full border-collapse text-sm" style={{ tableLayout: "auto" }}>{children}</table>
+                        </div>
+                      ),
+                      thead: ({children}) => <thead className="bg-muted/50">{children}</thead>,
+                      tbody: ({children}) => <tbody>{children}</tbody>,
+                      tr: ({children}) => <tr className="border-b border-border">{children}</tr>,
+                      th: ({children}) => <th className="px-3 py-2 text-left font-semibold border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</th>,
+                      td: ({children}) => <td className="px-3 py-2 border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</td>,
                     }}
                   >
                     {processLatex(streamingContent)}
@@ -2848,13 +2868,23 @@ export function ChatInterface({
                         )}
                       </div>
                     ) : (
-                      <div className="flex flex-col gap-2 w-full">
-                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed">
+                      <div className="flex flex-col gap-2 w-full min-w-0">
+                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkMath]}
                             rehypePlugins={[rehypeKatex, rehypeHighlight]}
                             components={{
                               img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
+                              table: ({children}) => (
+                                <div className="max-w-full overflow-x-auto my-3">
+                                  <table className="min-w-0 w-full border-collapse text-sm" style={{ tableLayout: "auto" }}>{children}</table>
+                                </div>
+                              ),
+                              thead: ({children}) => <thead className="bg-muted/50">{children}</thead>,
+                              tbody: ({children}) => <tbody>{children}</tbody>,
+                              tr: ({children}) => <tr className="border-b border-border">{children}</tr>,
+                              th: ({children}) => <th className="px-3 py-2 text-left font-semibold border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</th>,
+                              td: ({children}) => <td className="px-3 py-2 border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</td>,
                             }}
                           >
                             {processLatex(parseDocumentBlocks(msg.content).text)}
@@ -3055,11 +3085,23 @@ export function ChatInterface({
               
               {streamingContent && (
                 <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-                  <div className="flex flex-col gap-2 max-w-[85%] items-start">
-                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed">
+                  <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
+                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkMath]}
                         rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                        components={{
+                          table: ({children}) => (
+                            <div className="max-w-full overflow-x-auto my-3">
+                              <table className="min-w-0 w-full border-collapse text-sm" style={{ tableLayout: "auto" }}>{children}</table>
+                            </div>
+                          ),
+                          thead: ({children}) => <thead className="bg-muted/50">{children}</thead>,
+                          tbody: ({children}) => <tbody>{children}</tbody>,
+                          tr: ({children}) => <tr className="border-b border-border">{children}</tr>,
+                          th: ({children}) => <th className="px-3 py-2 text-left font-semibold border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</th>,
+                          td: ({children}) => <td className="px-3 py-2 border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</td>,
+                        }}
                       >
                         {processLatex(streamingContent)}
                       </ReactMarkdown>
@@ -3098,11 +3140,23 @@ export function ChatInterface({
             <div className="flex-1 flex flex-col items-center justify-center px-4">
               {streamingContent ? (
                 <div className="w-full max-w-3xl mx-auto">
-                  <div className="flex flex-col gap-2 max-w-[85%] items-start">
-                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed">
+                  <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
+                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkMath]}
                         rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                        components={{
+                          table: ({children}) => (
+                            <div className="max-w-full overflow-x-auto my-3">
+                              <table className="min-w-0 w-full border-collapse text-sm" style={{ tableLayout: "auto" }}>{children}</table>
+                            </div>
+                          ),
+                          thead: ({children}) => <thead className="bg-muted/50">{children}</thead>,
+                          tbody: ({children}) => <tbody>{children}</tbody>,
+                          tr: ({children}) => <tr className="border-b border-border">{children}</tr>,
+                          th: ({children}) => <th className="px-3 py-2 text-left font-semibold border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</th>,
+                          td: ({children}) => <td className="px-3 py-2 border border-border" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{children}</td>,
+                        }}
                       >
                         {processLatex(streamingContent)}
                       </ReactMarkdown>
