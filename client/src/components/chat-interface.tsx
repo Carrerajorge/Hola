@@ -2207,8 +2207,14 @@ export function ChatInterface({
                                 a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
                                 pre: ({children, node}: any) => {
                                   const codeChild = node?.children?.find((c: any) => c.tagName === 'code');
-                                  const className = codeChild?.properties?.className;
-                                  const lang = Array.isArray(className) ? className.find((c: string) => c.startsWith('language-'))?.replace('language-', '') : '';
+                                  const classNameProp = codeChild?.properties?.className;
+                                  let lang = '';
+                                  if (Array.isArray(classNameProp)) {
+                                    lang = classNameProp.find((c: string) => c.startsWith('language-'))?.replace('language-', '') || '';
+                                  } else if (typeof classNameProp === 'string') {
+                                    const match = classNameProp.match(/language-(\w+)/);
+                                    lang = match ? match[1] : '';
+                                  }
                                   if (lang === 'python' || lang === 'py') {
                                     const codeText = codeChild?.children?.[0]?.value || '';
                                     return <CodeExecutionBlock code={codeText} language="python" />;

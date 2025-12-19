@@ -1900,7 +1900,7 @@ export async function registerRoutes(
     try {
       const { code, conversationId, language } = req.body;
       
-      if (!code || typeof code !== "string") {
+      if (!code || typeof code !== "string" || !code.trim()) {
         return res.status(400).json({ error: "Code is required" });
       }
 
