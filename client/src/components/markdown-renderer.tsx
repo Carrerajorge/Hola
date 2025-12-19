@@ -8,6 +8,9 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { cn } from "@/lib/utils";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { preprocessMathInMarkdown } from "@/lib/mathParser";
+import { CodeBlockShell } from "./code-block-shell";
+import { isLanguageRunnable } from "@/lib/sandboxApi";
+import { useSandboxExecution } from "@/hooks/useSandboxExecution";
 
 const sanitizeSchema = {
   ...defaultSchema,
@@ -205,6 +208,102 @@ const tableComponents: TableComponents = {
   ),
 };
 
+interface InteractiveCodeBlockProps {
+  inline?: boolean;
+  className?: string;
+  children?: React.ReactNode;
+  runnable?: boolean;
+  editable?: boolean;
+  onEdit?: (code: string) => void;
+}
+
+const InteractiveCodeBlock = memo(function InteractiveCodeBlock({
+  inline,
+  className,
+  children,
+  runnable = true,
+  editable = false,
+  onEdit,
+}: InteractiveCodeBlockProps) {
+  const match = /language-(\w+)/.exec(className || "");
+  const language = match?.[1] || "text";
+  const codeContent = String(children).replace(/\n$/, "");
+
+  const { execute, isRunning, result, errorLines, reset } = useSandboxExecution();
+
+  const isRunnable = runnable && isLanguageRunnable(language);
+
+  const handleRun = useCallback(async () => {
+    await execute(codeContent, language);
+  }, [execute, codeContent, language]);
+
+  const handleEdit = useCallback(() => {
+    onEdit?.(codeContent);
+  }, [onEdit, codeContent]);
+
+  if (inline) {
+    return (
+      <code className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">
+        {children}
+      </code>
+    );
+  }
+
+  return (
+    <div className="my-4 space-y-2">
+      <CodeBlockShell
+        code={codeContent}
+        language={language}
+        showLineNumbers={true}
+        maxHeight="400px"
+        errorLines={errorLines}
+        runnable={isRunnable}
+        editable={editable}
+        onRun={isRunnable ? handleRun : undefined}
+        onEdit={editable ? handleEdit : undefined}
+      />
+      {isRunning && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground px-3 py-2 bg-muted/30 rounded-md">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>Running...</span>
+        </div>
+      )}
+      {result && !isRunning && (
+        <div className="rounded-md border border-zinc-800 bg-zinc-950 overflow-hidden">
+          <div className="px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between">
+            <span className="text-xs text-zinc-400 font-mono">
+              Output {result.usedFallback && "(local fallback)"}
+            </span>
+            <button
+              onClick={reset}
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              data-testid="button-clear-output"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="p-3 font-mono text-sm overflow-x-auto">
+            {result.run.stdout && (
+              <pre className="text-green-400 whitespace-pre-wrap">{result.run.stdout}</pre>
+            )}
+            {result.run.stderr && (
+              <pre className="text-red-400 whitespace-pre-wrap">{result.run.stderr}</pre>
+            )}
+            {!result.run.stdout && !result.run.stderr && (
+              <span className="text-zinc-500 italic">No output</span>
+            )}
+          </div>
+          {result.run.code !== 0 && (
+            <div className="px-3 py-1.5 bg-red-500/10 border-t border-zinc-800 text-xs text-red-400">
+              Exit code: {result.run.code}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export interface MarkdownRendererProps {
   content: string;
   className?: string;
@@ -213,6 +312,9 @@ export interface MarkdownRendererProps {
   enableCodeHighlight?: boolean;
   enableGfm?: boolean;
   sanitize?: boolean;
+  enableInteractiveCode?: boolean;
+  interactiveCodeEditable?: boolean;
+  onCodeEdit?: (code: string) => void;
   customComponents?: Record<string, React.ComponentType<any>>;
 }
 
@@ -224,6 +326,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   enableCodeHighlight = true,
   enableGfm = true,
   sanitize = true,
+  enableInteractiveCode = false,
+  interactiveCodeEditable = false,
+  onCodeEdit,
   customComponents = {},
 }: MarkdownRendererProps) {
   const processedContent = useMemo(() => {
@@ -246,8 +351,21 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     return plugins;
   }, [enableMath, enableCodeHighlight, sanitize]);
 
+  const CodeComponent = useMemo(() => {
+    if (enableInteractiveCode) {
+      return (props: any) => (
+        <InteractiveCodeBlock
+          {...props}
+          editable={interactiveCodeEditable}
+          onEdit={onCodeEdit}
+        />
+      );
+    }
+    return CodeBlock;
+  }, [enableInteractiveCode, interactiveCodeEditable, onCodeEdit]);
+
   const components = useMemo(() => ({
-    code: CodeBlock,
+    code: CodeComponent,
     img: (props: any) => <LazyImage {...props} maxHeight={imageMaxHeight} />,
     p: ({ children }: { children?: React.ReactNode }) => <p className="mb-3 leading-relaxed">{children}</p>,
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
@@ -288,7 +406,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     hr: () => <hr className="my-4 border-border" />,
     ...tableComponents,
     ...customComponents,
-  }), [imageMaxHeight, customComponents]);
+  }), [imageMaxHeight, customComponents, CodeComponent]);
 
   if (!processedContent) {
     return null;
