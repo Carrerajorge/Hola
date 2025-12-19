@@ -4,5 +4,5 @@ export { extractWithReadability, summarizeForLLM, type ExtractedContent } from "
 export { agentOrchestrator, type AgentTask, type StepUpdate, type StepCallback } from "./orchestrator";
 export { checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, type SecurityCheck } from "./security";
 export { guardrails, type PIIMatch, type AuditLogEntry, type DownloadPolicy, type GuardrailsConfig } from "./guardrails";
-export { runPipeline, cancelPipeline, initializePipeline, getAvailableTools } from "./pipeline";
+export { runPipeline, cancelPipeline, initializePipeline, getAvailableTools, multiIntentManager, multiIntentPipeline } from "./pipeline";
 export type { PipelineResult, PipelineRunOptions, ProgressUpdate, ExecutionPlan, PlanStep } from "./pipeline";
