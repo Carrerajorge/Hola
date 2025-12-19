@@ -385,6 +385,38 @@ ${documentModeInstructions}${documentMode.type === 'excel' ? excelChartInstructi
   const wantsDocument = /\b(crea|crear|genera|generar|haz|hacer|escribe|escribir|redacta|redactar|elabora|elaborar)\b.*(documento|word|excel|powerpoint|ppt|archivo|docx|xlsx|pptx)/i.test(lastUserMsgText) ||
                         /\b(documento|word|excel|powerpoint|ppt)\b.*(crea|crear|genera|generar|haz|hacer)/i.test(lastUserMsgText);
 
+  // Check if user wants a chart/graph/visualization
+  const wantsChart = /\b(gr[aá]fic[oa]|chart|plot|visualiz|histograma|diagrama de barras|pie chart|scatter|l[ií]nea|barras)\b/i.test(lastUserMsgText);
+
+  const codeInterpreterPrompt = wantsChart ? `
+CAPACIDAD DE CODE INTERPRETER:
+Tienes un Code Interpreter que puede ejecutar código Python. Cuando el usuario pida gráficas, visualizaciones o análisis de datos, DEBES generar código Python ejecutable.
+
+INSTRUCCIONES PARA GRÁFICAS:
+1. Genera un bloque de código Python con \`\`\`python
+2. Usa matplotlib para crear gráficas reales
+3. Siempre incluye plt.show() al final
+4. El código se ejecutará y mostrará la gráfica al usuario
+
+EJEMPLO para gráfica de barras:
+\`\`\`python
+import matplotlib.pyplot as plt
+
+years = [2020, 2021, 2022, 2023, 2024, 2025]
+values = [450, 520, 610, 580, 720, 850]
+
+plt.figure(figsize=(10, 6))
+plt.bar(years, values, color='steelblue')
+plt.xlabel('Año')
+plt.ylabel('Valor')
+plt.title('Datos 2020-2025')
+plt.grid(axis='y', alpha=0.3)
+plt.show()
+\`\`\`
+
+NO uses representaciones de texto con caracteres. SIEMPRE genera código Python real.
+` : '';
+
   const documentCapabilitiesPrompt = wantsDocument ? `
 CAPACIDADES DE GENERACIÓN DE DOCUMENTOS:
 Puedes crear documentos Word, Excel y PowerPoint. Incluye en tu respuesta un bloque especial con el formato:
@@ -407,7 +439,7 @@ NO generes documentos Word/Excel/PPT a menos que el usuario lo pida EXPLÍCITAME
 Si el usuario dice "dame un resumen" o "analiza esto", responde en texto, NO como documento.`;
 
   const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.
-${documentCapabilitiesPrompt}`;
+${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
 
   // Use document mode prompt when in document editing mode
   const systemContent = documentModePrompt 
