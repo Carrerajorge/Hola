@@ -115,16 +115,27 @@ export function CodeExecutionBlock({
 
   const handleCopyImage = async (dataUrl: string) => {
     try {
-      const response = await fetch(dataUrl);
-      const blob = await response.blob();
+      // Convert base64 to blob
+      const base64Data = dataUrl.split(',')[1];
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: 'image/png' });
+      
       await navigator.clipboard.write([
-        new ClipboardItem({ [blob.type]: blob })
+        new ClipboardItem({ 'image/png': blob })
       ]);
       setCopiedImage(true);
       toast({ title: "Imagen copiada al portapapeles" });
       setTimeout(() => setCopiedImage(false), 2000);
     } catch (error) {
-      toast({ title: "Error al copiar imagen", variant: "destructive" });
+      // Fallback: download the image instead
+      console.error("Copy failed, using fallback:", error);
+      handleDownloadImage(dataUrl, 'grafica.png');
+      toast({ title: "Imagen descargada (el navegador no soporta copiar imágenes)" });
     }
   };
 
