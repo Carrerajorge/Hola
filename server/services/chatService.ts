@@ -389,32 +389,58 @@ ${documentModeInstructions}${documentMode.type === 'excel' ? excelChartInstructi
   const wantsChart = /\b(gr[aá]fic[oa]|chart|plot|visualiz|histograma|diagrama de barras|pie chart|scatter|l[ií]nea|barras)\b/i.test(lastUserMsgText);
 
   const codeInterpreterPrompt = wantsChart ? `
-CAPACIDAD DE CODE INTERPRETER:
-Tienes un Code Interpreter que puede ejecutar código Python. Cuando el usuario pida gráficas, visualizaciones o análisis de datos, DEBES generar código Python ejecutable.
+⚠️ OBLIGATORIO - CODE INTERPRETER ACTIVO ⚠️
+El usuario ha solicitado una GRÁFICA o VISUALIZACIÓN. DEBES responder con código Python ejecutable.
 
-INSTRUCCIONES PARA GRÁFICAS:
-1. Genera un bloque de código Python con \`\`\`python
-2. Usa matplotlib para crear gráficas reales
-3. Siempre incluye plt.show() al final
-4. El código se ejecutará y mostrará la gráfica al usuario
+REGLAS ESTRICTAS:
+1. Tu respuesta DEBE contener un bloque \`\`\`python con código ejecutable
+2. NO describas la gráfica con texto - GENERA EL CÓDIGO
+3. NO uses caracteres ASCII (█, ─, etc.) para simular gráficas
+4. El código se ejecutará automáticamente y mostrará la gráfica real
 
-EJEMPLO para gráfica de barras:
+CÓDIGO OBLIGATORIO para gráfica de barras:
 \`\`\`python
 import matplotlib.pyplot as plt
+import numpy as np
 
+# Datos simulados
 years = [2020, 2021, 2022, 2023, 2024, 2025]
 values = [450, 520, 610, 580, 720, 850]
 
 plt.figure(figsize=(10, 6))
-plt.bar(years, values, color='steelblue')
-plt.xlabel('Año')
-plt.ylabel('Valor')
-plt.title('Datos 2020-2025')
-plt.grid(axis='y', alpha=0.3)
+plt.bar(years, values, color='steelblue', edgecolor='navy')
+plt.xlabel('Año', fontsize=12)
+plt.ylabel('Valor', fontsize=12)
+plt.title('Datos Simulados 2020-2025', fontsize=14, fontweight='bold')
+plt.grid(axis='y', alpha=0.3, linestyle='--')
+plt.tight_layout()
 plt.show()
 \`\`\`
 
-NO uses representaciones de texto con caracteres. SIEMPRE genera código Python real.
+Para gráfica de líneas:
+\`\`\`python
+import matplotlib.pyplot as plt
+plt.figure(figsize=(10, 6))
+plt.plot(years, values, marker='o', linewidth=2, markersize=8)
+plt.xlabel('Año')
+plt.ylabel('Valor')
+plt.title('Tendencia')
+plt.grid(True, alpha=0.3)
+plt.show()
+\`\`\`
+
+Para gráfica circular (pie):
+\`\`\`python
+import matplotlib.pyplot as plt
+labels = ['A', 'B', 'C', 'D']
+sizes = [30, 25, 25, 20]
+plt.figure(figsize=(8, 8))
+plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+plt.title('Distribución')
+plt.show()
+\`\`\`
+
+RESPONDE AHORA CON UN BLOQUE \`\`\`python QUE CREE LA GRÁFICA SOLICITADA.
 ` : '';
 
   const documentCapabilitiesPrompt = wantsDocument ? `
