@@ -178,7 +178,14 @@ User message: `;
   }
   
   private buildTaskPrompt(task: TaskPlan, originalMessage: string): string {
-    return `Task: ${task.title}\n\nDescription: ${task.description}\n\nOriginal context: ${originalMessage}`;
+    return task.description;
+  }
+  
+  private getTaskSystemInstruction(task: TaskPlan): string {
+    return `Eres un asistente que responde a UNA sola solicitud.
+Tu única tarea es: "${task.title}"
+NO respondas a ninguna otra solicitud. NO menciones otras tareas.
+Responde de forma completa y directa solo a esta tarea.`;
   }
   
   private async executeAll(
@@ -309,18 +316,11 @@ User message: `;
         }
         
         const fullPrompt = task.prompt + contextFromDeps;
-        
-        const conversationContext = context.messages
-          .map(m => `${m.role === "user" ? "Usuario" : "Asistente"}: ${m.content}`)
-          .join("\n");
-        
-        const contextualPrompt = conversationContext 
-          ? `Contexto de la conversación:\n${conversationContext}\n\n${fullPrompt}`
-          : fullPrompt;
+        const systemInstruction = this.getTaskSystemInstruction(task.plan);
         
         const response = await geminiChat(
-          [{ role: "user", parts: [{ text: contextualPrompt }] }],
-          { model: GEMINI_MODELS.FLASH_PREVIEW }
+          [{ role: "user", parts: [{ text: fullPrompt }] }],
+          { model: GEMINI_MODELS.FLASH_PREVIEW, systemInstruction }
         );
         
         context.onProgress?.({
@@ -427,20 +427,19 @@ User message: `;
     results: ExecutionResult[],
     status: "complete" | "partial" | "failed"
   ): string {
-    const completedOutputs = results
-      .filter(r => r.status === "completed" && r.output)
-      .map(r => r.output);
+    const completedResults = results
+      .filter(r => r.status === "completed" && r.output);
     
-    if (completedOutputs.length === 0) {
+    if (completedResults.length === 0) {
       return "No tasks were completed successfully.";
     }
     
-    if (completedOutputs.length === 1) {
-      return String(completedOutputs[0]);
+    if (completedResults.length === 1) {
+      return String(completedResults[0].output);
     }
     
-    return completedOutputs
-      .map((output, i) => `**Result ${i + 1}:**\n${output}`)
+    return completedResults
+      .map(r => String(r.output))
       .join("\n\n---\n\n");
   }
   

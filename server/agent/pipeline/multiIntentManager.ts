@@ -271,11 +271,13 @@ export class MultiIntentManager {
     intents.forEach((intent, index) => {
       const hasDependent = index > 0 && this.intentsDependOnPrevious(intents[index - 1].type, intent.type);
       
+      const relevantText = this.extractRelevantTextForIntent(message, intent.keywords);
+      
       plan.push({
         id: `task_${index + 1}`,
-        title: intent.description,
+        title: this.extractTaskTitle(relevantText),
         intentType: intent.type,
-        description: `${intent.description} based on: ${intent.keywords.join(", ")}`,
+        description: relevantText,
         requiredContext: hasDependent ? [`task_${index}`] : [],
         executionMode: hasDependent ? "sequential" : "parallel",
         dependencies: hasDependent ? [`task_${index}`] : [],
@@ -284,6 +286,31 @@ export class MultiIntentManager {
     });
     
     return plan;
+  }
+  
+  private extractRelevantTextForIntent(message: string, keywords: string[]): string {
+    if (keywords.length === 0) return message;
+    
+    const keywordPattern = new RegExp(`(${keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'i');
+    const match = message.match(keywordPattern);
+    
+    if (!match || match.index === undefined) return message;
+    
+    const startIndex = match.index;
+    const afterKeyword = message.slice(startIndex);
+    
+    const endMatch = afterKeyword.match(/[.,;]\s*(?=(?:crea|genera|haz|escribe|busca|analiza|resume|convierte|extrae|navega|abre|diseña|construye|investiga|make|create|write|search|analyze|summarize|transform|extract|navigate|open|design|build|investigate|y\s+(?:un|una|el|la))\b)/i);
+    
+    if (endMatch && endMatch.index !== undefined) {
+      return afterKeyword.slice(0, endMatch.index).trim();
+    }
+    
+    const sentenceEnd = afterKeyword.match(/[.!?]\s+(?=[A-ZÁÉÍÓÚÑ])/);
+    if (sentenceEnd && sentenceEnd.index !== undefined) {
+      return afterKeyword.slice(0, sentenceEnd.index + 1).trim();
+    }
+    
+    return afterKeyword.trim();
   }
   
   private intentsDependOnPrevious(prev: IntentType, current: IntentType): boolean {
