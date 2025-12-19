@@ -19,9 +19,10 @@ import {
   type AuditLog, type InsertAuditLog,
   type AnalyticsSnapshot, type InsertAnalyticsSnapshot,
   type Report, type InsertReport,
+  type LibraryItem, type InsertLibraryItem,
   files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   gpts, gptCategories, gptVersions, users,
-  aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports
+  aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -122,6 +123,11 @@ export interface IStorage {
   getDomainPolicies(): Promise<DomainPolicy[]>;
   updateDomainPolicy(id: string, updates: Partial<InsertDomainPolicy>): Promise<DomainPolicy | undefined>;
   deleteDomainPolicy(id: string): Promise<void>;
+  // Library Items CRUD
+  createLibraryItem(item: InsertLibraryItem): Promise<LibraryItem>;
+  getLibraryItems(userId: string, mediaType?: string): Promise<LibraryItem[]>;
+  getLibraryItem(id: string, userId: string): Promise<LibraryItem | null>;
+  deleteLibraryItem(id: string, userId: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -589,6 +595,36 @@ export class MemStorage implements IStorage {
 
   async deleteDomainPolicy(id: string): Promise<void> {
     await db.delete(domainPolicies).where(eq(domainPolicies.id, id));
+  }
+
+  // Library Items CRUD
+  async createLibraryItem(item: InsertLibraryItem): Promise<LibraryItem> {
+    const [result] = await db.insert(libraryItems).values(item).returning();
+    return result;
+  }
+
+  async getLibraryItems(userId: string, mediaType?: string): Promise<LibraryItem[]> {
+    if (mediaType) {
+      return db.select().from(libraryItems)
+        .where(sql`${libraryItems.userId} = ${userId} AND ${libraryItems.mediaType} = ${mediaType}`)
+        .orderBy(desc(libraryItems.createdAt));
+    }
+    return db.select().from(libraryItems)
+      .where(eq(libraryItems.userId, userId))
+      .orderBy(desc(libraryItems.createdAt));
+  }
+
+  async getLibraryItem(id: string, userId: string): Promise<LibraryItem | null> {
+    const [result] = await db.select().from(libraryItems)
+      .where(sql`${libraryItems.id} = ${id} AND ${libraryItems.userId} = ${userId}`);
+    return result || null;
+  }
+
+  async deleteLibraryItem(id: string, userId: string): Promise<boolean> {
+    const result = await db.delete(libraryItems)
+      .where(sql`${libraryItems.id} = ${id} AND ${libraryItems.userId} = ${userId}`)
+      .returning();
+    return result.length > 0;
   }
 }
 

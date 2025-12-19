@@ -523,3 +523,30 @@ export const insertChatParticipantSchema = createInsertSchema(chatParticipants).
 
 export type InsertChatParticipant = z.infer<typeof insertChatParticipantSchema>;
 export type ChatParticipant = typeof chatParticipants.$inferSelect;
+
+// Library Items - User media library
+export const libraryItems = pgTable("library_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  mediaType: text("media_type").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  storagePath: text("storage_path").notNull(),
+  thumbnailPath: text("thumbnail_path"),
+  mimeType: text("mime_type"),
+  size: integer("size"),
+  metadata: jsonb("metadata"),
+  sourceChatId: varchar("source_chat_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("library_items_user_idx").on(table.userId),
+  index("library_items_type_idx").on(table.userId, table.mediaType),
+]);
+
+export const insertLibraryItemSchema = createInsertSchema(libraryItems).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertLibraryItem = z.infer<typeof insertLibraryItemSchema>;
+export type LibraryItem = typeof libraryItems.$inferSelect;
