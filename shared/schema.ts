@@ -550,3 +550,49 @@ export const insertLibraryItemSchema = createInsertSchema(libraryItems).omit({
 
 export type InsertLibraryItem = z.infer<typeof insertLibraryItemSchema>;
 export type LibraryItem = typeof libraryItems.$inferSelect;
+
+// Code Interpreter Runs
+export const codeInterpreterRuns = pgTable("code_interpreter_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id"),
+  userId: varchar("user_id"),
+  code: text("code").notNull(),
+  language: text("language").notNull().default("python"),
+  status: text("status").notNull().default("pending"), // pending, running, success, error
+  stdout: text("stdout"),
+  stderr: text("stderr"),
+  executionTimeMs: integer("execution_time_ms"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("code_runs_conversation_idx").on(table.conversationId),
+  index("code_runs_user_idx").on(table.userId),
+]);
+
+export const insertCodeInterpreterRunSchema = createInsertSchema(codeInterpreterRuns).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCodeInterpreterRun = z.infer<typeof insertCodeInterpreterRunSchema>;
+export type CodeInterpreterRun = typeof codeInterpreterRuns.$inferSelect;
+
+// Code Interpreter Artifacts (generated files, charts, etc.)
+export const codeInterpreterArtifacts = pgTable("code_interpreter_artifacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => codeInterpreterRuns.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // image, file, data
+  name: text("name").notNull(),
+  data: text("data"), // base64 encoded for images, or text content
+  mimeType: text("mime_type"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("code_artifacts_run_idx").on(table.runId),
+]);
+
+export const insertCodeInterpreterArtifactSchema = createInsertSchema(codeInterpreterArtifacts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCodeInterpreterArtifact = z.infer<typeof insertCodeInterpreterArtifactSchema>;
+export type CodeInterpreterArtifact = typeof codeInterpreterArtifacts.$inferSelect;
