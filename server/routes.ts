@@ -4,14 +4,15 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { db } from "./db";
 import { users } from "@shared/schema";
-import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
+import { ObjectStorageService, ObjectNotFoundError, objectStorageClient } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
 import { agentOrchestrator, StepUpdate, ProgressUpdate, guardrails } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { handleChatRequest, AVAILABLE_MODELS, DEFAULT_PROVIDER, DEFAULT_MODEL } from "./services/chatService";
 import { llmGateway } from "./lib/llmGateway";
-import { ALLOWED_MIME_TYPES } from "./lib/constants";
+import { ALLOWED_MIME_TYPES, ALLOWED_EXTENSIONS, FILE_UPLOAD_CONFIG, LIMITS } from "./lib/constants";
+import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
 import { 
   generateWordDocument, 
   generateExcelDocument, 
@@ -28,6 +29,22 @@ import * as codeInterpreter from "./services/codeInterpreterService";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
+const fileStatusClients: Map<string, Set<WebSocket>> = new Map();
+
+interface MultipartUploadSession {
+  uploadId: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  totalChunks: number;
+  storagePath: string;
+  basePath: string;
+  bucketName: string;
+  uploadedParts: Map<number, string>;
+  createdAt: Date;
+}
+
+const multipartSessions: Map<string, MultipartUploadSession> = new Map();
 
 export async function registerRoutes(
   httpServer: Server,
@@ -62,6 +79,184 @@ export async function registerRoutes(
       console.error("Error getting upload URL:", error);
       res.status(500).json({ error: "Failed to get upload URL" });
     }
+  });
+
+  app.post("/api/objects/multipart/create", async (req, res) => {
+    try {
+      const { fileName, mimeType, fileSize, totalChunks } = req.body;
+
+      if (!fileName || !mimeType || !fileSize || !totalChunks) {
+        return res.status(400).json({ error: "Missing required fields: fileName, mimeType, fileSize, totalChunks" });
+      }
+
+      if (!ALLOWED_MIME_TYPES.includes(mimeType as any)) {
+        return res.status(400).json({ error: `Unsupported file type: ${mimeType}` });
+      }
+
+      if (fileSize > LIMITS.MAX_FILE_SIZE_BYTES) {
+        return res.status(400).json({ error: `File size exceeds maximum limit of ${LIMITS.MAX_FILE_SIZE_MB}MB` });
+      }
+
+      const uploadId = `multipart_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      const privateObjectDir = objectStorageService.getPrivateObjectDir();
+      const objectId = `uploads/${uploadId}`;
+      const storagePath = `/objects/${objectId}`;
+
+      const session: MultipartUploadSession = {
+        uploadId,
+        fileName,
+        mimeType,
+        fileSize,
+        totalChunks,
+        storagePath,
+        basePath: `${privateObjectDir}/${objectId}`,
+        bucketName: privateObjectDir.split('/')[1] || '',
+        uploadedParts: new Map(),
+        createdAt: new Date(),
+      };
+
+      multipartSessions.set(uploadId, session);
+
+      res.json({ uploadId, storagePath });
+    } catch (error: any) {
+      console.error("Error creating multipart upload:", error);
+      res.status(500).json({ error: "Failed to create multipart upload session" });
+    }
+  });
+
+  app.post("/api/objects/multipart/sign-part", async (req, res) => {
+    try {
+      const { uploadId, partNumber } = req.body;
+
+      if (!uploadId || partNumber === undefined) {
+        return res.status(400).json({ error: "Missing required fields: uploadId, partNumber" });
+      }
+
+      const session = multipartSessions.get(uploadId);
+      if (!session) {
+        return res.status(404).json({ error: "Upload session not found" });
+      }
+
+      if (partNumber < 1 || partNumber > session.totalChunks) {
+        return res.status(400).json({ error: `Invalid part number. Must be between 1 and ${session.totalChunks}` });
+      }
+
+      const partPath = `${session.basePath}_part_${partNumber}`;
+      const { bucketName, objectName } = parseObjectPath(partPath);
+      
+      const signedUrl = await signObjectURLForMultipart({
+        bucketName,
+        objectName,
+        method: "PUT",
+        ttlSec: 900,
+      });
+
+      res.json({ signedUrl });
+    } catch (error: any) {
+      console.error("Error signing multipart part:", error);
+      res.status(500).json({ error: "Failed to get signed URL for part" });
+    }
+  });
+
+  app.post("/api/objects/multipart/complete", async (req, res) => {
+    try {
+      const { uploadId, parts } = req.body;
+
+      if (!uploadId || !parts || !Array.isArray(parts)) {
+        return res.status(400).json({ error: "Missing required fields: uploadId, parts" });
+      }
+
+      const session = multipartSessions.get(uploadId);
+      if (!session) {
+        return res.status(404).json({ error: "Upload session not found" });
+      }
+
+      const { bucketName } = parseObjectPath(session.basePath);
+      const bucket = objectStorageClient.bucket(bucketName);
+      
+      const partPaths = parts
+        .sort((a: { partNumber: number }, b: { partNumber: number }) => a.partNumber - b.partNumber)
+        .map((p: { partNumber: number }) => {
+          const partPath = `${session.basePath}_part_${p.partNumber}`;
+          const { objectName } = parseObjectPath(partPath);
+          return objectName;
+        });
+
+      const { objectName: finalObjectName } = parseObjectPath(session.basePath);
+      const destinationFile = bucket.file(finalObjectName);
+
+      try {
+        await bucket.combine(
+          partPaths.map(p => bucket.file(p)),
+          destinationFile,
+          { metadata: { contentType: session.mimeType } }
+        );
+
+        for (const partPath of partPaths) {
+          try {
+            await bucket.file(partPath).delete();
+          } catch (e) {
+            console.warn(`Failed to delete part ${partPath}:`, e);
+          }
+        }
+      } catch (composeError: any) {
+        console.error("Failed to compose parts:", composeError);
+        return res.status(500).json({ error: "Failed to compose file parts" });
+      }
+
+      multipartSessions.delete(uploadId);
+
+      res.json({ success: true, storagePath: session.storagePath });
+    } catch (error: any) {
+      console.error("Error completing multipart upload:", error);
+      res.status(500).json({ error: "Failed to complete multipart upload" });
+    }
+  });
+
+  app.post("/api/objects/multipart/abort", async (req, res) => {
+    try {
+      const { uploadId } = req.body;
+
+      if (!uploadId) {
+        return res.status(400).json({ error: "Missing required field: uploadId" });
+      }
+
+      const session = multipartSessions.get(uploadId);
+      if (!session) {
+        return res.status(404).json({ error: "Upload session not found" });
+      }
+
+      const { bucketName } = parseObjectPath(session.basePath);
+      const bucket = objectStorageClient.bucket(bucketName);
+
+      for (let i = 1; i <= session.totalChunks; i++) {
+        const partPath = `${session.basePath}_part_${i}`;
+        const { objectName } = parseObjectPath(partPath);
+        try {
+          await bucket.file(objectName).delete();
+        } catch (e) {
+        }
+      }
+
+      multipartSessions.delete(uploadId);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error aborting multipart upload:", error);
+      res.status(500).json({ error: "Failed to abort multipart upload" });
+    }
+  });
+
+  app.get("/api/files/config", (req, res) => {
+    res.json({
+      allowedMimeTypes: [...ALLOWED_MIME_TYPES],
+      allowedExtensions: ALLOWED_EXTENSIONS,
+      maxFileSize: LIMITS.MAX_FILE_SIZE_BYTES,
+      maxFileSizeMB: LIMITS.MAX_FILE_SIZE_MB,
+      chunkSize: FILE_UPLOAD_CONFIG.CHUNK_SIZE_BYTES,
+      chunkSizeMB: FILE_UPLOAD_CONFIG.CHUNK_SIZE_MB,
+      maxParallelChunks: FILE_UPLOAD_CONFIG.MAX_PARALLEL_CHUNKS,
+    });
   });
 
   app.post("/api/files", async (req, res) => {
@@ -1567,8 +1762,68 @@ export async function registerRoutes(
   });
 
   const browserWss = new WebSocketServer({ server: httpServer, path: "/ws/browser" });
-  
   console.log("Browser WebSocket server created at /ws/browser");
+
+  const fileStatusWss = new WebSocketServer({ server: httpServer, path: "/ws/file-status" });
+  console.log("File status WebSocket server created at /ws/file-status");
+
+  fileStatusWss.on("connection", (ws) => {
+    console.log("File status WebSocket client connected");
+    let subscribedFileIds: Set<string> = new Set();
+    
+    ws.on("message", (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        if (data.type === "subscribe" && data.fileId) {
+          subscribedFileIds.add(data.fileId);
+          if (!fileStatusClients.has(data.fileId)) {
+            fileStatusClients.set(data.fileId, new Set());
+          }
+          fileStatusClients.get(data.fileId)!.add(ws);
+          
+          ws.send(JSON.stringify({ type: "subscribed", fileId: data.fileId }));
+          
+          const job = fileProcessingQueue.getJob(data.fileId);
+          if (job && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'file_status',
+              fileId: job.fileId,
+              status: job.status,
+              progress: job.progress,
+              error: job.error,
+            }));
+          }
+        } else if (data.type === "unsubscribe" && data.fileId) {
+          subscribedFileIds.delete(data.fileId);
+          const clients = fileStatusClients.get(data.fileId);
+          if (clients) {
+            clients.delete(ws);
+            if (clients.size === 0) {
+              fileStatusClients.delete(data.fileId);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("File status WS message parse error:", e);
+      }
+    });
+    
+    ws.on("close", () => {
+      for (const fileId of subscribedFileIds) {
+        const clients = fileStatusClients.get(fileId);
+        if (clients) {
+          clients.delete(ws);
+          if (clients.size === 0) {
+            fileStatusClients.delete(fileId);
+          }
+        }
+      }
+    });
+  });
+
+  fileProcessingQueue.setStatusChangeHandler((update: FileStatusUpdate) => {
+    broadcastFileStatus(update);
+  });
   
   browserWss.on("connection", (ws) => {
     console.log("Browser WebSocket client connected");
@@ -1999,4 +2254,68 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
     console.error(`Error processing file ${fileId}:`, error);
     await storage.updateFileStatus(fileId, "error");
   }
+}
+
+function broadcastFileStatus(update: FileStatusUpdate) {
+  const clients = fileStatusClients.get(update.fileId);
+  if (!clients) return;
+  
+  const message = JSON.stringify(update);
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
+
+function parseObjectPath(path: string): {
+  bucketName: string;
+  objectName: string;
+} {
+  if (!path.startsWith("/")) {
+    path = `/${path}`;
+  }
+  const pathParts = path.split("/");
+  if (pathParts.length < 3) {
+    throw new Error("Invalid path: must contain at least a bucket name");
+  }
+  const bucketName = pathParts[1];
+  const objectName = pathParts.slice(2).join("/");
+  return { bucketName, objectName };
+}
+
+const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
+
+async function signObjectURLForMultipart({
+  bucketName,
+  objectName,
+  method,
+  ttlSec,
+}: {
+  bucketName: string;
+  objectName: string;
+  method: "GET" | "PUT" | "DELETE" | "HEAD";
+  ttlSec: number;
+}): Promise<string> {
+  const request = {
+    bucket_name: bucketName,
+    object_name: objectName,
+    method,
+    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
+  };
+  const response = await fetch(
+    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Failed to sign object URL, errorcode: ${response.status}`
+    );
+  }
+  const { signed_url: signedURL } = await response.json();
+  return signedURL;
 }
