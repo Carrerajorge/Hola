@@ -127,12 +127,13 @@ export class MultiIntentManager {
       .filter(s => s.length > 5);
     
     if (segments.length <= 1) {
-      const commaSegments = message.split(/,\s*(?=(?:crea|genera|haz|escribe|busca|analiza|resume|convierte|extrae|navega|abre|diseña|construye|make|create|write|search|analyze|summarize|transform|extract|navigate|open|design|build)\b)/i)
+      const commaAndYSegments = message.split(/(?:,\s*|\s+y\s+)(?=(?:un(?:a|o)?\s+)?(?:crea|genera|haz|escribe|busca|analiza|resume|resumen|convierte|extrae|navega|abre|diseña|construye|imagen|tabla|lista|make|create|write|search|analyze|summarize|summary|transform|extract|navigate|open|design|build|image|table|list)\b)/i)
         .map(s => s.trim())
         .filter(s => s.length > 5);
       
-      if (commaSegments.length > 1) {
-        return commaSegments;
+      if (commaAndYSegments.length > 1) {
+        console.log("[MultiIntentManager] Split using comma/y pattern:", commaAndYSegments.length, "segments");
+        return commaAndYSegments;
       }
     }
     
