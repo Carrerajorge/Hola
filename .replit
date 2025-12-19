@@ -1,10 +1,10 @@
-modules = ["nodejs-20", "web", "postgresql-16"]
+modules = ["nodejs-20", "web", "postgresql-16", "python-3.11"]
 run = "npm run dev"
 hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "cups", "libdrm", "gtk3", "pango", "cairo", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "xorg.libxcb", "mesa", "expat", "alsa-lib", "dbus", "libxkbcommon", "xorg.libXcursor", "xorg.libXi", "xorg.libXrender", "xorg.libXScrnSaver", "xorg.libXtst", "fontconfig", "freetype"]
+packages = ["alsa-lib", "at-spi2-atk", "atk", "cairo", "cups", "dbus", "expat", "ffmpeg-full", "fontconfig", "freetype", "ghostscript", "glib", "gobject-introspection", "gtk3", "libdrm", "libxkbcommon", "mesa", "nspr", "nss", "pango", "pkg-config", "qhull", "tcl", "tk", "xorg.libX11", "xorg.libXScrnSaver", "xorg.libXcomposite", "xorg.libXcursor", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXi", "xorg.libXrandr", "xorg.libXrender", "xorg.libXtst", "xorg.libxcb"]
 
 [deployment]
 deploymentTarget = "autoscale"
