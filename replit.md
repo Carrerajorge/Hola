@@ -174,6 +174,61 @@ The application includes a multi-intent pipeline for handling complex user promp
 - Only used when pipeline completes successfully
 - Falls back to standard LLM response on partial/failed completion
 
+## Interactive Code Blocks System
+
+The application includes a comprehensive interactive code blocks system with advanced features:
+
+### Syntax Highlighting
+- **Prism.js** with lazy loading of language packs (`client/src/lib/syntaxHighlighter.ts`)
+- **Web Worker** for async tokenization (`client/src/workers/prismWorker.ts`)
+- **useAsyncHighlight hook** with LRU caching and fallback for small snippets
+- 50+ language aliases with dependency management
+
+### Code Block Shell (`client/src/components/code-block-shell.tsx`)
+- Unified component for interactive code display
+- **Toolbar actions**: Copy, Edit, Run, Annotate
+- **Virtualization** for snippets >100 lines using IntersectionObserver
+- **Line numbering** with gutter
+- **Error line highlighting** with red background
+- **Annotation markers** in gutter with type-colored indicators
+
+### Monaco Editor Integration
+- **Code-split** loading to avoid bundle bloat (`client/src/components/monaco-code-editor.tsx`)
+- **CodeEditorModal** for full-screen editing (`client/src/components/code-editor-modal.tsx`)
+- Theme sync (dark/light mode)
+- Keyboard shortcuts: Ctrl+S to save, Escape to cancel
+- Line decorations for errors and annotations
+
+### Multi-Language Code Execution (Piston API)
+- **Backend**: `server/services/pistonService.ts`
+- **Frontend**: `client/src/lib/sandboxApi.ts`, `client/src/hooks/useSandboxExecution.ts`
+- Supports 50+ languages via Piston public API (https://emkc.org/api/v2/piston/)
+- Error line parsing for Python, JavaScript, TypeScript, Go, Rust, C/C++, Java, etc.
+- Fallback to local Python interpreter for Python code
+- Rate limiting awareness and retry logic
+
+**API Endpoints:**
+- `GET /api/sandbox/runtimes` - List available runtimes and languages
+- `POST /api/sandbox/execute` - Execute code in sandbox
+
+### Code Annotations System
+- **Hook**: `client/src/hooks/useCodeAnnotations.ts` - CRUD operations with localStorage persistence
+- **Tooltip**: `client/src/components/code-annotation-tooltip.tsx` - Popover with edit/delete
+- **Sidebar**: `client/src/components/code-annotation-sidebar.tsx` - Collapsible panel listing all annotations
+- **Marker**: `client/src/components/code-annotation-marker.tsx` - Gutter indicators
+- Annotation types: info (blue), warning (amber), error (red), explanation (emerald)
+
+### Usage in MarkdownRenderer
+Enable interactive code blocks with:
+```tsx
+<MarkdownRenderer 
+  content={markdown}
+  enableInteractiveCode={true}
+  interactiveCodeEditable={true}
+  onCodeEdit={(newCode) => console.log(newCode)}
+/>
+```
+
 ## Figma MCP Integration (Disabled)
 
 The Figma MCP integration is available but currently disabled in the UI. To enable it:
