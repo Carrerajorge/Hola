@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { 
   ChevronDown, 
@@ -9,7 +9,9 @@ import {
   AlertCircle,
   Clock,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Terminal,
+  Code2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -41,6 +43,46 @@ interface CodeExecutionBlockProps {
   onExecuted?: (run: CodeRun, artifacts: CodeArtifact[]) => void;
 }
 
+function generateCodeDescription(code: string): string {
+  const lines = code.toLowerCase();
+  
+  if (lines.includes('plt.bar') || lines.includes('bar(')) {
+    return 'Generando gráfica de barras';
+  }
+  if (lines.includes('plt.plot') || lines.includes('.plot(')) {
+    return 'Generando gráfica de líneas';
+  }
+  if (lines.includes('plt.pie') || lines.includes('pie(')) {
+    return 'Generando gráfica circular';
+  }
+  if (lines.includes('plt.scatter') || lines.includes('scatter(')) {
+    return 'Generando gráfica de dispersión';
+  }
+  if (lines.includes('plt.hist') || lines.includes('histogram')) {
+    return 'Generando histograma';
+  }
+  if (lines.includes('matplotlib') || lines.includes('plt.')) {
+    return 'Generando visualización';
+  }
+  if (lines.includes('pandas') || lines.includes('read_csv') || lines.includes('dataframe')) {
+    return 'Procesando datos';
+  }
+  if (lines.includes('requests') || lines.includes('urllib') || lines.includes('fetch')) {
+    return 'Realizando petición HTTP';
+  }
+  if (lines.includes('open(') && ('write' in lines || 'read' in lines)) {
+    return 'Procesando archivo';
+  }
+  if (lines.includes('def ') || lines.includes('class ')) {
+    return 'Definiendo función/clase';
+  }
+  if (lines.includes('print(')) {
+    return 'Ejecutando código Python';
+  }
+  
+  return 'Código Python ejecutable';
+}
+
 export function CodeExecutionBlock({
   code,
   language = "python",
@@ -48,14 +90,17 @@ export function CodeExecutionBlock({
   autoRun = false,
   onExecuted,
 }: CodeExecutionBlockProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [run, setRun] = useState<CodeRun | null>(null);
   const [artifacts, setArtifacts] = useState<CodeArtifact[]>([]);
   const { toast } = useToast();
 
-  const handleCopyCode = async () => {
+  const description = generateCodeDescription(code);
+
+  const handleCopyCode = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     await navigator.clipboard.writeText(code);
     setCopied(true);
     toast({
@@ -65,7 +110,8 @@ export function CodeExecutionBlock({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleRunCode = async () => {
+  const handleRunCode = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (isRunning) return;
     
     setIsRunning(true);
@@ -109,86 +155,127 @@ export function CodeExecutionBlock({
     }
   };
 
-  const getStatusIcon = () => {
-    if (isRunning) return <Loader2 className="w-4 h-4 animate-spin text-blue-500" />;
-    if (!run) return null;
-    if (run.status === "success") return <CheckCircle2 className="w-4 h-4 text-green-500" />;
-    if (run.status === "error") return <AlertCircle className="w-4 h-4 text-red-500" />;
+  const getStatusBadge = () => {
+    if (isRunning) {
+      return (
+        <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-xs">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          Ejecutando...
+        </span>
+      );
+    }
+    if (run?.status === "success") {
+      return (
+        <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 text-xs">
+          <CheckCircle2 className="w-3 h-3" />
+          Completado
+          {run.executionTimeMs && (
+            <span className="text-green-500/70">
+              ({(run.executionTimeMs / 1000).toFixed(1)}s)
+            </span>
+          )}
+        </span>
+      );
+    }
+    if (run?.status === "error") {
+      return (
+        <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 text-xs">
+          <AlertCircle className="w-3 h-3" />
+          Error
+        </span>
+      );
+    }
     return null;
   };
 
   return (
     <div 
-      className="my-4 rounded-lg border border-border overflow-hidden bg-[#1e1e1e]"
+      className="my-4 rounded-xl border border-border/50 overflow-hidden bg-gradient-to-b from-[#1a1a1a] to-[#141414] shadow-lg"
       data-testid="code-execution-block"
     >
-      <div className="flex items-center justify-between px-3 py-2 bg-[#2d2d2d] border-b border-border">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0 text-gray-400 hover:text-white"
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            data-testid="toggle-code"
-          >
-            {isCollapsed ? (
-              <ChevronRight className="w-4 h-4" />
-            ) : (
-              <ChevronDown className="w-4 h-4" />
-            )}
-          </Button>
-          <span className="text-sm text-gray-400 font-mono">
-            {language}
-          </span>
-          {getStatusIcon()}
-          {run?.executionTimeMs && (
-            <span className="text-xs text-gray-500 flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              {(run.executionTimeMs / 1000).toFixed(2)}s
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-[#1e1e1e] hover:bg-[#252525] transition-colors cursor-pointer border-b border-border/30"
+        aria-expanded={isExpanded}
+        data-testid="toggle-code"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30">
+            <Terminal className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="flex flex-col items-start">
+            <span className="text-sm font-medium text-gray-200">
+              {description}
             </span>
-          )}
+            <span className="text-xs text-gray-500 flex items-center gap-1">
+              <Code2 className="w-3 h-3" />
+              {language} • {code.split('\n').length} líneas
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-gray-400 hover:text-white"
-            onClick={handleCopyCode}
-            data-testid="copy-code"
-          >
-            {copied ? (
-              <Check className="w-4 h-4" />
+        
+        <div className="flex items-center gap-2">
+          {getStatusBadge()}
+          
+          <div className="flex items-center gap-1 ml-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-gray-400 hover:text-white hover:bg-white/10"
+              onClick={handleCopyCode}
+              data-testid="copy-code"
+            >
+              {copied ? (
+                <Check className="w-4 h-4 text-green-400" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-gray-400 hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50"
+              onClick={handleRunCode}
+              disabled={isRunning}
+              data-testid="run-code"
+            >
+              {isRunning ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Play className="w-4 h-4" />
+              )}
+            </Button>
+          </div>
+          
+          <div className="w-6 h-6 flex items-center justify-center text-gray-500">
+            {isExpanded ? (
+              <ChevronDown className="w-4 h-4" />
             ) : (
-              <Copy className="w-4 h-4" />
+              <ChevronRight className="w-4 h-4" />
             )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-gray-400 hover:text-green-400 disabled:opacity-50"
-            onClick={handleRunCode}
-            disabled={isRunning}
-            data-testid="run-code"
-          >
-            {isRunning ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
-          </Button>
+          </div>
         </div>
-      </div>
+      </button>
 
-      {!isCollapsed && (
-        <div className="max-h-[400px] overflow-auto">
+      {isExpanded && (
+        <div className="max-h-[400px] overflow-auto border-b border-border/30">
           <SyntaxHighlighter
             language={language}
             style={oneDark}
             customStyle={{
               margin: 0,
               padding: "1rem",
-              fontSize: "0.875rem",
+              fontSize: "0.8125rem",
               background: "transparent",
+              lineHeight: 1.6,
+            }}
+            showLineNumbers
+            lineNumberStyle={{
+              minWidth: "2.5em",
+              paddingRight: "1em",
+              color: "#4a4a4a",
+              userSelect: "none",
             }}
           >
             {code}
@@ -196,46 +283,58 @@ export function CodeExecutionBlock({
         </div>
       )}
 
-      {run && (run.stdout || run.stderr || artifacts.length > 0) && (
-        <div className="border-t border-border">
-          <div className="px-3 py-2 bg-[#252525] text-xs text-gray-400 uppercase tracking-wide">
-            Salida
+      {run && run.stdout && (
+        <div className="border-t border-border/30">
+          <div className="px-4 py-2 bg-[#1a1a1a] flex items-center gap-2">
+            <Terminal className="w-3.5 h-3.5 text-gray-500" />
+            <span className="text-xs text-gray-500 uppercase tracking-wide font-medium">
+              Salida de consola
+            </span>
           </div>
-          
-          {run.stdout && (
-            <pre className="px-4 py-3 text-sm text-gray-200 font-mono whitespace-pre-wrap overflow-auto max-h-[300px]">
-              {run.stdout}
-            </pre>
-          )}
-          
-          {run.stderr && (
-            <pre className="px-4 py-3 text-sm text-red-400 font-mono whitespace-pre-wrap overflow-auto max-h-[200px] bg-red-950/20">
-              {run.stderr}
-            </pre>
-          )}
+          <pre className="px-4 py-3 text-sm text-gray-300 font-mono whitespace-pre-wrap overflow-auto max-h-[200px] bg-black/20">
+            {run.stdout}
+          </pre>
+        </div>
+      )}
+      
+      {run && run.stderr && (
+        <div className="border-t border-red-500/20">
+          <div className="px-4 py-2 bg-red-950/30 flex items-center gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+            <span className="text-xs text-red-400 uppercase tracking-wide font-medium">
+              Error
+            </span>
+          </div>
+          <pre className="px-4 py-3 text-sm text-red-400 font-mono whitespace-pre-wrap overflow-auto max-h-[200px] bg-red-950/10">
+            {run.stderr}
+          </pre>
+        </div>
+      )}
 
-          {artifacts.length > 0 && (
-            <div className="p-4 space-y-4">
-              {artifacts.map((artifact) => (
-                <div key={artifact.id} data-testid={`artifact-${artifact.id}`}>
-                  {artifact.type === "image" && artifact.mimeType?.startsWith("image/") && (
-                    <div className="rounded-lg overflow-hidden bg-white inline-block">
-                      <img
-                        src={`data:${artifact.mimeType};base64,${artifact.data}`}
-                        alt={artifact.name}
-                        className="max-w-full h-auto"
-                      />
-                    </div>
-                  )}
-                  {artifact.type === "file" && (
-                    <div className="flex items-center gap-2 p-2 bg-[#2d2d2d] rounded">
-                      <span className="text-sm text-gray-300">{artifact.name}</span>
-                    </div>
-                  )}
+      {artifacts.length > 0 && (
+        <div className="border-t border-border/30 bg-white">
+          {artifacts.map((artifact) => (
+            <div key={artifact.id} data-testid={`artifact-${artifact.id}`}>
+              {artifact.type === "image" && artifact.mimeType?.startsWith("image/") && (
+                <div className="p-4 flex justify-center">
+                  <img
+                    src={`data:${artifact.mimeType};base64,${artifact.data}`}
+                    alt={artifact.name}
+                    className="max-w-full h-auto rounded-lg shadow-md"
+                    style={{ maxHeight: "500px" }}
+                  />
                 </div>
-              ))}
+              )}
+              {artifact.type === "file" && (
+                <div className="p-4">
+                  <div className="flex items-center gap-2 p-3 bg-gray-100 rounded-lg">
+                    <Code2 className="w-4 h-4 text-gray-600" />
+                    <span className="text-sm text-gray-700">{artifact.name}</span>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>
