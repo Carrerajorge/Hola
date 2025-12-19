@@ -1,0 +1,296 @@
+import React, { memo, useState, useEffect, useRef } from "react";
+import { cn } from "@/lib/utils";
+import { convertToLatex, sanitizeMathInput } from "@/lib/mathParser";
+import { Loader2, AlertCircle } from "lucide-react";
+
+declare global {
+  interface Window {
+    katex?: {
+      render: (latex: string, element: HTMLElement, options?: any) => void;
+      renderToString: (latex: string, options?: any) => string;
+    };
+    MathJax?: {
+      typesetPromise?: (elements?: HTMLElement[]) => Promise<void>;
+      tex2chtml?: (latex: string, options?: any) => HTMLElement;
+      startup?: {
+        promise: Promise<void>;
+        defaultReady: () => void;
+      };
+    };
+  }
+}
+
+export interface MathRendererProps {
+  content: string;
+  block?: boolean;
+  className?: string;
+  fallbackToMathJax?: boolean;
+  showError?: boolean;
+}
+
+type RenderStatus = "idle" | "loading" | "success" | "loading-mathjax" | "mathjax-ready" | "fallback" | "error";
+
+interface RenderState {
+  status: RenderStatus;
+  html: string;
+  error?: string;
+  latex?: string;
+  displayMode?: boolean;
+  version?: number;
+}
+
+const MATHJAX_CDN = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js";
+
+let mathJaxLoading: Promise<void> | null = null;
+
+async function loadMathJax(): Promise<void> {
+  if (window.MathJax?.typesetPromise) {
+    return Promise.resolve();
+  }
+
+  if (mathJaxLoading) {
+    return mathJaxLoading;
+  }
+
+  mathJaxLoading = new Promise((resolve, reject) => {
+    (window as any).MathJax = {
+      tex: {
+        inlineMath: [["$", "$"]],
+        displayMath: [["$$", "$$"]],
+      },
+      startup: {
+        ready: () => {
+          (window as any).MathJax.startup.defaultReady();
+          resolve();
+        },
+      },
+    };
+
+    const script = document.createElement("script");
+    script.src = MATHJAX_CDN;
+    script.async = true;
+    script.onerror = () => reject(new Error("Failed to load MathJax"));
+    document.head.appendChild(script);
+  });
+
+  return mathJaxLoading;
+}
+
+function renderWithKatex(latex: string, displayMode: boolean): { html: string; success: boolean; error?: string } {
+  try {
+    if (!window.katex) {
+      return { html: "", success: false, error: "KaTeX not loaded" };
+    }
+    
+    const sanitized = sanitizeMathInput(latex);
+    const html = window.katex.renderToString(sanitized, {
+      displayMode,
+      throwOnError: true,
+      trust: false,
+      strict: "warn",
+      maxSize: 500,
+      maxExpand: 100,
+    });
+    
+    return { html, success: true };
+  } catch (error: any) {
+    return { 
+      html: "", 
+      success: false, 
+      error: error.message || "KaTeX render error" 
+    };
+  }
+}
+
+export const MathRenderer = memo(function MathRenderer({
+  content,
+  block = false,
+  className,
+  fallbackToMathJax = true,
+  showError = true,
+}: MathRendererProps) {
+  const [state, setState] = useState<RenderState>({ status: "idle", html: "", version: 0 });
+  const containerRef = useRef<HTMLSpanElement>(null);
+  const versionRef = useRef(0);
+
+  useEffect(() => {
+    versionRef.current += 1;
+    const currentVersion = versionRef.current;
+    
+    if (!content) {
+      setState({ status: "success", html: "", version: currentVersion });
+      return;
+    }
+
+    setState({ status: "loading", html: "", version: currentVersion });
+
+    const { latex, isBlock } = convertToLatex(content);
+    const displayMode = block || isBlock;
+    const katexResult = renderWithKatex(latex, displayMode);
+    
+    if (katexResult.success) {
+      if (versionRef.current === currentVersion) {
+        setState({ status: "success", html: katexResult.html, version: currentVersion });
+      }
+      return;
+    }
+    if (!fallbackToMathJax) {
+      if (versionRef.current === currentVersion) {
+        setState({ 
+          status: "error", 
+          html: "", 
+          error: katexResult.error,
+          version: currentVersion 
+        });
+      }
+      return;
+    }
+    if (versionRef.current === currentVersion) {
+      setState({ 
+        status: "loading-mathjax", 
+        html: "", 
+        latex, 
+        displayMode,
+        version: currentVersion 
+      });
+    }
+  }, [content, block, fallbackToMathJax]);
+
+  useEffect(() => {
+    if (state.status !== "mathjax-ready" || !containerRef.current || !state.latex) {
+      return;
+    }
+
+    const currentVersion = state.version;
+
+    const runMathJax = async () => {
+      try {
+        await loadMathJax();
+        if (versionRef.current !== currentVersion || !containerRef.current) return;
+        
+        const mathContent = state.displayMode 
+          ? `$$${state.latex}$$` 
+          : `$${state.latex}$`;
+        containerRef.current.innerHTML = mathContent;
+        
+        if (window.MathJax?.typesetPromise) {
+          await window.MathJax.typesetPromise([containerRef.current]);
+          if (versionRef.current === currentVersion && containerRef.current) {
+            setState(prev => {
+              if (prev.version !== currentVersion) return prev;
+              return { 
+                ...prev, 
+                status: "fallback", 
+                html: containerRef.current?.innerHTML || "" 
+              };
+            });
+          }
+        }
+      } catch (error: any) {
+        if (versionRef.current === currentVersion) {
+          setState(prev => {
+            if (prev.version !== currentVersion) return prev;
+            return { 
+              status: "error", 
+              html: "", 
+              error: error.message || "MathJax render failed",
+              version: currentVersion 
+            };
+          });
+        }
+      }
+    };
+
+    runMathJax();
+  }, [state.status, state.latex, state.displayMode, state.version]);
+
+  useEffect(() => {
+    if (state.status === "loading-mathjax") {
+      const timer = requestAnimationFrame(() => {
+        if (versionRef.current === state.version && containerRef.current) {
+          setState(prev => {
+            if (prev.version !== state.version) return prev;
+            return { ...prev, status: "mathjax-ready" };
+          });
+        }
+      });
+      return () => cancelAnimationFrame(timer);
+    }
+  }, [state.status, state.version]);
+
+  if (state.status === "loading") {
+    return (
+      <span className={cn("inline-flex items-center gap-1 text-muted-foreground", className)}>
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span className="text-xs">Rendering...</span>
+      </span>
+    );
+  }
+
+  if (state.status === "error" && showError) {
+    return (
+      <span className={cn("inline-flex items-center gap-1 text-destructive text-sm", className)}>
+        <AlertCircle className="h-3 w-3" />
+        <code className="bg-destructive/10 px-1 rounded text-xs">{content}</code>
+      </span>
+    );
+  }
+
+  if (state.status === "loading-mathjax" || state.status === "mathjax-ready") {
+    return (
+      <span
+        ref={containerRef}
+        className={cn(
+          "inline-flex items-center gap-1",
+          block ? "block my-4" : "inline",
+          className
+        )}
+        data-testid="math-loading-mathjax"
+      >
+        <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Loading MathJax...</span>
+      </span>
+    );
+  }
+
+  if (state.status === "fallback") {
+    return (
+      <span
+        ref={containerRef}
+        className={cn(
+          block ? "block my-4 overflow-x-auto" : "inline",
+          className
+        )}
+        dangerouslySetInnerHTML={{ __html: state.html }}
+        data-testid="math-mathjax"
+      />
+    );
+  }
+
+  return (
+    <span
+      ref={containerRef}
+      className={cn(
+        block ? "katex-display block my-4 overflow-x-auto" : "inline",
+        className
+      )}
+      dangerouslySetInnerHTML={{ __html: state.html }}
+      data-testid="math-katex"
+    />
+  );
+});
+
+export interface MathBlockProps {
+  children: string;
+  className?: string;
+}
+
+export const InlineMath = memo(function InlineMath({ children, className }: MathBlockProps) {
+  return <MathRenderer content={children} block={false} className={className} />;
+});
+
+export const BlockMath = memo(function BlockMath({ children, className }: MathBlockProps) {
+  return <MathRenderer content={children} block={true} className={className} />;
+});
+
+export default MathRenderer;

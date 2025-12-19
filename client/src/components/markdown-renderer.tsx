@@ -7,6 +7,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { cn } from "@/lib/utils";
 import { Check, Copy, Loader2 } from "lucide-react";
+import { preprocessMathInMarkdown } from "@/lib/mathParser";
 
 const sanitizeSchema = {
   ...defaultSchema,
@@ -63,15 +64,6 @@ const sanitizeSchema = {
   },
 };
 
-function processLatex(text: string): string {
-  if (!text) return text;
-  let processed = text
-    .replace(/\\\[/g, "$$")
-    .replace(/\\\]/g, "$$")
-    .replace(/\\\(/g, "$")
-    .replace(/\\\)/g, "$");
-  return processed;
-}
 
 interface LazyImageProps {
   src?: string;
@@ -236,7 +228,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 }: MarkdownRendererProps) {
   const processedContent = useMemo(() => {
     if (!content) return "";
-    return enableMath ? processLatex(content) : content;
+    return enableMath ? preprocessMathInMarkdown(content) : content;
   }, [content, enableMath]);
 
   const remarkPlugins = useMemo(() => {
