@@ -54,26 +54,31 @@ const SEPARATOR_PATTERNS = [
   /\n+/
 ];
 
+const TASK_SPLIT_REGEX = /(?:^|\s)(?:primero|luego|después|segundo|tercero|cuarto|finalmente|por último|y también|además|then|first|second|third|finally|also)\s+/gi;
+
 export class MultiIntentManager {
   async detectMultiIntent(
     message: string,
     context?: ConversationContext
   ): Promise<MultiIntentDetection> {
+    const taskSegments = this.splitIntoTasks(message);
     const detectedIntents = this.analyzeIntents(message);
     const hasSeparators = this.detectSeparators(message);
+    
+    const taskCount = Math.max(taskSegments.length, detectedIntents.length);
     const intentCount = detectedIntents.length;
     
     let confidence = 0;
     
-    if (intentCount > 1) {
-      confidence = 0.5 + (Math.min(intentCount, 4) * 0.1);
+    if (taskCount > 1) {
+      confidence = 0.5 + (Math.min(taskCount, 4) * 0.15);
     }
     
-    if (hasSeparators) {
-      confidence += 0.2;
+    if (hasSeparators && taskCount > 1) {
+      confidence += 0.25;
     }
     
-    if (message.length > 200 && intentCount > 1) {
+    if (message.length > 100 && taskCount > 1) {
       confidence += 0.1;
     }
     
@@ -86,11 +91,26 @@ export class MultiIntentManager {
     
     confidence = Math.min(confidence, 1);
     
-    const isMultiIntent = confidence >= MULTI_INTENT_THRESHOLD && intentCount > 1;
+    const isMultiIntent = confidence >= MULTI_INTENT_THRESHOLD && taskCount > 1;
+    
+    console.log("[MultiIntentManager] Detection:", {
+      message: message.substring(0, 100) + "...",
+      taskSegments: taskSegments.length,
+      intentTypes: intentCount,
+      hasSeparators,
+      confidence,
+      isMultiIntent
+    });
     
     let suggestedPlan: TaskPlan[] | undefined;
     if (isMultiIntent) {
-      suggestedPlan = this.generateSuggestedPlan(message, detectedIntents);
+      if (taskSegments.length >= detectedIntents.length) {
+        console.log("[MultiIntentManager] Using segment-based plan with", taskSegments.length, "segments");
+        suggestedPlan = this.generateSuggestedPlanFromSegments(message, taskSegments);
+      } else {
+        console.log("[MultiIntentManager] Using intent-based plan with", detectedIntents.length, "intents");
+        suggestedPlan = this.generateSuggestedPlan(message, detectedIntents);
+      }
     }
     
     return MultiIntentDetectionSchema.parse({
@@ -99,6 +119,24 @@ export class MultiIntentManager {
       detectedIntents,
       suggestedPlan
     });
+  }
+  
+  private splitIntoTasks(message: string): string[] {
+    const segments = message.split(TASK_SPLIT_REGEX)
+      .map(s => s.trim())
+      .filter(s => s.length > 5);
+    
+    if (segments.length <= 1) {
+      const commaSegments = message.split(/,\s*(?=(?:crea|genera|haz|escribe|busca|analiza|resume|convierte|extrae|navega|abre|diseña|construye|make|create|write|search|analyze|summarize|transform|extract|navigate|open|design|build)\b)/i)
+        .map(s => s.trim())
+        .filter(s => s.length > 5);
+      
+      if (commaSegments.length > 1) {
+        return commaSegments;
+      }
+    }
+    
+    return segments.length > 0 ? segments : [message];
   }
   
   private analyzeIntents(message: string): Array<{
@@ -175,6 +213,53 @@ export class MultiIntentManager {
       chat: "General conversation"
     };
     return descriptions[type] || "Unknown intent";
+  }
+  
+  private generateSuggestedPlanFromSegments(
+    originalMessage: string,
+    segments: string[]
+  ): TaskPlan[] {
+    const plan: TaskPlan[] = [];
+    
+    segments.forEach((segment, index) => {
+      const intentType = this.detectIntentTypeForSegment(segment);
+      const title = this.extractTaskTitle(segment);
+      
+      plan.push({
+        id: `task_${index + 1}`,
+        title,
+        intentType,
+        description: segment,
+        requiredContext: [],
+        executionMode: "sequential",
+        dependencies: [],
+        priority: segments.length - index
+      });
+    });
+    
+    console.log("[MultiIntentManager] Generated plan:", plan.map(p => ({ id: p.id, title: p.title, intentType: p.intentType })));
+    
+    return plan;
+  }
+  
+  private detectIntentTypeForSegment(segment: string): IntentType {
+    for (const [intentType, patterns] of Object.entries(INTENT_PATTERNS)) {
+      for (const pattern of patterns) {
+        if (pattern.test(segment)) {
+          return intentType as IntentType;
+        }
+      }
+    }
+    return "generate";
+  }
+  
+  private extractTaskTitle(segment: string): string {
+    const cleanedSegment = segment
+      .replace(/^(primero|luego|después|segundo|tercero|cuarto|finalmente|por último|y también|además|then|first|second|third|finally|also)\s*/i, '')
+      .trim();
+    
+    const words = cleanedSegment.split(/\s+/).slice(0, 8);
+    return words.join(' ') + (cleanedSegment.split(/\s+/).length > 8 ? '...' : '');
   }
   
   private generateSuggestedPlan(

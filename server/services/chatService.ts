@@ -192,13 +192,21 @@ export async function handleChatRequest(
     
     if (!documentMode && !figmaMode && !hasImages) {
       try {
+        console.log("[ChatService] Checking for multi-intent...");
         const detection = await multiIntentManager.detectMultiIntent(lastUserMessage.content, {
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           userPreferences: {}
         });
         
+        console.log("[ChatService] Detection result:", {
+          isMultiIntent: detection.isMultiIntent,
+          confidence: detection.confidence,
+          intentsCount: detection.detectedIntents.length,
+          planLength: detection.suggestedPlan?.length || 0
+        });
+        
         if (detection.isMultiIntent && detection.confidence >= 0.7) {
-          console.log("Multi-intent detected:", detection.detectedIntents.length, "intents, confidence:", detection.confidence);
+          console.log("[ChatService] Multi-intent ACTIVATED with", detection.suggestedPlan?.length, "tasks");
           
           const pipelineResponse = await multiIntentPipeline.execute(
             lastUserMessage.content,
@@ -221,7 +229,13 @@ export async function handleChatRequest(
             };
           }
           
-          console.log("Multi-intent pipeline incomplete, falling back to standard chat. Status:", pipelineResponse.aggregate.completionStatus);
+          console.log("[ChatService] Multi-intent pipeline incomplete:", {
+            status: pipelineResponse.aggregate.completionStatus,
+            totalTasks: pipelineResponse.aggregate.totalTasks,
+            completedTasks: pipelineResponse.aggregate.completedTasks,
+            failedTasks: pipelineResponse.aggregate.failedTasks,
+            errors: pipelineResponse.errors.map(e => e.message)
+          });
         }
       } catch (error) {
         console.error("Multi-intent pipeline error, falling back to standard chat:", error);
