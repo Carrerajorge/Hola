@@ -56,6 +56,7 @@ interface SidebarProps {
   onHideChat?: (id: string, e: React.MouseEvent) => void;
   onOpenGpts?: () => void;
   onOpenApps?: () => void;
+  onOpenLibrary?: () => void;
 }
 
 export function Sidebar({ 
@@ -71,7 +72,8 @@ export function Sidebar({
   onArchiveChat,
   onHideChat,
   onOpenGpts,
-  onOpenApps
+  onOpenApps,
+  onOpenLibrary
 }: SidebarProps) {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
@@ -181,6 +183,7 @@ export function Sidebar({
         <Button 
           variant="ghost" 
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          onClick={onOpenLibrary}
           data-testid="button-library"
         >
           <Library className="h-4 w-4" />

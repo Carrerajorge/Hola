@@ -3,6 +3,7 @@ import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { GptExplorer, Gpt } from "@/components/gpt-explorer";
 import { GptBuilder } from "@/components/gpt-builder";
+import { UserLibrary } from "@/components/user-library";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useLocation } from "wouter";
@@ -38,6 +39,7 @@ export default function Home() {
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
   const [isGptExplorerOpen, setIsGptExplorerOpen] = useState(false);
   const [isGptBuilderOpen, setIsGptBuilderOpen] = useState(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [editingGpt, setEditingGpt] = useState<Gpt | null>(null);
   const [activeGpt, setActiveGpt] = useState<Gpt | null>(null);
   
@@ -125,6 +127,10 @@ export default function Home() {
     setLocation("/workspace-settings?section=apps");
   };
 
+  const handleOpenLibrary = () => {
+    setIsLibraryOpen(true);
+  };
+
   const handleSelectGpt = (gpt: Gpt) => {
     setActiveGpt(gpt);
     handleNewChat();
@@ -157,6 +163,7 @@ export default function Home() {
           onHideChat={hideChat}
           onOpenGpts={handleOpenGpts}
           onOpenApps={handleOpenApps}
+          onOpenLibrary={handleOpenLibrary}
         />
       </div>
 
@@ -190,6 +197,7 @@ export default function Home() {
               onHideChat={hideChat}
               onOpenGpts={handleOpenGpts}
               onOpenApps={handleOpenApps}
+              onOpenLibrary={handleOpenLibrary}
             />
           </SheetContent>
         </Sheet>
@@ -232,6 +240,12 @@ export default function Home() {
           setIsGptBuilderOpen(false);
           setEditingGpt(null);
         }}
+      />
+
+      {/* User Library Modal */}
+      <UserLibrary
+        open={isLibraryOpen}
+        onOpenChange={setIsLibraryOpen}
       />
     </div>
   );
