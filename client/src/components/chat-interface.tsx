@@ -133,8 +133,16 @@ const downloadTableAsExcel = (children: React.ReactNode) => {
   URL.revokeObjectURL(url);
 };
 
+const copyTableToClipboard = (children: React.ReactNode) => {
+  const data = extractTableData(children);
+  if (data.length === 0) return;
+  const text = data.map(row => row.join('\t')).join('\n');
+  navigator.clipboard.writeText(text);
+};
+
 const DataTableWrapper = ({children}: {children?: React.ReactNode}) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const childArray = React.Children.toArray(children);
   let colCount = 0;
   childArray.forEach((child: any) => {
@@ -150,6 +158,12 @@ const DataTableWrapper = ({children}: {children?: React.ReactNode}) => {
   });
   const minWidth = Math.min(Math.max(colCount * 150, 400), 1400);
   
+  const handleCopy = () => {
+    copyTableToClipboard(children);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  
   const renderTable = () => (
     <table className="data-table" style={{ minWidth: `${minWidth}px` }}>
       {children}
@@ -158,36 +172,49 @@ const DataTableWrapper = ({children}: {children?: React.ReactNode}) => {
 
   return (
     <>
-      <div className="table-container relative my-4">
-        <div className="table-actions absolute -top-1 right-0 flex gap-1 z-10">
+      <div className="table-container group relative my-4">
+        <div className="table-actions absolute top-2 right-2 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 onClick={() => downloadTableAsExcel(children)}
-                className="p-1.5 rounded-md bg-background/80 backdrop-blur-sm border border-border hover:bg-accent transition-colors"
+                className="p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border hover:bg-accent transition-colors shadow-sm"
                 data-testid="button-download-excel"
               >
                 <Download className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>Descargar Excel</TooltipContent>
+            <TooltipContent>Descargar</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
                 onClick={() => setIsFullscreen(true)}
-                className="p-1.5 rounded-md bg-background/80 backdrop-blur-sm border border-border hover:bg-accent transition-colors"
+                className="p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border hover:bg-accent transition-colors shadow-sm"
                 data-testid="button-fullscreen-table"
               >
                 <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>Ampliar tabla</TooltipContent>
+            <TooltipContent>Ampliar</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border hover:bg-accent transition-colors shadow-sm"
+                data-testid="button-copy-table"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{copied ? "Copiado" : "Copiar"}</TooltipContent>
           </Tooltip>
         </div>
-        <div className="table-wrap pt-6">
+        <div className="table-wrap">
           {renderTable()}
         </div>
       </div>
