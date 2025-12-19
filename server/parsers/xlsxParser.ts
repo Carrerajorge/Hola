@@ -8,60 +8,250 @@ export class XlsxParser implements FileParser {
     "application/vnd.ms-excel",
   ];
 
+  private readonly MAX_ROWS_PREVIEW = 100;
+  private readonly MAX_COLS_PREVIEW = 20;
+
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
+    const startTime = Date.now();
+    console.log(`[XlsxParser] Starting Excel parse, size: ${content.length} bytes`);
+
     try {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(content);
       
-      let text = "";
-      const sheetNames: string[] = [];
+      const sheetData: Array<{
+        name: string;
+        rowCount: number;
+        columnCount: number;
+        content: string;
+        truncated: boolean;
+      }> = [];
+
+      const metadata = this.extractWorkbookMetadata(workbook);
       
       workbook.eachSheet((worksheet) => {
-        const sheetName = worksheet.name;
-        sheetNames.push(sheetName);
-        text += `Sheet: ${sheetName}\n`;
-        
-        worksheet.eachRow({ includeEmpty: false }, (row) => {
-          const values: string[] = [];
-          row.eachCell({ includeEmpty: true }, (cell) => {
-            let cellValue = '';
-            if (cell.value === null || cell.value === undefined) {
-              cellValue = '';
-            } else if (typeof cell.value === 'object') {
-              if ('text' in cell.value) {
-                cellValue = cell.value.text;
-              } else if ('result' in cell.value) {
-                cellValue = String(cell.value.result ?? '');
-              } else if ('richText' in cell.value) {
-                cellValue = cell.value.richText.map((rt: any) => rt.text).join('');
-              } else {
-                cellValue = cell.text ?? String(cell.value);
-              }
-            } else {
-              cellValue = String(cell.value);
-            }
-            
-            if (cellValue.includes(',') || cellValue.includes('\n') || cellValue.includes('"')) {
-              cellValue = '"' + cellValue.replace(/"/g, '""') + '"';
-            }
-            values.push(cellValue);
-          });
-          text += values.join(',') + "\n";
-        });
-        
-        text += "\n";
+        const sheetResult = this.parseSheet(worksheet);
+        sheetData.push(sheetResult);
       });
+
+      const formattedOutput = this.formatOutput(metadata, sheetData);
       
+      const elapsed = Date.now() - startTime;
+      console.log(`[XlsxParser] Completed in ${elapsed}ms, ${sheetData.length} sheets processed`);
+
       return {
-        text: text.trim(),
+        text: formattedOutput,
         metadata: {
-          sheetNames,
-          sheetCount: sheetNames.length,
+          ...metadata,
+          sheets: sheetData.map(s => ({
+            name: s.name,
+            rowCount: s.rowCount,
+            columnCount: s.columnCount,
+            truncated: s.truncated,
+          })),
         },
       };
     } catch (error) {
-      console.error("Error parsing Excel:", error);
-      throw new Error("Failed to parse Excel");
+      const elapsed = Date.now() - startTime;
+      console.error(`[XlsxParser] Failed after ${elapsed}ms:`, error);
+      
+      if (error instanceof Error) {
+        throw new Error(`Failed to parse Excel: ${error.message}`);
+      }
+      throw new Error("Failed to parse Excel: Unknown error");
     }
+  }
+
+  private extractWorkbookMetadata(workbook: ExcelJS.Workbook): Record<string, any> {
+    const metadata: Record<string, any> = {
+      sheetCount: 0,
+    };
+
+    let sheetCount = 0;
+    workbook.eachSheet(() => sheetCount++);
+    metadata.sheetCount = sheetCount;
+
+    if (workbook.creator) metadata.author = workbook.creator;
+    if (workbook.created) metadata.creationDate = workbook.created.toISOString().split('T')[0];
+    if (workbook.modified) metadata.modificationDate = workbook.modified.toISOString().split('T')[0];
+    if (workbook.company) metadata.company = workbook.company;
+
+    return metadata;
+  }
+
+  private parseSheet(worksheet: ExcelJS.Worksheet): {
+    name: string;
+    rowCount: number;
+    columnCount: number;
+    content: string;
+    truncated: boolean;
+  } {
+    const sheetName = worksheet.name;
+    const rows: string[][] = [];
+    let maxCols = 0;
+    let totalRows = 0;
+    let truncated = false;
+
+    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      totalRows = rowNumber;
+      
+      if (rows.length >= this.MAX_ROWS_PREVIEW) {
+        truncated = true;
+        return;
+      }
+
+      const values: string[] = [];
+      let colIndex = 0;
+      
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        if (colNumber > this.MAX_COLS_PREVIEW) {
+          truncated = true;
+          return;
+        }
+        
+        while (values.length < colNumber - 1) {
+          values.push('');
+        }
+        
+        const cellValue = this.getCellValue(cell);
+        values.push(cellValue);
+        colIndex = colNumber;
+      });
+      
+      maxCols = Math.max(maxCols, values.length);
+      rows.push(values);
+    });
+
+    const normalizedRows = rows.map(row => {
+      while (row.length < maxCols) row.push('');
+      return row;
+    });
+
+    const markdownTable = this.createMarkdownTable(normalizedRows, sheetName, totalRows, truncated);
+
+    return {
+      name: sheetName,
+      rowCount: totalRows,
+      columnCount: maxCols,
+      content: markdownTable,
+      truncated,
+    };
+  }
+
+  private getCellValue(cell: ExcelJS.Cell): string {
+    if (cell.value === null || cell.value === undefined) {
+      return '';
+    }
+
+    if (typeof cell.value === 'object') {
+      if ('result' in cell.value) {
+        return String(cell.value.result ?? '');
+      }
+      if ('text' in cell.value) {
+        return (cell.value as any).text;
+      }
+      if ('richText' in cell.value) {
+        return (cell.value as any).richText.map((rt: any) => rt.text).join('');
+      }
+      if (cell.value instanceof Date) {
+        return cell.value.toISOString().split('T')[0];
+      }
+      return cell.text ?? String(cell.value);
+    }
+
+    if (typeof cell.value === 'number') {
+      if (Number.isInteger(cell.value)) {
+        return String(cell.value);
+      }
+      return cell.value.toFixed(2);
+    }
+
+    return String(cell.value);
+  }
+
+  private createMarkdownTable(
+    rows: string[][],
+    sheetName: string,
+    totalRows: number,
+    truncated: boolean
+  ): string {
+    if (rows.length === 0) {
+      return `*Empty sheet*`;
+    }
+
+    const parts: string[] = [];
+    
+    const columnWidths = this.calculateColumnWidths(rows);
+    
+    const headerRow = rows[0];
+    parts.push('| ' + headerRow.map((cell, i) => this.padCell(cell, columnWidths[i])).join(' | ') + ' |');
+    parts.push('| ' + columnWidths.map(w => '-'.repeat(Math.max(3, w))).join(' | ') + ' |');
+    
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      parts.push('| ' + row.map((cell, j) => this.padCell(cell, columnWidths[j])).join(' | ') + ' |');
+    }
+
+    if (truncated) {
+      parts.push('');
+      parts.push(`*Note: Sheet has ${totalRows} total rows. Showing first ${Math.min(this.MAX_ROWS_PREVIEW, rows.length)} rows.*`);
+    }
+
+    return parts.join('\n');
+  }
+
+  private calculateColumnWidths(rows: string[][]): number[] {
+    if (rows.length === 0) return [];
+    
+    const widths: number[] = new Array(rows[0].length).fill(3);
+    
+    for (const row of rows) {
+      for (let i = 0; i < row.length; i++) {
+        const escapedCell = this.escapeMarkdown(row[i]);
+        widths[i] = Math.min(30, Math.max(widths[i], escapedCell.length));
+      }
+    }
+    
+    return widths;
+  }
+
+  private padCell(cell: string, width: number): string {
+    const escaped = this.escapeMarkdown(cell);
+    if (escaped.length >= width) {
+      return escaped.substring(0, width);
+    }
+    return escaped + ' '.repeat(width - escaped.length);
+  }
+
+  private escapeMarkdown(text: string): string {
+    return text
+      .replace(/\|/g, '\\|')
+      .replace(/\n/g, ' ')
+      .replace(/\r/g, '')
+      .trim();
+  }
+
+  private formatOutput(
+    metadata: Record<string, any>,
+    sheets: Array<{ name: string; rowCount: number; columnCount: number; content: string; truncated: boolean }>
+  ): string {
+    const parts: string[] = [];
+    
+    parts.push('=== Workbook Info ===');
+    if (metadata.author) parts.push(`Author: ${metadata.author}`);
+    if (metadata.company) parts.push(`Company: ${metadata.company}`);
+    if (metadata.creationDate) parts.push(`Created: ${metadata.creationDate}`);
+    parts.push(`Sheets: ${metadata.sheetCount}`);
+    parts.push('');
+
+    for (const sheet of sheets) {
+      parts.push(`## Sheet: ${sheet.name}`);
+      parts.push(`*${sheet.rowCount} rows × ${sheet.columnCount} columns*`);
+      parts.push('');
+      parts.push(sheet.content);
+      parts.push('');
+    }
+
+    return parts.join('\n').trim();
   }
 }
