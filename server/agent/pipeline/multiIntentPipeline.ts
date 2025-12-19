@@ -310,14 +310,16 @@ User message: `;
         
         const fullPrompt = task.prompt + contextFromDeps;
         
-        const geminiMessages = context.messages.map(m => ({
-          role: m.role === "assistant" ? "model" : "user" as "user" | "model",
-          parts: [{ text: m.content }]
-        }));
-        geminiMessages.push({ role: "user", parts: [{ text: fullPrompt }] });
+        const conversationContext = context.messages
+          .map(m => `${m.role === "user" ? "Usuario" : "Asistente"}: ${m.content}`)
+          .join("\n");
+        
+        const contextualPrompt = conversationContext 
+          ? `Contexto de la conversación:\n${conversationContext}\n\n${fullPrompt}`
+          : fullPrompt;
         
         const response = await geminiChat(
-          geminiMessages,
+          [{ role: "user", parts: [{ text: contextualPrompt }] }],
           { model: GEMINI_MODELS.FLASH_PREVIEW }
         );
         
@@ -331,7 +333,7 @@ User message: `;
         return {
           taskId: task.plan.id,
           status: "completed",
-          output: response,
+          output: response.content,
           artifacts: [],
           duration: Date.now() - startTime,
           retryCount

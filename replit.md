@@ -147,6 +147,33 @@ The ETL agent returns a ZIP file containing two Excel workbooks:
 - Accessible via + menu → "ETL Datos Económicos"
 - Results appear in chat transcript after download
 
+## Multi-Intent Pipeline Architecture
+
+The application includes a multi-intent pipeline for handling complex user prompts with multiple tasks:
+
+**Pipeline Stages (Plan→Decompose→Execute→Aggregate):**
+1. **Plan**: Detect multi-intent prompts and extract structured task list using LLM
+2. **Decompose**: Break down prompts into individual atomic tasks with dependencies
+3. **Execute**: Run tasks (parallel for independent, sequential for dependent)
+4. **Aggregate**: Combine results with validation and error reporting
+
+**Key Files:**
+- `shared/schemas/multiIntent.ts` - Zod schemas for TaskPlan, ExecutionResult, PipelineResponse
+- `server/agent/pipeline/multiIntentManager.ts` - Intent detection using pattern matching and context
+- `server/agent/pipeline/multiIntentPipeline.ts` - Pipeline orchestrator with retry and error handling
+
+**Features:**
+- Automatic detection of multi-intent prompts (confidence threshold ≥0.7)
+- Parallel execution with Promise.allSettled for independent tasks
+- Per-task retry policy with exponential backoff
+- Graceful fallback to standard chat on pipeline failure
+- Fixed response schema: `{ plan[], results[], errors[], aggregate }`
+
+**Integration:**
+- Integrated in `chatService.ts` after route check
+- Only used when pipeline completes successfully
+- Falls back to standard LLM response on partial/failed completion
+
 ## Figma MCP Integration (Disabled)
 
 The Figma MCP integration is available but currently disabled in the UI. To enable it:

@@ -5,7 +5,8 @@ import { LIMITS } from "../lib/constants";
 import { storage } from "../storage";
 import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
-import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective } from "../agent";
+import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, multiIntentManager, multiIntentPipeline } from "../agent";
+import type { PipelineResponse } from "../../shared/schemas/multiIntent";
 
 export type LLMProvider = "xai" | "gemini";
 
@@ -77,6 +78,7 @@ interface ChatResponse {
   pipelineSuccess?: boolean;
   browserSessionId?: string | null;
   figmaDiagram?: FigmaDiagram;
+  multiIntentResponse?: PipelineResponse;
 }
 
 function broadcastAgentUpdate(runId: string, update: any) {
@@ -186,6 +188,44 @@ export async function handleChatRequest(
         pipelineSuccess: pipelineResult.success,
         browserSessionId: lastBrowserSessionId
       };
+    }
+    
+    if (!documentMode && !figmaMode && !hasImages) {
+      try {
+        const detection = await multiIntentManager.detectMultiIntent(lastUserMessage.content, {
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          userPreferences: {}
+        });
+        
+        if (detection.isMultiIntent && detection.confidence >= 0.7) {
+          console.log("Multi-intent detected:", detection.detectedIntents.length, "intents, confidence:", detection.confidence);
+          
+          const pipelineResponse = await multiIntentPipeline.execute(
+            lastUserMessage.content,
+            {
+              userId: conversationId,
+              conversationId,
+              messages: messages.map(m => ({ role: m.role, content: m.content })),
+              onProgress: onAgentProgress
+            }
+          );
+          
+          if (pipelineResponse.aggregate.completionStatus === "complete") {
+            return {
+              content: pipelineResponse.aggregate.summary,
+              role: "assistant",
+              wasAgentTask: true,
+              pipelineSteps: pipelineResponse.plan.length,
+              pipelineSuccess: true,
+              multiIntentResponse: pipelineResponse
+            };
+          }
+          
+          console.log("Multi-intent pipeline incomplete, falling back to standard chat. Status:", pipelineResponse.aggregate.completionStatus);
+        }
+      } catch (error) {
+        console.error("Multi-intent pipeline error, falling back to standard chat:", error);
+      }
     }
   }
 
