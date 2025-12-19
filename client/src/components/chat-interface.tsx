@@ -3107,35 +3107,74 @@ export function ChatInterface({
                       </div>
                     ) : (
                       <div className="flex flex-col gap-2 w-full min-w-0">
-                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm, remarkMath]}
-                            rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                            components={{
-                              img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
-                              ...CleanDataTableComponents,
-                            }}
-                          >
-                            {processLatex(parseDocumentBlocks(msg.content).text)}
-                          </ReactMarkdown>
-                        </div>
-                        {parseDocumentBlocks(msg.content).documents.length > 0 && (
-                          <div className="flex gap-2 flex-wrap mt-3">
-                            {parseDocumentBlocks(msg.content).documents.map((doc, idx) => (
-                              <Button
-                                key={idx}
-                                variant="outline"
-                                className="flex items-center gap-2 px-4 py-2 h-auto"
-                                onClick={() => handleOpenDocumentPreview(doc)}
-                              >
-                                {doc.type === "word" && <FileText className="h-5 w-5 text-blue-600" />}
-                                {doc.type === "excel" && <FileSpreadsheet className="h-5 w-5 text-green-600" />}
-                                {doc.type === "ppt" && <FileIcon className="h-5 w-5 text-orange-600" />}
-                                <span className="text-sm font-medium">{doc.title}</span>
-                              </Button>
-                            ))}
-                          </div>
-                        )}
+                        {(() => {
+                          const { text, documents } = parseDocumentBlocks(msg.content);
+                          
+                          const extractCodeBlocks = (content: string) => {
+                            const pythonBlockRegex = /```(?:python|py)\n([\s\S]*?)```/g;
+                            const blocks: { type: 'text' | 'python', content: string }[] = [];
+                            let lastIndex = 0;
+                            let match;
+                            
+                            while ((match = pythonBlockRegex.exec(content)) !== null) {
+                              if (match.index > lastIndex) {
+                                blocks.push({ type: 'text', content: content.slice(lastIndex, match.index) });
+                              }
+                              blocks.push({ type: 'python', content: match[1] });
+                              lastIndex = match.index + match[0].length;
+                            }
+                            
+                            if (lastIndex < content.length) {
+                              blocks.push({ type: 'text', content: content.slice(lastIndex) });
+                            }
+                            
+                            return blocks.length > 0 ? blocks : [{ type: 'text' as const, content }];
+                          };
+                          
+                          const contentBlocks = extractCodeBlocks(text || '');
+                          
+                          return (
+                            <>
+                              {contentBlocks.map((block, blockIdx) => (
+                                block.type === 'python' ? (
+                                  <div key={blockIdx} className="my-2">
+                                    <CodeExecutionBlock code={block.content.trim()} language="python" />
+                                  </div>
+                                ) : block.content.trim() ? (
+                                  <div key={blockIdx} className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
+                                    <ReactMarkdown
+                                      remarkPlugins={[remarkGfm, remarkMath]}
+                                      rehypePlugins={[rehypeKatex, rehypeHighlight]}
+                                      components={{
+                                        img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
+                                        ...CleanDataTableComponents,
+                                      }}
+                                    >
+                                      {processLatex(block.content)}
+                                    </ReactMarkdown>
+                                  </div>
+                                ) : null
+                              ))}
+                              {documents.length > 0 && (
+                                <div className="flex gap-2 flex-wrap mt-3">
+                                  {documents.map((doc, idx) => (
+                                    <Button
+                                      key={idx}
+                                      variant="outline"
+                                      className="flex items-center gap-2 px-4 py-2 h-auto"
+                                      onClick={() => handleOpenDocumentPreview(doc)}
+                                    >
+                                      {doc.type === "word" && <FileText className="h-5 w-5 text-blue-600" />}
+                                      {doc.type === "excel" && <FileSpreadsheet className="h-5 w-5 text-green-600" />}
+                                      {doc.type === "ppt" && <FileIcon className="h-5 w-5 text-orange-600" />}
+                                      <span className="text-sm font-medium">{doc.title}</span>
+                                    </Button>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                         
                         {/* Generated Image Block - BEFORE toolbar */}
                         {(() => {
