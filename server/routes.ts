@@ -24,6 +24,7 @@ import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "./et
 import { figmaService } from "./services/figmaService";
 import { sendShareNotificationEmail } from "./services/emailService";
 import { generateImage, detectImageRequest, extractImagePrompt } from "./services/imageGeneration";
+import * as codeInterpreter from "./services/codeInterpreterService";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -1891,6 +1892,48 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error deleting library item:", error);
       res.status(500).json({ error: "Failed to delete library item" });
+    }
+  });
+
+  // Code Interpreter Routes
+  app.post("/api/code-interpreter/run", async (req, res) => {
+    try {
+      const { code, conversationId, language } = req.body;
+      
+      if (!code || typeof code !== "string") {
+        return res.status(400).json({ error: "Code is required" });
+      }
+
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+
+      const result = await codeInterpreter.executeCode(code, {
+        conversationId,
+        userId,
+        language: language || "python",
+      });
+
+      res.json({
+        run: result.run,
+        artifacts: result.artifacts,
+      });
+    } catch (error: any) {
+      console.error("Error executing code:", error);
+      res.status(500).json({ error: "Failed to execute code" });
+    }
+  });
+
+  app.get("/api/code-interpreter/run/:id", async (req, res) => {
+    try {
+      const run = await codeInterpreter.getRun(req.params.id);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      const artifacts = await codeInterpreter.getRunArtifacts(req.params.id);
+      res.json({ run, artifacts });
+    } catch (error: any) {
+      console.error("Error getting run:", error);
+      res.status(500).json({ error: "Failed to get run" });
     }
   });
 
