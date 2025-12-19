@@ -2216,8 +2216,17 @@ export function ChatInterface({
                                     lang = match ? match[1] : '';
                                   }
                                   if (lang === 'python' || lang === 'py') {
-                                    const codeText = codeChild?.children?.[0]?.value || '';
-                                    return <CodeExecutionBlock code={codeText} language="python" />;
+                                    const extractText = (nodes: any[]): string => {
+                                      return nodes?.map((n: any) => {
+                                        if (n.type === 'text') return n.value || '';
+                                        if (n.children) return extractText(n.children);
+                                        return '';
+                                      }).join('') || '';
+                                    };
+                                    const codeText = extractText(codeChild?.children || []);
+                                    if (codeText) {
+                                      return <CodeExecutionBlock code={codeText} language="python" />;
+                                    }
                                   }
                                   return <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>;
                                 },
