@@ -40,3 +40,31 @@ export const LIMITS = {
   MAX_FILE_SIZE_MB: 100,
   MAX_FILE_SIZE_BYTES: 100 * 1024 * 1024
 } as const;
+
+export const FILE_UPLOAD_CONFIG = {
+  CHUNK_SIZE_MB: 5,
+  CHUNK_SIZE_BYTES: 5 * 1024 * 1024,
+  MAX_PARALLEL_CHUNKS: 4,
+  UPLOAD_TIMEOUT_MS: 60000
+} as const;
+
+export const ALLOWED_EXTENSIONS: Record<string, string> = {
+  "text/plain": ".txt",
+  "text/markdown": ".md",
+  "text/csv": ".csv",
+  "text/html": ".html",
+  "application/json": ".json",
+  "application/pdf": ".pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+  "application/vnd.ms-excel": ".xls",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+  "application/vnd.ms-powerpoint": ".ppt",
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/gif": ".gif",
+  "image/bmp": ".bmp",
+  "image/webp": ".webp",
+  "image/tiff": ".tiff"
+} as const;

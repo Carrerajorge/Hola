@@ -61,16 +61,49 @@ export const files = pgTable("files", {
   size: integer("size").notNull(),
   storagePath: text("storage_path").notNull(),
   status: text("status").notNull().default("pending"),
+  processingProgress: integer("processing_progress").default(0),
+  processingError: text("processing_error"),
+  completedAt: timestamp("completed_at"),
+  totalChunks: integer("total_chunks"),
+  uploadedChunks: integer("uploaded_chunks").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const insertFileSchema = createInsertSchema(files).omit({
   id: true,
   createdAt: true,
+}).extend({
+  processingProgress: z.number().min(0).max(100).optional(),
+  processingError: z.string().nullable().optional(),
+  completedAt: z.date().nullable().optional(),
+  totalChunks: z.number().nullable().optional(),
+  uploadedChunks: z.number().optional(),
 });
 
 export type InsertFile = z.infer<typeof insertFileSchema>;
 export type File = typeof files.$inferSelect;
+
+export const fileJobs = pgTable("file_jobs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fileId: varchar("file_id").notNull().references(() => files.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"),
+  retries: integer("retries").default(0),
+  lastError: text("last_error"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("file_jobs_file_id_idx").on(table.fileId),
+  index("file_jobs_status_idx").on(table.status),
+]);
+
+export const insertFileJobSchema = createInsertSchema(fileJobs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertFileJob = z.infer<typeof insertFileJobSchema>;
+export type FileJob = typeof fileJobs.$inferSelect;
 
 export const fileChunks = pgTable("file_chunks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

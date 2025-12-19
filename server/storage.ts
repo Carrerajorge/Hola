@@ -2,6 +2,7 @@ import {
   type User, type InsertUser, 
   type File, type InsertFile, 
   type FileChunk, type InsertFileChunk,
+  type FileJob, type InsertFileJob,
   type AgentRun, type InsertAgentRun,
   type AgentStep, type InsertAgentStep,
   type AgentAsset, type InsertAgentAsset,
@@ -20,7 +21,7 @@ import {
   type AnalyticsSnapshot, type InsertAnalyticsSnapshot,
   type Report, type InsertReport,
   type LibraryItem, type InsertLibraryItem,
-  files, fileChunks, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
+  files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   gpts, gptCategories, gptVersions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems
 } from "@shared/schema";
@@ -37,6 +38,13 @@ export interface IStorage {
   getFiles(userId?: string): Promise<File[]>;
   updateFileStatus(id: string, status: string): Promise<File | undefined>;
   deleteFile(id: string): Promise<void>;
+  updateFileProgress(id: string, progress: number): Promise<File | undefined>;
+  updateFileError(id: string, error: string): Promise<File | undefined>;
+  updateFileCompleted(id: string): Promise<File | undefined>;
+  updateFileUploadChunks(id: string, uploadedChunks: number, totalChunks: number): Promise<File | undefined>;
+  createFileJob(job: InsertFileJob): Promise<FileJob>;
+  getFileJob(fileId: string): Promise<FileJob | undefined>;
+  updateFileJobStatus(fileId: string, status: string, error?: string): Promise<FileJob | undefined>;
   createFileChunks(chunks: InsertFileChunk[]): Promise<FileChunk[]>;
   getFileChunks(fileId: string): Promise<FileChunk[]>;
   searchSimilarChunks(embedding: number[], limit?: number): Promise<FileChunk[]>;
@@ -176,6 +184,59 @@ export class MemStorage implements IStorage {
 
   async deleteFile(id: string): Promise<void> {
     await db.delete(files).where(eq(files.id, id));
+  }
+
+  async updateFileProgress(id: string, progress: number): Promise<File | undefined> {
+    const [file] = await db.update(files).set({ processingProgress: progress }).where(eq(files.id, id)).returning();
+    return file;
+  }
+
+  async updateFileError(id: string, error: string): Promise<File | undefined> {
+    const [file] = await db.update(files).set({ processingError: error, status: "failed" }).where(eq(files.id, id)).returning();
+    return file;
+  }
+
+  async updateFileCompleted(id: string): Promise<File | undefined> {
+    const [file] = await db.update(files).set({ 
+      status: "completed", 
+      processingProgress: 100, 
+      completedAt: new Date() 
+    }).where(eq(files.id, id)).returning();
+    return file;
+  }
+
+  async updateFileUploadChunks(id: string, uploadedChunks: number, totalChunks: number): Promise<File | undefined> {
+    const [file] = await db.update(files).set({ 
+      uploadedChunks, 
+      totalChunks 
+    }).where(eq(files.id, id)).returning();
+    return file;
+  }
+
+  async createFileJob(job: InsertFileJob): Promise<FileJob> {
+    const [result] = await db.insert(fileJobs).values(job).returning();
+    return result;
+  }
+
+  async getFileJob(fileId: string): Promise<FileJob | undefined> {
+    const [result] = await db.select().from(fileJobs).where(eq(fileJobs.fileId, fileId));
+    return result;
+  }
+
+  async updateFileJobStatus(fileId: string, status: string, error?: string): Promise<FileJob | undefined> {
+    const updates: Partial<FileJob> = { status };
+    if (status === "processing") {
+      updates.startedAt = new Date();
+    }
+    if (status === "completed" || status === "failed") {
+      updates.completedAt = new Date();
+    }
+    if (error) {
+      updates.lastError = error;
+      updates.retries = sql`${fileJobs.retries} + 1` as any;
+    }
+    const [result] = await db.update(fileJobs).set(updates).where(eq(fileJobs.fileId, fileId)).returning();
+    return result;
   }
 
   async createFileChunks(chunks: InsertFileChunk[]): Promise<FileChunk[]> {
