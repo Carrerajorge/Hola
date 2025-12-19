@@ -95,7 +95,7 @@ const isNumericValue = (text: string): boolean => {
   return !isNaN(parseFloat(cleaned)) && isFinite(Number(cleaned)) && cleaned.length > 0;
 };
 
-const APATableComponents = {
+const CleanDataTableComponents = {
   table: ({children}: {children?: React.ReactNode}) => {
     const childArray = React.Children.toArray(children);
     let colCount = 0;
@@ -110,43 +110,23 @@ const APATableComponents = {
         });
       }
     });
-    const minWidth = Math.min(Math.max(colCount * 80, 400), 1200);
+    const minWidth = Math.min(Math.max(colCount * 150, 400), 1400);
     return (
-      <div className="max-w-full overflow-x-auto my-4">
-        <table 
-          className="w-full text-sm border-collapse"
-          style={{ 
-            tableLayout: "auto", 
-            minWidth: `${minWidth}px`,
-            borderTop: "2px solid currentColor",
-            borderBottom: "2px solid currentColor"
-          }}
-        >
+      <div className="table-wrap">
+        <table className="data-table" style={{ minWidth: `${minWidth}px` }}>
           {children}
         </table>
       </div>
     );
   },
-  thead: ({children}: {children?: React.ReactNode}) => (
-    <thead style={{ borderBottom: "1px solid currentColor" }}>{children}</thead>
-  ),
+  thead: ({children}: {children?: React.ReactNode}) => <thead>{children}</thead>,
   tbody: ({children}: {children?: React.ReactNode}) => <tbody>{children}</tbody>,
   tr: ({children}: {children?: React.ReactNode}) => <tr>{children}</tr>,
   th: ({children}: {children?: React.ReactNode}) => {
     const text = extractTextFromChildren(children);
     const isNumeric = isNumericValue(text);
     return (
-      <th 
-        className="px-3 py-2 font-semibold"
-        style={{ 
-          whiteSpace: "nowrap",
-          wordBreak: "normal",
-          overflowWrap: "normal",
-          hyphens: "none",
-          textAlign: isNumeric ? "right" : "left",
-          fontVariantNumeric: isNumeric ? "tabular-nums" : "normal"
-        }}
-      >
+      <th scope="col" className={isNumeric ? "text-right" : ""}>
         {children}
       </th>
     );
@@ -154,19 +134,9 @@ const APATableComponents = {
   td: ({children}: {children?: React.ReactNode}) => {
     const text = extractTextFromChildren(children);
     const isNumeric = isNumericValue(text);
-    const isShort = text.length <= 20;
+    const isLong = text.length > 50;
     return (
-      <td 
-        className="px-3 py-2"
-        style={{ 
-          whiteSpace: isShort ? "nowrap" : "normal",
-          wordBreak: "normal",
-          overflowWrap: "break-word",
-          hyphens: "none",
-          textAlign: isNumeric ? "right" : "left",
-          fontVariantNumeric: isNumeric ? "tabular-nums" : "normal"
-        }}
-      >
+      <td className={`${isNumeric ? "text-right" : ""} ${isLong ? "wrap-cell" : ""}`}>
         {children}
       </td>
     );
@@ -2099,7 +2069,7 @@ export function ChatInterface({
                                 h3: ({children}) => <h3 className="text-base font-semibold mb-2">{children}</h3>,
                                 blockquote: ({children}) => <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-3">{children}</blockquote>,
                                 img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
-                                ...APATableComponents,
+                                ...CleanDataTableComponents,
                               }}
                             >
                               {processLatex(text)}
@@ -2373,7 +2343,7 @@ export function ChatInterface({
                       pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
                       code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
                       img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
-                      ...APATableComponents,
+                      ...CleanDataTableComponents,
                     }}
                   >
                     {processLatex(streamingContent)}
@@ -2955,7 +2925,7 @@ export function ChatInterface({
                             rehypePlugins={[rehypeKatex, rehypeHighlight]}
                             components={{
                               img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
-                              ...APATableComponents,
+                              ...CleanDataTableComponents,
                             }}
                           >
                             {processLatex(parseDocumentBlocks(msg.content).text)}
@@ -3161,7 +3131,7 @@ export function ChatInterface({
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkMath]}
                         rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                        components={{ ...APATableComponents }}
+                        components={{ ...CleanDataTableComponents }}
                       >
                         {processLatex(streamingContent)}
                       </ReactMarkdown>
@@ -3205,7 +3175,7 @@ export function ChatInterface({
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm, remarkMath]}
                         rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                        components={{ ...APATableComponents }}
+                        components={{ ...CleanDataTableComponents }}
                       >
                         {processLatex(streamingContent)}
                       </ReactMarkdown>
