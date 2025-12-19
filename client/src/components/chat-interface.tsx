@@ -924,6 +924,26 @@ export function ChatInterface({
   const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const streamingContentRef = useRef<string>("");
   const aiStateRef = useRef<"idle" | "thinking" | "responding">("idle");
+  const composerRef = useRef<HTMLDivElement>(null);
+  
+  // Measure composer height and set CSS variable for proper layout
+  useEffect(() => {
+    const updateComposerHeight = () => {
+      if (composerRef.current) {
+        const h = composerRef.current.getBoundingClientRect().height;
+        document.documentElement.style.setProperty('--composer-height', `${h}px`);
+      }
+    };
+    
+    updateComposerHeight();
+    window.addEventListener('resize', updateComposerHeight);
+    window.addEventListener('orientationchange', updateComposerHeight);
+    
+    return () => {
+      window.removeEventListener('resize', updateComposerHeight);
+      window.removeEventListener('orientationchange', updateComposerHeight);
+    };
+  }, []);
   
   // Keep aiStateRef in sync with aiState for reliable access
   useEffect(() => {
@@ -2024,10 +2044,13 @@ export function ChatInterface({
               
           {/* Messages Area - Compact for document mode */}
           {hasMessages && (
-            <div className={cn(
-              "flex-1 overflow-y-auto space-y-3",
-              activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
-            )}>
+            <div 
+              className={cn(
+                "flex-1 overflow-y-auto space-y-3 overscroll-contain",
+                activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+              )}
+              style={{ paddingBottom: 'var(--composer-height, 120px)' }}
+            >
         
         {messages.map((msg, msgIndex) => (
           // Compact message display for document mode
@@ -2535,7 +2558,10 @@ export function ChatInterface({
           )}
 
           {/* Sticky Input Area */}
-          <div className="flex-shrink-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative">
+          <div 
+            ref={composerRef}
+            className="sticky bottom-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10"
+          >
             {/* Virtual Computer - Always visible above input */}
             <div className="absolute left-4 sm:left-6 bottom-[calc(100%+8px)] z-20">
               <VirtualComputer
@@ -2946,7 +2972,10 @@ export function ChatInterface({
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Messages Area - only show when there are messages */}
           {hasMessages && (
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
+            <div 
+              className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6 overscroll-contain"
+              style={{ paddingBottom: 'var(--composer-height, 120px)' }}
+            >
               {messages.map((msg, msgIndex) => (
                 <div
                   key={msg.id}

@@ -369,37 +369,25 @@ export function Sidebar({
       )}
 
       <div className="mt-auto border-t p-4">
-        <Popover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
-          <PopoverTrigger asChild>
-            <button className="flex w-full items-center gap-3 rounded-lg p-2 liquid-button cursor-pointer" data-testid="button-user-menu">
-              <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-amber-100 text-amber-700">
-                  {user?.role === "admin" ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex flex-1 flex-col overflow-hidden text-left">
-                <span className="truncate text-sm font-medium">
-                  {user?.role === "admin" ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
-                </span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {user?.email === "infosiragpt@gmail.com" ? "ENTERPRISE" : "Cuenta personal"}
-                </span>
-              </div>
-              {user?.email !== "infosiragpt@gmail.com" && (
-                <Button
-                  size="sm"
-                  className="rounded-full text-xs px-4 py-1 h-auto whitespace-nowrap bg-purple-600 hover:bg-purple-700 text-white border-0"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsUpgradeDialogOpen(true);
-                  }}
-                  data-testid="button-upgrade-plan"
-                >
-                  Mejorar el plan
-                </Button>
-              )}
-            </button>
-          </PopoverTrigger>
+        <div className="flex w-full items-center gap-3 rounded-lg p-2">
+          <Popover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
+            <PopoverTrigger asChild>
+              <button className="flex flex-1 items-center gap-3 liquid-button cursor-pointer" data-testid="button-user-menu">
+                <Avatar className="h-10 w-10">
+                  <AvatarFallback className="bg-amber-100 text-amber-700">
+                    {user?.role === "admin" ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex flex-1 flex-col overflow-hidden text-left">
+                  <span className="truncate text-sm font-medium">
+                    {user?.role === "admin" ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
+                  </span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {user?.email === "infosiragpt@gmail.com" ? "ENTERPRISE" : "Cuenta personal"}
+                  </span>
+                </div>
+              </button>
+            </PopoverTrigger>
           <PopoverContent className="w-auto min-w-56 p-2" align="start" side="top">
             <div className="flex flex-col">
               <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/profile"); }} data-testid="button-profile">
@@ -435,7 +423,18 @@ export function Sidebar({
               </Button>
             </div>
           </PopoverContent>
-        </Popover>
+          </Popover>
+          {user?.email !== "infosiragpt@gmail.com" && (
+            <Button
+              size="sm"
+              className="rounded-full text-xs px-4 py-1 h-auto whitespace-nowrap bg-purple-600 hover:bg-purple-700 text-white border-0 flex-shrink-0"
+              onClick={() => setIsUpgradeDialogOpen(true)}
+              data-testid="button-upgrade-plan"
+            >
+              Mejorar el plan
+            </Button>
+          )}
+        </div>
       </div>
 
       <SearchModal
