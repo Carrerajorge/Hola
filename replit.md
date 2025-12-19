@@ -229,6 +229,50 @@ Enable interactive code blocks with:
 />
 ```
 
+## Data Visualization System
+
+The application includes a comprehensive data visualization system with charts and smart tables:
+
+### Charts (`client/src/components/charts/`)
+- **RechartsChart** (`recharts-chart.tsx`): Bar, line, area, pie, donut, scatter charts
+  - Responsive containers, interactive tooltips, zoom/pan, PNG/SVG export
+- **EChartsChart** (`echarts-chart.tsx`): Geographic maps and heatmaps
+  - Lazy-loaded for bundle optimization
+  - World map visualization with scatter points
+  - 2D heatmaps with color gradients
+
+### Smart Tables (`smart-table.tsx`)
+- **TanStack Table** with full features:
+  - Multi-column sorting (click headers, shift+click for multi-sort)
+  - Type-aware filtering (text, number range, date range, select, boolean)
+  - Debounced global search (300ms)
+  - Client-side and server-side pagination
+  - Row virtualization via @tanstack/react-virtual for large datasets
+
+### Unified API
+- **Schema**: `shared/schemas/visualization.ts` - TypeScript types and Zod schemas
+- **Orchestrator**: `VisualizationRenderer` component routes to correct renderer based on config
+- **JSON Config**: Declarative configuration for both charts and tables
+
+**Usage:**
+```tsx
+import { VisualizationRenderer } from '@/components/charts';
+
+<VisualizationRenderer 
+  config={{
+    id: 'sales-chart',
+    type: 'chart',
+    chart: {
+      type: 'bar',
+      data: [{ label: 'Q1', value: 100 }, { label: 'Q2', value: 150 }],
+      title: 'Sales by Quarter',
+      showTooltip: true,
+      enableExport: true
+    }
+  }}
+/>
+```
+
 ## Figma MCP Integration (Disabled)
 
 The Figma MCP integration is available but currently disabled in the UI. To enable it:
