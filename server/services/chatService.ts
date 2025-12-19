@@ -125,6 +125,62 @@ export async function handleChatRequest(
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
   
   if (lastUserMessage) {
+    // PRIMERO: Detectar multi-intent ANTES de routeMessage para evitar que el agent pipeline
+    // capture prompts con múltiples tareas y solo procese la última
+    if (!documentMode && !figmaMode && !hasImages) {
+      try {
+        console.log("[ChatService] Checking for multi-intent FIRST (before routeMessage)...");
+        const detection = await multiIntentManager.detectMultiIntent(lastUserMessage.content, {
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          userPreferences: {}
+        });
+        
+        console.log("[ChatService] Detection result:", {
+          isMultiIntent: detection.isMultiIntent,
+          confidence: detection.confidence,
+          intentsCount: detection.detectedIntents.length,
+          planLength: detection.suggestedPlan?.length || 0
+        });
+        
+        if (detection.isMultiIntent && detection.confidence >= 0.7) {
+          console.log("[ChatService] Multi-intent ACTIVATED with", detection.suggestedPlan?.length, "tasks");
+          
+          const pipelineResponse = await multiIntentPipeline.execute(
+            lastUserMessage.content,
+            {
+              userId: conversationId,
+              conversationId,
+              messages: messages.map(m => ({ role: m.role, content: m.content })),
+              onProgress: onAgentProgress
+            }
+          );
+          
+          if (pipelineResponse.aggregate.completionStatus === "complete") {
+            return {
+              content: pipelineResponse.aggregate.summary,
+              role: "assistant",
+              wasAgentTask: true,
+              pipelineSteps: pipelineResponse.plan.length,
+              pipelineSuccess: true,
+              multiIntentResponse: pipelineResponse
+            };
+          }
+          
+          console.log("[ChatService] Multi-intent pipeline incomplete:", {
+            status: pipelineResponse.aggregate.completionStatus,
+            totalTasks: pipelineResponse.aggregate.totalTasks,
+            completedTasks: pipelineResponse.aggregate.completedTasks,
+            failedTasks: pipelineResponse.aggregate.failedTasks,
+            errors: pipelineResponse.errors.map(e => e.message)
+          });
+          // Si el pipeline multi-intent falla, continuar con routeMessage normal
+        }
+      } catch (error) {
+        console.error("Multi-intent pipeline error, falling back to routeMessage:", error);
+      }
+    }
+    
+    // SEGUNDO: Si no es multi-intent o falló, usar routeMessage normal
     const routeResult = await routeMessage(lastUserMessage.content);
     
     if (routeResult.decision === "agent" || routeResult.decision === "hybrid") {
@@ -188,58 +244,6 @@ export async function handleChatRequest(
         pipelineSuccess: pipelineResult.success,
         browserSessionId: lastBrowserSessionId
       };
-    }
-    
-    if (!documentMode && !figmaMode && !hasImages) {
-      try {
-        console.log("[ChatService] Checking for multi-intent...");
-        const detection = await multiIntentManager.detectMultiIntent(lastUserMessage.content, {
-          messages: messages.map(m => ({ role: m.role, content: m.content })),
-          userPreferences: {}
-        });
-        
-        console.log("[ChatService] Detection result:", {
-          isMultiIntent: detection.isMultiIntent,
-          confidence: detection.confidence,
-          intentsCount: detection.detectedIntents.length,
-          planLength: detection.suggestedPlan?.length || 0
-        });
-        
-        if (detection.isMultiIntent && detection.confidence >= 0.7) {
-          console.log("[ChatService] Multi-intent ACTIVATED with", detection.suggestedPlan?.length, "tasks");
-          
-          const pipelineResponse = await multiIntentPipeline.execute(
-            lastUserMessage.content,
-            {
-              userId: conversationId,
-              conversationId,
-              messages: messages.map(m => ({ role: m.role, content: m.content })),
-              onProgress: onAgentProgress
-            }
-          );
-          
-          if (pipelineResponse.aggregate.completionStatus === "complete") {
-            return {
-              content: pipelineResponse.aggregate.summary,
-              role: "assistant",
-              wasAgentTask: true,
-              pipelineSteps: pipelineResponse.plan.length,
-              pipelineSuccess: true,
-              multiIntentResponse: pipelineResponse
-            };
-          }
-          
-          console.log("[ChatService] Multi-intent pipeline incomplete:", {
-            status: pipelineResponse.aggregate.completionStatus,
-            totalTasks: pipelineResponse.aggregate.totalTasks,
-            completedTasks: pipelineResponse.aggregate.completedTasks,
-            failedTasks: pipelineResponse.aggregate.failedTasks,
-            errors: pipelineResponse.errors.map(e => e.message)
-          });
-        }
-      } catch (error) {
-        console.error("Multi-intent pipeline error, falling back to standard chat:", error);
-      }
     }
   }
 
