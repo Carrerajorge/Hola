@@ -46,13 +46,9 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import rehypeHighlight from "rehype-highlight";
 
 import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage } from "@/hooks/use-chats";
+import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
@@ -68,14 +64,6 @@ import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { Database, Sparkles } from "lucide-react";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
-
-const processLatex = (content: string): string => {
-  return content
-    .replace(/\\\[/g, '$$')
-    .replace(/\\\]/g, '$$')
-    .replace(/\\\(/g, '$')
-    .replace(/\\\)/g, '$');
-};
 
 const extractTextFromChildren = (children: React.ReactNode): string => {
   if (typeof children === 'string') return children;
@@ -2339,27 +2327,10 @@ export function ChatInterface({
                             </div>
                           ) : block.content.trim() ? (
                           <div key={blockIdx} className="px-4 py-3 text-foreground liquid-message-ai-light min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
-                            <ReactMarkdown
-                              remarkPlugins={[remarkGfm, remarkMath]}
-                              rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                              components={{
-                                p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
-                                a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
-                                pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
-                                code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
-                                ul: ({children}) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
-                                ol: ({children}) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
-                                li: ({children}) => <li className="ml-2">{children}</li>,
-                                h1: ({children}) => <h1 className="text-xl font-bold mb-3">{children}</h1>,
-                                h2: ({children}) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
-                                h3: ({children}) => <h3 className="text-base font-semibold mb-2">{children}</h3>,
-                                blockquote: ({children}) => <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic my-3">{children}</blockquote>,
-                                img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
-                                ...CleanDataTableComponents,
-                              }}
-                            >
-                              {processLatex(block.content)}
-                            </ReactMarkdown>
+                            <MarkdownRenderer
+                              content={block.content}
+                              customComponents={{...CleanDataTableComponents}}
+                            />
                           </div>
                           ) : null
                         ))}
@@ -2627,20 +2598,10 @@ export function ChatInterface({
               )}
               {aiState === "responding" && streamingContent && (
                 <div className="px-4 py-3 text-foreground min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm, remarkMath]}
-                    rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                    components={{
-                      p: ({children}) => <p className="mb-3 last:mb-0">{children}</p>,
-                      a: ({href, children}) => <a href={href} className="text-blue-500 hover:underline break-all" target="_blank" rel="noopener noreferrer">{children}</a>,
-                      pre: ({children}) => <pre className="bg-muted p-3 rounded-lg overflow-x-auto mb-3 text-xs">{children}</pre>,
-                      code: ({children, className}) => className ? <code className={className}>{children}</code> : <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{children}</code>,
-                      img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
-                      ...CleanDataTableComponents,
-                    }}
-                  >
-                    {processLatex(streamingContent)}
-                  </ReactMarkdown>
+                  <MarkdownRenderer
+                    content={streamingContent}
+                    customComponents={{...CleanDataTableComponents}}
+                  />
                   <span className="typing-cursor">|</span>
                 </div>
               )}
@@ -3260,16 +3221,10 @@ export function ChatInterface({
                                   </div>
                                 ) : block.content.trim() ? (
                                   <div key={blockIdx} className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                                    <ReactMarkdown
-                                      remarkPlugins={[remarkGfm, remarkMath]}
-                                      rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                                      components={{
-                                        img: ({src, alt}) => src ? <img src={src} alt={alt || "Generated image"} className="max-w-full h-auto rounded-lg my-3" style={{ maxHeight: "400px" }} /> : null,
-                                        ...CleanDataTableComponents,
-                                      }}
-                                    >
-                                      {processLatex(block.content)}
-                                    </ReactMarkdown>
+                                    <MarkdownRenderer
+                                      content={block.content}
+                                      customComponents={{...CleanDataTableComponents}}
+                                    />
                                   </div>
                                 ) : null
                               ))}
@@ -3473,13 +3428,10 @@ export function ChatInterface({
                 <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
                   <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
                     <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkMath]}
-                        rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                        components={{ ...CleanDataTableComponents }}
-                      >
-                        {processLatex(streamingContent)}
-                      </ReactMarkdown>
+                      <MarkdownRenderer
+                        content={streamingContent}
+                        customComponents={{...CleanDataTableComponents}}
+                      />
                       <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5" />
                     </div>
                   </div>
@@ -3517,13 +3469,10 @@ export function ChatInterface({
                 <div className="w-full max-w-3xl mx-auto">
                   <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
                     <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkMath]}
-                        rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                        components={{ ...CleanDataTableComponents }}
-                      >
-                        {processLatex(streamingContent)}
-                      </ReactMarkdown>
+                      <MarkdownRenderer
+                        content={streamingContent}
+                        customComponents={{...CleanDataTableComponents}}
+                      />
                       <span className="inline-block w-0.5 h-4 bg-primary animate-[pulse_0.33s_ease-in-out_infinite] ml-0.5" />
                     </div>
                   </div>
@@ -4258,60 +4207,7 @@ export function ChatInterface({
                   className="prose prose-sm dark:prose-invert max-w-none"
                 >
                   <div className="bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm, remarkMath]}
-                      rehypePlugins={[rehypeKatex, rehypeHighlight]}
-                      components={{
-                        p: ({children}) => <p className="mb-3 leading-relaxed text-sm">{children}</p>,
-                        h1: ({children}) => <h1 className="text-xl font-bold mb-3 mt-4">{children}</h1>,
-                        h2: ({children}) => <h2 className="text-lg font-bold mb-2 mt-3">{children}</h2>,
-                        h3: ({children}) => <h3 className="text-base font-semibold mb-2 mt-2">{children}</h3>,
-                        ul: ({children}) => <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>,
-                        ol: ({children}) => <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>,
-                        li: ({children}) => <li className="text-sm">{children}</li>,
-                        code: ({className, children, ...props}) => {
-                          const isInline = !className;
-                          return isInline ? (
-                            <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono" {...props}>
-                              {children}
-                            </code>
-                          ) : (
-                            <code className={cn("block text-xs", className)} {...props}>
-                              {children}
-                            </code>
-                          );
-                        },
-                        pre: ({children}) => (
-                          <pre className="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg overflow-x-auto text-xs mb-3">
-                            {children}
-                          </pre>
-                        ),
-                        blockquote: ({children}) => (
-                          <blockquote className="border-l-4 border-primary/50 pl-4 italic my-3 text-muted-foreground">
-                            {children}
-                          </blockquote>
-                        ),
-                        table: ({children}) => (
-                          <div className="overflow-x-auto my-3">
-                            <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600">
-                              {children}
-                            </table>
-                          </div>
-                        ),
-                        th: ({children}) => (
-                          <th className="border border-gray-300 dark:border-gray-600 px-3 py-2 bg-gray-100 dark:bg-gray-700 font-semibold text-left text-sm">
-                            {children}
-                          </th>
-                        ),
-                        td: ({children}) => (
-                          <td className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm">
-                            {children}
-                          </td>
-                        ),
-                      }}
-                    >
-                      {previewFileAttachment.content}
-                    </ReactMarkdown>
+                    <MarkdownRenderer content={previewFileAttachment.content} />
                   </div>
                 </motion.div>
               ) : (
