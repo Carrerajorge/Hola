@@ -9,7 +9,10 @@ import {
   CheckCircle2,
   Loader2,
   Terminal,
-  Code2
+  Code2,
+  Download,
+  Maximize2,
+  X
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -90,13 +93,40 @@ export function CodeExecutionBlock({
 }: CodeExecutionBlockProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedImage, setCopiedImage] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [run, setRun] = useState<CodeRun | null>(null);
   const [artifacts, setArtifacts] = useState<CodeArtifact[]>([]);
   const [hasAutoRun, setHasAutoRun] = useState(false);
+  const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   const { toast } = useToast();
 
   const description = generateCodeDescription(code);
+
+  const handleDownloadImage = (dataUrl: string, filename: string) => {
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = filename || 'grafica.png';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast({ title: "Imagen descargada" });
+  };
+
+  const handleCopyImage = async (dataUrl: string) => {
+    try {
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob })
+      ]);
+      setCopiedImage(true);
+      toast({ title: "Imagen copiada al portapapeles" });
+      setTimeout(() => setCopiedImage(false), 2000);
+    } catch (error) {
+      toast({ title: "Error al copiar imagen", variant: "destructive" });
+    }
+  };
 
   // Auto-execute code on mount
   useEffect(() => {
@@ -302,28 +332,85 @@ export function CodeExecutionBlock({
 
       {artifacts.length > 0 && (
         <div className="border-t border-border/30 bg-white">
-          {artifacts.map((artifact) => (
-            <div key={artifact.id} data-testid={`artifact-${artifact.id}`}>
-              {artifact.type === "image" && artifact.mimeType?.startsWith("image/") && (
-                <div className="p-4 flex justify-center">
-                  <img
-                    src={`data:${artifact.mimeType};base64,${artifact.data}`}
-                    alt={artifact.name}
-                    className="max-w-full h-auto rounded-lg shadow-md"
-                    style={{ maxHeight: "500px" }}
-                  />
-                </div>
-              )}
-              {artifact.type === "file" && (
-                <div className="p-4">
-                  <div className="flex items-center gap-2 p-3 bg-gray-100 rounded-lg">
-                    <Code2 className="w-4 h-4 text-gray-600" />
-                    <span className="text-sm text-gray-700">{artifact.name}</span>
+          {artifacts.map((artifact) => {
+            const imageDataUrl = `data:${artifact.mimeType};base64,${artifact.data}`;
+            return (
+              <div key={artifact.id} data-testid={`artifact-${artifact.id}`}>
+                {artifact.type === "image" && artifact.mimeType?.startsWith("image/") && (
+                  <div className="p-4 flex justify-center">
+                    <div className="relative group">
+                      <img
+                        src={imageDataUrl}
+                        alt={artifact.name}
+                        className="max-w-full h-auto rounded-lg shadow-md cursor-pointer"
+                        style={{ maxHeight: "500px" }}
+                        onClick={() => setFullscreenImage(imageDataUrl)}
+                      />
+                      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          className="h-8 w-8 bg-black/60 hover:bg-black/80 text-white border-0"
+                          onClick={(e) => { e.stopPropagation(); handleDownloadImage(imageDataUrl, artifact.name || 'grafica.png'); }}
+                          data-testid="download-image"
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          className="h-8 w-8 bg-black/60 hover:bg-black/80 text-white border-0"
+                          onClick={(e) => { e.stopPropagation(); setFullscreenImage(imageDataUrl); }}
+                          data-testid="fullscreen-image"
+                        >
+                          <Maximize2 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          className="h-8 w-8 bg-black/60 hover:bg-black/80 text-white border-0"
+                          onClick={(e) => { e.stopPropagation(); handleCopyImage(imageDataUrl); }}
+                          data-testid="copy-image"
+                        >
+                          {copiedImage ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+                {artifact.type === "file" && (
+                  <div className="p-4">
+                    <div className="flex items-center gap-2 p-3 bg-gray-100 rounded-lg">
+                      <Code2 className="w-4 h-4 text-gray-600" />
+                      <span className="text-sm text-gray-700">{artifact.name}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {fullscreenImage && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setFullscreenImage(null)}
+        >
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-4 right-4 h-10 w-10 text-white hover:bg-white/20"
+            onClick={() => setFullscreenImage(null)}
+          >
+            <X className="h-6 w-6" />
+          </Button>
+          <img
+            src={fullscreenImage}
+            alt="Imagen en pantalla completa"
+            className="max-w-full max-h-full object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>
