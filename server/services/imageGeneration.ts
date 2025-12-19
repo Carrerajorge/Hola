@@ -50,13 +50,61 @@ export async function generateImage(prompt: string): Promise<ImageGenerationResu
 }
 
 export function detectImageRequest(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+  
+  // Negative indicators: structured content that should NOT trigger image generation
+  const structuredContentKeywords = [
+    'tabla', 'table', 'tablas', 'tables',
+    'lista', 'list', 'listas', 'lists',
+    'documento', 'document', 'documentos', 'documents',
+    'texto', 'text', 'textos',
+    'organigrama', 'organigram', 'org chart',
+    'esquema', 'schema', 'outline',
+    'resumen', 'summary', 'resúmenes',
+    'código', 'code', 'script',
+    'excel', 'word', 'powerpoint', 'ppt',
+    'csv', 'json', 'xml', 'html',
+    'fórmula', 'formula', 'ecuación', 'equation',
+    'diagrama de flujo', 'flowchart', 'flow chart',
+    'markdown', 'md',
+    'párrafo', 'paragraph',
+    'artículo', 'article',
+    'informe', 'report',
+    'análisis', 'analysis',
+    'datos', 'data',
+    'filas', 'rows', 'columnas', 'columns',
+    'celdas', 'cells',
+    '10x10', '5x5', '3x3', // Table dimensions
+  ];
+  
+  // Check for structured content keywords first (negative indicators)
+  const hasStructuredContent = structuredContentKeywords.some(keyword => 
+    lowerMessage.includes(keyword)
+  );
+  
+  if (hasStructuredContent) {
+    // Only generate image if there's explicit image-specific noun
+    const explicitImageNouns = [
+      /\bimagen\b/i, /\bimágenes\b/i,
+      /\bfoto\b/i, /\bfotos\b/i, /\bfotografía\b/i,
+      /\bimage\b/i, /\bimages\b/i,
+      /\bpicture\b/i, /\bpictures\b/i,
+      /\bphoto\b/i, /\bphotos\b/i,
+      /\bilustración\b/i, /\billustration\b/i,
+      /\bdibujo\b/i, /\bdrawing\b/i,
+    ];
+    return explicitImageNouns.some(pattern => pattern.test(message));
+  }
+  
+  // Positive indicators: image-specific patterns
   const imagePatterns = [
-    /\b(genera|crea|dibuja|haz|hazme|dame|quiero|necesito|podr[ií]as)\b.{0,20}\b(imagen|imagen|foto|ilustraci[oó]n|dibujo|arte|retrato|paisaje)\b/i,
+    /\b(genera|crea|dibuja|haz|hazme|dame|quiero|necesito|podr[ií]as)\b.{0,20}\b(imagen|foto|ilustraci[oó]n|dibujo|arte|retrato|paisaje)\b/i,
     /\b(generate|create|make|draw|give me|i want|i need|can you)\b.{0,20}\b(image|picture|photo|illustration|drawing|art|portrait|landscape)\b/i,
     /\b(imagen|picture|photo)\s+(de|of|with)\b/i,
-    /^(dibuja|draw|genera|generate|crea|create)\s+/i,
     /\buna?\s+imagen\s+de\b/i,
     /\ban?\s+image\s+of\b/i,
+    /\bdibuja(me)?\s+/i,
+    /\bdraw\s+(me\s+)?a\b/i,
   ];
 
   return imagePatterns.some(pattern => pattern.test(message));
