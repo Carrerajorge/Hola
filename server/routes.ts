@@ -36,6 +36,11 @@ import {
   getTemplates,
   getTemplateById
 } from "./services/documentService";
+import { renderExcelFromSpec } from "./services/excelSpecRenderer";
+import { renderWordFromSpec } from "./services/wordSpecRenderer";
+import { validateExcelSpec, validateDocSpec } from "./services/documentValidators";
+import { generateExcelFromPrompt, generateWordFromPrompt } from "./services/documentOrchestrator";
+import { excelSpecSchema, docSpecSchema } from "../shared/documentSpecs";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -1559,6 +1564,96 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     } catch (error: any) {
       console.error("Document download error:", error);
       res.status(500).json({ error: "Failed to download document" });
+    }
+  });
+
+  // Render Excel from spec
+  app.post("/api/documents/render/excel", async (req, res) => {
+    try {
+      const parseResult = excelSpecSchema.safeParse(req.body);
+      
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid Excel spec", 
+          details: parseResult.error.flatten().fieldErrors 
+        });
+      }
+      
+      const buffer = await renderExcelFromSpec(parseResult.data);
+      
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${parseResult.data.workbook_title || 'workbook'}.xlsx"`);
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Excel render error:", error);
+      res.status(500).json({ error: "Failed to render Excel document", details: error.message });
+    }
+  });
+
+  // Render Word from spec
+  app.post("/api/documents/render/word", async (req, res) => {
+    try {
+      const parseResult = docSpecSchema.safeParse(req.body);
+      
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid Word doc spec", 
+          details: parseResult.error.flatten().fieldErrors 
+        });
+      }
+      
+      const buffer = await renderWordFromSpec(parseResult.data);
+      
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${parseResult.data.title || 'document'}.docx"`);
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Word render error:", error);
+      res.status(500).json({ error: "Failed to render Word document", details: error.message });
+    }
+  });
+
+  // Generate Excel from prompt (AI-powered)
+  app.post("/api/documents/generate/excel", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+      
+      const { buffer, spec } = await generateExcelFromPrompt(prompt);
+      
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${spec.workbook_title || 'generated'}.xlsx"`);
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Excel generation error:", error);
+      res.status(500).json({ error: "Failed to generate Excel document", details: error.message });
+    }
+  });
+
+  // Generate Word from prompt (AI-powered)
+  app.post("/api/documents/generate/word", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+      
+      const { buffer, spec } = await generateWordFromPrompt(prompt);
+      
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${spec.title || 'generated'}.docx"`);
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Word generation error:", error);
+      res.status(500).json({ error: "Failed to generate Word document", details: error.message });
     }
   });
 
