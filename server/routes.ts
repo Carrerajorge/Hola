@@ -27,6 +27,13 @@ import { sendShareNotificationEmail } from "./services/emailService";
 import { generateImage, detectImageRequest, extractImagePrompt } from "./services/imageGeneration";
 import * as codeInterpreter from "./services/codeInterpreterService";
 import * as pistonService from "./services/pistonService";
+import { 
+  DocumentRenderRequestSchema,
+  renderDocument,
+  getGeneratedDocument,
+  getTemplates,
+  getTemplateById
+} from "./services/documentService";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -189,9 +196,10 @@ export async function registerRoutes(
       try {
         await bucket.combine(
           partPaths.map(p => bucket.file(p)),
-          destinationFile,
-          { metadata: { contentType: session.mimeType } }
+          destinationFile
         );
+        
+        await destinationFile.setMetadata({ contentType: session.mimeType });
 
         for (const partPath of partPaths) {
           try {
@@ -1389,6 +1397,83 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/documents/templates", async (req, res) => {
+    try {
+      const templates = getTemplates();
+      const type = req.query.type as string | undefined;
+      
+      if (type) {
+        const filtered = templates.filter(t => t.type.includes(type as any));
+        return res.json(filtered);
+      }
+      
+      res.json(templates);
+    } catch (error: any) {
+      console.error("Error fetching templates:", error);
+      res.status(500).json({ error: "Failed to fetch templates" });
+    }
+  });
+
+  app.get("/api/documents/templates/:id", async (req, res) => {
+    try {
+      const template = getTemplateById(req.params.id);
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+      res.json(template);
+    } catch (error: any) {
+      console.error("Error fetching template:", error);
+      res.status(500).json({ error: "Failed to fetch template" });
+    }
+  });
+
+  app.post("/api/documents/render", async (req, res) => {
+    try {
+      const parseResult = DocumentRenderRequestSchema.safeParse(req.body);
+      
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid request", 
+          details: parseResult.error.flatten().fieldErrors 
+        });
+      }
+      
+      const document = await renderDocument(parseResult.data);
+      
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      const downloadUrl = `${baseUrl}/api/documents/${document.id}`;
+      
+      res.json({
+        id: document.id,
+        fileName: document.fileName,
+        mimeType: document.mimeType,
+        downloadUrl,
+        expiresAt: document.expiresAt.toISOString(),
+      });
+    } catch (error: any) {
+      console.error("Document render error:", error);
+      res.status(500).json({ error: "Failed to render document", details: error.message });
+    }
+  });
+
+  app.get("/api/documents/:id", async (req, res) => {
+    try {
+      const document = getGeneratedDocument(req.params.id);
+      
+      if (!document) {
+        return res.status(404).json({ error: "Document not found or expired" });
+      }
+      
+      res.setHeader("Content-Type", document.mimeType);
+      res.setHeader("Content-Disposition", `attachment; filename="${document.fileName}"`);
+      res.setHeader("Content-Length", document.buffer.length);
+      res.send(document.buffer);
+    } catch (error: any) {
+      console.error("Document download error:", error);
+      res.status(500).json({ error: "Failed to download document" });
+    }
+  });
+
   // Admin API Routes
   
   // Dashboard metrics
@@ -1831,7 +1916,8 @@ export async function registerRoutes(
     });
     
     ws.on("close", () => {
-      for (const fileId of subscribedFileIds) {
+      const fileIds = Array.from(subscribedFileIds);
+      for (const fileId of fileIds) {
         const clients = fileStatusClients.get(fileId);
         if (clients) {
           clients.delete(ws);

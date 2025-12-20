@@ -22,6 +22,12 @@ const badgeVariants = cva(
           "border-transparent bg-destructive text-destructive-foreground shadow-xs",
           // @replit shadow-xs" - use badge outline variable
         outline: "text-foreground border [border-color:var(--badge-outline)]",
+        success:
+          "border-transparent bg-green-600 text-white shadow-xs",
+        warning:
+          "border-transparent bg-amber-500 text-amber-950 shadow-xs",
+        info:
+          "border-transparent bg-blue-600 text-white shadow-xs",
       },
     },
     defaultVariants: {
@@ -36,7 +42,11 @@ export interface BadgeProps
 
 function Badge({ className, variant, ...props }: BadgeProps) {
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+    <div 
+      className={cn(badgeVariants({ variant }), className)} 
+      data-testid={`badge-${variant || 'default'}`}
+      {...props} 
+    />
   )
 }
 
