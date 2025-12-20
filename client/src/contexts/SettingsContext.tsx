@@ -6,6 +6,9 @@ interface SettingsContextType {
   updateSetting: <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => void;
   updateSettings: (updates: Partial<UserSettings>) => void;
   resetSettings: () => void;
+  syncSettingsToServer: () => Promise<boolean>;
+  loadSettingsFromServer: () => Promise<boolean>;
+  isSyncing: boolean;
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
@@ -19,7 +22,7 @@ export function useSettingsContext() {
 }
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const { settings, updateSetting, updateSettings, resetSettings } = useSettings();
+  const { settings, updateSetting, updateSettings, resetSettings, syncSettingsToServer, loadSettingsFromServer, isSyncing } = useSettings();
 
   useEffect(() => {
     applyTheme(settings.appearance);
@@ -57,7 +60,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       settings, 
       updateSetting: wrappedUpdateSetting, 
       updateSettings, 
-      resetSettings 
+      resetSettings,
+      syncSettingsToServer,
+      loadSettingsFromServer,
+      isSyncing,
     }}>
       {children}
     </SettingsContext.Provider>

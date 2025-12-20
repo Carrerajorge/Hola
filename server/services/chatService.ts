@@ -89,6 +89,7 @@ export async function handleChatRequest(
   options: {
     useRag?: boolean;
     conversationId?: string;
+    userId?: string;
     images?: string[];
     onAgentProgress?: (update: ProgressUpdate) => void;
     gptConfig?: GptConfig;
@@ -98,8 +99,42 @@ export async function handleChatRequest(
     model?: string;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL } = options;
+  const { useRag = true, conversationId, userId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL } = options;
   const hasImages = images && images.length > 0;
+  
+  // Fetch user settings for feature flags and preferences
+  let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
+  if (userId) {
+    try {
+      userSettings = await storage.getUserSettings(userId);
+    } catch (error) {
+      console.error("Error fetching user settings:", error);
+    }
+  }
+  
+  // Extract feature flags with defaults
+  // These flags control tool availability:
+  // - memoryEnabled: controls RAG/document memory retrieval
+  // - webSearchAuto: controls automatic web search triggering
+  // - codeInterpreterEnabled: controls code execution for charts/visualizations
+  // - connectorSearchAuto: controls automatic connector searches (TODO: implement in orchestrator/agent pipeline)
+  // - canvasEnabled: controls canvas/visualization features
+  // - voiceEnabled: controls voice input/output features
+  const featureFlags = {
+    memoryEnabled: userSettings?.featureFlags?.memoryEnabled ?? true,
+    webSearchAuto: userSettings?.featureFlags?.webSearchAuto ?? false,
+    codeInterpreterEnabled: userSettings?.featureFlags?.codeInterpreterEnabled ?? true,
+    connectorSearchAuto: userSettings?.featureFlags?.connectorSearchAuto ?? false,
+    canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
+    voiceEnabled: userSettings?.featureFlags?.voiceEnabled ?? true,
+  };
+  
+  // Extract response preferences
+  const customInstructions = userSettings?.responsePreferences?.customInstructions || "";
+  const responseStyle = userSettings?.responsePreferences?.responseStyle || "default";
+  
+  // Extract user profile for context
+  const userProfile = userSettings?.userProfile || null;
   
   let validatedGptConfig = gptConfig;
   if (gptConfig?.id) {
@@ -251,7 +286,9 @@ export async function handleChatRequest(
   let sources: ChatSource[] = [];
   let webSearchInfo = "";
 
-  if (lastUserMessage && needsAcademicSearch(lastUserMessage.content)) {
+  // Web search is gated by the webSearchAuto feature flag
+  // If webSearchAuto is false, skip automatic web search detection
+  if (featureFlags.webSearchAuto && lastUserMessage && needsAcademicSearch(lastUserMessage.content)) {
     try {
       console.log("Academic search triggered for:", lastUserMessage.content);
       const scholarResults = await searchScholar(lastUserMessage.content, 5);
@@ -265,7 +302,7 @@ export async function handleChatRequest(
     } catch (error) {
       console.error("Academic search error:", error);
     }
-  } else if (lastUserMessage && needsWebSearch(lastUserMessage.content)) {
+  } else if (featureFlags.webSearchAuto && lastUserMessage && needsWebSearch(lastUserMessage.content)) {
     try {
       console.log("Web search triggered for:", lastUserMessage.content);
       const searchResults = await searchWeb(lastUserMessage.content, 5);
@@ -286,7 +323,9 @@ export async function handleChatRequest(
     }
   }
 
-  if (useRag && lastUserMessage) {
+  // RAG/Memory retrieval is gated by the memoryEnabled feature flag
+  // If memoryEnabled is false, skip document memory retrieval
+  if (useRag && featureFlags.memoryEnabled && lastUserMessage) {
     try {
       const queryEmbedding = await generateEmbedding(lastUserMessage.content);
       const similarChunks = await storage.searchSimilarChunks(queryEmbedding, LIMITS.RAG_SIMILAR_CHUNKS);
@@ -386,9 +425,10 @@ ${documentModeInstructions}${documentMode.type === 'excel' ? excelChartInstructi
                         /\b(documento|word|excel|powerpoint|ppt)\b.*(crea|crear|genera|generar|haz|hacer)/i.test(lastUserMsgText);
 
   // Check if user wants a chart/graph/visualization
+  // Code interpreter is gated by the codeInterpreterEnabled feature flag
   const wantsChart = /\b(gr[aá]fic[oa]|chart|plot|visualiz|histograma|diagrama de barras|pie chart|scatter|l[ií]nea|barras)\b/i.test(lastUserMsgText);
 
-  const codeInterpreterPrompt = wantsChart ? `
+  const codeInterpreterPrompt = (wantsChart && featureFlags.codeInterpreterEnabled) ? `
 ⚠️ OBLIGATORIO - CODE INTERPRETER ACTIVO ⚠️
 El usuario ha solicitado una GRÁFICA o VISUALIZACIÓN. DEBES responder con código Python ejecutable.
 
@@ -464,7 +504,26 @@ IMPORTANTE: Cuando el usuario pida un resumen, análisis o información, respond
 NO generes documentos Word/Excel/PPT a menos que el usuario lo pida EXPLÍCITAMENTE con frases como "crea un documento", "genera un Word", "haz un PowerPoint", etc.
 Si el usuario dice "dame un resumen" o "analiza esto", responde en texto, NO como documento.`;
 
-  const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.
+  // Build user profile context if available
+  const userProfileContext = userProfile && (userProfile.nickname || userProfile.occupation || userProfile.bio) 
+    ? `\n\nInformación del usuario:${userProfile.nickname ? `\n- Nombre/Apodo: ${userProfile.nickname}` : ''}${userProfile.occupation ? `\n- Ocupación: ${userProfile.occupation}` : ''}${userProfile.bio ? `\n- Bio: ${userProfile.bio}` : ''}`
+    : '';
+
+  // Build custom instructions section if present
+  const customInstructionsSection = customInstructions 
+    ? `\n\nInstrucciones personalizadas del usuario:\n${customInstructions}`
+    : '';
+
+  // Build response style modifier based on user preference
+  const responseStyleModifier = responseStyle !== 'default' 
+    ? `\n\nEstilo de respuesta preferido: ${
+        responseStyle === 'formal' ? 'formal y profesional' :
+        responseStyle === 'casual' ? 'casual y amigable' :
+        responseStyle === 'concise' ? 'muy conciso y breve' : ''
+      }`
+    : '';
+
+  const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.${userProfileContext}${customInstructionsSection}${responseStyleModifier}
 ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
 
   // Use document mode prompt when in document editing mode

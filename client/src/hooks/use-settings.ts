@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 export interface UserSettings {
   // Display
@@ -66,6 +66,30 @@ export interface UserSettings {
   linkedInUrl: string;
   githubUrl: string;
   websiteDomain: string;
+}
+
+interface ApiUserSettings {
+  userId: string;
+  responsePreferences: {
+    responseStyle: string;
+    responseTone?: string;
+    customInstructions: string;
+  };
+  userProfile: {
+    nickname: string;
+    occupation: string;
+    bio: string;
+  };
+  featureFlags: {
+    memoryEnabled: boolean;
+    recordingHistoryEnabled: boolean;
+    webSearchAuto: boolean;
+    codeInterpreterEnabled: boolean;
+    canvasEnabled: boolean;
+    voiceEnabled: boolean;
+    voiceAdvanced: boolean;
+    connectorSearchAuto: boolean;
+  };
 }
 
 const defaultSettings: UserSettings = {
@@ -137,6 +161,7 @@ const defaultSettings: UserSettings = {
 };
 
 const STORAGE_KEY = "sira_user_settings";
+const SYNC_DEBOUNCE_MS = 500;
 
 function loadSettings(): UserSettings {
   try {
@@ -159,8 +184,166 @@ function saveSettings(settings: UserSettings): void {
   }
 }
 
+function mapLocalToApiSettings(settings: UserSettings): Omit<ApiUserSettings, 'userId'> {
+  return {
+    responsePreferences: {
+      responseStyle: settings.styleAndTone,
+      customInstructions: settings.customInstructions,
+    },
+    userProfile: {
+      nickname: settings.nickname,
+      occupation: settings.occupation,
+      bio: settings.aboutYou,
+    },
+    featureFlags: {
+      memoryEnabled: settings.allowMemories,
+      recordingHistoryEnabled: settings.allowRecordings,
+      webSearchAuto: settings.webSearch,
+      codeInterpreterEnabled: settings.codeInterpreter,
+      canvasEnabled: settings.canvas,
+      voiceEnabled: settings.voiceMode,
+      voiceAdvanced: settings.advancedVoice,
+      connectorSearchAuto: settings.connectorSearch,
+    },
+  };
+}
+
+function mapApiToLocalSettings(apiSettings: ApiUserSettings): Partial<UserSettings> {
+  return {
+    styleAndTone: (apiSettings.responsePreferences?.responseStyle as UserSettings['styleAndTone']) || 'default',
+    customInstructions: apiSettings.responsePreferences?.customInstructions || '',
+    nickname: apiSettings.userProfile?.nickname || '',
+    occupation: apiSettings.userProfile?.occupation || '',
+    aboutYou: apiSettings.userProfile?.bio || '',
+    allowMemories: apiSettings.featureFlags?.memoryEnabled ?? true,
+    allowRecordings: apiSettings.featureFlags?.recordingHistoryEnabled ?? false,
+    webSearch: apiSettings.featureFlags?.webSearchAuto ?? true,
+    codeInterpreter: apiSettings.featureFlags?.codeInterpreterEnabled ?? true,
+    canvas: apiSettings.featureFlags?.canvasEnabled ?? true,
+    voiceMode: apiSettings.featureFlags?.voiceEnabled ?? true,
+    advancedVoice: apiSettings.featureFlags?.voiceAdvanced ?? false,
+    connectorSearch: apiSettings.featureFlags?.connectorSearchAuto ?? false,
+  };
+}
+
+async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null> {
+  try {
+    const response = await fetch(`/api/users/${userId}/settings`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      console.error("Failed to fetch settings from server:", response.status);
+      return null;
+    }
+    return await response.json();
+  } catch (e) {
+    console.error("Error fetching settings from server:", e);
+    return null;
+  }
+}
+
+async function saveUserSettings(userId: string, settings: Omit<ApiUserSettings, 'userId'>): Promise<boolean> {
+  try {
+    const response = await fetch(`/api/users/${userId}/settings`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(settings),
+    });
+    if (!response.ok) {
+      console.error("Failed to save settings to server:", response.status);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("Error saving settings to server:", e);
+    return false;
+  }
+}
+
+function getUserId(): string | null {
+  try {
+    const userDataStr = localStorage.getItem("sira_user_data");
+    if (userDataStr) {
+      const userData = JSON.parse(userDataStr);
+      return userData.id || null;
+    }
+  } catch (e) {
+    console.error("Error getting user ID:", e);
+  }
+  return null;
+}
+
 export function useSettings() {
   const [settings, setSettingsState] = useState<UserSettings>(loadSettings);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSyncedRef = useRef<string>('');
+
+  const syncSettingsToServer = useCallback(async (settingsToSync?: UserSettings): Promise<boolean> => {
+    const userId = getUserId();
+    if (!userId) {
+      console.log("No user ID found, skipping server sync");
+      return false;
+    }
+
+    const currentSettings = settingsToSync || settings;
+    const apiSettings = mapLocalToApiSettings(currentSettings);
+    
+    setIsSyncing(true);
+    try {
+      const success = await saveUserSettings(userId, apiSettings);
+      if (success) {
+        lastSyncedRef.current = JSON.stringify(apiSettings);
+      }
+      return success;
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [settings]);
+
+  const loadSettingsFromServer = useCallback(async (): Promise<boolean> => {
+    const userId = getUserId();
+    if (!userId) {
+      console.log("No user ID found, skipping server load");
+      return false;
+    }
+
+    setIsSyncing(true);
+    try {
+      const apiSettings = await fetchUserSettings(userId);
+      if (apiSettings) {
+        const mappedSettings = mapApiToLocalSettings(apiSettings);
+        setSettingsState((prev) => {
+          const merged = { ...prev, ...mappedSettings };
+          saveSettings(merged);
+          return merged;
+        });
+        lastSyncedRef.current = JSON.stringify(mapLocalToApiSettings({ ...settings, ...mappedSettings }));
+        return true;
+      }
+      return false;
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [settings]);
+
+  const debouncedSyncToServer = useCallback((newSettings: UserSettings) => {
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+    }
+
+    syncTimeoutRef.current = setTimeout(() => {
+      const apiSettings = mapLocalToApiSettings(newSettings);
+      const currentApiSettingsStr = JSON.stringify(apiSettings);
+      
+      if (currentApiSettingsStr !== lastSyncedRef.current) {
+        syncSettingsToServer(newSettings);
+      }
+    }, SYNC_DEBOUNCE_MS);
+  }, [syncSettingsToServer]);
 
   const updateSetting = useCallback(<K extends keyof UserSettings>(
     key: K,
@@ -169,21 +352,28 @@ export function useSettings() {
     setSettingsState((prev) => {
       const updated = { ...prev, [key]: value };
       saveSettings(updated);
+      debouncedSyncToServer(updated);
       return updated;
     });
-  }, []);
+  }, [debouncedSyncToServer]);
 
   const updateSettings = useCallback((updates: Partial<UserSettings>) => {
     setSettingsState((prev) => {
       const updated = { ...prev, ...updates };
       saveSettings(updated);
+      debouncedSyncToServer(updated);
       return updated;
     });
-  }, []);
+  }, [debouncedSyncToServer]);
 
   const resetSettings = useCallback(() => {
     saveSettings(defaultSettings);
     setSettingsState(defaultSettings);
+    debouncedSyncToServer(defaultSettings);
+  }, [debouncedSyncToServer]);
+
+  useEffect(() => {
+    loadSettingsFromServer();
   }, []);
 
   useEffect(() => {
@@ -198,11 +388,22 @@ export function useSettings() {
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+    };
+  }, []);
+
   return {
     settings,
     updateSetting,
     updateSettings,
     resetSettings,
+    syncSettingsToServer,
+    loadSettingsFromServer,
+    isSyncing,
   };
 }
 
