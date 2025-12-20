@@ -3954,20 +3954,7 @@ export function ChatInterface({
                 />
 
                 <div className="flex items-center gap-1 pb-1">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    onClick={toggleVoiceRecording}
-                    className={cn(
-                      "h-9 w-9 rounded-full transition-all duration-300",
-                      isRecording 
-                        ? "bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50" 
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                    data-testid="button-voice-recording"
-                  >
-                    {isRecording ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-                  </Button>
+                  {/* Contextual action button: Voice when empty, Send when has text */}
                   {aiState !== "idle" ? (
                     <Button 
                       onClick={handleStopChat}
@@ -3977,15 +3964,50 @@ export function ChatInterface({
                     >
                       <Square className="h-5 w-5 fill-current" />
                     </Button>
-                  ) : (
+                  ) : isRecording ? (
                     <Button 
-                      onClick={handleSubmit}
+                      onClick={toggleVoiceRecording}
                       size="icon" 
-                      className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn"
-                      data-testid="button-send-message"
+                      className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50"
+                      data-testid="button-voice-recording-active"
                     >
-                      <ArrowUp className="h-5 w-5" />
+                      <MicOff className="h-5 w-5" />
                     </Button>
+                  ) : input.trim().length > 0 || uploadedFiles.length > 0 ? (
+                    <motion.div
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.8, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: "easeOut" }}
+                      key="send-button"
+                    >
+                      <Button 
+                        onClick={handleSubmit}
+                        size="icon" 
+                        className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn"
+                        data-testid="button-send-message"
+                      >
+                        <ArrowUp className="h-5 w-5" />
+                      </Button>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.8, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: "easeOut" }}
+                      key="voice-button"
+                    >
+                      <Button 
+                        variant="ghost"
+                        onClick={toggleVoiceRecording}
+                        size="icon" 
+                        className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted"
+                        data-testid="button-voice-recording"
+                      >
+                        <Mic className="h-5 w-5" />
+                      </Button>
+                    </motion.div>
                   )}
                 </div>
                 </div>
