@@ -209,7 +209,7 @@ export function Sidebar({
         </Button>
       </div>
 
-      <Separator className="mx-4 my-2 w-auto opacity-50" />
+      <Separator className="mx-4 my-2 w-auto" />
 
       <ScrollArea className="flex-1 px-2 liquid-scroll">
         <div className="flex flex-col gap-4 pb-4">
@@ -220,15 +220,15 @@ export function Sidebar({
             return (
               <div key={group} className="flex flex-col gap-0.5">
                 <div className="px-2 py-1.5">
-                  <h3 className="text-xs font-medium text-muted-foreground/70">{group}</h3>
+                  <h3 className="text-xs font-medium text-muted-foreground">{group}</h3>
                 </div>
                 {groupChats.map((chat) => (
                   <div
                     key={chat.id}
                     className={cn(
-                      "group flex w-full items-center justify-between px-2 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-white/50 dark:hover:bg-white/10 transition-all duration-300",
-                      activeChatId === chat.id && "bg-white/60 dark:bg-white/10 shadow-sm",
-                      chat.archived && "opacity-60"
+                      "group flex w-full items-center justify-between px-2 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-accent transition-all duration-300",
+                      activeChatId === chat.id && "bg-accent shadow-sm",
+                      chat.archived && "opacity-70"
                     )}
                     onClick={() => !editingChatId && onSelectChat(chat.id)}
                     data-testid={`chat-item-${chat.id}`}
@@ -274,11 +274,11 @@ export function Sidebar({
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <div
-                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-black/10 rounded"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-accent rounded"
                               onClick={(e) => e.stopPropagation()}
                               data-testid={`button-chat-menu-${chat.id}`}
                             >
-                              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                              <MoreHorizontal className="h-4 w-4 text-foreground" />
                             </div>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-40">
@@ -344,7 +344,7 @@ export function Sidebar({
               {hiddenChats.map((chat) => (
                 <div
                   key={chat.id}
-                  className="group flex w-full items-center justify-between px-2 py-2 rounded-md cursor-pointer hover:bg-sidebar-accent transition-colors opacity-60"
+                  className="group flex w-full items-center justify-between px-2 py-2 rounded-md cursor-pointer hover:bg-accent transition-colors opacity-70"
                   onClick={() => onSelectChat(chat.id)}
                   data-testid={`hidden-chat-item-${chat.id}`}
                 >
@@ -352,7 +352,7 @@ export function Sidebar({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                    className="h-6 w-6 opacity-0 group-hover:opacity-80"
                     onClick={(e) => {
                       e.stopPropagation();
                       onHideChat?.(chat.id, e);

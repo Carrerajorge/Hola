@@ -143,7 +143,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden liquid-bg-light dark:liquid-bg relative">
+    <div className="flex h-screen w-full overflow-hidden bg-background relative">
       <div className="liquid-blob liquid-blob-1 opacity-30"></div>
       <div className="liquid-blob liquid-blob-2 opacity-20"></div>
       <div className="liquid-blob liquid-blob-3 opacity-25"></div>
@@ -179,8 +179,8 @@ export default function Home() {
       <div className="md:hidden absolute top-4 left-4 z-50">
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="glass-card-light dark:glass-card">
-              <Menu className="h-6 w-6" />
+            <Button variant="ghost" size="icon" className="bg-card border border-border rounded-lg">
+              <Menu className="h-6 w-6 text-foreground" />
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="p-0 w-[260px]">

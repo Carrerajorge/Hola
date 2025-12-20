@@ -541,7 +541,7 @@ function EditableDocumentPreview({
           <h3 
             key={block.id}
             onClick={() => handleBlockClick(block)}
-            className={cn("text-lg font-bold mb-2 mt-4 text-gray-800 dark:text-gray-200", baseClass)}
+            className={cn("text-lg font-bold mb-2 mt-4 text-foreground", baseClass)}
           >
             {block.content.replace(/^### /, '')}
           </h3>
@@ -551,7 +551,7 @@ function EditableDocumentPreview({
           <p 
             key={block.id}
             onClick={() => handleBlockClick(block)}
-            className={cn("mb-3 leading-relaxed text-gray-700 dark:text-gray-300 text-sm", baseClass)}
+            className={cn("mb-3 leading-relaxed text-muted-foreground text-sm", baseClass)}
           >
             {renderInlineFormatting(block.content)}
           </p>
@@ -564,7 +564,7 @@ function EditableDocumentPreview({
             className={cn("list-disc list-inside mb-4 space-y-1", baseClass)}
           >
             {block.content.split('\n').map((item, idx) => (
-              <li key={idx} className="text-gray-800 dark:text-gray-200">
+              <li key={idx} className="text-foreground">
                 {renderInlineFormatting(item.replace(/^[-*] /, ''))}
               </li>
             ))}
@@ -578,7 +578,7 @@ function EditableDocumentPreview({
             className={cn("list-decimal list-inside mb-4 space-y-1", baseClass)}
           >
             {block.content.split('\n').map((item, idx) => (
-              <li key={idx} className="text-gray-800 dark:text-gray-200">
+              <li key={idx} className="text-foreground">
                 {renderInlineFormatting(item.replace(/^\d+\. /, ''))}
               </li>
             ))}
@@ -589,10 +589,10 @@ function EditableDocumentPreview({
           <blockquote 
             key={block.id}
             onClick={() => handleBlockClick(block)}
-            className={cn("border-l-4 border-blue-500 pl-4 italic my-4 py-2 bg-gray-50 dark:bg-gray-800", baseClass)}
+            className={cn("border-l-4 border-blue-500 pl-4 italic my-4 py-2 bg-muted", baseClass)}
           >
             {block.content.split('\n').map((line, idx) => (
-              <p key={idx} className="text-gray-700 dark:text-gray-300">
+              <p key={idx} className="text-muted-foreground">
                 {renderInlineFormatting(line.replace(/^> /, ''))}
               </p>
             ))}
@@ -602,17 +602,17 @@ function EditableDocumentPreview({
         const rows = block.content.split('\n').filter(r => !r.match(/^\|[-:| ]+\|$/));
         return (
           <div key={block.id} onClick={() => handleBlockClick(block)} className={baseClass}>
-            <table className="w-full border-collapse border border-gray-300 my-4">
+            <table className="w-full border-collapse border border-border my-4">
               <tbody>
                 {rows.map((row, idx) => (
-                  <tr key={idx} className={idx === 0 ? "bg-gray-100 dark:bg-gray-700" : ""}>
+                  <tr key={idx} className={idx === 0 ? "bg-muted" : ""}>
                     {row.split('|').filter(c => c.trim()).map((cell, cidx) => (
                       idx === 0 ? (
-                        <th key={cidx} className="border border-gray-300 px-3 py-2 font-semibold text-left">
+                        <th key={cidx} className="border border-border px-3 py-2 font-semibold text-left">
                           {cell.trim()}
                         </th>
                       ) : (
-                        <td key={cidx} className="border border-gray-300 px-3 py-2">
+                        <td key={cidx} className="border border-border px-3 py-2">
                           {cell.trim()}
                         </td>
                       )
@@ -624,7 +624,7 @@ function EditableDocumentPreview({
           </div>
         );
       case 'hr':
-        return <hr key={block.id} className="my-6 border-t-2 border-gray-200 dark:border-gray-700" />;
+        return <hr key={block.id} className="my-6 border-t-2 border-border" />;
       default:
         return (
           <p key={block.id} onClick={() => handleBlockClick(block)} className={cn("mb-4", baseClass)}>
@@ -2178,7 +2178,7 @@ export function ChatInterface({
                       <Textarea
                         value={editContent}
                         onChange={(e) => setEditContent(e.target.value)}
-                        className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:border-primary focus:ring-1 focus:ring-primary"
+                        className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-border bg-card focus:border-primary focus:ring-1 focus:ring-primary"
                         autoFocus
                       />
                       <div className="flex items-center justify-end gap-2 mt-2">
@@ -2208,7 +2208,7 @@ export function ChatInterface({
                         <div className="flex flex-wrap gap-2 mb-2 justify-end">
                           {msg.attachments.map((file, idx) => (
                             file.type === "image" && file.imageUrl ? (
-                              <div key={idx} className="relative max-w-[280px] rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
+                              <div key={idx} className="relative max-w-[280px] rounded-xl overflow-hidden border border-border">
                                 <img 
                                   src={file.imageUrl} 
                                   alt={file.name}
@@ -2221,7 +2221,7 @@ export function ChatInterface({
                                 return (
                                   <div
                                     key={idx}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-card border-border"
                                   >
                                     <div className={cn(
                                       "flex items-center justify-center w-8 h-8 rounded-lg",
@@ -2688,7 +2688,7 @@ export function ChatInterface({
                     </Button>
                   </div>
                 </div>
-                <div className="bg-white dark:bg-gray-900 relative h-[100px]">
+                <div className="bg-card relative h-[100px]">
                   <iframe 
                     src={browserUrl}
                     className="w-full h-full border-0"
@@ -2728,7 +2728,7 @@ export function ChatInterface({
                     </Button>
                   </div>
                 </div>
-                <div className="bg-white dark:bg-gray-900 relative h-[calc(100%-28px)]">
+                <div className="bg-card relative h-[calc(100%-28px)]">
                   <iframe 
                     src={browserUrl}
                     className="w-full h-full border-0"
@@ -2766,7 +2766,7 @@ export function ChatInterface({
                         "relative group rounded-lg border overflow-hidden",
                         file.status === "error" 
                           ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
-                          : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                          : "bg-card border-border"
                       )}
                       data-testid={`inline-file-${index}`}
                     >
@@ -2803,7 +2803,7 @@ export function ChatInterface({
                             (file.name.toLowerCase().endsWith(".docx") || file.name.toLowerCase().endsWith(".doc") || file.type.includes("word") || file.type.includes("document") || file.type.includes("wordprocessing")) ? "bg-blue-600" :
                             (file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls") || file.name.toLowerCase().endsWith(".csv") || file.type.includes("sheet") || file.type.includes("excel") || file.type.includes("spreadsheet")) ? "bg-green-600" :
                             (file.name.toLowerCase().endsWith(".pptx") || file.name.toLowerCase().endsWith(".ppt") || file.type.includes("presentation") || file.type.includes("powerpoint")) ? "bg-orange-500" :
-                            "bg-gray-500"
+                            "bg-muted-foreground"
                           )}>
                             <span className="text-white text-[10px] font-bold">
                               {(file.name.toLowerCase().endsWith(".pdf") || file.type.includes("pdf")) ? "PDF" :
@@ -3089,7 +3089,7 @@ export function ChatInterface({
                             <Textarea
                               value={editContent}
                               onChange={(e) => setEditContent(e.target.value)}
-                              className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:border-primary focus:ring-1 focus:ring-primary"
+                              className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-border bg-card focus:border-primary focus:ring-1 focus:ring-primary"
                               autoFocus
                             />
                             <div className="flex items-center justify-end gap-2 mt-2">
@@ -3121,7 +3121,7 @@ export function ChatInterface({
                                   att.type === "image" && att.imageUrl ? (
                                     <div 
                                       key={i} 
-                                      className="relative max-w-[280px] rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
+                                      className="relative max-w-[280px] rounded-xl overflow-hidden border border-border cursor-pointer hover:opacity-90 transition-opacity"
                                       onClick={() => handleOpenFileAttachmentPreview(att)}
                                       data-testid={`attachment-image-${i}`}
                                     >
@@ -3137,7 +3137,7 @@ export function ChatInterface({
                                       return (
                                         <div
                                           key={i}
-                                          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-card border-border cursor-pointer hover:bg-accent transition-colors"
                                           onClick={() => handleOpenFileAttachmentPreview(att)}
                                           data-testid={`attachment-file-${i}`}
                                         >
@@ -3704,7 +3704,7 @@ export function ChatInterface({
                                 className="justify-start gap-2 text-sm h-9"
                                 onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
                               >
-                                <div className="flex items-center justify-center w-5 h-5 rounded bg-white dark:bg-gray-800 border dark:border-gray-700">
+                                <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
                                   <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
                                     <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE"/>
                                     <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83"/>
@@ -3742,7 +3742,7 @@ export function ChatInterface({
                           <div className="grid gap-1">
                             <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-gmail">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-white dark:bg-gray-800 border dark:border-gray-700 flex items-center justify-center">
+                                <div className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center">
                                   <svg width="18" height="14" viewBox="0 0 24 18" fill="none">
                                     <path d="M1.5 5.25V15.75C1.5 16.1478 1.65804 16.5294 1.93934 16.8107C2.22064 17.092 2.60218 17.25 3 17.25H21C21.3978 17.25 21.7794 17.092 22.0607 16.8107C22.342 16.5294 22.5 16.1478 22.5 15.75V5.25L12 12L1.5 5.25Z" fill="#EA4335"/>
                                     <path d="M22.5 2.25V5.25L12 12L1.5 5.25V2.25C1.5 1.85218 1.65804 1.47064 1.93934 1.18934C2.22064 0.908035 2.60218 0.75 3 0.75H21C21.3978 0.75 21.7794 0.908035 22.0607 1.18934C22.342 1.47064 22.5 1.85218 22.5 2.25Z" fill="#FBBC05"/>
@@ -3751,14 +3751,14 @@ export function ChatInterface({
                                 </div>
                                 <span className="text-sm font-medium">Gmail</span>
                               </div>
-                              <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
+                              <Button size="sm" className="h-7 px-3 text-xs bg-primary text-primary-foreground hover:bg-primary/90 rounded-full">
                                 Conectar
                               </Button>
                             </div>
                             
                             <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-google-drive">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-white dark:bg-gray-800 border dark:border-gray-700 flex items-center justify-center">
+                                <div className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center">
                                   <svg width="20" height="18" viewBox="0 0 87.3 78" fill="none">
                                     <path d="M6.6 66.85L0.8 56.05L28.7 5.8H57.7L85.6 56.05L79.8 66.85L56.1 25.6H30.4L6.6 66.85Z" fill="#0066DA"/>
                                     <path d="M29.2 78L44.1 51.2H87.3L72.4 78H29.2Z" fill="#00AC47"/>
@@ -3770,14 +3770,14 @@ export function ChatInterface({
                                 </div>
                                 <span className="text-sm font-medium">Google Drive</span>
                               </div>
-                              <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
+                              <Button size="sm" className="h-7 px-3 text-xs bg-primary text-primary-foreground hover:bg-primary/90 rounded-full">
                                 Conectar
                               </Button>
                             </div>
                             
                             <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-onedrive">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-white dark:bg-gray-800 border dark:border-gray-700 flex items-center justify-center">
+                                <div className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center">
                                   <svg width="20" height="14" viewBox="0 0 24 16" fill="none">
                                     <path d="M14.5 2C12.5 2 10.7 3.1 9.8 4.8C9.3 4.5 8.7 4.4 8 4.4C5.8 4.4 4 6.2 4 8.4C4 8.6 4 8.8 4.1 9C1.8 9.4 0 11.4 0 13.8C0 16.1 1.9 18 4.2 18H19.5C22 18 24 16 24 13.5C24 11.2 22.3 9.3 20 9C20 5.1 17.6 2 14.5 2Z" fill="#0364B8"/>
                                     <path d="M9.8 4.8C10.7 3.1 12.5 2 14.5 2C17.6 2 20 5.1 20 9C22.3 9.3 24 11.2 24 13.5C24 16 22 18 19.5 18H10L9.8 4.8Z" fill="#0078D4"/>
@@ -3787,7 +3787,7 @@ export function ChatInterface({
                                 </div>
                                 <span className="text-sm font-medium">OneDrive</span>
                               </div>
-                              <Button size="sm" className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full">
+                              <Button size="sm" className="h-7 px-3 text-xs bg-primary text-primary-foreground hover:bg-primary/90 rounded-full">
                                 Conectar
                               </Button>
                             </div>
@@ -3795,7 +3795,7 @@ export function ChatInterface({
                             <div className="flex flex-col gap-2 px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-figma">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 rounded-lg bg-white dark:bg-gray-800 border dark:border-gray-700 flex items-center justify-center">
+                                  <div className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center">
                                     <svg width="14" height="20" viewBox="0 0 38 57" fill="none">
                                       <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE"/>
                                       <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83"/>
@@ -3818,7 +3818,7 @@ export function ChatInterface({
                                 ) : (
                                   <Button 
                                     size="sm" 
-                                    className="h-7 px-3 text-xs bg-black text-white hover:bg-gray-800 rounded-full"
+                                    className="h-7 px-3 text-xs bg-primary text-primary-foreground hover:bg-primary/90 rounded-full"
                                     onClick={handleFigmaConnect}
                                     disabled={isFigmaConnecting}
                                   >
@@ -4111,11 +4111,11 @@ export function ChatInterface({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
-            className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+            className="relative bg-card rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
               <div className="flex items-center gap-3">
                 {(() => {
                   const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
