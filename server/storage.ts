@@ -22,10 +22,11 @@ import {
   type Report, type InsertReport,
   type LibraryItem, type InsertLibraryItem,
   type NotificationEventType, type NotificationPreference, type InsertNotificationPreference,
+  type UserSettings, type InsertUserSettings,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   gpts, gptCategories, gptVersions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
-  notificationEventTypes, notificationPreferences
+  notificationEventTypes, notificationPreferences, userSettings
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -142,6 +143,9 @@ export interface IStorage {
   getNotificationEventTypes(): Promise<NotificationEventType[]>;
   getNotificationPreferences(userId: string): Promise<NotificationPreference[]>;
   upsertNotificationPreference(pref: InsertNotificationPreference): Promise<NotificationPreference>;
+  // User Settings
+  getUserSettings(userId: string): Promise<UserSettings | null>;
+  upsertUserSettings(userId: string, settings: Partial<InsertUserSettings>): Promise<UserSettings>;
 }
 
 export class MemStorage implements IStorage {
@@ -714,6 +718,76 @@ export class MemStorage implements IStorage {
       return updated;
     }
     const [created] = await db.insert(notificationPreferences).values(pref).returning();
+    return created;
+  }
+
+  // User Settings
+  async getUserSettings(userId: string): Promise<UserSettings | null> {
+    const [result] = await db.select().from(userSettings).where(eq(userSettings.userId, userId));
+    return result || null;
+  }
+
+  async upsertUserSettings(userId: string, settings: Partial<InsertUserSettings>): Promise<UserSettings> {
+    const defaultFeatureFlags = {
+      memoryEnabled: true,
+      recordingHistoryEnabled: false,
+      webSearchAuto: true,
+      codeInterpreterEnabled: true,
+      canvasEnabled: true,
+      voiceEnabled: true,
+      voiceAdvanced: false,
+      connectorSearchAuto: false
+    };
+
+    const defaultResponsePreferences = {
+      responseStyle: 'default' as const,
+      responseTone: 'professional',
+      customInstructions: ''
+    };
+
+    const defaultUserProfile = {
+      nickname: '',
+      occupation: '',
+      bio: ''
+    };
+
+    const existing = await this.getUserSettings(userId);
+    
+    if (existing) {
+      const mergedSettings = {
+        responsePreferences: settings.responsePreferences 
+          ? { ...existing.responsePreferences, ...settings.responsePreferences }
+          : existing.responsePreferences,
+        userProfile: settings.userProfile
+          ? { ...existing.userProfile, ...settings.userProfile }
+          : existing.userProfile,
+        featureFlags: settings.featureFlags
+          ? { ...existing.featureFlags, ...settings.featureFlags }
+          : existing.featureFlags,
+        updatedAt: new Date()
+      };
+      
+      const [updated] = await db.update(userSettings)
+        .set(mergedSettings)
+        .where(eq(userSettings.userId, userId))
+        .returning();
+      return updated;
+    }
+
+    const newSettings: InsertUserSettings = {
+      userId,
+      responsePreferences: settings.responsePreferences 
+        ? { ...defaultResponsePreferences, ...settings.responsePreferences }
+        : defaultResponsePreferences,
+      userProfile: settings.userProfile
+        ? { ...defaultUserProfile, ...settings.userProfile }
+        : defaultUserProfile,
+      featureFlags: settings.featureFlags
+        ? { ...defaultFeatureFlags, ...settings.featureFlags }
+        : defaultFeatureFlags
+    };
+
+    const [created] = await db.insert(userSettings).values(newSettings).returning();
     return created;
   }
 }

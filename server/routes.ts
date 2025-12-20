@@ -2585,6 +2585,63 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     }
   });
 
+  app.get("/api/users/:id/settings", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const settings = await storage.getUserSettings(id);
+      
+      if (!settings) {
+        res.json({
+          userId: id,
+          responsePreferences: {
+            responseStyle: 'default',
+            responseTone: 'professional',
+            customInstructions: ''
+          },
+          userProfile: {
+            nickname: '',
+            occupation: '',
+            bio: ''
+          },
+          featureFlags: {
+            memoryEnabled: true,
+            recordingHistoryEnabled: false,
+            webSearchAuto: true,
+            codeInterpreterEnabled: true,
+            canvasEnabled: true,
+            voiceEnabled: true,
+            voiceAdvanced: false,
+            connectorSearchAuto: false
+          }
+        });
+        return;
+      }
+      
+      res.json(settings);
+    } catch (error: any) {
+      console.error("Error getting user settings:", error);
+      res.status(500).json({ error: "Failed to get user settings" });
+    }
+  });
+
+  app.put("/api/users/:id/settings", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { responsePreferences, userProfile, featureFlags } = req.body;
+      
+      const updates: any = {};
+      if (responsePreferences) updates.responsePreferences = responsePreferences;
+      if (userProfile) updates.userProfile = userProfile;
+      if (featureFlags) updates.featureFlags = featureFlags;
+      
+      const settings = await storage.upsertUserSettings(id, updates);
+      res.json(settings);
+    } catch (error: any) {
+      console.error("Error updating user settings:", error);
+      res.status(500).json({ error: "Failed to update user settings" });
+    }
+  });
+
   return httpServer;
 }
 
