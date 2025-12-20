@@ -7,6 +7,7 @@ import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
 import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, multiIntentManager, multiIntentPipeline } from "../agent";
 import type { PipelineResponse } from "../../shared/schemas/multiIntent";
+import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
 
 export type LLMProvider = "xai" | "gemini";
 
@@ -128,6 +129,28 @@ export async function handleChatRequest(
     canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
     voiceEnabled: userSettings?.featureFlags?.voiceEnabled ?? true,
   };
+  
+  // TODO: Tool Policy Enforcement Integration Points
+  // The checkToolPolicy and logToolCall functions from integrationPolicyService.ts
+  // should be called at the following tool invocation points:
+  // 
+  // 1. Web Search (lines ~291-324): Before calling searchWeb/searchScholar
+  //    Example: const policyCheck = await checkToolPolicy(userId, "web_search", "search_provider");
+  //    if (!policyCheck.allowed) { skip search and inform user }
+  //
+  // 2. RAG/Memory Retrieval (lines ~328-346): Before searching similar chunks
+  //    Example: const policyCheck = await checkToolPolicy(userId, "memory_retrieval", "rag_provider");
+  //
+  // 3. Multi-Intent Pipeline (line ~183): Before executing multiIntentPipeline.execute()
+  //    Example: const policyCheck = await checkToolPolicy(userId, "multi_intent", "agent_pipeline");
+  //
+  // 4. Agent Pipeline (line ~258): Before calling runPipeline()
+  //    Example: const policyCheck = await checkToolPolicy(userId, "agent_pipeline", "browser_agent");
+  //
+  // 5. Code Interpreter (detected via wantsChart flag): Before executing Python code
+  //    Example: const policyCheck = await checkToolPolicy(userId, "code_interpreter", "python_executor");
+  //
+  // After each tool execution, call logToolCall to record the invocation for audit purposes.
   
   // Extract response preferences
   const customInstructions = userSettings?.responsePreferences?.customInstructions || "";
