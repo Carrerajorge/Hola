@@ -155,170 +155,363 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">General</h2>
             
-            <div className="space-y-4">
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm">Aspecto</span>
-                <Select 
-                  value={settings.appearance} 
-                  onValueChange={(value) => updateSetting("appearance", value as any)}
-                >
-                  <SelectTrigger className="w-40" data-testid="select-appearance">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="system">Sistema</SelectItem>
-                    <SelectItem value="light">Claro</SelectItem>
-                    <SelectItem value="dark">Oscuro</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm">Color de acento</span>
-                <Select 
-                  value={settings.accentColor} 
-                  onValueChange={(value) => updateSetting("accentColor", value as any)}
-                >
-                  <SelectTrigger className="w-40" data-testid="select-accent-color">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="default">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-foreground" />
-                        Predeterminada
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="blue">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-blue-500" />
-                        Azul
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="green">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-green-500" />
-                        Verde
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="purple">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-purple-500" />
-                        Morado
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="orange">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-orange-500" />
-                        Naranja
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="pink">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-pink-500" />
-                        Rosa
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm">Idioma</span>
-                <Select value={currentLanguage} onValueChange={handleLanguageChange}>
-                  <SelectTrigger className="w-40" data-testid="select-language">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {supportedLanguages.map(lang => (
-                      <SelectItem key={lang.code} value={lang.code}>{lang.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <span className="text-sm block">Idioma hablado</span>
-                  <span className="text-xs text-muted-foreground">
-                    Para obtener mejores resultados, selecciona el idioma principal.
-                  </span>
-                </div>
-                <Select 
-                  value={settings.spokenLanguage} 
-                  onValueChange={(value) => updateSetting("spokenLanguage", value)}
-                >
-                  <SelectTrigger className="w-40 shrink-0" data-testid="select-spoken-language">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Automático</SelectItem>
-                    <SelectItem value="es">Español</SelectItem>
-                    <SelectItem value="en">English</SelectItem>
-                    <SelectItem value="fr">Français</SelectItem>
-                    <SelectItem value="de">Deutsch</SelectItem>
-                    <SelectItem value="pt">Português</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm">Voz</span>
-                <div className="flex items-center gap-2">
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="gap-1"
-                    onClick={() => playVoicePreview(settings.voice)}
-                    disabled={playingVoice !== null}
-                    data-testid="button-play-voice"
-                  >
-                    {playingVoice === settings.voice ? (
-                      <Volume2 className="h-3 w-3 animate-pulse" />
-                    ) : (
-                      <Play className="h-3 w-3" />
-                    )}
-                    Reproducir
-                  </Button>
+            {/* Display Section */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Pantalla</h3>
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Tema</span>
+                    <span className="text-xs text-muted-foreground">Selecciona el aspecto visual de la aplicación</span>
+                  </div>
                   <Select 
-                    value={settings.voice} 
-                    onValueChange={(value) => updateSetting("voice", value)}
+                    value={settings.appearance} 
+                    onValueChange={(value) => updateSetting("appearance", value as any)}
                   >
-                    <SelectTrigger className="w-28" data-testid="select-voice">
+                    <SelectTrigger className="w-40" data-testid="select-appearance">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {voices.map((voice) => (
-                        <SelectItem key={voice.id} value={voice.id}>
-                          {voice.name}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="system">Sistema</SelectItem>
+                      <SelectItem value="light">Claro</SelectItem>
+                      <SelectItem value="dark">Oscuro</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Color de acento</span>
+                    <span className="text-xs text-muted-foreground">Color principal de la interfaz</span>
+                  </div>
+                  <Select 
+                    value={settings.accentColor} 
+                    onValueChange={(value) => updateSetting("accentColor", value as any)}
+                  >
+                    <SelectTrigger className="w-40" data-testid="select-accent-color">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-foreground" />
+                          Predeterminada
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="blue">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-blue-500" />
+                          Azul
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="green">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-green-500" />
+                          Verde
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="purple">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-purple-500" />
+                          Morado
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="orange">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-orange-500" />
+                          Naranja
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="pink">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-pink-500" />
+                          Rosa
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Tamaño de fuente</span>
+                    <span className="text-xs text-muted-foreground">Ajusta el tamaño del texto</span>
+                  </div>
+                  <Select 
+                    value={settings.fontSize} 
+                    onValueChange={(value) => updateSetting("fontSize", value as any)}
+                  >
+                    <SelectTrigger className="w-40" data-testid="select-font-size">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="small">Pequeño</SelectItem>
+                      <SelectItem value="medium">Mediano</SelectItem>
+                      <SelectItem value="large">Grande</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Densidad</span>
+                    <span className="text-xs text-muted-foreground">Espaciado entre elementos</span>
+                  </div>
+                  <Select 
+                    value={settings.density} 
+                    onValueChange={(value) => updateSetting("density", value as any)}
+                  >
+                    <SelectTrigger className="w-40" data-testid="select-density">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="compact">Compacto</SelectItem>
+                      <SelectItem value="comfortable">Cómodo</SelectItem>
+                      <SelectItem value="spacious">Espacioso</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
+            </div>
 
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <span className="text-sm block">Modo de voz independiente</span>
-                  <span className="text-xs text-muted-foreground">
-                    Mantén MICHAT Voice en pantalla completa independiente.
-                  </span>
+            <Separator />
+
+            {/* Language & Region Section */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Idioma y región</h3>
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-sm">Idioma de la interfaz</span>
+                  <Select value={currentLanguage} onValueChange={handleLanguageChange}>
+                    <SelectTrigger className="w-40" data-testid="select-language">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {supportedLanguages.map(lang => (
+                        <SelectItem key={lang.code} value={lang.code}>{lang.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Switch 
-                  checked={settings.independentVoiceMode} 
-                  onCheckedChange={(checked) => updateSetting("independentVoiceMode", checked)}
-                  data-testid="switch-voice-mode"
-                />
-              </div>
 
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm">Mostrar modelos adicionales</span>
-                <Switch 
-                  checked={settings.showAdditionalModels} 
-                  onCheckedChange={(checked) => updateSetting("showAdditionalModels", checked)}
-                  data-testid="switch-additional-models"
-                />
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Idioma hablado</span>
+                    <span className="text-xs text-muted-foreground">Para reconocimiento de voz</span>
+                  </div>
+                  <Select 
+                    value={settings.spokenLanguage} 
+                    onValueChange={(value) => updateSetting("spokenLanguage", value)}
+                  >
+                    <SelectTrigger className="w-40 shrink-0" data-testid="select-spoken-language">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Automático</SelectItem>
+                      <SelectItem value="es">Español</SelectItem>
+                      <SelectItem value="en">English</SelectItem>
+                      <SelectItem value="fr">Français</SelectItem>
+                      <SelectItem value="de">Deutsch</SelectItem>
+                      <SelectItem value="pt">Português</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-sm">Formato de fecha</span>
+                  <Select 
+                    value={settings.dateFormat} 
+                    onValueChange={(value) => updateSetting("dateFormat", value as any)}
+                  >
+                    <SelectTrigger className="w-40" data-testid="select-date-format">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dd/mm/yyyy">DD/MM/AAAA</SelectItem>
+                      <SelectItem value="mm/dd/yyyy">MM/DD/AAAA</SelectItem>
+                      <SelectItem value="yyyy-mm-dd">AAAA-MM-DD</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-sm">Formato de hora</span>
+                  <Select 
+                    value={settings.timeFormat} 
+                    onValueChange={(value) => updateSetting("timeFormat", value as any)}
+                  >
+                    <SelectTrigger className="w-40" data-testid="select-time-format">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="24h">24 horas</SelectItem>
+                      <SelectItem value="12h">12 horas (AM/PM)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Voice & Audio Section */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Voz y audio</h3>
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-sm">Voz del asistente</span>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="gap-1"
+                      onClick={() => playVoicePreview(settings.voice)}
+                      disabled={playingVoice !== null}
+                      data-testid="button-play-voice"
+                    >
+                      {playingVoice === settings.voice ? (
+                        <Volume2 className="h-3 w-3 animate-pulse" />
+                      ) : (
+                        <Play className="h-3 w-3" />
+                      )}
+                    </Button>
+                    <Select 
+                      value={settings.voice} 
+                      onValueChange={(value) => updateSetting("voice", value)}
+                    >
+                      <SelectTrigger className="w-28" data-testid="select-voice">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {voices.map((voice) => (
+                          <SelectItem key={voice.id} value={voice.id}>
+                            {voice.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Reproducir respuestas automáticamente</span>
+                    <span className="text-xs text-muted-foreground">Lee las respuestas en voz alta</span>
+                  </div>
+                  <Switch 
+                    checked={settings.autoPlayResponses} 
+                    onCheckedChange={(checked) => updateSetting("autoPlayResponses", checked)}
+                    data-testid="switch-auto-play"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Modo de voz independiente</span>
+                    <span className="text-xs text-muted-foreground">Pantalla completa sin elementos visuales</span>
+                  </div>
+                  <Switch 
+                    checked={settings.independentVoiceMode} 
+                    onCheckedChange={(checked) => updateSetting("independentVoiceMode", checked)}
+                    data-testid="switch-voice-mode"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* AI Models Section */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Modelos de IA</h3>
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Modelo predeterminado</span>
+                    <span className="text-xs text-muted-foreground">Modelo para nuevas conversaciones</span>
+                  </div>
+                  <Select 
+                    value={settings.defaultModel} 
+                    onValueChange={(value) => updateSetting("defaultModel", value)}
+                  >
+                    <SelectTrigger className="w-48" data-testid="select-default-model">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                      <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                      <SelectItem value="grok-3-fast">Grok 3 Fast</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Mostrar modelos adicionales</span>
+                    <span className="text-xs text-muted-foreground">Ver todos los modelos disponibles</span>
+                  </div>
+                  <Switch 
+                    checked={settings.showAdditionalModels} 
+                    onCheckedChange={(checked) => updateSetting("showAdditionalModels", checked)}
+                    data-testid="switch-additional-models"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Transmitir respuestas</span>
+                    <span className="text-xs text-muted-foreground">Ver las respuestas mientras se generan</span>
+                  </div>
+                  <Switch 
+                    checked={settings.streamResponses} 
+                    onCheckedChange={(checked) => updateSetting("streamResponses", checked)}
+                    data-testid="switch-stream"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Accessibility Section */}
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Accesibilidad</h3>
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Atajos de teclado</span>
+                    <span className="text-xs text-muted-foreground">Habilitar navegación con teclado</span>
+                  </div>
+                  <Switch 
+                    checked={settings.keyboardShortcuts} 
+                    onCheckedChange={(checked) => updateSetting("keyboardShortcuts", checked)}
+                    data-testid="switch-keyboard"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Reducir movimiento</span>
+                    <span className="text-xs text-muted-foreground">Minimizar animaciones</span>
+                  </div>
+                  <Switch 
+                    checked={settings.reducedMotion} 
+                    onCheckedChange={(checked) => updateSetting("reducedMotion", checked)}
+                    data-testid="switch-motion"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="text-sm block">Alto contraste</span>
+                    <span className="text-xs text-muted-foreground">Mejorar visibilidad de elementos</span>
+                  </div>
+                  <Switch 
+                    checked={settings.highContrast} 
+                    onCheckedChange={(checked) => updateSetting("highContrast", checked)}
+                    data-testid="switch-contrast"
+                  />
+                </div>
               </div>
             </div>
           </div>

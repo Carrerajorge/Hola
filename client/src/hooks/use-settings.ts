@@ -1,13 +1,34 @@
 import { useState, useEffect, useCallback } from "react";
 
 export interface UserSettings {
-  // General
+  // Display
   appearance: "system" | "light" | "dark";
   accentColor: "default" | "blue" | "green" | "purple" | "orange" | "pink";
+  fontSize: "small" | "medium" | "large";
+  density: "compact" | "comfortable" | "spacious";
+  
+  // Language & Region
   spokenLanguage: string;
+  dateFormat: "dd/mm/yyyy" | "mm/dd/yyyy" | "yyyy-mm-dd";
+  timeFormat: "12h" | "24h";
+  timezone: string;
+  
+  // Voice & Audio
   voice: string;
+  voiceSpeed: number;
+  voiceVolume: number;
   independentVoiceMode: boolean;
+  autoPlayResponses: boolean;
+  
+  // AI Models
   showAdditionalModels: boolean;
+  defaultModel: string;
+  streamResponses: boolean;
+  
+  // Keyboard & Accessibility
+  keyboardShortcuts: boolean;
+  reducedMotion: boolean;
+  highContrast: boolean;
   
   // Notifications
   notifResponses: "push" | "email" | "push_email" | "none";
@@ -48,13 +69,34 @@ export interface UserSettings {
 }
 
 const defaultSettings: UserSettings = {
-  // General
+  // Display
   appearance: "system",
   accentColor: "default",
+  fontSize: "medium",
+  density: "comfortable",
+  
+  // Language & Region
   spokenLanguage: "auto",
+  dateFormat: "dd/mm/yyyy",
+  timeFormat: "24h",
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  
+  // Voice & Audio
   voice: "cove",
+  voiceSpeed: 1.0,
+  voiceVolume: 1.0,
   independentVoiceMode: false,
+  autoPlayResponses: false,
+  
+  // AI Models
   showAdditionalModels: true,
+  defaultModel: "gemini-2.5-flash",
+  streamResponses: true,
+  
+  // Keyboard & Accessibility
+  keyboardShortcuts: true,
+  reducedMotion: false,
+  highContrast: false,
   
   // Notifications
   notifResponses: "push",
