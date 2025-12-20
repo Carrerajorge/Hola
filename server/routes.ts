@@ -2698,6 +2698,134 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     }
   });
 
+  // Integration API endpoints
+  app.get("/api/integrations/providers", async (req, res) => {
+    try {
+      const providers = await storage.getIntegrationProviders();
+      res.json(providers);
+    } catch (error: any) {
+      console.error("Error getting providers:", error);
+      res.status(500).json({ error: "Failed to get providers" });
+    }
+  });
+
+  app.get("/api/integrations/tools", async (req, res) => {
+    try {
+      const { providerId } = req.query;
+      const tools = await storage.getIntegrationTools(providerId as string | undefined);
+      res.json(tools);
+    } catch (error: any) {
+      console.error("Error getting tools:", error);
+      res.status(500).json({ error: "Failed to get tools" });
+    }
+  });
+
+  app.get("/api/users/:id/integrations", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const [accounts, policy, providers] = await Promise.all([
+        storage.getIntegrationAccounts(id),
+        storage.getIntegrationPolicy(id),
+        storage.getIntegrationProviders()
+      ]);
+      
+      res.json({ accounts, policy, providers });
+    } catch (error: any) {
+      console.error("Error getting user integrations:", error);
+      res.status(500).json({ error: "Failed to get integrations" });
+    }
+  });
+
+  app.put("/api/users/:id/integrations/policy", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const { enabledApps, enabledTools, disabledTools, resourceScopes, autoConfirmPolicy, sandboxMode, maxParallelCalls } = req.body;
+      
+      const policy = await storage.upsertIntegrationPolicy(id, {
+        enabledApps,
+        enabledTools,
+        disabledTools,
+        resourceScopes,
+        autoConfirmPolicy,
+        sandboxMode,
+        maxParallelCalls
+      });
+      
+      res.json(policy);
+    } catch (error: any) {
+      console.error("Error updating policy:", error);
+      res.status(500).json({ error: "Failed to update policy" });
+    }
+  });
+
+  app.post("/api/users/:id/integrations/:provider/connect", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id, provider } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const providerInfo = await storage.getIntegrationProvider(provider);
+      if (!providerInfo) return res.status(404).json({ error: "Provider not found" });
+      
+      res.json({ 
+        message: "OAuth flow not yet implemented",
+        provider: providerInfo.name,
+        authType: providerInfo.authType
+      });
+    } catch (error: any) {
+      console.error("Error initiating connect:", error);
+      res.status(500).json({ error: "Failed to initiate connection" });
+    }
+  });
+
+  app.post("/api/users/:id/integrations/:provider/disconnect", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id, provider } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const account = await storage.getIntegrationAccountByProvider(id, provider);
+      if (!account) return res.status(404).json({ error: "Account not found" });
+      
+      await storage.deleteIntegrationAccount(account.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error disconnecting:", error);
+      res.status(500).json({ error: "Failed to disconnect" });
+    }
+  });
+
+  app.get("/api/users/:id/integrations/logs", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const limit = parseInt(req.query.limit as string) || 50;
+      const logs = await storage.getToolCallLogs(id, limit);
+      res.json(logs);
+    } catch (error: any) {
+      console.error("Error getting logs:", error);
+      res.status(500).json({ error: "Failed to get logs" });
+    }
+  });
+
   return httpServer;
 }
 

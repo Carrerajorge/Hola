@@ -23,10 +23,16 @@ import {
   type LibraryItem, type InsertLibraryItem,
   type NotificationEventType, type NotificationPreference, type InsertNotificationPreference,
   type UserSettings, type InsertUserSettings,
+  type IntegrationProvider, type InsertIntegrationProvider,
+  type IntegrationAccount, type InsertIntegrationAccount,
+  type IntegrationTool, type InsertIntegrationTool,
+  type IntegrationPolicy, type InsertIntegrationPolicy,
+  type ToolCallLog, type InsertToolCallLog,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   gpts, gptCategories, gptVersions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
-  notificationEventTypes, notificationPreferences, userSettings
+  notificationEventTypes, notificationPreferences, userSettings,
+  integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -146,6 +152,20 @@ export interface IStorage {
   // User Settings
   getUserSettings(userId: string): Promise<UserSettings | null>;
   upsertUserSettings(userId: string, settings: Partial<InsertUserSettings>): Promise<UserSettings>;
+  // Integration Management
+  getIntegrationProviders(): Promise<IntegrationProvider[]>;
+  getIntegrationProvider(id: string): Promise<IntegrationProvider | null>;
+  getIntegrationAccounts(userId: string): Promise<IntegrationAccount[]>;
+  getIntegrationAccount(id: string): Promise<IntegrationAccount | null>;
+  getIntegrationAccountByProvider(userId: string, providerId: string): Promise<IntegrationAccount | null>;
+  createIntegrationAccount(account: InsertIntegrationAccount): Promise<IntegrationAccount>;
+  updateIntegrationAccount(id: string, updates: Partial<InsertIntegrationAccount>): Promise<IntegrationAccount | null>;
+  deleteIntegrationAccount(id: string): Promise<void>;
+  getIntegrationTools(providerId?: string): Promise<IntegrationTool[]>;
+  getIntegrationPolicy(userId: string): Promise<IntegrationPolicy | null>;
+  upsertIntegrationPolicy(userId: string, policy: Partial<InsertIntegrationPolicy>): Promise<IntegrationPolicy>;
+  createToolCallLog(log: InsertToolCallLog): Promise<ToolCallLog>;
+  getToolCallLogs(userId: string, limit?: number): Promise<ToolCallLog[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -789,6 +809,119 @@ export class MemStorage implements IStorage {
 
     const [created] = await db.insert(userSettings).values(newSettings).returning();
     return created;
+  }
+
+  // Integration Management
+  async getIntegrationProviders(): Promise<IntegrationProvider[]> {
+    return db.select().from(integrationProviders).orderBy(integrationProviders.name);
+  }
+
+  async getIntegrationProvider(id: string): Promise<IntegrationProvider | null> {
+    const [result] = await db.select().from(integrationProviders).where(eq(integrationProviders.id, id));
+    return result || null;
+  }
+
+  async getIntegrationAccounts(userId: string): Promise<IntegrationAccount[]> {
+    return db.select().from(integrationAccounts)
+      .where(eq(integrationAccounts.userId, userId))
+      .orderBy(desc(integrationAccounts.createdAt));
+  }
+
+  async getIntegrationAccount(id: string): Promise<IntegrationAccount | null> {
+    const [result] = await db.select().from(integrationAccounts).where(eq(integrationAccounts.id, id));
+    return result || null;
+  }
+
+  async getIntegrationAccountByProvider(userId: string, providerId: string): Promise<IntegrationAccount | null> {
+    const [result] = await db.select().from(integrationAccounts)
+      .where(sql`${integrationAccounts.userId} = ${userId} AND ${integrationAccounts.providerId} = ${providerId}`);
+    return result || null;
+  }
+
+  async createIntegrationAccount(account: InsertIntegrationAccount): Promise<IntegrationAccount> {
+    const [result] = await db.insert(integrationAccounts).values(account).returning();
+    return result;
+  }
+
+  async updateIntegrationAccount(id: string, updates: Partial<InsertIntegrationAccount>): Promise<IntegrationAccount | null> {
+    const [result] = await db.update(integrationAccounts)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(integrationAccounts.id, id))
+      .returning();
+    return result || null;
+  }
+
+  async deleteIntegrationAccount(id: string): Promise<void> {
+    await db.delete(integrationAccounts).where(eq(integrationAccounts.id, id));
+  }
+
+  async getIntegrationTools(providerId?: string): Promise<IntegrationTool[]> {
+    if (providerId) {
+      return db.select().from(integrationTools)
+        .where(eq(integrationTools.providerId, providerId))
+        .orderBy(integrationTools.name);
+    }
+    return db.select().from(integrationTools).orderBy(integrationTools.name);
+  }
+
+  async getIntegrationPolicy(userId: string): Promise<IntegrationPolicy | null> {
+    const [result] = await db.select().from(integrationPolicies).where(eq(integrationPolicies.userId, userId));
+    return result || null;
+  }
+
+  async upsertIntegrationPolicy(userId: string, policy: Partial<InsertIntegrationPolicy>): Promise<IntegrationPolicy> {
+    const existing = await this.getIntegrationPolicy(userId);
+    
+    if (existing) {
+      const mergedPolicy = {
+        enabledApps: policy.enabledApps 
+          ? Array.from(new Set([...(existing.enabledApps || []), ...policy.enabledApps]))
+          : existing.enabledApps,
+        enabledTools: policy.enabledTools
+          ? Array.from(new Set([...(existing.enabledTools || []), ...policy.enabledTools]))
+          : existing.enabledTools,
+        disabledTools: policy.disabledTools
+          ? Array.from(new Set([...(existing.disabledTools || []), ...policy.disabledTools]))
+          : existing.disabledTools,
+        resourceScopes: policy.resourceScopes ?? existing.resourceScopes,
+        autoConfirmPolicy: policy.autoConfirmPolicy ?? existing.autoConfirmPolicy,
+        sandboxMode: policy.sandboxMode ?? existing.sandboxMode,
+        maxParallelCalls: policy.maxParallelCalls ?? existing.maxParallelCalls,
+        updatedAt: new Date()
+      };
+      
+      const [updated] = await db.update(integrationPolicies)
+        .set(mergedPolicy)
+        .where(eq(integrationPolicies.userId, userId))
+        .returning();
+      return updated;
+    }
+
+    const newPolicy: InsertIntegrationPolicy = {
+      userId,
+      enabledApps: policy.enabledApps || [],
+      enabledTools: policy.enabledTools || [],
+      disabledTools: policy.disabledTools || [],
+      resourceScopes: policy.resourceScopes,
+      autoConfirmPolicy: policy.autoConfirmPolicy || 'ask',
+      sandboxMode: policy.sandboxMode || 'false',
+      maxParallelCalls: policy.maxParallelCalls || 3
+    };
+
+    const [created] = await db.insert(integrationPolicies).values(newPolicy).returning();
+    return created;
+  }
+
+  async createToolCallLog(log: InsertToolCallLog): Promise<ToolCallLog> {
+    const [result] = await db.insert(toolCallLogs).values(log).returning();
+    return result;
+  }
+
+  async getToolCallLogs(userId: string, limit: number = 100): Promise<ToolCallLog[]> {
+    return db.select().from(toolCallLogs)
+      .where(eq(toolCallLogs.userId, userId))
+      .orderBy(desc(toolCallLogs.createdAt))
+      .limit(limit);
   }
 }
 

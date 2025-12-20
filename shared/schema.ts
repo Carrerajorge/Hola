@@ -102,6 +102,141 @@ export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
 export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
 export type UserSettings = typeof userSettings.$inferSelect;
 
+// ========================================
+// Integration Management Tables
+// ========================================
+
+// Integration Providers - Catalog of available providers
+export const integrationProviders = pgTable("integration_providers", {
+  id: varchar("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  iconUrl: text("icon_url"),
+  authType: text("auth_type").notNull().default("oauth2"),
+  authConfig: jsonb("auth_config"),
+  category: text("category").default("general"),
+  isActive: text("is_active").default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertIntegrationProviderSchema = createInsertSchema(integrationProviders).omit({
+  createdAt: true,
+});
+
+export type InsertIntegrationProvider = z.infer<typeof insertIntegrationProviderSchema>;
+export type IntegrationProvider = typeof integrationProviders.$inferSelect;
+
+// Integration Accounts - User's connected accounts per provider
+export const integrationAccounts = pgTable("integration_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  providerId: varchar("provider_id").notNull().references(() => integrationProviders.id),
+  externalUserId: text("external_user_id"),
+  displayName: text("display_name"),
+  email: text("email"),
+  avatarUrl: text("avatar_url"),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiresAt: timestamp("token_expires_at"),
+  scopes: text("scopes"),
+  isDefault: text("is_default").default("false"),
+  status: text("status").default("active"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("integration_accounts_user_id_idx").on(table.userId),
+  index("integration_accounts_provider_idx").on(table.providerId),
+]);
+
+export const insertIntegrationAccountSchema = createInsertSchema(integrationAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertIntegrationAccount = z.infer<typeof insertIntegrationAccountSchema>;
+export type IntegrationAccount = typeof integrationAccounts.$inferSelect;
+
+// Integration Tools - Available tools/actions per provider
+export const integrationTools = pgTable("integration_tools", {
+  id: varchar("id").primaryKey(),
+  providerId: varchar("provider_id").notNull().references(() => integrationProviders.id),
+  name: text("name").notNull(),
+  description: text("description"),
+  actionSchema: jsonb("action_schema"),
+  resultSchema: jsonb("result_schema"),
+  requiredScopes: text("required_scopes").array(),
+  dataAccessLevel: text("data_access_level").default("read"),
+  rateLimit: jsonb("rate_limit"),
+  confirmationRequired: text("confirmation_required").default("false"),
+  isActive: text("is_active").default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertIntegrationToolSchema = createInsertSchema(integrationTools).omit({
+  createdAt: true,
+});
+
+export type InsertIntegrationTool = z.infer<typeof insertIntegrationToolSchema>;
+export type IntegrationTool = typeof integrationTools.$inferSelect;
+
+// Integration Policies - User preferences for enabled apps/tools
+export const integrationPolicies = pgTable("integration_policies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  enabledApps: jsonb("enabled_apps").$type<string[]>().default([]),
+  enabledTools: jsonb("enabled_tools").$type<string[]>().default([]),
+  disabledTools: jsonb("disabled_tools").$type<string[]>().default([]),
+  resourceScopes: jsonb("resource_scopes"),
+  autoConfirmPolicy: text("auto_confirm_policy").default("ask"),
+  sandboxMode: text("sandbox_mode").default("false"),
+  maxParallelCalls: integer("max_parallel_calls").default(3),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("integration_policies_user_id_idx").on(table.userId),
+]);
+
+export const insertIntegrationPolicySchema = createInsertSchema(integrationPolicies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertIntegrationPolicy = z.infer<typeof insertIntegrationPolicySchema>;
+export type IntegrationPolicy = typeof integrationPolicies.$inferSelect;
+
+// Tool Call Logs - Audit log for tool invocations
+export const toolCallLogs = pgTable("tool_call_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  chatId: varchar("chat_id"),
+  toolId: varchar("tool_id").notNull(),
+  providerId: varchar("provider_id").notNull(),
+  accountId: varchar("account_id").references(() => integrationAccounts.id),
+  inputRedacted: jsonb("input_redacted"),
+  outputRedacted: jsonb("output_redacted"),
+  status: text("status").notNull(),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  latencyMs: integer("latency_ms"),
+  idempotencyKey: text("idempotency_key"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("tool_call_logs_user_id_idx").on(table.userId),
+  index("tool_call_logs_tool_id_idx").on(table.toolId),
+  index("tool_call_logs_created_at_idx").on(table.createdAt),
+]);
+
+export const insertToolCallLogSchema = createInsertSchema(toolCallLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertToolCallLog = z.infer<typeof insertToolCallLogSchema>;
+export type ToolCallLog = typeof toolCallLogs.$inferSelect;
+
 export const files = pgTable("files", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id"),
