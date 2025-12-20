@@ -1,4 +1,4 @@
-import * as ExcelJS from "exceljs";
+import ExcelJS from "exceljs";
 import type { ExcelSpec, TableSpec, ChartSpec, SheetLayoutSpec } from "../../shared/documentSpecs";
 
 function parseCellReference(ref: string): { col: number; row: number } {
