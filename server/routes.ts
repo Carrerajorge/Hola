@@ -2967,8 +2967,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
       
       const { trainingOptIn, remoteBrowserDataAccess } = req.body;
-      const ipAddress = req.ip || req.headers['x-forwarded-for']?.toString();
-      const userAgent = req.headers['user-agent'];
+      const ipAddress = req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0] || undefined;
+      const userAgent = req.headers['user-agent'] || undefined;
       
       if (trainingOptIn !== undefined) {
         await storage.logConsent(id, 'training_opt_in', String(trainingOptIn), ipAddress, userAgent);

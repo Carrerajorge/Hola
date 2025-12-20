@@ -811,7 +811,7 @@ function DataControlsSection() {
   }>({
     queryKey: ['/api/users', userId, 'privacy'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/privacy`);
+      const res = await fetch(`/api/users/${userId}/privacy`, { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch privacy settings');
       return res.json();
     },
@@ -821,7 +821,7 @@ function DataControlsSection() {
   const { data: sharedLinks = [], isLoading: isLoadingLinks } = useQuery<SharedLink[]>({
     queryKey: ['/api/users', userId, 'shared-links'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/shared-links`);
+      const res = await fetch(`/api/users/${userId}/shared-links`, { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch shared links');
       return res.json();
     },
@@ -831,7 +831,7 @@ function DataControlsSection() {
   const { data: archivedChats = [], isLoading: isLoadingArchived } = useQuery<ArchivedChat[]>({
     queryKey: ['/api/users', userId, 'chats', 'archived'],
     queryFn: async () => {
-      const res = await fetch(`/api/users/${userId}/chats/archived`);
+      const res = await fetch(`/api/users/${userId}/chats/archived`, { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch archived chats');
       return res.json();
     },
@@ -843,6 +843,7 @@ function DataControlsSection() {
       const res = await fetch(`/api/users/${userId}/privacy`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error('Failed to update');
@@ -859,7 +860,7 @@ function DataControlsSection() {
 
   const revokeLink = useMutation({
     mutationFn: async (linkId: string) => {
-      const res = await fetch(`/api/users/${userId}/shared-links/${linkId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/users/${userId}/shared-links/${linkId}`, { method: 'DELETE', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to revoke');
       return res.json();
     },
@@ -871,7 +872,7 @@ function DataControlsSection() {
 
   const unarchiveChat = useMutation({
     mutationFn: async (chatId: string) => {
-      const res = await fetch(`/api/users/${userId}/chats/${chatId}/unarchive`, { method: 'POST' });
+      const res = await fetch(`/api/users/${userId}/chats/${chatId}/unarchive`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to unarchive');
       return res.json();
     },
@@ -884,7 +885,7 @@ function DataControlsSection() {
 
   const archiveAll = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/users/${userId}/chats/archive-all`, { method: 'POST' });
+      const res = await fetch(`/api/users/${userId}/chats/archive-all`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to archive all');
       return res.json();
     },
@@ -898,7 +899,7 @@ function DataControlsSection() {
 
   const deleteAll = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/users/${userId}/chats/delete-all`, { method: 'POST' });
+      const res = await fetch(`/api/users/${userId}/chats/delete-all`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to delete all');
       return res.json();
     },
