@@ -53,6 +53,55 @@ export const insertUserSchema = createInsertSchema(users).pick({
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
+// User Settings table - one settings record per user
+export const responsePreferencesSchema = z.object({
+  responseStyle: z.enum(['default', 'formal', 'casual', 'concise']).default('default'),
+  responseTone: z.string().default(''),
+  customInstructions: z.string().default(''),
+});
+
+export const userProfileSchema = z.object({
+  nickname: z.string().default(''),
+  occupation: z.string().default(''),
+  bio: z.string().default(''),
+});
+
+export const featureFlagsSchema = z.object({
+  memoryEnabled: z.boolean().default(true),
+  recordingHistoryEnabled: z.boolean().default(true),
+  webSearchAuto: z.boolean().default(false),
+  codeInterpreterEnabled: z.boolean().default(true),
+  canvasEnabled: z.boolean().default(true),
+  voiceEnabled: z.boolean().default(true),
+  voiceAdvanced: z.boolean().default(false),
+  connectorSearchAuto: z.boolean().default(false),
+});
+
+export const userSettings = pgTable("user_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  responsePreferences: jsonb("response_preferences").$type<z.infer<typeof responsePreferencesSchema>>(),
+  userProfile: jsonb("user_profile").$type<z.infer<typeof userProfileSchema>>(),
+  featureFlags: jsonb("feature_flags").$type<z.infer<typeof featureFlagsSchema>>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("user_settings_user_id_idx").on(table.userId),
+]);
+
+export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  responsePreferences: responsePreferencesSchema.optional(),
+  userProfile: userProfileSchema.optional(),
+  featureFlags: featureFlagsSchema.optional(),
+});
+
+export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
+export type UserSettings = typeof userSettings.$inferSelect;
+
 export const files = pgTable("files", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id"),
