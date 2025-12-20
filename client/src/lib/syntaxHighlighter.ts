@@ -107,7 +107,7 @@ export async function loadLanguage(lang: string): Promise<boolean> {
     try {
       await loadLanguageDependencies(resolved);
       
-      const langModule = await import(`prismjs/components/prism-${resolved}.js`);
+      const langModule = await import(/* @vite-ignore */ `prismjs/components/prism-${resolved}.js`);
       
       if (langModule) {
         loadedLanguages.add(resolved);
