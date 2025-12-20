@@ -872,7 +872,7 @@ function DataControlsSection() {
 
   const unarchiveChat = useMutation({
     mutationFn: async (chatId: string) => {
-      const res = await fetch(`/api/users/${userId}/chats/${chatId}/unarchive`, { method: 'POST', credentials: 'include' });
+      const res = await fetch(`/api/users/${userId}/chats/${chatId}/restore`, { method: 'POST', credentials: 'include' });
       if (!res.ok) throw new Error('Failed to unarchive');
       return res.json();
     },
