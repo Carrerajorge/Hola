@@ -424,6 +424,50 @@ export async function registerRoutes(
     }
   });
 
+  // Voice Chat API - for conversational voice mode with Grok
+  app.post("/api/voice-chat", async (req, res) => {
+    try {
+      const { message } = req.body;
+      
+      if (!message || typeof message !== "string") {
+        return res.status(400).json({ error: "Message is required" });
+      }
+
+      console.log("[VoiceChat] Processing voice input:", message);
+      
+      const result = await llmGateway.chat([
+        {
+          role: "system",
+          content: `Eres Sira, un asistente de voz amigable y conversacional. 
+Responde de manera natural y concisa, como si estuvieras hablando directamente con el usuario.
+Mantén las respuestas cortas (2-3 oraciones máximo) para que sean fáciles de escuchar.
+Usa un tono cálido y conversacional en español.
+No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída en voz alta.`
+        },
+        {
+          role: "user",
+          content: message
+        }
+      ], {
+        model: "grok-3-fast",
+        temperature: 0.7,
+        maxTokens: 150,
+      });
+      
+      res.json({ 
+        success: true,
+        response: result.content,
+        latencyMs: result.latencyMs
+      });
+    } catch (error: any) {
+      console.error("Voice chat error:", error);
+      res.status(500).json({ 
+        error: "Failed to process voice message",
+        details: error.message 
+      });
+    }
+  });
+
   // Image Generation API
   app.post("/api/image/generate", async (req, res) => {
     try {

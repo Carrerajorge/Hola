@@ -61,8 +61,9 @@ import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { SiraLogo } from "@/components/sira-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
+import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { useAuth } from "@/hooks/use-auth";
-import { Database, Sparkles } from "lucide-react";
+import { Database, Sparkles, AudioLines } from "lucide-react";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
 
 const extractTextFromChildren = (children: React.ReactNode): string => {
@@ -801,6 +802,7 @@ export function ChatInterface({
   const [selectedModel, setSelectedModel] = useState<string>("gemini-3-flash-preview");
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
+  const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -3954,7 +3956,34 @@ export function ChatInterface({
                 />
 
                 <div className="flex items-center gap-1 pb-1">
-                  {/* Contextual action button: Voice when empty, Send when has text */}
+                  {/* Mic button for dictation - always visible when not recording */}
+                  {isRecording ? (
+                    <Button 
+                      onClick={toggleVoiceRecording}
+                      size="icon" 
+                      className="h-9 w-9 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50"
+                      data-testid="button-voice-recording-active"
+                    >
+                      <MicOff className="h-5 w-5" />
+                    </Button>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button 
+                          variant="ghost"
+                          onClick={toggleVoiceRecording}
+                          size="icon" 
+                          className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted"
+                          data-testid="button-voice-dictation"
+                        >
+                          <Mic className="h-5 w-5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Dictar texto</TooltipContent>
+                    </Tooltip>
+                  )}
+
+                  {/* Voice chat mode button - opens fullscreen conversation */}
                   {aiState !== "idle" ? (
                     <Button 
                       onClick={handleStopChat}
@@ -3963,15 +3992,6 @@ export function ChatInterface({
                       data-testid="button-stop-chat"
                     >
                       <Square className="h-5 w-5 fill-current" />
-                    </Button>
-                  ) : isRecording ? (
-                    <Button 
-                      onClick={toggleVoiceRecording}
-                      size="icon" 
-                      className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50"
-                      data-testid="button-voice-recording-active"
-                    >
-                      <MicOff className="h-5 w-5" />
                     </Button>
                   ) : input.trim().length > 0 || uploadedFiles.length > 0 ? (
                     <motion.div
@@ -3991,23 +4011,19 @@ export function ChatInterface({
                       </Button>
                     </motion.div>
                   ) : (
-                    <motion.div
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      exit={{ scale: 0.8, opacity: 0 }}
-                      transition={{ duration: 0.2, ease: "easeOut" }}
-                      key="voice-button"
-                    >
-                      <Button 
-                        variant="ghost"
-                        onClick={toggleVoiceRecording}
-                        size="icon" 
-                        className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted"
-                        data-testid="button-voice-recording"
-                      >
-                        <Mic className="h-5 w-5" />
-                      </Button>
-                    </motion.div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button 
+                          onClick={() => setIsVoiceChatOpen(true)}
+                          size="icon" 
+                          className="h-9 w-9 rounded-full transition-all duration-300 bg-foreground text-background hover:bg-foreground/90"
+                          data-testid="button-voice-chat-mode"
+                        >
+                          <AudioLines className="h-5 w-5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Modo conversación por voz</TooltipContent>
+                    </Tooltip>
                   )}
                 </div>
                 </div>
@@ -4036,6 +4052,12 @@ export function ChatInterface({
       <UpgradePlanDialog 
         open={isUpgradeDialogOpen} 
         onOpenChange={setIsUpgradeDialogOpen} 
+      />
+
+      {/* Voice Chat Mode - Fullscreen conversation with Grok */}
+      <VoiceChatMode 
+        open={isVoiceChatOpen} 
+        onClose={() => setIsVoiceChatOpen(false)} 
       />
 
       {/* Image Lightbox Modal */}
