@@ -20,7 +20,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
   return (
     <TooltipProvider delayDuration={100}>
       <div className={cn(
-        "flex h-screen w-[60px] flex-col items-center py-3 liquid-sidebar-light border-r border-white/20",
+        "flex h-screen w-[60px] flex-col items-center py-3 liquid-sidebar-light dark:liquid-sidebar border-r border-white/20",
         className
       )}>
         <div className="flex flex-col items-center gap-1 mb-4">
@@ -29,7 +29,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-10 w-10 rounded-xl hover:bg-white/50 transition-all duration-200"
+                className="h-10 w-10 rounded-xl hover:bg-white/50 dark:hover:bg-white/10 transition-all duration-200"
                 onClick={onExpand}
               >
                 <SiraLogo size={28} />
@@ -47,7 +47,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-10 w-10 rounded-xl hover:bg-white/50 transition-all duration-200"
+                className="h-10 w-10 rounded-xl hover:bg-white/50 dark:hover:bg-white/10 transition-all duration-200"
                 onClick={onNewChat}
                 data-testid="mini-button-new-chat"
               >
@@ -64,7 +64,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-10 w-10 rounded-xl hover:bg-white/50 transition-all duration-200"
+                className="h-10 w-10 rounded-xl hover:bg-white/50 dark:hover:bg-white/10 transition-all duration-200"
                 data-testid="mini-button-search"
               >
                 <Search className="h-5 w-5 text-muted-foreground" />
@@ -80,7 +80,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-10 w-10 rounded-xl hover:bg-white/50 transition-all duration-200"
+                className="h-10 w-10 rounded-xl hover:bg-white/50 dark:hover:bg-white/10 transition-all duration-200"
                 data-testid="mini-button-library"
               >
                 <Library className="h-5 w-5 text-muted-foreground" />
@@ -96,7 +96,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-10 w-10 rounded-xl hover:bg-white/50 transition-all duration-200"
+                className="h-10 w-10 rounded-xl hover:bg-white/50 dark:hover:bg-white/10 transition-all duration-200"
                 data-testid="mini-button-gpts"
               >
                 <Bot className="h-5 w-5 text-muted-foreground" />
@@ -114,7 +114,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="h-10 w-10 rounded-xl hover:bg-white/50 transition-all duration-200"
+                className="h-10 w-10 rounded-xl hover:bg-white/50 dark:hover:bg-white/10 transition-all duration-200"
                 data-testid="mini-button-user"
               >
                 <Avatar className="h-8 w-8">

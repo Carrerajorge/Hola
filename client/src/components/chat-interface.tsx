@@ -1994,7 +1994,7 @@ export function ChatInterface({
   return (
     <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
-      <header className="flex h-14 items-center justify-between px-2 sm:px-4 border-b border-white/20 glass-card-light rounded-none z-10 sticky top-0 flex-shrink-0 safe-area-top">
+      <header className="flex h-14 items-center justify-between px-2 sm:px-4 border-b border-white/20 dark:border-white/10 glass-card-light dark:glass-card rounded-none z-10 sticky top-0 flex-shrink-0 safe-area-top">
         <div className="flex items-center gap-1 sm:gap-2 relative min-w-0">
           <div 
             className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors"
@@ -3561,7 +3561,7 @@ export function ChatInterface({
           {/* Input Bar */}
           <div className="shrink-0 px-4 pb-4">
             <div className={cn(
-              "max-w-3xl mx-auto glass-card-light rounded-2xl border border-white/30 p-3",
+              "max-w-3xl mx-auto glass-card-light dark:glass-card rounded-2xl border border-white/30 dark:border-white/10 p-3",
               selectedDocText && "ring-2 ring-primary/50"
             )}>
               <div className="flex flex-col gap-2">

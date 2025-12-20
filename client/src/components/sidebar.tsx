@@ -142,7 +142,7 @@ export function Sidebar({
   });
   
   return (
-    <div className={cn("flex h-screen w-[260px] flex-col liquid-sidebar-light text-sidebar-foreground", className)}>
+    <div className={cn("flex h-screen w-[260px] flex-col liquid-sidebar-light dark:liquid-sidebar text-sidebar-foreground", className)}>
       <div className="flex h-14 items-center justify-between px-4 py-2">
         <div className="flex items-center gap-2">
           <SiraLogo size={32} />
@@ -226,8 +226,8 @@ export function Sidebar({
                   <div
                     key={chat.id}
                     className={cn(
-                      "group flex w-full items-center justify-between px-2 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-white/50 transition-all duration-300",
-                      activeChatId === chat.id && "bg-white/60 shadow-sm",
+                      "group flex w-full items-center justify-between px-2 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-white/50 dark:hover:bg-white/10 transition-all duration-300",
+                      activeChatId === chat.id && "bg-white/60 dark:bg-white/10 shadow-sm",
                       chat.archived && "opacity-60"
                     )}
                     onClick={() => !editingChatId && onSelectChat(chat.id)}
