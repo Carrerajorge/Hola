@@ -394,21 +394,21 @@
   display: none;
 }
 
-/* Simple Button - Futuristic B&W */
+/* Simple Button - Uses design tokens */
 .liquid-btn {
-  background: #ffffff;
-  border: 1px solid #000000;
+  background-color: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
   border-radius: 6px;
   padding: 12px 24px;
-  color: #000000;
+  color: hsl(var(--foreground));
   font-weight: 500;
   transition: all 0.2s ease;
 }
 
 .liquid-btn:hover {
   transform: translateY(-1px);
-  background: #000000;
-  color: #ffffff;
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 
 /* Simple Input - Uses design tokens */
@@ -437,11 +437,11 @@
   border-color: hsl(var(--ring));
 }
 
-/* Simple Message Bubbles - Futuristic B&W */
+/* Simple Message Bubbles - Uses design tokens */
 .liquid-message-user {
-  background: #000000;
+  background-color: hsl(var(--primary));
   border-radius: 16px 16px 4px 16px;
-  color: #ffffff;
+  color: hsl(var(--primary-foreground));
   overflow-wrap: break-word;
   word-wrap: break-word;
   word-break: break-word;
@@ -449,9 +449,10 @@
 }
 
 .liquid-message-ai {
-  background: #0a0a0a;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 16px 16px 16px 4px;
+  color: hsl(var(--card-foreground));
 }
 
 .liquid-message-ai-light {
@@ -473,13 +474,13 @@
   max-width: 100%;
 }
 
-/* Liquid Hover Effects - Futuristic B&W */
+/* Liquid Hover Effects - Uses design tokens */
 .liquid-hover {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .liquid-hover:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background-color: hsl(var(--accent));
   transform: translateX(4px);
 }
 
@@ -493,26 +494,22 @@
 }
 
 .liquid-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background-color: hsl(var(--muted-foreground) / 0.3);
   border-radius: 3px;
 }
 
 .liquid-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background-color: hsl(var(--muted-foreground) / 0.5);
 }
 
-/* Simple glow effect - Futuristic B&W */
+/* Simple glow effect - Uses design tokens */
 .liquid-glow {
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 10px hsl(var(--ring) / 0.2);
 }
 
-/* Simple text color - Futuristic B&W */
+/* Simple text color - Uses design tokens */
 .liquid-text-gradient {
-  color: #000000;
-}
-
-.dark .liquid-text-gradient {
-  color: #ffffff;
+  color: hsl(var(--foreground));
 }
 
 /* Thinking wave animation - Futuristic B&W */
@@ -585,16 +582,12 @@
   display: inline-block;
   font-weight: 200;
   font-size: 1.1em;
-  color: #000000;
+  color: hsl(var(--foreground));
   animation: cursorPulse 1s ease-in-out infinite;
   margin-left: 2px;
 }
 
-.dark .thinking-cursor {
-  color: #ffffff;
-}
-
-/* Typing cursor animation - Futuristic B&W */
+/* Typing cursor animation */
 @keyframes cursorBlink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
@@ -604,14 +597,10 @@
   display: inline-block;
   font-weight: bold;
   font-size: 1.1em;
-  color: #000000;
+  color: hsl(var(--foreground));
   animation: cursorBlink 0.8s step-end infinite;
   margin-left: 1px;
   vertical-align: baseline;
-}
-
-.dark .typing-cursor {
-  color: #ffffff;
 }
 
 /* ========================================
@@ -632,15 +621,11 @@
   left: 50%;
   width: 0;
   height: 0;
-  background: radial-gradient(circle, rgba(0, 0, 0, 0.1) 0%, transparent 70%);
+  background: radial-gradient(circle, hsl(var(--foreground) / 0.1) 0%, transparent 70%);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   transition: width 0.4s ease, height 0.4s ease;
   pointer-events: none;
-}
-
-.dark .liquid-button::before {
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
 }
 
 .liquid-button:hover::before {
@@ -650,11 +635,7 @@
 
 .liquid-button:hover {
   transform: scale(1.02) translateY(-1px);
-  background: rgba(0, 0, 0, 0.05) !important;
-}
-
-.dark .liquid-button:hover {
-  background: rgba(255, 255, 255, 0.05) !important;
+  background-color: hsl(var(--foreground) / 0.05) !important;
 }
 
 .liquid-button:active {
@@ -663,16 +644,12 @@
 }
 
 .liquid-button:active::before {
-  background: radial-gradient(circle, rgba(0, 0, 0, 0.2) 0%, transparent 60%);
+  background: radial-gradient(circle, hsl(var(--foreground) / 0.2) 0%, transparent 60%);
   width: 250%;
   height: 250%;
 }
 
-.dark .liquid-button:active::before {
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.2) 0%, transparent 60%);
-}
-
-/* Ripple effect on click - Futuristic B&W */
+/* Ripple effect on click */
 @keyframes liquidRipple {
   0% {
     transform: translate(-50%, -50%) scale(0);
@@ -691,15 +668,11 @@
   left: var(--ripple-x, 50%);
   width: 100%;
   height: 100%;
-  background: radial-gradient(circle, rgba(0, 0, 0, 0.15) 0%, transparent 50%);
+  background: radial-gradient(circle, hsl(var(--foreground) / 0.15) 0%, transparent 50%);
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(0);
   pointer-events: none;
   opacity: 0;
-}
-
-.dark .liquid-button::after {
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.15) 0%, transparent 50%);
 }
 
 .liquid-button.rippling::after {
