@@ -963,6 +963,48 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/chats/archive-all", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      
+      const chats = await storage.getChats(userId);
+      let archivedCount = 0;
+      for (const chat of chats) {
+        if (chat.archived !== "true") {
+          await storage.updateChat(chat.id, { archived: "true" });
+          archivedCount++;
+        }
+      }
+      res.json({ success: true, archivedCount });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/chats/delete-all", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      
+      const chats = await storage.getChats(userId);
+      let deletedCount = 0;
+      for (const chat of chats) {
+        await storage.deleteChat(chat.id);
+        deletedCount++;
+      }
+      res.json({ success: true, deletedCount });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/chats/:id/messages", async (req, res) => {
     try {
       const user = (req as any).user;
