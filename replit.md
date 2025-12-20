@@ -24,6 +24,12 @@ Preferred communication style: Simple, everyday language.
 - **LLM Gateway**: Centralized `llmGateway.ts` for enterprise-grade reliability with Circuit Breaker, Exponential Backoff Retries, Per-User Rate Limiting, Request Timeout, Response Caching, Context Truncation, Metrics Collection, and SSE Streaming.
 - **ETL Agent**: Automated economic data processing from official sources (e.g., World Bank API) into normalized schemas and ZIP bundles with Excel workbooks and audit reports.
 - **Multi-Intent Pipeline**: Processes complex user prompts via Plan → Decompose → Execute → Aggregate stages, featuring automatic detection, parallel execution, and error handling.
+- **Document Generation System**: Spec-based document rendering for Excel (.xlsx) and Word (.docx) files with LLM-driven generation and validation repair loops.
+  - `shared/documentSpecs.ts`: Zod schemas for ExcelSpec (workbooks, sheets, tables, charts) and DocSpec (headings, paragraphs, bullets, tables).
+  - `server/services/excelSpecRenderer.ts`: Renders Excel workbooks from ExcelSpec JSON using ExcelJS with tables, autofilter, column formats, freeze panes.
+  - `server/services/wordSpecRenderer.ts`: Renders Word documents from DocSpec JSON using docx package with headings, bullets, tables.
+  - `server/services/documentOrchestrator.ts`: LLM orchestrator with Gemini integration and 3-attempt repair loop for AI-driven document generation.
+  - API endpoints: POST `/api/documents/render/excel`, `/api/documents/render/word`, `/api/documents/generate/excel`, `/api/documents/generate/word`.
 
 ### Data Storage
 - **Database ORM**: Drizzle ORM for PostgreSQL.
