@@ -77,12 +77,18 @@ export const featureFlagsSchema = z.object({
   connectorSearchAuto: z.boolean().default(false),
 });
 
+export const privacySettingsSchema = z.object({
+  trainingOptIn: z.boolean().default(false),
+  remoteBrowserDataAccess: z.boolean().default(false),
+});
+
 export const userSettings = pgTable("user_settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
   responsePreferences: jsonb("response_preferences").$type<z.infer<typeof responsePreferencesSchema>>(),
   userProfile: jsonb("user_profile").$type<z.infer<typeof userProfileSchema>>(),
   featureFlags: jsonb("feature_flags").$type<z.infer<typeof featureFlagsSchema>>(),
+  privacySettings: jsonb("privacy_settings").$type<z.infer<typeof privacySettingsSchema>>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
@@ -97,6 +103,7 @@ export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
   responsePreferences: responsePreferencesSchema.optional(),
   userProfile: userProfileSchema.optional(),
   featureFlags: featureFlagsSchema.optional(),
+  privacySettings: privacySettingsSchema.optional(),
 });
 
 export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
@@ -206,6 +213,52 @@ export const insertIntegrationPolicySchema = createInsertSchema(integrationPolic
 
 export type InsertIntegrationPolicy = z.infer<typeof insertIntegrationPolicySchema>;
 export type IntegrationPolicy = typeof integrationPolicies.$inferSelect;
+
+// Shared Links - For sharing resources with external users
+export const sharedLinks = pgTable("shared_links", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  resourceType: text("resource_type").notNull(), // 'chat', 'file', 'artifact'
+  resourceId: varchar("resource_id").notNull(),
+  token: varchar("token").notNull().unique(),
+  scope: text("scope").default("link_only"), // 'public', 'link_only', 'organization'
+  permissions: text("permissions").default("read"), // 'read', 'read_write'
+  expiresAt: timestamp("expires_at"),
+  lastAccessedAt: timestamp("last_accessed_at"),
+  accessCount: integer("access_count").default(0),
+  isRevoked: text("is_revoked").default("false"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("shared_links_user_idx").on(table.userId),
+  index("shared_links_token_idx").on(table.token),
+  index("shared_links_resource_idx").on(table.resourceType, table.resourceId),
+]);
+
+export const insertSharedLinkSchema = createInsertSchema(sharedLinks).omit({
+  id: true,
+  createdAt: true,
+  accessCount: true,
+  lastAccessedAt: true,
+});
+
+export type InsertSharedLink = z.infer<typeof insertSharedLinkSchema>;
+export type SharedLink = typeof sharedLinks.$inferSelect;
+
+// Consent Logs - Audit trail for privacy consent changes
+export const consentLogs = pgTable("consent_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  consentType: text("consent_type").notNull(), // 'training_opt_in', 'remote_browser_access'
+  value: text("value").notNull(), // 'true' or 'false'
+  consentVersion: text("consent_version").default("1.0"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("consent_logs_user_idx").on(table.userId),
+]);
+
+export type ConsentLog = typeof consentLogs.$inferSelect;
 
 // Tool Call Logs - Audit log for tool invocations
 export const toolCallLogs = pgTable("tool_call_logs", {
@@ -421,6 +474,7 @@ export const chats = pgTable("chats", {
   gptId: varchar("gpt_id"),
   archived: text("archived").default("false"),
   hidden: text("hidden").default("false"),
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
