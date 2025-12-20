@@ -27,7 +27,15 @@ import {
   Box,
   Loader2,
   Check,
-  Volume2
+  Volume2,
+  Link,
+  Unlink,
+  Clock,
+  AlertCircle,
+  CheckCircle2,
+  XCircle,
+  ExternalLink,
+  RefreshCw
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -299,6 +307,454 @@ function NotificationsSection() {
           Administrar tareas
           <ChevronRight className="h-4 w-4" />
         </a>
+      </div>
+    </div>
+  );
+}
+
+interface IntegrationProvider {
+  id: string;
+  name: string;
+  description: string | null;
+  iconUrl: string | null;
+  authType: string;
+  category: string | null;
+  isActive: string;
+}
+
+interface IntegrationAccount {
+  id: string;
+  userId: string;
+  providerId: string;
+  displayName: string | null;
+  email: string | null;
+  status: string | null;
+}
+
+interface IntegrationPolicy {
+  id: string;
+  userId: string;
+  enabledApps: string[];
+  autoConfirmPolicy: string | null;
+  sandboxMode: string | null;
+  maxParallelCalls: number | null;
+}
+
+interface ToolCallLog {
+  id: string;
+  toolId: string;
+  providerId: string;
+  status: string;
+  errorMessage: string | null;
+  latencyMs: number | null;
+  createdAt: string;
+}
+
+interface IntegrationsData {
+  accounts: IntegrationAccount[];
+  policy: IntegrationPolicy | null;
+  providers: IntegrationProvider[];
+}
+
+const providerIcons: Record<string, React.ReactNode> = {
+  github: <Github className="h-5 w-5" />,
+  figma: <Box className="h-5 w-5" />,
+  slack: <MessageSquare className="h-5 w-5" />,
+  notion: <FileText className="h-5 w-5" />,
+  google_drive: <Globe className="h-5 w-5" />,
+  canva: <Palette className="h-5 w-5" />,
+};
+
+const categoryLabelsApps: Record<string, string> = {
+  development: "Desarrollo",
+  design: "Diseño",
+  communication: "Comunicación",
+  productivity: "Productividad",
+  general: "General",
+};
+
+function AppsSection() {
+  const { user } = useAuthHook();
+  const userId = user?.id;
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const { data: integrationsData, isLoading: isLoadingIntegrations, refetch } = useQuery<IntegrationsData>({
+    queryKey: ['/api/users', userId, 'integrations'],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${userId}/integrations`);
+      if (!res.ok) throw new Error('Failed to fetch integrations');
+      return res.json();
+    },
+    enabled: !!userId,
+  });
+
+  const { data: logsData, isLoading: isLoadingLogs } = useQuery<ToolCallLog[]>({
+    queryKey: ['/api/users', userId, 'integrations', 'logs'],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${userId}/integrations/logs?limit=10`);
+      if (!res.ok) throw new Error('Failed to fetch logs');
+      return res.json();
+    },
+    enabled: !!userId,
+  });
+
+  const updatePolicy = useMutation({
+    mutationFn: async (data: Partial<IntegrationPolicy>) => {
+      const res = await fetch(`/api/users/${userId}/integrations/policy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to update policy');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'integrations'] });
+      toast({ title: "Configuración actualizada", description: "Los cambios han sido guardados." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo actualizar la configuración.", variant: "destructive" });
+    },
+  });
+
+  const connectProvider = useMutation({
+    mutationFn: async (providerId: string) => {
+      const res = await fetch(`/api/users/${userId}/integrations/${providerId}/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) throw new Error('Failed to connect');
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'integrations'] });
+      toast({ title: "Conexión iniciada", description: data.message || "El proceso de conexión ha sido iniciado." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo iniciar la conexión.", variant: "destructive" });
+    },
+  });
+
+  const disconnectProvider = useMutation({
+    mutationFn: async (providerId: string) => {
+      const res = await fetch(`/api/users/${userId}/integrations/${providerId}/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) throw new Error('Failed to disconnect');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'integrations'] });
+      toast({ title: "Desconectado", description: "La integración ha sido desconectada." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo desconectar la integración.", variant: "destructive" });
+    },
+  });
+
+  const providers = integrationsData?.providers || [];
+  const accounts = integrationsData?.accounts || [];
+  const policy = integrationsData?.policy;
+  const logs = logsData || [];
+
+  const isProviderConnected = (providerId: string) => {
+    return accounts.some(a => a.providerId === providerId && a.status === 'active');
+  };
+
+  const isProviderEnabled = (providerId: string) => {
+    return policy?.enabledApps?.includes(providerId) ?? false;
+  };
+
+  const toggleProviderEnabled = (providerId: string, enabled: boolean) => {
+    const currentEnabled = policy?.enabledApps || [];
+    const newEnabled = enabled 
+      ? [...currentEnabled, providerId]
+      : currentEnabled.filter(id => id !== providerId);
+    updatePolicy.mutate({ enabledApps: newEnabled });
+  };
+
+  const groupedProviders = providers.reduce((acc, provider) => {
+    const category = provider.category || 'general';
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(provider);
+    return acc;
+  }, {} as Record<string, IntegrationProvider[]>);
+
+  if (isLoadingIntegrations) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold" data-testid="text-apps-title">Aplicaciones e Integraciones</h2>
+          <p className="text-sm text-muted-foreground mt-1" data-testid="text-apps-description">
+            Conecta y administra las aplicaciones que MICHAT puede usar
+          </p>
+        </div>
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" data-testid="spinner-loading-apps" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold" data-testid="text-apps-title">Aplicaciones e Integraciones</h2>
+          <p className="text-sm text-muted-foreground mt-1" data-testid="text-apps-description">
+            Conecta y administra las aplicaciones que MICHAT puede usar
+          </p>
+        </div>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          onClick={() => refetch()}
+          disabled={isLoadingIntegrations}
+          data-testid="button-refresh-integrations"
+        >
+          <RefreshCw className={cn("h-4 w-4", isLoadingIntegrations && "animate-spin")} />
+        </Button>
+      </div>
+
+      {Object.entries(groupedProviders).map(([category, categoryProviders]) => (
+        <div key={category} className="space-y-3" data-testid={`section-category-${category}`}>
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide" data-testid={`text-category-${category}`}>
+            {categoryLabelsApps[category] || category}
+          </h3>
+          
+          <div className="space-y-2">
+            {categoryProviders.map((provider) => {
+              const connected = isProviderConnected(provider.id);
+              const enabled = isProviderEnabled(provider.id);
+              const account = accounts.find(a => a.providerId === provider.id);
+              
+              return (
+                <div 
+                  key={provider.id}
+                  className="flex items-center justify-between p-4 rounded-lg border bg-card"
+                  data-testid={`card-provider-${provider.id}`}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className={cn(
+                      "w-10 h-10 rounded-lg flex items-center justify-center",
+                      connected ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+                    )}>
+                      {providerIcons[provider.id] || <AppWindow className="h-5 w-5" />}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium" data-testid={`text-provider-name-${provider.id}`}>
+                          {provider.name}
+                        </span>
+                        {connected && (
+                          <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-100 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Conectado
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground" data-testid={`text-provider-desc-${provider.id}`}>
+                        {provider.description || 'Sin descripción'}
+                      </p>
+                      {connected && account?.email && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {account.displayName || account.email}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-3">
+                    {connected && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Habilitado</span>
+                        <Switch
+                          checked={enabled}
+                          onCheckedChange={(checked) => toggleProviderEnabled(provider.id, checked)}
+                          data-testid={`switch-enable-${provider.id}`}
+                        />
+                      </div>
+                    )}
+                    
+                    {connected ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => disconnectProvider.mutate(provider.id)}
+                        disabled={disconnectProvider.isPending}
+                        className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                        data-testid={`button-disconnect-${provider.id}`}
+                      >
+                        {disconnectProvider.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Unlink className="h-4 w-4 mr-1" />
+                            Desconectar
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => connectProvider.mutate(provider.id)}
+                        disabled={connectProvider.isPending}
+                        data-testid={`button-connect-${provider.id}`}
+                      >
+                        {connectProvider.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Link className="h-4 w-4 mr-1" />
+                            Conectar
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      {providers.length === 0 && (
+        <div className="text-center py-8 text-muted-foreground" data-testid="text-no-providers">
+          <AppWindow className="h-8 w-8 mx-auto mb-2 opacity-50" />
+          <p className="text-sm">No hay proveedores de integración disponibles</p>
+        </div>
+      )}
+
+      <Separator />
+
+      <div className="space-y-3">
+        <button
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
+          data-testid="button-advanced-config"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+              <Settings className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <span className="text-sm font-medium">Configuración avanzada</span>
+          </div>
+          <ChevronRight className={cn("h-5 w-5 text-muted-foreground transition-transform", showAdvanced && "rotate-90")} />
+        </button>
+        
+        {showAdvanced && (
+          <div className="space-y-4 pl-4 border-l-2 border-muted ml-5">
+            <div className="flex items-center justify-between py-2">
+              <div>
+                <span className="text-sm block">Política de confirmación automática</span>
+                <span className="text-xs text-muted-foreground">
+                  Cuándo confirmar automáticamente las acciones de las herramientas
+                </span>
+              </div>
+              <Select
+                value={policy?.autoConfirmPolicy || 'ask'}
+                onValueChange={(value) => updatePolicy.mutate({ autoConfirmPolicy: value })}
+              >
+                <SelectTrigger className="w-36" data-testid="select-auto-confirm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="always">Siempre</SelectItem>
+                  <SelectItem value="ask">Preguntar</SelectItem>
+                  <SelectItem value="never">Nunca</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between py-2">
+              <div>
+                <span className="text-sm block">Modo sandbox</span>
+                <span className="text-xs text-muted-foreground">
+                  Ejecutar acciones en modo de prueba cuando esté disponible
+                </span>
+              </div>
+              <Switch
+                checked={policy?.sandboxMode === 'true'}
+                onCheckedChange={(checked) => updatePolicy.mutate({ sandboxMode: checked ? 'true' : 'false' })}
+                data-testid="switch-sandbox-mode"
+              />
+            </div>
+
+            <div className="flex items-center justify-between py-2">
+              <div>
+                <span className="text-sm block">Llamadas paralelas máximas</span>
+                <span className="text-xs text-muted-foreground">
+                  Número máximo de herramientas ejecutadas simultáneamente
+                </span>
+              </div>
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={policy?.maxParallelCalls || 3}
+                onChange={(e) => updatePolicy.mutate({ maxParallelCalls: parseInt(e.target.value) || 3 })}
+                className="w-20 text-center"
+                data-testid="input-max-parallel"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+            Registro de llamadas recientes
+          </h3>
+          {isLoadingLogs && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        </div>
+
+        {logs.length > 0 ? (
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {logs.map((log) => (
+              <div 
+                key={log.id}
+                className="flex items-center justify-between p-3 rounded-lg bg-muted/30 text-sm"
+                data-testid={`log-entry-${log.id}`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "w-6 h-6 rounded-full flex items-center justify-center",
+                    log.status === 'success' ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" :
+                    log.status === 'error' ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" :
+                    "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400"
+                  )}>
+                    {log.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> :
+                     log.status === 'error' ? <XCircle className="h-3 w-3" /> :
+                     <Clock className="h-3 w-3" />}
+                  </div>
+                  <div>
+                    <span className="font-medium">{log.toolId}</span>
+                    <span className="text-xs text-muted-foreground ml-2">
+                      {log.providerId}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  {log.latencyMs && <span>{log.latencyMs}ms</span>}
+                  <span>{new Date(log.createdAt).toLocaleTimeString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-4 text-muted-foreground" data-testid="text-no-logs">
+            <Clock className="h-6 w-6 mx-auto mb-2 opacity-50" />
+            <p className="text-sm">No hay registros de llamadas recientes</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -944,65 +1400,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         );
 
       case "apps":
-        return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Aplicaciones habilitadas</h2>
-              <Button variant="outline" size="sm" className="gap-2" data-testid="button-add-app">
-                <Plus className="h-4 w-4" />
-                Agregar más
-              </Button>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Administra las aplicaciones habilitadas que MICHAT puede usar en tus chats.
-            </p>
-            
-            <div className="space-y-1">
-              <button 
-                className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors"
-                data-testid="app-github"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center">
-                    <Github className="h-5 w-5 text-white" />
-                  </div>
-                  <span className="text-sm font-medium">GitHub</span>
-                </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground" />
-              </button>
-
-              <Separator />
-
-              <button 
-                className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors"
-                data-testid="app-teams"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-[#464EB8] flex items-center justify-center">
-                    <span className="text-white font-bold text-sm">T</span>
-                  </div>
-                  <span className="text-sm font-medium">Teams</span>
-                </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground" />
-              </button>
-
-              <Separator />
-
-              <button 
-                className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-muted/50 transition-colors"
-                data-testid="app-advanced-config"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                    <Settings className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <span className="text-sm font-medium">Configuración avanzada</span>
-                </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground" />
-              </button>
-            </div>
-          </div>
-        );
+        return <AppsSection />;
 
       case "schedules":
         return (
