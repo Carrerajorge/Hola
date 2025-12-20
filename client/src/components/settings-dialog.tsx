@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -372,6 +373,40 @@ const categoryLabelsApps: Record<string, string> = {
   productivity: "Productividad",
   general: "General",
 };
+
+interface SharedLink {
+  id: string;
+  resourceType: string;
+  resourceId: string;
+  token: string;
+  scope: string;
+  permissions: string;
+  expiresAt: string | null;
+  lastAccessedAt: string | null;
+  accessCount: number;
+  isRevoked: string;
+  createdAt: string;
+}
+
+interface ArchivedChat {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ConsentLogEntry {
+  id: string;
+  consentType: string;
+  value: string;
+  consentVersion: string;
+  createdAt: string;
+}
+
+interface PrivacySettings {
+  trainingOptIn: boolean;
+  remoteBrowserDataAccess: boolean;
+}
 
 function AppsSection() {
   const { user } = useAuthHook();
@@ -760,18 +795,377 @@ function AppsSection() {
   );
 }
 
+function DataControlsSection() {
+  const { user } = useAuthHook();
+  const userId = user?.id;
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [showArchivedDialog, setShowArchivedDialog] = useState(false);
+  const [showSharedLinksDialog, setShowSharedLinksDialog] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+
+  const { data: privacyData, isLoading: isLoadingPrivacy } = useQuery<{
+    privacySettings: PrivacySettings;
+    consentHistory: ConsentLogEntry[];
+  }>({
+    queryKey: ['/api/users', userId, 'privacy'],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${userId}/privacy`);
+      if (!res.ok) throw new Error('Failed to fetch privacy settings');
+      return res.json();
+    },
+    enabled: !!userId,
+  });
+
+  const { data: sharedLinks = [], isLoading: isLoadingLinks } = useQuery<SharedLink[]>({
+    queryKey: ['/api/users', userId, 'shared-links'],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${userId}/shared-links`);
+      if (!res.ok) throw new Error('Failed to fetch shared links');
+      return res.json();
+    },
+    enabled: !!userId,
+  });
+
+  const { data: archivedChats = [], isLoading: isLoadingArchived } = useQuery<ArchivedChat[]>({
+    queryKey: ['/api/users', userId, 'chats', 'archived'],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${userId}/chats/archived`);
+      if (!res.ok) throw new Error('Failed to fetch archived chats');
+      return res.json();
+    },
+    enabled: !!userId,
+  });
+
+  const updatePrivacy = useMutation({
+    mutationFn: async (data: Partial<PrivacySettings>) => {
+      const res = await fetch(`/api/users/${userId}/privacy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to update');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'privacy'] });
+      toast({ title: "Preferencias actualizadas", description: "Tus preferencias de privacidad han sido guardadas." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "No se pudo actualizar la configuración.", variant: "destructive" });
+    },
+  });
+
+  const revokeLink = useMutation({
+    mutationFn: async (linkId: string) => {
+      const res = await fetch(`/api/users/${userId}/shared-links/${linkId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to revoke');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'shared-links'] });
+      toast({ title: "Enlace revocado", description: "El enlace compartido ha sido revocado." });
+    },
+  });
+
+  const unarchiveChat = useMutation({
+    mutationFn: async (chatId: string) => {
+      const res = await fetch(`/api/users/${userId}/chats/${chatId}/unarchive`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to unarchive');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'archived'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      toast({ title: "Chat restaurado", description: "El chat ha sido restaurado." });
+    },
+  });
+
+  const archiveAll = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/users/${userId}/chats/archive-all`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to archive all');
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'chats', 'archived'] });
+      toast({ title: "Chats archivados", description: `Se archivaron ${data.count} chats.` });
+      setShowArchiveConfirm(false);
+    },
+  });
+
+  const deleteAll = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/users/${userId}/chats/delete-all`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to delete all');
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      toast({ title: "Chats eliminados", description: `Se eliminaron ${data.count} chats.` });
+      setShowDeleteConfirm(false);
+    },
+  });
+
+  const privacySettings = privacyData?.privacySettings || { trainingOptIn: false, remoteBrowserDataAccess: false };
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-xl font-semibold" data-testid="text-data-controls-title">Controles de datos</h2>
+      
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Privacidad</h3>
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between py-3 px-2 rounded-lg hover:bg-muted/50">
+            <div className="flex-1 pr-4">
+              <span className="text-sm block">Mejora el modelo para todos</span>
+              <span className="text-xs text-muted-foreground">
+                Permite que tu contenido (prompts, respuestas, adjuntos) se use para mejorar los modelos de IA.
+              </span>
+            </div>
+            <Switch 
+              checked={privacySettings.trainingOptIn}
+              onCheckedChange={(checked) => updatePrivacy.mutate({ trainingOptIn: checked })}
+              disabled={updatePrivacy.isPending || isLoadingPrivacy}
+              data-testid="switch-training-opt-in"
+            />
+          </div>
+
+          <div className="flex items-center justify-between py-3 px-2 rounded-lg hover:bg-muted/50">
+            <div className="flex-1 pr-4">
+              <span className="text-sm block">Datos del navegador remoto</span>
+              <span className="text-xs text-muted-foreground">
+                Permite que MICHAT acceda a datos de sesiones de navegación remota (cookies, DOM, capturas).
+              </span>
+            </div>
+            <Switch 
+              checked={privacySettings.remoteBrowserDataAccess}
+              onCheckedChange={(checked) => updatePrivacy.mutate({ remoteBrowserDataAccess: checked })}
+              disabled={updatePrivacy.isPending || isLoadingPrivacy}
+              data-testid="switch-remote-browser"
+            />
+          </div>
+        </div>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Enlaces compartidos</h3>
+        <div className="flex items-center justify-between py-3 px-2">
+          <div>
+            <span className="text-sm block">Administrar enlaces</span>
+            <span className="text-xs text-muted-foreground">
+              {sharedLinks.filter(l => l.isRevoked === 'false').length} enlaces activos
+            </span>
+          </div>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => setShowSharedLinksDialog(true)}
+            data-testid="button-manage-links"
+          >
+            Administrar
+          </Button>
+        </div>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Gestión de chats</h3>
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between py-3 px-2">
+            <div>
+              <span className="text-sm block">Chats archivados</span>
+              <span className="text-xs text-muted-foreground">
+                {archivedChats.length} chats archivados
+              </span>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setShowArchivedDialog(true)}
+              data-testid="button-manage-archived"
+            >
+              Administrar
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between py-3 px-2">
+            <span className="text-sm">Archivar todos los chats</span>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setShowArchiveConfirm(true)}
+              disabled={archiveAll.isPending}
+              data-testid="button-archive-all"
+            >
+              {archiveAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Archivar todo"}
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between py-3 px-2">
+            <span className="text-sm">Eliminar todos los chats</span>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={deleteAll.isPending}
+              data-testid="button-delete-all"
+            >
+              {deleteAll.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Eliminar todo"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <Dialog open={showArchivedDialog} onOpenChange={setShowArchivedDialog}>
+        <DialogContent className="max-w-md max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Chats archivados</DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="h-[400px] pr-4">
+            {isLoadingArchived ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : archivedChats.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No tienes chats archivados.</p>
+            ) : (
+              <div className="space-y-2">
+                {archivedChats.map((chat) => (
+                  <div key={chat.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`archived-chat-${chat.id}`}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{chat.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(chat.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => unarchiveChat.mutate(chat.id)}
+                      disabled={unarchiveChat.isPending}
+                      data-testid={`button-unarchive-${chat.id}`}
+                    >
+                      Restaurar
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showSharedLinksDialog} onOpenChange={setShowSharedLinksDialog}>
+        <DialogContent className="max-w-lg max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Enlaces compartidos</DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="h-[400px] pr-4">
+            {isLoadingLinks ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : sharedLinks.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No tienes enlaces compartidos.</p>
+            ) : (
+              <div className="space-y-2">
+                {sharedLinks.map((link) => (
+                  <div key={link.id} className={cn("p-3 border rounded-lg", link.isRevoked === 'true' && "opacity-50")} data-testid={`shared-link-${link.id}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Share2 className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm font-medium capitalize">{link.resourceType}</span>
+                          <span className={cn(
+                            "text-xs px-2 py-0.5 rounded-full",
+                            link.scope === 'public' ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" :
+                            link.scope === 'organization' ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" :
+                            "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                          )}>
+                            {link.scope === 'public' ? 'Público' : link.scope === 'organization' ? 'Organización' : 'Solo con enlace'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Creado: {new Date(link.createdAt).toLocaleDateString()} · {link.accessCount} accesos
+                        </p>
+                      </div>
+                      {link.isRevoked === 'false' && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          className="text-red-500 hover:text-red-600"
+                          onClick={() => revokeLink.mutate(link.id)}
+                          disabled={revokeLink.isPending}
+                          data-testid={`button-revoke-${link.id}`}
+                        >
+                          Revocar
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={showArchiveConfirm} onOpenChange={setShowArchiveConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Archivar todos los chats?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Todos tus chats serán archivados. Podrás restaurarlos desde "Chats archivados".
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => archiveAll.mutate()}>
+              Archivar todo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar todos los chats?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará todos tus chats. Tendrás un período de recuperación antes de que se eliminen permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => deleteAll.mutate()}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              Eliminar todo
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
   
   const { settings, updateSetting } = useSettingsContext();
   const { language: currentLanguage, setLanguage: setAppLanguage, supportedLanguages } = useLanguage();
   const { toast } = useToast();
   const { logout } = useAuth();
-  const queryClient = useQueryClient();
 
   const handleLanguageChange = (value: string) => {
     if (value !== "auto") {
@@ -790,38 +1184,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
   };
-
-  const archiveAllChats = useMutation({
-    mutationFn: async () => {
-      const response = await fetch("/api/chats/archive-all", { method: "POST" });
-      if (!response.ok) throw new Error("Failed to archive chats");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/chats"] });
-      toast({ title: "Chats archivados", description: "Todos los chats han sido archivados correctamente." });
-      setShowArchiveConfirm(false);
-    },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudieron archivar los chats.", variant: "destructive" });
-    },
-  });
-
-  const deleteAllChats = useMutation({
-    mutationFn: async () => {
-      const response = await fetch("/api/chats/delete-all", { method: "DELETE" });
-      if (!response.ok) throw new Error("Failed to delete chats");
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/chats"] });
-      toast({ title: "Chats eliminados", description: "Todos los chats han sido eliminados permanentemente." });
-      setShowDeleteConfirm(false);
-    },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudieron eliminar los chats.", variant: "destructive" });
-    },
-  });
 
   const handleLogout = () => {
     logout();
@@ -1417,93 +1779,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         );
 
       case "data":
-        return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Controles de datos</h2>
-            
-            <div className="space-y-1">
-              <button 
-                className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
-                onClick={() => updateSetting("improveModel", !settings.improveModel)}
-                data-testid="data-improve-model"
-              >
-                <span className="text-sm">Mejora el modelo para todos</span>
-                <span className="text-sm text-muted-foreground flex items-center gap-1">
-                  {settings.improveModel ? "Activado" : "Desactivado"} <ChevronRight className="h-4 w-4" />
-                </span>
-              </button>
-
-              <button 
-                className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
-                onClick={() => updateSetting("remoteBrowser", !settings.remoteBrowser)}
-                data-testid="data-remote-browser"
-              >
-                <span className="text-sm">Datos del navegador remoto</span>
-                <span className="text-sm text-muted-foreground flex items-center gap-1">
-                  {settings.remoteBrowser ? "Activado" : "Desactivado"} <ChevronRight className="h-4 w-4" />
-                </span>
-              </button>
-
-              <div className="flex items-center justify-between py-3 px-2">
-                <div className="flex-1 pr-4">
-                  <span className="text-sm block">Comparte tu ubicación precisa</span>
-                  <span className="text-xs text-muted-foreground">
-                    Permite que MICHAT utilice la ubicación precisa de tu dispositivo al responder preguntas.
-                  </span>
-                </div>
-                <Switch 
-                  checked={settings.shareLocation}
-                  onCheckedChange={(checked) => updateSetting("shareLocation", checked)}
-                  data-testid="switch-location" 
-                />
-              </div>
-
-              <Separator />
-
-              <div className="flex items-center justify-between py-3 px-2">
-                <span className="text-sm">Chats archivados</span>
-                <Button variant="outline" size="sm" data-testid="button-manage-archived">
-                  Administrar
-                </Button>
-              </div>
-
-              <div className="flex items-center justify-between py-3 px-2">
-                <span className="text-sm">Archivar todos los chats</span>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setShowArchiveConfirm(true)}
-                  disabled={archiveAllChats.isPending}
-                  data-testid="button-archive-all"
-                >
-                  {archiveAllChats.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    "Archivar todo"
-                  )}
-                </Button>
-              </div>
-
-              <div className="flex items-center justify-between py-3 px-2">
-                <span className="text-sm">Eliminar todos los chats</span>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-                  onClick={() => setShowDeleteConfirm(true)}
-                  disabled={deleteAllChats.isPending}
-                  data-testid="button-delete-all"
-                >
-                  {deleteAllChats.isPending ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    "Eliminar todo"
-                  )}
-                </Button>
-              </div>
-            </div>
-          </div>
-        );
+        return <DataControlsSection />;
 
       case "security":
         return (
@@ -1796,43 +2072,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </div>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar todos los chats?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción no se puede deshacer. Se eliminarán permanentemente todos tus chats y mensajes.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={() => deleteAllChats.mutate()}
-              className="bg-red-500 hover:bg-red-600"
-            >
-              Eliminar todo
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={showArchiveConfirm} onOpenChange={setShowArchiveConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Archivar todos los chats?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Todos tus chats serán archivados. Podrás acceder a ellos desde la sección de chats archivados.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => archiveAllChats.mutate()}>
-              Archivar todo
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog open={showLogoutAllConfirm} onOpenChange={setShowLogoutAllConfirm}>
         <AlertDialogContent>
