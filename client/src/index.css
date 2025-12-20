@@ -135,46 +135,68 @@
   --sidebar-border: 0 0% 90%;
   --sidebar-ring: 0 0% 30%;
   
+  --bg-surface-1: 0 0% 100%;
+  --bg-surface-2: 0 0% 98%;
+  --bg-surface-3: 0 0% 96%;
+  --text-primary: 0 0% 5%;
+  --text-secondary: 0 0% 25%;
+  --text-tertiary: 0 0% 45%;
+  --icon-primary: 0 0% 10%;
+  --icon-secondary: 0 0% 35%;
+  --icon-tertiary: 0 0% 55%;
+  --overlay: 0 0% 0% / 0.4;
+  
   --font-sans: 'Geist', 'Inter', sans-serif;
 }
 
 .dark {
-  --background: 0 0% 3%;
-  --foreground: 0 0% 95%;
+  --background: 0 0% 4%;
+  --foreground: 0 0% 98%;
   
-  --card: 0 0% 5%;
-  --card-foreground: 0 0% 95%;
+  --card: 0 0% 6%;
+  --card-foreground: 0 0% 98%;
   
-  --popover: 0 0% 5%;
-  --popover-foreground: 0 0% 95%;
+  --popover: 0 0% 8%;
+  --popover-foreground: 0 0% 98%;
   
   --primary: 0 0% 100%;
-  --primary-foreground: 0 0% 5%;
+  --primary-foreground: 0 0% 4%;
   
-  --secondary: 0 0% 12%;
-  --secondary-foreground: 0 0% 95%;
+  --secondary: 0 0% 14%;
+  --secondary-foreground: 0 0% 98%;
   
-  --muted: 0 0% 12%;
-  --muted-foreground: 0 0% 55%;
+  --muted: 0 0% 14%;
+  --muted-foreground: 0 0% 70%;
   
-  --accent: 0 0% 15%;
-  --accent-foreground: 0 0% 95%;
+  --accent: 0 0% 18%;
+  --accent-foreground: 0 0% 98%;
   
-  --destructive: 0 0% 40%;
-  --destructive-foreground: 0 0% 95%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
   
-  --border: 0 0% 15%;
-  --input: 0 0% 15%;
-  --ring: 0 0% 70%;
+  --border: 0 0% 20%;
+  --input: 0 0% 18%;
+  --ring: 0 0% 80%;
   
-  --sidebar: 0 0% 5%;
-  --sidebar-foreground: 0 0% 90%;
+  --sidebar: 0 0% 6%;
+  --sidebar-foreground: 0 0% 95%;
   --sidebar-primary: 0 0% 100%;
-  --sidebar-primary-foreground: 0 0% 5%;
-  --sidebar-accent: 0 0% 12%;
-  --sidebar-accent-foreground: 0 0% 90%;
-  --sidebar-border: 0 0% 15%;
-  --sidebar-ring: 0 0% 50%;
+  --sidebar-primary-foreground: 0 0% 4%;
+  --sidebar-accent: 0 0% 14%;
+  --sidebar-accent-foreground: 0 0% 95%;
+  --sidebar-border: 0 0% 18%;
+  --sidebar-ring: 0 0% 60%;
+  
+  --bg-surface-1: 0 0% 6%;
+  --bg-surface-2: 0 0% 10%;
+  --bg-surface-3: 0 0% 14%;
+  --text-primary: 0 0% 98%;
+  --text-secondary: 0 0% 85%;
+  --text-tertiary: 0 0% 65%;
+  --icon-primary: 0 0% 95%;
+  --icon-secondary: 0 0% 75%;
+  --icon-tertiary: 0 0% 55%;
+  --overlay: 0 0% 0% / 0.6;
 }
 
 @layer base {
@@ -289,40 +311,82 @@
 .rst-content .role-strong { @apply font-bold; }
 
 /* ========================================
+   DESIGN TOKEN UTILITY CLASSES
+======================================== */
+
+/* Surface backgrounds using CSS variables */
+.surface-1 {
+  background-color: hsl(var(--bg-surface-1));
+}
+.surface-2 {
+  background-color: hsl(var(--bg-surface-2));
+}
+.surface-3 {
+  background-color: hsl(var(--bg-surface-3));
+}
+
+/* Text colors using CSS variables */
+.text-token-primary {
+  color: hsl(var(--text-primary));
+}
+.text-token-secondary {
+  color: hsl(var(--text-secondary));
+}
+.text-token-tertiary {
+  color: hsl(var(--text-tertiary));
+}
+
+/* Icon colors using CSS variables */
+.icon-token-primary {
+  color: hsl(var(--icon-primary));
+}
+.icon-token-secondary {
+  color: hsl(var(--icon-secondary));
+}
+.icon-token-tertiary {
+  color: hsl(var(--icon-tertiary));
+}
+
+/* Overlay using CSS variable */
+.overlay-bg {
+  background-color: hsl(var(--overlay));
+}
+
+/* ========================================
    LIQUID UI UTILITY CLASSES
 ======================================== */
 
-/* Simple Background - Futuristic B&W */
+/* Simple Background - Uses design tokens */
 .liquid-bg {
-  background: #050505;
+  background-color: hsl(var(--background));
 }
 
 .liquid-bg-light {
-  background: #ffffff;
+  background-color: hsl(var(--background));
 }
 
-/* Simple Card - Futuristic B&W */
+/* Simple Card - Uses design tokens */
 .glass-card {
-  background: #0a0a0a;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
 
 .glass-card-light {
-  background: #ffffff;
-  border: 1px solid #e5e5e5;
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
 }
 
-/* Simple Sidebar - Futuristic B&W */
+/* Simple Sidebar - Uses design tokens */
 .liquid-sidebar {
-  background: #050505;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background-color: hsl(var(--sidebar));
+  border-right: 1px solid hsl(var(--sidebar-border));
 }
 
 .liquid-sidebar-light {
-  background: #fafafa;
-  border-right: 1px solid #e5e5e5;
+  background-color: hsl(var(--sidebar));
+  border-right: 1px solid hsl(var(--sidebar-border));
 }
 
 /* Hidden Blob Elements */
@@ -347,27 +411,30 @@
   color: #ffffff;
 }
 
-/* Simple Input - Futuristic B&W */
+/* Simple Input - Uses design tokens */
 .liquid-input {
-  background: #0a0a0a;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: hsl(var(--input));
+  border: 1px solid hsl(var(--border));
   border-radius: 6px;
   transition: all 0.2s ease;
+  color: hsl(var(--foreground));
 }
 
-.liquid-input:focus {
-  border-color: #ffffff;
+.liquid-input:focus,
+.liquid-input:focus-within {
+  border-color: hsl(var(--ring));
 }
 
 .liquid-input-light {
-  background: #ffffff;
-  border: 1px solid #e5e5e5;
+  background-color: hsl(var(--input));
+  border: 1px solid hsl(var(--border));
   border-radius: 6px;
   transition: all 0.2s ease;
+  color: hsl(var(--foreground));
 }
 
 .liquid-input-light:focus-within {
-  border-color: #000000;
+  border-color: hsl(var(--ring));
 }
 
 /* Simple Message Bubbles - Futuristic B&W */
