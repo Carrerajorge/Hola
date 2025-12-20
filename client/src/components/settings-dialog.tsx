@@ -35,7 +35,22 @@ import { useLanguage } from "@/hooks/use-language";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/App";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth as useAuthHook } from "@/hooks/use-auth";
+import { 
+  Sparkles, 
+  CheckSquare, 
+  Users, 
+  Package,
+  MessageSquare,
+  Zap,
+  Star,
+  Share2,
+  Heart,
+  Gift,
+  TrendingUp,
+  FileText
+} from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -71,6 +86,223 @@ const voices = [
   { id: "juniper", name: "Juniper", description: "Voz clara y profesional" },
   { id: "breeze", name: "Breeze", description: "Voz suave y relajante" },
 ];
+
+interface NotificationEventType {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon?: string;
+}
+
+interface NotificationPreference {
+  id: string;
+  eventTypeId: string;
+  channels: string;
+  enabled: boolean;
+}
+
+const categoryLabels: Record<string, string> = {
+  ai_updates: "Actualizaciones de IA",
+  tasks: "Tareas",
+  social: "Social",
+  product: "Producto",
+};
+
+const categoryIcons: Record<string, React.ReactNode> = {
+  ai_updates: <Sparkles className="h-4 w-4" />,
+  tasks: <CheckSquare className="h-4 w-4" />,
+  social: <Users className="h-4 w-4" />,
+  product: <Package className="h-4 w-4" />,
+};
+
+const eventTypeIcons: Record<string, React.ReactNode> = {
+  ai_response: <MessageSquare className="h-4 w-4" />,
+  ai_suggestion: <Zap className="h-4 w-4" />,
+  task_completed: <CheckSquare className="h-4 w-4" />,
+  task_assigned: <FileText className="h-4 w-4" />,
+  task_reminder: <Bell className="h-4 w-4" />,
+  mention: <Star className="h-4 w-4" />,
+  share: <Share2 className="h-4 w-4" />,
+  follow: <Heart className="h-4 w-4" />,
+  new_feature: <Gift className="h-4 w-4" />,
+  tips: <TrendingUp className="h-4 w-4" />,
+};
+
+function NotificationsSection() {
+  const { user } = useAuthHook();
+  const userId = user?.id;
+  const queryClient = useQueryClient();
+
+  const { data: eventTypes, isLoading: isLoadingEventTypes } = useQuery<NotificationEventType[]>({
+    queryKey: ['/api/notification-event-types'],
+    queryFn: async () => {
+      const res = await fetch('/api/notification-event-types');
+      if (!res.ok) throw new Error('Failed to fetch event types');
+      return res.json();
+    },
+  });
+
+  const { data: preferences, isLoading: isLoadingPreferences } = useQuery<NotificationPreference[]>({
+    queryKey: ['/api/users', userId, 'notification-preferences'],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${userId}/notification-preferences`);
+      if (!res.ok) throw new Error('Failed to fetch preferences');
+      return res.json();
+    },
+    enabled: !!userId,
+  });
+
+  const updatePreference = useMutation({
+    mutationFn: async (data: { eventTypeId: string; channels?: string; enabled?: boolean }) => {
+      const res = await fetch(`/api/users/${userId}/notification-preferences`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error('Failed to update preference');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/users', userId, 'notification-preferences'] });
+    },
+  });
+
+  const getPreferenceForEventType = (eventTypeId: string): NotificationPreference | undefined => {
+    return preferences?.find(p => p.eventTypeId === eventTypeId);
+  };
+
+  const groupedEventTypes = eventTypes?.reduce((acc, eventType) => {
+    const category = eventType.category || 'other';
+    if (!acc[category]) {
+      acc[category] = [];
+    }
+    acc[category].push(eventType);
+    return acc;
+  }, {} as Record<string, NotificationEventType[]>) || {};
+
+  const categoryOrder = ['ai_updates', 'tasks', 'social', 'product'];
+
+  if (isLoadingEventTypes || isLoadingPreferences) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-semibold" data-testid="text-notifications-title">Preferencias de Notificaciones</h2>
+          <p className="text-sm text-muted-foreground mt-1" data-testid="text-notifications-description">
+            Configura cómo y cuándo recibir notificaciones
+          </p>
+        </div>
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" data-testid="spinner-loading" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold" data-testid="text-notifications-title">Preferencias de Notificaciones</h2>
+        <p className="text-sm text-muted-foreground mt-1" data-testid="text-notifications-description">
+          Configura cómo y cuándo recibir notificaciones
+        </p>
+      </div>
+
+      {categoryOrder.map((category) => {
+        const categoryEventTypes = groupedEventTypes[category];
+        if (!categoryEventTypes || categoryEventTypes.length === 0) return null;
+
+        return (
+          <div key={category} className="space-y-3" data-testid={`section-category-${category}`}>
+            <div className="flex items-center gap-2">
+              {categoryIcons[category]}
+              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide" data-testid={`text-category-${category}`}>
+                {categoryLabels[category] || category}
+              </h3>
+            </div>
+            
+            <div className="space-y-2">
+              {categoryEventTypes.map((eventType) => {
+                const preference = getPreferenceForEventType(eventType.id);
+                const channels = preference?.channels || 'none';
+                const enabled = preference?.enabled ?? true;
+
+                return (
+                  <div 
+                    key={eventType.id} 
+                    className="flex items-center justify-between py-3 border-b border-border last:border-b-0"
+                    data-testid={`row-notification-${eventType.id}`}
+                  >
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div className="mt-0.5 text-muted-foreground">
+                        {eventTypeIcons[eventType.id] || <Bell className="h-4 w-4" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium block" data-testid={`text-event-name-${eventType.id}`}>
+                          {eventType.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground" data-testid={`text-event-description-${eventType.id}`}>
+                          {eventType.description}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 shrink-0">
+                      <Select 
+                        value={channels}
+                        onValueChange={(value) => updatePreference.mutate({ 
+                          eventTypeId: eventType.id, 
+                          channels: value 
+                        })}
+                        disabled={!enabled}
+                      >
+                        <SelectTrigger 
+                          className="w-36" 
+                          data-testid={`select-channel-${eventType.id}`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Ninguna</SelectItem>
+                          <SelectItem value="push">Push</SelectItem>
+                          <SelectItem value="email">Email</SelectItem>
+                          <SelectItem value="push_email">Push y Email</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      
+                      <Switch 
+                        checked={enabled}
+                        onCheckedChange={(checked) => updatePreference.mutate({ 
+                          eventTypeId: eventType.id, 
+                          enabled: checked 
+                        })}
+                        data-testid={`switch-enabled-${eventType.id}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      <Separator />
+
+      <div className="flex items-center justify-between">
+        <a 
+          href="/settings?tab=tasks" 
+          className="text-sm text-primary hover:underline flex items-center gap-1"
+          data-testid="link-manage-tasks"
+        >
+          <CheckSquare className="h-4 w-4" />
+          Administrar tareas
+          <ChevronRight className="h-4 w-4" />
+        </a>
+      </div>
+    </div>
+  );
+}
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
@@ -518,105 +750,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         );
 
       case "notifications":
-        return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Notificaciones</h2>
-            
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <div className="flex items-start justify-between">
-                  <span className="text-sm font-medium">Respuestas</span>
-                  <Select 
-                    value={settings.notifResponses} 
-                    onValueChange={(value) => updateSetting("notifResponses", value as any)}
-                  >
-                    <SelectTrigger className="w-48" data-testid="select-notif-responses">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="push">Push</SelectItem>
-                      <SelectItem value="email">Correo electrónico</SelectItem>
-                      <SelectItem value="push_email">Push, correo electrónico</SelectItem>
-                      <SelectItem value="none">Ninguna</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Recibe notificaciones cuando MICHAT responda a solicitudes que tomen tiempo.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-start justify-between">
-                  <span className="text-sm font-medium">Tareas</span>
-                  <Select 
-                    value={settings.notifTasks} 
-                    onValueChange={(value) => updateSetting("notifTasks", value as any)}
-                  >
-                    <SelectTrigger className="w-48" data-testid="select-notif-tasks">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="push">Push</SelectItem>
-                      <SelectItem value="email">Correo electrónico</SelectItem>
-                      <SelectItem value="push_email">Push, correo electrónico</SelectItem>
-                      <SelectItem value="none">Ninguna</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Recibe una notificación cuando haya actualizaciones de las tareas que creaste.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-start justify-between">
-                  <span className="text-sm font-medium">Projects</span>
-                  <Select 
-                    value={settings.notifProjects} 
-                    onValueChange={(value) => updateSetting("notifProjects", value as any)}
-                  >
-                    <SelectTrigger className="w-48" data-testid="select-notif-projects">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="push">Push</SelectItem>
-                      <SelectItem value="email">Correo electrónico</SelectItem>
-                      <SelectItem value="push_email">Push, correo electrónico</SelectItem>
-                      <SelectItem value="none">Ninguna</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Recibe una notificación cuando te llegue una invitación por correo electrónico.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-start justify-between">
-                  <span className="text-sm font-medium">Recomendaciones</span>
-                  <Select 
-                    value={settings.notifRecommendations} 
-                    onValueChange={(value) => updateSetting("notifRecommendations", value as any)}
-                  >
-                    <SelectTrigger className="w-48" data-testid="select-notif-recommendations">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="push">Push</SelectItem>
-                      <SelectItem value="email">Correo electrónico</SelectItem>
-                      <SelectItem value="push_email">Push, correo electrónico</SelectItem>
-                      <SelectItem value="none">Ninguna</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Mantente al tanto de las nuevas herramientas, consejos y características.
-                </p>
-              </div>
-            </div>
-          </div>
-        );
+        return <NotificationsSection />;
 
       case "personalization":
         return (

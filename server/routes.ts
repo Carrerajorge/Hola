@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { db } from "./db";
-import { users } from "@shared/schema";
+import { users, notificationEventTypes } from "@shared/schema";
 import { ObjectStorageService, ObjectNotFoundError, objectStorageClient } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
@@ -2495,6 +2495,93 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         error: "Failed to execute code",
         details: error.message,
       });
+    }
+  });
+
+  // Notification Event Types and Preferences API
+  app.get("/api/notification-event-types", async (req, res) => {
+    try {
+      const eventTypes = await storage.getNotificationEventTypes();
+      res.json(eventTypes);
+    } catch (error: any) {
+      console.error("Error getting notification event types:", error);
+      res.status(500).json({ error: "Failed to get notification event types" });
+    }
+  });
+
+  app.get("/api/users/:id/notification-preferences", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const eventTypes = await storage.getNotificationEventTypes();
+      const preferences = await storage.getNotificationPreferences(id);
+      
+      const prefsWithEventTypes = eventTypes.map(eventType => {
+        const pref = preferences.find(p => p.eventTypeId === eventType.id);
+        return {
+          eventType,
+          preference: pref || null,
+          enabled: pref ? pref.enabled : eventType.defaultChannels !== 'none',
+          channels: pref ? pref.channels : eventType.defaultChannels
+        };
+      });
+      
+      res.json(prefsWithEventTypes);
+    } catch (error: any) {
+      console.error("Error getting notification preferences:", error);
+      res.status(500).json({ error: "Failed to get notification preferences" });
+    }
+  });
+
+  app.put("/api/users/:id/notification-preferences", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { eventTypeId, enabled, channels } = req.body;
+      
+      if (!eventTypeId) {
+        return res.status(400).json({ error: "eventTypeId is required" });
+      }
+      
+      const preference = await storage.upsertNotificationPreference({
+        userId: id,
+        eventTypeId,
+        enabled: enabled !== undefined ? (enabled ? "true" : "false") : "true",
+        channels: channels || "push"
+      });
+      
+      res.json(preference);
+    } catch (error: any) {
+      console.error("Error updating notification preference:", error);
+      res.status(500).json({ error: "Failed to update notification preference" });
+    }
+  });
+
+  app.post("/api/notification-event-types/seed", async (req, res) => {
+    try {
+      const eventTypesToSeed = [
+        { id: 'ai_response_ready', name: 'Respuestas de IA', description: 'Notificaciones cuando una respuesta larga está lista', category: 'ai_updates', severity: 'normal', defaultChannels: 'push', sortOrder: 1 },
+        { id: 'task_status_update', name: 'Actualizaciones de tareas', description: 'Cambios en tareas programadas', category: 'tasks', severity: 'normal', defaultChannels: 'push_email', sortOrder: 2 },
+        { id: 'project_invitation', name: 'Invitaciones a proyectos', description: 'Invitaciones a chats compartidos', category: 'social', severity: 'high', defaultChannels: 'push_email', sortOrder: 3 },
+        { id: 'product_recommendation', name: 'Recomendaciones', description: 'Sugerencias personalizadas', category: 'product', severity: 'low', defaultChannels: 'email', sortOrder: 4 },
+        { id: 'feature_announcement', name: 'Novedades', description: 'Nuevas funciones disponibles', category: 'product', severity: 'low', defaultChannels: 'email', sortOrder: 5 }
+      ];
+      
+      const existing = await storage.getNotificationEventTypes();
+      const existingIds = new Set(existing.map(e => e.id));
+      
+      const toInsert = eventTypesToSeed.filter(e => !existingIds.has(e.id));
+      
+      if (toInsert.length > 0) {
+        await db.insert(notificationEventTypes).values(toInsert);
+      }
+      
+      const allEventTypes = await storage.getNotificationEventTypes();
+      res.json({ 
+        message: `Seeded ${toInsert.length} new event types`,
+        eventTypes: allEventTypes 
+      });
+    } catch (error: any) {
+      console.error("Error seeding notification event types:", error);
+      res.status(500).json({ error: "Failed to seed notification event types" });
     }
   });
 

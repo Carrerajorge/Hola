@@ -21,9 +21,11 @@ import {
   type AnalyticsSnapshot, type InsertAnalyticsSnapshot,
   type Report, type InsertReport,
   type LibraryItem, type InsertLibraryItem,
+  type NotificationEventType, type NotificationPreference, type InsertNotificationPreference,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   gpts, gptCategories, gptVersions, users,
-  aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems
+  aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
+  notificationEventTypes, notificationPreferences
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { db } from "./db";
@@ -136,6 +138,10 @@ export interface IStorage {
   getLibraryItems(userId: string, mediaType?: string): Promise<LibraryItem[]>;
   getLibraryItem(id: string, userId: string): Promise<LibraryItem | null>;
   deleteLibraryItem(id: string, userId: string): Promise<boolean>;
+  // Notification Preferences
+  getNotificationEventTypes(): Promise<NotificationEventType[]>;
+  getNotificationPreferences(userId: string): Promise<NotificationPreference[]>;
+  upsertNotificationPreference(pref: InsertNotificationPreference): Promise<NotificationPreference>;
 }
 
 export class MemStorage implements IStorage {
@@ -686,6 +692,29 @@ export class MemStorage implements IStorage {
       .where(sql`${libraryItems.id} = ${id} AND ${libraryItems.userId} = ${userId}`)
       .returning();
     return result.length > 0;
+  }
+
+  // Notification Preferences
+  async getNotificationEventTypes(): Promise<NotificationEventType[]> {
+    return db.select().from(notificationEventTypes).orderBy(notificationEventTypes.sortOrder);
+  }
+
+  async getNotificationPreferences(userId: string): Promise<NotificationPreference[]> {
+    return db.select().from(notificationPreferences).where(eq(notificationPreferences.userId, userId));
+  }
+
+  async upsertNotificationPreference(pref: InsertNotificationPreference): Promise<NotificationPreference> {
+    const existing = await db.select().from(notificationPreferences)
+      .where(sql`${notificationPreferences.userId} = ${pref.userId} AND ${notificationPreferences.eventTypeId} = ${pref.eventTypeId}`);
+    if (existing.length > 0) {
+      const [updated] = await db.update(notificationPreferences)
+        .set({ ...pref, updatedAt: new Date() })
+        .where(eq(notificationPreferences.id, existing[0].id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(notificationPreferences).values(pref).returning();
+    return created;
   }
 }
 
