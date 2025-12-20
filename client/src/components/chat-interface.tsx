@@ -2178,7 +2178,7 @@ export function ChatInterface({
                       <Textarea
                         value={editContent}
                         onChange={(e) => setEditContent(e.target.value)}
-                        className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-gray-200 bg-white focus:border-primary focus:ring-1 focus:ring-primary"
+                        className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:border-primary focus:ring-1 focus:ring-primary"
                         autoFocus
                       />
                       <div className="flex items-center justify-end gap-2 mt-2">
@@ -2688,7 +2688,7 @@ export function ChatInterface({
                     </Button>
                   </div>
                 </div>
-                <div className="bg-white relative h-[100px]">
+                <div className="bg-white dark:bg-gray-900 relative h-[100px]">
                   <iframe 
                     src={browserUrl}
                     className="w-full h-full border-0"
@@ -2728,7 +2728,7 @@ export function ChatInterface({
                     </Button>
                   </div>
                 </div>
-                <div className="bg-white relative h-[calc(100%-28px)]">
+                <div className="bg-white dark:bg-gray-900 relative h-[calc(100%-28px)]">
                   <iframe 
                     src={browserUrl}
                     className="w-full h-full border-0"
@@ -2755,7 +2755,7 @@ export function ChatInterface({
               data-testid="input-file-upload"
             />
 
-            <div className="relative flex flex-col rounded-3xl liquid-input-light p-2 focus-within:shadow-lg transition-all duration-300">
+            <div className="relative flex flex-col rounded-3xl liquid-input-light dark:liquid-input p-2 focus-within:shadow-lg transition-all duration-300">
               {/* Inline Attachments Preview - inside input container */}
               {uploadedFiles.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2 px-1" data-testid="inline-attachments-container">
@@ -3089,7 +3089,7 @@ export function ChatInterface({
                             <Textarea
                               value={editContent}
                               onChange={(e) => setEditContent(e.target.value)}
-                              className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-gray-200 bg-white focus:border-primary focus:ring-1 focus:ring-primary"
+                              className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 focus:border-primary focus:ring-1 focus:ring-primary"
                               autoFocus
                             />
                             <div className="flex items-center justify-end gap-2 mt-2">

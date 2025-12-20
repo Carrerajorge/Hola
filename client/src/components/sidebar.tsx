@@ -374,7 +374,7 @@ export function Sidebar({
             <PopoverTrigger asChild>
               <button className="flex flex-1 items-center gap-3 liquid-button cursor-pointer" data-testid="button-user-menu">
                 <Avatar className="h-10 w-10">
-                  <AvatarFallback className="bg-amber-100 text-amber-700">
+                  <AvatarFallback className="bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
                     {user?.role === "admin" ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
                   </AvatarFallback>
                 </Avatar>

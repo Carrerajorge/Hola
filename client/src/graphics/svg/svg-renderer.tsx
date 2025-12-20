@@ -177,7 +177,7 @@ export function SVGRenderer({ config, className, onReady, onExport }: SVGRendere
         >
           <button
             onClick={zoomIn}
-            className="w-8 h-8 bg-white/90 hover:bg-white border border-gray-200 rounded flex items-center justify-center text-gray-700 shadow-sm"
+            className="w-8 h-8 bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded flex items-center justify-center text-gray-700 dark:text-gray-300 shadow-sm"
             data-testid="svg-zoom-in"
             title="Zoom In"
           >
@@ -185,7 +185,7 @@ export function SVGRenderer({ config, className, onReady, onExport }: SVGRendere
           </button>
           <button
             onClick={zoomOut}
-            className="w-8 h-8 bg-white/90 hover:bg-white border border-gray-200 rounded flex items-center justify-center text-gray-700 shadow-sm"
+            className="w-8 h-8 bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded flex items-center justify-center text-gray-700 dark:text-gray-300 shadow-sm"
             data-testid="svg-zoom-out"
             title="Zoom Out"
           >
@@ -193,7 +193,7 @@ export function SVGRenderer({ config, className, onReady, onExport }: SVGRendere
           </button>
           <button
             onClick={resetZoom}
-            className="w-8 h-8 bg-white/90 hover:bg-white border border-gray-200 rounded flex items-center justify-center text-gray-700 shadow-sm text-xs"
+            className="w-8 h-8 bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded flex items-center justify-center text-gray-700 dark:text-gray-300 shadow-sm text-xs"
             data-testid="svg-zoom-reset"
             title="Reset Zoom"
           >
@@ -204,7 +204,7 @@ export function SVGRenderer({ config, className, onReady, onExport }: SVGRendere
       {config.exportable && onExport && (
         <button
           onClick={handleExport}
-          className="absolute bottom-2 right-2 px-3 py-1 bg-white/90 hover:bg-white border border-gray-200 rounded text-sm text-gray-700 shadow-sm z-10"
+          className="absolute bottom-2 right-2 px-3 py-1 bg-white/90 dark:bg-gray-800/90 hover:bg-white dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-sm text-gray-700 dark:text-gray-300 shadow-sm z-10"
           data-testid="svg-export-button"
         >
           Export SVG

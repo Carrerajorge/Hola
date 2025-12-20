@@ -342,7 +342,7 @@ export function CodeExecutionBlock({
       )}
 
       {artifacts.length > 0 && (
-        <div className="border-t border-border/30 bg-white">
+        <div className="border-t border-border/30 bg-white dark:bg-gray-900">
           {artifacts.map((artifact) => {
             const imageDataUrl = `data:${artifact.mimeType};base64,${artifact.data}`;
             return (
