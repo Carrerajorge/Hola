@@ -192,10 +192,16 @@ export async function generateExcelFromPrompt(
     }
 
     const spec = parsed as ExcelSpec;
-    const buffer = await renderExcelFromSpec(spec);
-
-    console.log(`[DocumentOrchestrator] Excel generated successfully on attempt ${attempt}`);
-    return { buffer, spec };
+    
+    try {
+      const buffer = await renderExcelFromSpec(spec);
+      console.log(`[DocumentOrchestrator] Excel generated successfully on attempt ${attempt}`);
+      return { buffer, spec };
+    } catch (renderError) {
+      lastErrors = [`Render error: ${(renderError as Error).message}`];
+      console.error(`[DocumentOrchestrator] Render failed:`, lastErrors[0]);
+      continue;
+    }
   }
 
   throw new Error(
@@ -237,10 +243,16 @@ export async function generateWordFromPrompt(
     }
 
     const spec = parsed as DocSpec;
-    const buffer = await renderWordFromSpec(spec);
-
-    console.log(`[DocumentOrchestrator] Word generated successfully on attempt ${attempt}`);
-    return { buffer, spec };
+    
+    try {
+      const buffer = await renderWordFromSpec(spec);
+      console.log(`[DocumentOrchestrator] Word generated successfully on attempt ${attempt}`);
+      return { buffer, spec };
+    } catch (renderError) {
+      lastErrors = [`Render error: ${(renderError as Error).message}`];
+      console.error(`[DocumentOrchestrator] Render failed:`, lastErrors[0]);
+      continue;
+    }
   }
 
   throw new Error(

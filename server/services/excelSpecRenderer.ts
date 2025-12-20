@@ -118,10 +118,18 @@ function renderChart(worksheet: ExcelJS.Worksheet, chart: ChartSpec, sheetName: 
   // 2. Creating the data and letting users add charts manually in Excel
   // 3. Using a Python-based solution with openpyxl which has better chart support
   
-  const position = parseCellReference(chart.position || "H2");
-  const cell = worksheet.getRow(position.row).getCell(position.col);
-  cell.value = `[Chart placeholder: ${chart.title || chart.type || 'Chart'} - Charts require manual creation in Excel]`;
-  cell.font = { italic: true, color: { argb: "FF808080" } };
+  try {
+    const position = parseCellReference(chart.position || "H2");
+    const cell = worksheet.getRow(position.row).getCell(position.col);
+    cell.value = `[Chart placeholder: ${chart.title || chart.type || 'Chart'} - Charts require manual creation in Excel]`;
+    cell.font = { italic: true, color: { argb: "FF808080" } };
+  } catch (error) {
+    // If position parsing fails, place chart info at a default location
+    console.warn(`[ExcelRenderer] Invalid chart position "${chart.position}", using default H2`);
+    const cell = worksheet.getRow(2).getCell(8); // H2
+    cell.value = `[Chart: ${chart.title || chart.type || 'Chart'}]`;
+    cell.font = { italic: true, color: { argb: "FF808080" } };
+  }
 }
 
 function applyLayout(worksheet: ExcelJS.Worksheet, layout: SheetLayoutSpec): void {

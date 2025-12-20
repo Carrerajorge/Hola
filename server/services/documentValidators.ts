@@ -84,7 +84,7 @@ export function validateExcelSpec(spec: unknown): ValidationResult {
       }
     }
 
-    // Validate chart ranges (basic validation for cell references)
+    // Validate chart ranges (validate all cell references)
     for (let chartIdx = 0; chartIdx < sheet.charts.length; chartIdx++) {
       const chart = sheet.charts[chartIdx];
 
@@ -94,6 +94,40 @@ export function validateExcelSpec(spec: unknown): ValidationResult {
         errors.push(
           `Sheet "${sheet.name}", chart ${chartIdx + 1}: Invalid position "${chart.position}"`
         );
+      }
+
+      // Validate categories_range (can be a range like "A2:A10" or single cell)
+      if (!chart.categories_range || chart.categories_range.trim() === "") {
+        errors.push(
+          `Sheet "${sheet.name}", chart ${chartIdx + 1}: categories_range is required`
+        );
+      } else {
+        const rangeParts = chart.categories_range.split(":");
+        for (const part of rangeParts) {
+          if (!parseCellReference(part.trim())) {
+            errors.push(
+              `Sheet "${sheet.name}", chart ${chartIdx + 1}: Invalid categories_range "${chart.categories_range}"`
+            );
+            break;
+          }
+        }
+      }
+
+      // Validate values_range (can be a range like "B2:B10" or single cell)
+      if (!chart.values_range || chart.values_range.trim() === "") {
+        errors.push(
+          `Sheet "${sheet.name}", chart ${chartIdx + 1}: values_range is required`
+        );
+      } else {
+        const rangeParts = chart.values_range.split(":");
+        for (const part of rangeParts) {
+          if (!parseCellReference(part.trim())) {
+            errors.push(
+              `Sheet "${sheet.name}", chart ${chartIdx + 1}: Invalid values_range "${chart.values_range}"`
+            );
+            break;
+          }
+        }
       }
     }
   }
