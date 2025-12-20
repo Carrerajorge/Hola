@@ -28,15 +28,17 @@ import {
   type IntegrationTool, type InsertIntegrationTool,
   type IntegrationPolicy, type InsertIntegrationPolicy,
   type ToolCallLog, type InsertToolCallLog,
+  type ConsentLog, type SharedLink, type InsertSharedLink,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   gpts, gptCategories, gptVersions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
   notificationEventTypes, notificationPreferences, userSettings,
-  integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs
+  integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs,
+  consentLogs, sharedLinks
 } from "@shared/schema";
-import { randomUUID } from "crypto";
+import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, sql, desc } from "drizzle-orm";
+import { eq, sql, desc, and, isNull } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -166,6 +168,26 @@ export interface IStorage {
   upsertIntegrationPolicy(userId: string, policy: Partial<InsertIntegrationPolicy>): Promise<IntegrationPolicy>;
   createToolCallLog(log: InsertToolCallLog): Promise<ToolCallLog>;
   getToolCallLogs(userId: string, limit?: number): Promise<ToolCallLog[]>;
+  // Consent Logs
+  logConsent(userId: string, consentType: string, value: string, ipAddress?: string, userAgent?: string): Promise<void>;
+  getConsentLogs(userId: string, limit?: number): Promise<ConsentLog[]>;
+  // Shared Links CRUD
+  createSharedLink(data: InsertSharedLink): Promise<SharedLink>;
+  getSharedLinks(userId: string): Promise<SharedLink[]>;
+  getSharedLinkByToken(token: string): Promise<SharedLink | undefined>;
+  updateSharedLink(id: string, data: Partial<InsertSharedLink>): Promise<SharedLink>;
+  revokeSharedLink(id: string): Promise<void>;
+  rotateSharedLinkToken(id: string): Promise<SharedLink>;
+  incrementSharedLinkAccess(id: string): Promise<void>;
+  // Archived/Deleted Chats
+  getArchivedChats(userId: string): Promise<Chat[]>;
+  unarchiveChat(chatId: string): Promise<void>;
+  archiveAllChats(userId: string): Promise<number>;
+  softDeleteChat(chatId: string): Promise<void>;
+  softDeleteAllChats(userId: string): Promise<number>;
+  getDeletedChats(userId: string): Promise<Chat[]>;
+  restoreDeletedChat(chatId: string): Promise<void>;
+  permanentlyDeleteChat(chatId: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -771,6 +793,11 @@ export class MemStorage implements IStorage {
       bio: ''
     };
 
+    const defaultPrivacySettings = {
+      trainingOptIn: false,
+      remoteBrowserDataAccess: false
+    };
+
     const existing = await this.getUserSettings(userId);
     
     if (existing) {
@@ -784,6 +811,9 @@ export class MemStorage implements IStorage {
         featureFlags: settings.featureFlags
           ? { ...existing.featureFlags, ...settings.featureFlags }
           : existing.featureFlags,
+        privacySettings: settings.privacySettings
+          ? { ...existing.privacySettings, ...settings.privacySettings }
+          : existing.privacySettings,
         updatedAt: new Date()
       };
       
@@ -804,7 +834,10 @@ export class MemStorage implements IStorage {
         : defaultUserProfile,
       featureFlags: settings.featureFlags
         ? { ...defaultFeatureFlags, ...settings.featureFlags }
-        : defaultFeatureFlags
+        : defaultFeatureFlags,
+      privacySettings: settings.privacySettings
+        ? { ...defaultPrivacySettings, ...settings.privacySettings }
+        : defaultPrivacySettings
     };
 
     const [created] = await db.insert(userSettings).values(newSettings).returning();
@@ -922,6 +955,125 @@ export class MemStorage implements IStorage {
       .where(eq(toolCallLogs.userId, userId))
       .orderBy(desc(toolCallLogs.createdAt))
       .limit(limit);
+  }
+
+  // Consent Logs
+  async logConsent(userId: string, consentType: string, value: string, ipAddress?: string, userAgent?: string): Promise<void> {
+    await db.insert(consentLogs).values({
+      userId,
+      consentType,
+      value,
+      ipAddress,
+      userAgent,
+    });
+  }
+
+  async getConsentLogs(userId: string, limit: number = 50): Promise<ConsentLog[]> {
+    return db.select().from(consentLogs)
+      .where(eq(consentLogs.userId, userId))
+      .orderBy(desc(consentLogs.createdAt))
+      .limit(limit);
+  }
+
+  // Shared Links CRUD
+  async createSharedLink(data: InsertSharedLink): Promise<SharedLink> {
+    const token = data.token || crypto.randomBytes(32).toString('hex');
+    const [result] = await db.insert(sharedLinks).values({ ...data, token }).returning();
+    return result;
+  }
+
+  async getSharedLinks(userId: string): Promise<SharedLink[]> {
+    return db.select().from(sharedLinks)
+      .where(eq(sharedLinks.userId, userId))
+      .orderBy(desc(sharedLinks.createdAt));
+  }
+
+  async getSharedLinkByToken(token: string): Promise<SharedLink | undefined> {
+    const [result] = await db.select().from(sharedLinks).where(eq(sharedLinks.token, token));
+    return result;
+  }
+
+  async updateSharedLink(id: string, data: Partial<InsertSharedLink>): Promise<SharedLink> {
+    const [result] = await db.update(sharedLinks)
+      .set(data)
+      .where(eq(sharedLinks.id, id))
+      .returning();
+    return result;
+  }
+
+  async revokeSharedLink(id: string): Promise<void> {
+    await db.update(sharedLinks)
+      .set({ isRevoked: 'true' })
+      .where(eq(sharedLinks.id, id));
+  }
+
+  async rotateSharedLinkToken(id: string): Promise<SharedLink> {
+    const newToken = crypto.randomBytes(32).toString('hex');
+    const [result] = await db.update(sharedLinks)
+      .set({ token: newToken })
+      .where(eq(sharedLinks.id, id))
+      .returning();
+    return result;
+  }
+
+  async incrementSharedLinkAccess(id: string): Promise<void> {
+    await db.update(sharedLinks)
+      .set({ 
+        accessCount: sql`${sharedLinks.accessCount} + 1`,
+        lastAccessedAt: new Date()
+      })
+      .where(eq(sharedLinks.id, id));
+  }
+
+  // Archived/Deleted Chats
+  async getArchivedChats(userId: string): Promise<Chat[]> {
+    return db.select().from(chats)
+      .where(and(eq(chats.userId, userId), eq(chats.archived, 'true')))
+      .orderBy(desc(chats.updatedAt));
+  }
+
+  async unarchiveChat(chatId: string): Promise<void> {
+    await db.update(chats)
+      .set({ archived: 'false', updatedAt: new Date() })
+      .where(eq(chats.id, chatId));
+  }
+
+  async archiveAllChats(userId: string): Promise<number> {
+    const result = await db.update(chats)
+      .set({ archived: 'true', updatedAt: new Date() })
+      .where(and(eq(chats.userId, userId), eq(chats.archived, 'false')))
+      .returning();
+    return result.length;
+  }
+
+  async softDeleteChat(chatId: string): Promise<void> {
+    await db.update(chats)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(chats.id, chatId));
+  }
+
+  async softDeleteAllChats(userId: string): Promise<number> {
+    const result = await db.update(chats)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(chats.userId, userId), isNull(chats.deletedAt)))
+      .returning();
+    return result.length;
+  }
+
+  async getDeletedChats(userId: string): Promise<Chat[]> {
+    return db.select().from(chats)
+      .where(and(eq(chats.userId, userId), sql`${chats.deletedAt} IS NOT NULL`))
+      .orderBy(desc(chats.deletedAt));
+  }
+
+  async restoreDeletedChat(chatId: string): Promise<void> {
+    await db.update(chats)
+      .set({ deletedAt: null, updatedAt: new Date() })
+      .where(eq(chats.id, chatId));
+  }
+
+  async permanentlyDeleteChat(chatId: string): Promise<void> {
+    await db.delete(chats).where(eq(chats.id, chatId));
   }
 }
 

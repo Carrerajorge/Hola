@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import crypto from "crypto";
 import { storage } from "./storage";
 import { db } from "./db";
 import { users, notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema, integrationProviders, integrationTools } from "@shared/schema";
@@ -2928,6 +2929,311 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     } catch (error: any) {
       console.error("Error getting logs:", error);
       res.status(500).json({ error: "Failed to get logs" });
+    }
+  });
+
+  // ========================================
+  // Data Controls API Endpoints
+  // ========================================
+
+  // Get privacy settings
+  app.get("/api/users/:id/privacy", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const settings = await storage.getUserSettings(id);
+      const logs = await storage.getConsentLogs(id, 10);
+      res.json({ 
+        privacySettings: settings?.privacySettings || { trainingOptIn: false, remoteBrowserDataAccess: false },
+        consentHistory: logs
+      });
+    } catch (error: any) {
+      console.error("Error getting privacy settings:", error);
+      res.status(500).json({ error: "Failed to get privacy settings" });
+    }
+  });
+
+  // Update privacy settings with consent logging
+  app.put("/api/users/:id/privacy", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const { trainingOptIn, remoteBrowserDataAccess } = req.body;
+      const ipAddress = req.ip || req.headers['x-forwarded-for']?.toString();
+      const userAgent = req.headers['user-agent'];
+      
+      if (trainingOptIn !== undefined) {
+        await storage.logConsent(id, 'training_opt_in', String(trainingOptIn), ipAddress, userAgent);
+      }
+      if (remoteBrowserDataAccess !== undefined) {
+        await storage.logConsent(id, 'remote_browser_access', String(remoteBrowserDataAccess), ipAddress, userAgent);
+      }
+      
+      const settings = await storage.upsertUserSettings(id, {
+        privacySettings: { trainingOptIn: trainingOptIn ?? false, remoteBrowserDataAccess: remoteBrowserDataAccess ?? false }
+      });
+      
+      res.json(settings);
+    } catch (error: any) {
+      console.error("Error updating privacy settings:", error);
+      res.status(500).json({ error: "Failed to update privacy settings" });
+    }
+  });
+
+  // Get user's shared links
+  app.get("/api/users/:id/shared-links", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const links = await storage.getSharedLinks(id);
+      res.json(links);
+    } catch (error: any) {
+      console.error("Error getting shared links:", error);
+      res.status(500).json({ error: "Failed to get shared links" });
+    }
+  });
+
+  // Create shared link
+  app.post("/api/users/:id/shared-links", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const { resourceType, resourceId, scope, permissions, expiresAt } = req.body;
+      
+      if (!resourceType || !resourceId) {
+        return res.status(400).json({ error: "Missing required fields: resourceType, resourceId" });
+      }
+      
+      const token = crypto.randomBytes(32).toString('hex');
+      
+      const link = await storage.createSharedLink({
+        userId: id,
+        resourceType,
+        resourceId,
+        token,
+        scope: scope || 'link_only',
+        permissions: permissions || 'read',
+        expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+        isRevoked: 'false'
+      });
+      
+      res.json(link);
+    } catch (error: any) {
+      console.error("Error creating shared link:", error);
+      res.status(500).json({ error: "Failed to create shared link" });
+    }
+  });
+
+  // Revoke shared link
+  app.delete("/api/users/:id/shared-links/:linkId", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id, linkId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      await storage.revokeSharedLink(linkId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error revoking shared link:", error);
+      res.status(500).json({ error: "Failed to revoke shared link" });
+    }
+  });
+
+  // Rotate shared link token
+  app.post("/api/users/:id/shared-links/:linkId/rotate", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id, linkId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const link = await storage.rotateSharedLinkToken(linkId);
+      res.json(link);
+    } catch (error: any) {
+      console.error("Error rotating shared link token:", error);
+      res.status(500).json({ error: "Failed to rotate shared link token" });
+    }
+  });
+
+  // Update shared link permissions
+  app.patch("/api/users/:id/shared-links/:linkId", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id, linkId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const { scope, permissions } = req.body;
+      
+      const link = await storage.updateSharedLink(linkId, { scope, permissions });
+      res.json(link);
+    } catch (error: any) {
+      console.error("Error updating shared link:", error);
+      res.status(500).json({ error: "Failed to update shared link" });
+    }
+  });
+
+  // Public access endpoint (no auth required)
+  app.get("/api/shared/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      
+      const link = await storage.getSharedLinkByToken(token);
+      
+      if (!link) {
+        return res.status(404).json({ error: "Shared link not found" });
+      }
+      
+      if (link.isRevoked === 'true') {
+        return res.status(410).json({ error: "This shared link has been revoked" });
+      }
+      
+      if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
+        return res.status(410).json({ error: "This shared link has expired" });
+      }
+      
+      await storage.incrementSharedLinkAccess(link.id);
+      
+      res.json({
+        resourceType: link.resourceType,
+        resourceId: link.resourceId,
+        scope: link.scope,
+        permissions: link.permissions,
+        accessCount: (link.accessCount || 0) + 1
+      });
+    } catch (error: any) {
+      console.error("Error accessing shared link:", error);
+      res.status(500).json({ error: "Failed to access shared link" });
+    }
+  });
+
+  // Get archived chats
+  app.get("/api/users/:id/chats/archived", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const chats = await storage.getArchivedChats(id);
+      res.json(chats);
+    } catch (error: any) {
+      console.error("Error getting archived chats:", error);
+      res.status(500).json({ error: "Failed to get archived chats" });
+    }
+  });
+
+  // Unarchive chat
+  app.post("/api/users/:id/chats/:chatId/unarchive", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id, chatId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      await storage.unarchiveChat(chatId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error unarchiving chat:", error);
+      res.status(500).json({ error: "Failed to unarchive chat" });
+    }
+  });
+
+  // Archive all chats
+  app.post("/api/users/:id/chats/archive-all", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const count = await storage.archiveAllChats(id);
+      res.json({ count });
+    } catch (error: any) {
+      console.error("Error archiving all chats:", error);
+      res.status(500).json({ error: "Failed to archive all chats" });
+    }
+  });
+
+  // Get deleted chats (for recovery)
+  app.get("/api/users/:id/chats/deleted", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const chats = await storage.getDeletedChats(id);
+      res.json(chats);
+    } catch (error: any) {
+      console.error("Error getting deleted chats:", error);
+      res.status(500).json({ error: "Failed to get deleted chats" });
+    }
+  });
+
+  // Soft delete all chats
+  app.post("/api/users/:id/chats/delete-all", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const count = await storage.softDeleteAllChats(id);
+      
+      const links = await storage.getSharedLinks(id);
+      for (const link of links) {
+        if (link.resourceType === 'chat') {
+          await storage.revokeSharedLink(link.id);
+        }
+      }
+      
+      res.json({ count });
+    } catch (error: any) {
+      console.error("Error deleting all chats:", error);
+      res.status(500).json({ error: "Failed to delete all chats" });
+    }
+  });
+
+  // Restore deleted chat
+  app.post("/api/users/:id/chats/:chatId/restore", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id, chatId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      await storage.restoreDeletedChat(chatId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error restoring chat:", error);
+      res.status(500).json({ error: "Failed to restore chat" });
     }
   });
 
