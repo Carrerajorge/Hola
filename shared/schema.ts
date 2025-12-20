@@ -609,6 +609,81 @@ export const insertCodeInterpreterRunSchema = createInsertSchema(codeInterpreter
 export type InsertCodeInterpreterRun = z.infer<typeof insertCodeInterpreterRunSchema>;
 export type CodeInterpreterRun = typeof codeInterpreterRuns.$inferSelect;
 
+// ========================================
+// Notification Preferences System
+// ========================================
+
+// Notification Event Types Catalog
+export const notificationEventTypes = pgTable("notification_event_types", {
+  id: varchar("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category").notNull(), // ai_updates, tasks, social, product
+  severity: text("severity").default("normal"), // low, normal, high, critical
+  defaultOptIn: text("default_opt_in").default("true"),
+  defaultChannels: text("default_channels").default("push"), // none, push, email, push_email
+  frequencyCap: integer("frequency_cap"), // max notifications per hour
+  icon: text("icon"),
+  sortOrder: integer("sort_order").default(0),
+});
+
+export const insertNotificationEventTypeSchema = createInsertSchema(notificationEventTypes);
+export type InsertNotificationEventType = z.infer<typeof insertNotificationEventTypeSchema>;
+export type NotificationEventType = typeof notificationEventTypes.$inferSelect;
+
+// User Notification Preferences
+export const notificationPreferences = pgTable("notification_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  eventTypeId: varchar("event_type_id").notNull().references(() => notificationEventTypes.id, { onDelete: "cascade" }),
+  channels: text("channels").notNull().default("push"), // none, push, email, push_email
+  enabled: text("enabled").default("true"),
+  quietHoursStart: text("quiet_hours_start"), // HH:MM format
+  quietHoursEnd: text("quiet_hours_end"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("notification_prefs_user_idx").on(table.userId),
+  uniqueIndex("notification_prefs_unique_idx").on(table.userId, table.eventTypeId),
+]);
+
+export const insertNotificationPreferenceSchema = createInsertSchema(notificationPreferences).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertNotificationPreference = z.infer<typeof insertNotificationPreferenceSchema>;
+export type NotificationPreference = typeof notificationPreferences.$inferSelect;
+
+// Notification Delivery Log
+export const notificationLogs = pgTable("notification_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  eventId: varchar("event_id").notNull(), // idempotency key
+  userId: varchar("user_id").notNull(),
+  eventTypeId: varchar("event_type_id").notNull(),
+  channel: text("channel").notNull(), // push, email
+  status: text("status").notNull().default("pending"), // pending, sent, delivered, failed, bounced
+  providerResponse: jsonb("provider_response"),
+  errorMessage: text("error_message"),
+  retryCount: integer("retry_count").default(0),
+  sentAt: timestamp("sent_at"),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("notification_logs_user_idx").on(table.userId),
+  index("notification_logs_event_idx").on(table.eventId),
+  uniqueIndex("notification_logs_idempotency_idx").on(table.eventId, table.channel),
+]);
+
+export const insertNotificationLogSchema = createInsertSchema(notificationLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertNotificationLog = z.infer<typeof insertNotificationLogSchema>;
+export type NotificationLog = typeof notificationLogs.$inferSelect;
+
 // Code Interpreter Artifacts (generated files, charts, etc.)
 export const codeInterpreterArtifacts = pgTable("code_interpreter_artifacts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
