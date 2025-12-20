@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { db } from "./db";
-import { users, notificationEventTypes } from "@shared/schema";
+import { users, notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema } from "@shared/schema";
 import { ObjectStorageService, ObjectNotFoundError, objectStorageClient } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
 import { chunkText, generateEmbedding, generateEmbeddingsBatch } from "./embeddingService";
@@ -2588,6 +2588,18 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
   app.get("/api/users/:id/settings", async (req, res) => {
     try {
       const { id } = req.params;
+      
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
+      if (userId !== id) {
+        return res.status(403).json({ error: "Access denied: You can only access your own settings" });
+      }
+      
       const settings = await storage.getUserSettings(id);
       
       if (!settings) {
@@ -2627,12 +2639,56 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
   app.put("/api/users/:id/settings", async (req, res) => {
     try {
       const { id } = req.params;
+      
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      
+      if (userId !== id) {
+        return res.status(403).json({ error: "Access denied: You can only update your own settings" });
+      }
+      
       const { responsePreferences, userProfile, featureFlags } = req.body;
       
       const updates: any = {};
-      if (responsePreferences) updates.responsePreferences = responsePreferences;
-      if (userProfile) updates.userProfile = userProfile;
-      if (featureFlags) updates.featureFlags = featureFlags;
+      const validationErrors: string[] = [];
+      
+      if (responsePreferences !== undefined) {
+        const parsed = responsePreferencesSchema.safeParse(responsePreferences);
+        if (!parsed.success) {
+          validationErrors.push(`responsePreferences: ${parsed.error.errors.map(e => e.message).join(', ')}`);
+        } else {
+          updates.responsePreferences = parsed.data;
+        }
+      }
+      
+      if (userProfile !== undefined) {
+        const parsed = userProfileSchema.safeParse(userProfile);
+        if (!parsed.success) {
+          validationErrors.push(`userProfile: ${parsed.error.errors.map(e => e.message).join(', ')}`);
+        } else {
+          updates.userProfile = parsed.data;
+        }
+      }
+      
+      if (featureFlags !== undefined) {
+        const parsed = featureFlagsSchema.safeParse(featureFlags);
+        if (!parsed.success) {
+          validationErrors.push(`featureFlags: ${parsed.error.errors.map(e => e.message).join(', ')}`);
+        } else {
+          updates.featureFlags = parsed.data;
+        }
+      }
+      
+      if (validationErrors.length > 0) {
+        return res.status(400).json({ 
+          error: "Validation failed", 
+          details: validationErrors 
+        });
+      }
       
       const settings = await storage.upsertUserSettings(id, updates);
       res.json(settings);

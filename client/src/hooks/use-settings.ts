@@ -263,27 +263,14 @@ async function saveUserSettings(userId: string, settings: Omit<ApiUserSettings, 
   }
 }
 
-function getUserId(): string | null {
-  try {
-    const userDataStr = localStorage.getItem("sira_user_data");
-    if (userDataStr) {
-      const userData = JSON.parse(userDataStr);
-      return userData.id || null;
-    }
-  } catch (e) {
-    console.error("Error getting user ID:", e);
-  }
-  return null;
-}
-
-export function useSettings() {
+export function useSettings(userId?: string | null) {
   const [settings, setSettingsState] = useState<UserSettings>(loadSettings);
   const [isSyncing, setIsSyncing] = useState(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSyncedRef = useRef<string>('');
+  const prevUserIdRef = useRef<string | null | undefined>(undefined);
 
   const syncSettingsToServer = useCallback(async (settingsToSync?: UserSettings): Promise<boolean> => {
-    const userId = getUserId();
     if (!userId) {
       console.log("No user ID found, skipping server sync");
       return false;
@@ -302,10 +289,9 @@ export function useSettings() {
     } finally {
       setIsSyncing(false);
     }
-  }, [settings]);
+  }, [settings, userId]);
 
   const loadSettingsFromServer = useCallback(async (): Promise<boolean> => {
-    const userId = getUserId();
     if (!userId) {
       console.log("No user ID found, skipping server load");
       return false;
@@ -328,7 +314,7 @@ export function useSettings() {
     } finally {
       setIsSyncing(false);
     }
-  }, [settings]);
+  }, [settings, userId]);
 
   const debouncedSyncToServer = useCallback((newSettings: UserSettings) => {
     if (syncTimeoutRef.current) {
@@ -373,8 +359,11 @@ export function useSettings() {
   }, [debouncedSyncToServer]);
 
   useEffect(() => {
-    loadSettingsFromServer();
-  }, []);
+    if (userId && prevUserIdRef.current !== userId) {
+      loadSettingsFromServer();
+    }
+    prevUserIdRef.current = userId;
+  }, [userId, loadSettingsFromServer]);
 
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {

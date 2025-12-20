@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, ReactNode } from "react";
 import { useSettings, applyTheme, applyAccentColor, UserSettings } from "@/hooks/use-settings";
+import { useAuth } from "@/hooks/use-auth";
 
 interface SettingsContextType {
   settings: UserSettings;
@@ -9,6 +10,7 @@ interface SettingsContextType {
   syncSettingsToServer: () => Promise<boolean>;
   loadSettingsFromServer: () => Promise<boolean>;
   isSyncing: boolean;
+  isAuthenticated: boolean;
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
@@ -22,7 +24,8 @@ export function useSettingsContext() {
 }
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const { settings, updateSetting, updateSettings, resetSettings, syncSettingsToServer, loadSettingsFromServer, isSyncing } = useSettings();
+  const { user, isAuthenticated } = useAuth();
+  const { settings, updateSetting, updateSettings, resetSettings, syncSettingsToServer, loadSettingsFromServer, isSyncing } = useSettings(user?.id);
 
   useEffect(() => {
     applyTheme(settings.appearance);
@@ -64,6 +67,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       syncSettingsToServer,
       loadSettingsFromServer,
       isSyncing,
+      isAuthenticated,
     }}>
       {children}
     </SettingsContext.Provider>
