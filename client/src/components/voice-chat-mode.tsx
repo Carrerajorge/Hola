@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Mic, MicOff, Volume2, VolumeX, Loader2 } from "lucide-react";
+import { X, Mic, MicOff, Volume2, VolumeX, Loader2, Video, VideoOff, Upload, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface VoiceChatModeProps {
@@ -9,32 +10,43 @@ interface VoiceChatModeProps {
   onClose: () => void;
 }
 
+type InputMode = "idle" | "mic" | "camera" | "uploading";
+
 export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
+  const [inputMode, setInputMode] = useState<InputMode>("idle");
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [transcript, setTranscript] = useState("");
   const [response, setResponse] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const videoStreamRef = useRef<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Clean up on unmount or close
   useEffect(() => {
     if (!open) {
       stopListening();
       stopSpeaking();
+      stopCamera();
       cleanupAudio();
+      setInputMode("idle");
     }
     return () => {
       stopListening();
       stopSpeaking();
+      stopCamera();
       cleanupAudio();
     };
   }, [open]);
@@ -90,6 +102,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
 
     setError(null);
     setTranscript("");
+    setInputMode("mic");
     
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
@@ -125,6 +138,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       if (transcript.trim()) {
         await sendToGrok(transcript);
       }
+      setInputMode("idle");
     };
 
     recognition.onerror = (event: any) => {
@@ -132,6 +146,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       setIsListening(false);
       cleanupAudio();
       setAudioLevel(0);
+      setInputMode("idle");
       if (event.error !== 'no-speech') {
         setError(`Error: ${event.error}`);
       }
@@ -149,11 +164,82 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     setIsListening(false);
     cleanupAudio();
     setAudioLevel(0);
+    setInputMode("idle");
   };
 
   const stopSpeaking = () => {
     window.speechSynthesis.cancel();
     setIsSpeaking(false);
+  };
+
+  // Camera functions
+  const startCamera = async () => {
+    try {
+      setCameraError(null);
+      setInputMode("camera");
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: true 
+      });
+      videoStreamRef.current = stream;
+      setIsCameraActive(true);
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err: any) {
+      console.error("Error accessing camera:", err);
+      setCameraError("No se pudo acceder a la cámara");
+      setInputMode("idle");
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoStreamRef.current) {
+      videoStreamRef.current.getTracks().forEach(track => track.stop());
+      videoStreamRef.current = null;
+    }
+    setIsCameraActive(false);
+    setInputMode("idle");
+  };
+
+  // File upload functions
+  const handleFileUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    setInputMode("uploading");
+    const file = files[0];
+    
+    // Validate file
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (file.size > maxSize) {
+      setError("El archivo es demasiado grande (máximo 50MB)");
+      setInputMode("idle");
+      return;
+    }
+    
+    try {
+      // For now, show a message about the file
+      setResponse(`Archivo recibido: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+      
+      // TODO: Implement actual file upload to storage
+      // const formData = new FormData();
+      // formData.append("file", file);
+      // const res = await fetch("/api/upload", { method: "POST", body: formData });
+      
+    } catch (err: any) {
+      setError("Error al subir el archivo");
+    } finally {
+      setInputMode("idle");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
   };
 
   const sendToGrok = async (text: string) => {
@@ -210,13 +296,21 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     window.speechSynthesis.speak(utterance);
   };
 
-  const handleToggleListen = () => {
+  const handleMicToggle = () => {
     if (isListening) {
       stopListening();
     } else if (isSpeaking) {
       stopSpeaking();
     } else {
       startListening();
+    }
+  };
+
+  const handleCameraToggle = () => {
+    if (isCameraActive) {
+      stopCamera();
+    } else {
+      startCamera();
     }
   };
 
@@ -235,6 +329,15 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
         className="fixed inset-0 z-[100] bg-gradient-to-br from-gray-900 via-black to-gray-900 flex flex-col items-center justify-center"
         data-testid="voice-chat-mode"
       >
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
+          onChange={handleFileChange}
+        />
+
         {/* Close button */}
         <Button
           variant="ghost"
@@ -252,8 +355,29 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
           animate={{ opacity: 1, y: 0 }}
           className="absolute top-8 left-1/2 -translate-x-1/2 text-white/80 text-lg font-medium"
         >
-          {isListening ? "Escuchando..." : isSpeaking ? "Hablando..." : isProcessing ? "Procesando..." : "Toca para hablar"}
+          {isListening ? "Escuchando..." : isSpeaking ? "Hablando..." : isProcessing ? "Procesando..." : isCameraActive ? "Cámara activa" : "Modo conversación"}
         </motion.div>
+
+        {/* Camera preview (when active) */}
+        {isCameraActive && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="absolute top-20 left-1/2 -translate-x-1/2 w-80 h-60 rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl"
+          >
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute bottom-2 left-2 px-2 py-1 bg-red-500 rounded-full flex items-center gap-1">
+              <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+              <span className="text-white text-xs font-medium">LIVE</span>
+            </div>
+          </motion.div>
+        )}
 
         {/* Main animated bubble */}
         <motion.div
@@ -261,16 +385,17 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
+          style={{ marginTop: isCameraActive ? "160px" : "0" }}
         >
           {/* Outer glow ring */}
           <motion.div
             className={cn(
               "absolute w-64 h-64 rounded-full",
-              isListening ? "bg-blue-500/20" : isSpeaking ? "bg-green-500/20" : "bg-white/10"
+              isListening ? "bg-blue-500/20" : isSpeaking ? "bg-green-500/20" : isCameraActive ? "bg-red-500/20" : "bg-white/10"
             )}
             animate={{
-              scale: isListening || isSpeaking ? [1, 1.2, 1] : 1,
-              opacity: isListening || isSpeaking ? [0.3, 0.5, 0.3] : 0.2,
+              scale: isListening || isSpeaking || isCameraActive ? [1, 1.2, 1] : 1,
+              opacity: isListening || isSpeaking || isCameraActive ? [0.3, 0.5, 0.3] : 0.2,
             }}
             transition={{
               duration: 1.5,
@@ -283,10 +408,10 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
           <motion.div
             className={cn(
               "absolute w-48 h-48 rounded-full",
-              isListening ? "bg-blue-400/30" : isSpeaking ? "bg-green-400/30" : "bg-white/15"
+              isListening ? "bg-blue-400/30" : isSpeaking ? "bg-green-400/30" : isCameraActive ? "bg-red-400/30" : "bg-white/15"
             )}
             animate={{
-              scale: isListening ? [1, 1 + audioLevel * 0.3, 1] : isSpeaking ? [1, 1.15, 1] : 1,
+              scale: isListening ? [1, 1 + audioLevel * 0.3, 1] : isSpeaking || isCameraActive ? [1, 1.15, 1] : 1,
             }}
             transition={{
               duration: isListening ? 0.1 : 1,
@@ -298,30 +423,30 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
             }}
           />
           
-          {/* Main bubble button */}
-          <motion.button
-            onClick={handleToggleListen}
-            disabled={isProcessing}
+          {/* Main bubble - displays current state */}
+          <motion.div
             className={cn(
               "relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300",
-              "focus:outline-none focus:ring-4 focus:ring-white/30",
               isListening 
                 ? "bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg shadow-blue-500/50" 
                 : isSpeaking 
                   ? "bg-gradient-to-br from-green-500 to-green-600 shadow-lg shadow-green-500/50"
                   : isProcessing
                     ? "bg-gradient-to-br from-amber-500 to-amber-600 shadow-lg shadow-amber-500/50"
-                    : "bg-gradient-to-br from-gray-700 to-gray-800 hover:from-gray-600 hover:to-gray-700 shadow-lg shadow-black/50"
+                    : isCameraActive
+                      ? "bg-gradient-to-br from-red-500 to-red-600 shadow-lg shadow-red-500/50"
+                      : "bg-gradient-to-br from-gray-700 to-gray-800 shadow-lg shadow-black/50"
             )}
             style={{
               boxShadow: isListening 
                 ? `0 0 ${bubbleGlow}px rgba(59, 130, 246, 0.6)` 
                 : isSpeaking 
                   ? `0 0 60px rgba(34, 197, 94, 0.5)`
-                  : undefined,
+                  : isCameraActive
+                    ? `0 0 60px rgba(239, 68, 68, 0.5)`
+                    : undefined,
             }}
-            whileTap={{ scale: 0.95 }}
-            data-testid="button-voice-bubble"
+            data-testid="voice-bubble-display"
           >
             {isProcessing ? (
               <Loader2 className="h-12 w-12 text-white animate-spin" />
@@ -330,7 +455,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
                 animate={{ scale: [1, 1.1, 1] }}
                 transition={{ duration: 0.5, repeat: Infinity }}
               >
-                <MicOff className="h-12 w-12 text-white" />
+                <Mic className="h-12 w-12 text-white" />
               </motion.div>
             ) : isSpeaking ? (
               <motion.div
@@ -339,10 +464,19 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
               >
                 <Volume2 className="h-12 w-12 text-white" />
               </motion.div>
+            ) : isCameraActive ? (
+              <motion.div
+                animate={{ scale: [1, 1.05, 1] }}
+                transition={{ duration: 1, repeat: Infinity }}
+              >
+                <Video className="h-12 w-12 text-white" />
+              </motion.div>
             ) : (
-              <Mic className="h-12 w-12 text-white" />
+              <div className="flex flex-col items-center">
+                <span className="text-white/80 text-sm">Sira</span>
+              </div>
             )}
-          </motion.button>
+          </motion.div>
           
           {/* Audio level visualization rings */}
           {isListening && (
@@ -374,7 +508,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="absolute bottom-32 left-0 right-0 px-8 text-center"
+          className="absolute bottom-44 left-0 right-0 px-8 text-center"
         >
           {transcript && (
             <motion.p
@@ -394,20 +528,113 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
               {response}
             </motion.p>
           )}
-          {error && (
+          {(error || cameraError) && (
             <motion.p
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="text-red-400 text-sm"
             >
-              {error}
+              {error || cameraError}
             </motion.p>
           )}
         </motion.div>
 
-        {/* Bottom controls */}
-        <div className="absolute bottom-8 flex items-center gap-4">
-          {isSpeaking && (
+        {/* Multimodal input buttons */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="absolute bottom-16 flex items-center gap-6"
+        >
+          {/* Camera/Video button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <motion.button
+                onClick={handleCameraToggle}
+                disabled={isListening || isProcessing}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className={cn(
+                  "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
+                  "focus:outline-none focus:ring-4 focus:ring-white/20",
+                  isCameraActive 
+                    ? "bg-red-500 text-white shadow-lg shadow-red-500/40" 
+                    : "bg-gray-800/80 text-white/80 hover:bg-gray-700 hover:text-white"
+                )}
+                data-testid="button-camera-input"
+              >
+                {isCameraActive ? <VideoOff className="h-7 w-7" /> : <Video className="h-7 w-7" />}
+              </motion.button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
+              {isCameraActive ? "Detener cámara" : "Iniciar cámara"}
+            </TooltipContent>
+          </Tooltip>
+
+          {/* Upload/Attach button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <motion.button
+                onClick={handleFileUpload}
+                disabled={isListening || isProcessing || isCameraActive}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className={cn(
+                  "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
+                  "focus:outline-none focus:ring-4 focus:ring-white/20",
+                  inputMode === "uploading"
+                    ? "bg-blue-500 text-white shadow-lg shadow-blue-500/40"
+                    : "bg-gray-800/80 text-white/80 hover:bg-gray-700 hover:text-white"
+                )}
+                data-testid="button-upload-input"
+              >
+                {inputMode === "uploading" ? (
+                  <Loader2 className="h-7 w-7 animate-spin" />
+                ) : (
+                  <Upload className="h-7 w-7" />
+                )}
+              </motion.button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
+              Adjuntar archivo
+            </TooltipContent>
+          </Tooltip>
+
+          {/* Microphone button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <motion.button
+                onClick={handleMicToggle}
+                disabled={isProcessing || isCameraActive}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className={cn(
+                  "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
+                  "focus:outline-none focus:ring-4 focus:ring-white/20",
+                  isListening 
+                    ? "bg-blue-500 text-white shadow-lg shadow-blue-500/40 animate-pulse" 
+                    : isSpeaking
+                      ? "bg-green-500 text-white shadow-lg shadow-green-500/40"
+                      : "bg-gray-800/80 text-white/80 hover:bg-gray-700 hover:text-white"
+                )}
+                data-testid="button-mic-input"
+              >
+                {isListening ? <MicOff className="h-7 w-7" /> : <Mic className="h-7 w-7" />}
+              </motion.button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="bg-gray-800 text-white border-gray-700">
+              {isListening ? "Detener grabación" : isSpeaking ? "Silenciar" : "Hablar"}
+            </TooltipContent>
+          </Tooltip>
+        </motion.div>
+
+        {/* Stop speaking button */}
+        {isSpeaking && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="absolute bottom-4"
+          >
             <Button
               variant="ghost"
               size="sm"
@@ -415,11 +642,11 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
               className="text-white/70 hover:text-white hover:bg-white/10"
               data-testid="button-stop-speaking"
             >
-              <VolumeX className="h-5 w-5 mr-2" />
+              <VolumeX className="h-4 w-4 mr-2" />
               Silenciar
             </Button>
-          )}
-        </div>
+          </motion.div>
+        )}
       </motion.div>
     </AnimatePresence>
   );
