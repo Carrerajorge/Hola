@@ -3646,25 +3646,38 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
     const result = await processDocument(content, mimeType, filename);
     const chunks = chunkText(result.text, 1500, 150);
     
-    const texts = chunks.map(c => c.content);
-    const embeddings = await generateEmbeddingsBatch(texts);
-    
-    const chunksWithEmbeddings = chunks.map((chunk, i) => ({
+    const chunksWithoutEmbeddings = chunks.map((chunk) => ({
       fileId,
       content: chunk.content,
-      embedding: embeddings[i],
+      embedding: null,
       chunkIndex: chunk.chunkIndex,
       pageNumber: chunk.pageNumber || null,
       metadata: null,
     }));
     
-    await storage.createFileChunks(chunksWithEmbeddings);
+    await storage.createFileChunks(chunksWithoutEmbeddings);
     await storage.updateFileStatus(fileId, "ready");
     
-    console.log(`File ${fileId} processed: ${chunks.length} chunks created`);
+    console.log(`File ${fileId} processed: ${chunks.length} chunks created (fast mode)`);
+    
+    generateEmbeddingsAsync(fileId, chunks);
   } catch (error) {
     console.error(`Error processing file ${fileId}:`, error);
     await storage.updateFileStatus(fileId, "error");
+  }
+}
+
+async function generateEmbeddingsAsync(fileId: string, chunks: { content: string; chunkIndex: number; pageNumber?: number }[]) {
+  try {
+    const texts = chunks.map(c => c.content);
+    const embeddings = await generateEmbeddingsBatch(texts);
+    
+    for (let i = 0; i < chunks.length; i++) {
+      await storage.updateFileChunkEmbedding(fileId, chunks[i].chunkIndex, embeddings[i]);
+    }
+    console.log(`File ${fileId} embeddings generated asynchronously`);
+  } catch (error) {
+    console.error(`Error generating embeddings for file ${fileId}:`, error);
   }
 }
 

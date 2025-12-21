@@ -59,6 +59,7 @@ export interface IStorage {
   createFileChunks(chunks: InsertFileChunk[]): Promise<FileChunk[]>;
   getFileChunks(fileId: string): Promise<FileChunk[]>;
   searchSimilarChunks(embedding: number[], limit?: number): Promise<FileChunk[]>;
+  updateFileChunkEmbedding(fileId: string, chunkIndex: number, embedding: number[]): Promise<void>;
   // Agent CRUD operations
   createAgentRun(run: InsertAgentRun): Promise<AgentRun>;
   getAgentRun(id: string): Promise<AgentRun | undefined>;
@@ -313,6 +314,12 @@ export class MemStorage implements IStorage {
       LIMIT ${limit}
     `);
     return result.rows as FileChunk[];
+  }
+
+  async updateFileChunkEmbedding(fileId: string, chunkIndex: number, embedding: number[]): Promise<void> {
+    await db.update(fileChunks)
+      .set({ embedding })
+      .where(and(eq(fileChunks.fileId, fileId), eq(fileChunks.chunkIndex, chunkIndex)));
   }
 
   async createAgentRun(run: InsertAgentRun): Promise<AgentRun> {
