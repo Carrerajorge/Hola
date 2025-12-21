@@ -204,7 +204,7 @@ export function EnhancedDocumentEditor({
   if (!editor) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+    <div className="h-full flex flex-col bg-background relative">
       <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30">
         <h2 className="font-semibold text-lg truncate max-w-md">{title}</h2>
         <div className="flex items-center gap-2">
