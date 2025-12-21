@@ -309,3 +309,500 @@ export const docSpecJsonSchema = {
   },
   required: [],
 };
+
+// -------------------------
+// CV/Resume specification
+// -------------------------
+
+export const cvHeaderSchema = z.object({
+  name: z.string().min(1).describe("Full name"),
+  phone: z.string().describe("Phone number"),
+  email: z.string().email().describe("Email address"),
+  address: z.string().describe("Physical address or city/country"),
+  website: z.string().url().nullable().optional().describe("Personal website or portfolio URL"),
+  photo_url: z.string().url().nullable().optional().describe("Profile photo URL"),
+});
+
+export type CvHeader = z.infer<typeof cvHeaderSchema>;
+
+export const cvWorkExperienceSchema = z.object({
+  company: z.string().min(1),
+  role: z.string().min(1),
+  start_date: z.string().describe("Start date, e.g. 'Jan 2020' or '2020-01'"),
+  end_date: z.string().nullable().optional().describe("End date or null/undefined for 'Present'"),
+  location: z.string().nullable().optional().describe("City, Country"),
+  description: z.string().nullable().optional().describe("Role description"),
+  achievements: z.array(z.string()).default([]).describe("List of key achievements"),
+});
+
+export type CvWorkExperience = z.infer<typeof cvWorkExperienceSchema>;
+
+export const cvEducationSchema = z.object({
+  institution: z.string().min(1),
+  degree: z.string().min(1).describe("e.g. 'Bachelor of Science'"),
+  field: z.string().min(1).describe("e.g. 'Computer Science'"),
+  start_date: z.string().describe("Start date"),
+  end_date: z.string().nullable().optional().describe("End date or expected graduation"),
+  gpa: z.string().nullable().optional().describe("GPA or grade, e.g. '3.8/4.0'"),
+  achievements: z.array(z.string()).default([]).describe("Honors, awards, relevant coursework"),
+});
+
+export type CvEducation = z.infer<typeof cvEducationSchema>;
+
+export const cvSkillSchema = z.object({
+  name: z.string().min(1).describe("Skill name"),
+  proficiency: z.number().int().min(1).max(5).describe("Proficiency level 1-5"),
+});
+
+export type CvSkill = z.infer<typeof cvSkillSchema>;
+
+export const cvSkillCategorySchema = z.object({
+  name: z.string().min(1).describe("Category name, e.g. 'Programming Languages'"),
+  skills: z.array(cvSkillSchema).min(1),
+});
+
+export type CvSkillCategory = z.infer<typeof cvSkillCategorySchema>;
+
+export const cvLanguageSchema = z.object({
+  name: z.string().min(1).describe("Language name"),
+  proficiency: z.number().int().min(1).max(5).describe("Proficiency level 1-5 (1=Basic, 5=Native)"),
+});
+
+export type CvLanguage = z.infer<typeof cvLanguageSchema>;
+
+export const cvCertificationSchema = z.object({
+  name: z.string().min(1),
+  issuer: z.string().min(1).describe("Issuing organization"),
+  date: z.string().describe("Date obtained"),
+  url: z.string().url().nullable().optional().describe("Verification URL"),
+});
+
+export type CvCertification = z.infer<typeof cvCertificationSchema>;
+
+export const cvProjectSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().describe("Project description"),
+  technologies: z.array(z.string()).default([]).describe("Technologies used"),
+  url: z.string().url().nullable().optional().describe("Project URL"),
+});
+
+export type CvProject = z.infer<typeof cvProjectSchema>;
+
+export const cvColorSchemeSchema = z.object({
+  primary: z.string().default("#1a1a1a").describe("Primary color hex"),
+  accent: z.string().default("#2563eb").describe("Accent color hex"),
+});
+
+export type CvColorScheme = z.infer<typeof cvColorSchemeSchema>;
+
+export const cvSpecSchema = z.object({
+  header: cvHeaderSchema,
+  profile_summary: z.string().nullable().optional().describe("Professional summary or objective"),
+  work_experience: z.array(cvWorkExperienceSchema).default([]),
+  education: z.array(cvEducationSchema).default([]),
+  skills: z.array(cvSkillCategorySchema).default([]),
+  languages: z.array(cvLanguageSchema).default([]),
+  certifications: z.array(cvCertificationSchema).default([]),
+  projects: z.array(cvProjectSchema).default([]),
+  template_style: z.enum(["modern", "classic", "creative", "minimalist"]).default("modern"),
+  color_scheme: cvColorSchemeSchema.default({}),
+});
+
+export type CvSpec = z.infer<typeof cvSpecSchema>;
+
+// -------------------------
+// Report specification
+// -------------------------
+
+export const reportHeaderSchema = z.object({
+  title: z.string().min(1),
+  subtitle: z.string().nullable().optional(),
+  author: z.string().nullable().optional(),
+  date: z.string().nullable().optional().describe("Report date"),
+  organization: z.string().nullable().optional(),
+  logo_url: z.string().url().nullable().optional().describe("Organization logo URL"),
+});
+
+export type ReportHeader = z.infer<typeof reportHeaderSchema>;
+
+export const reportTextBlockSchema = z.object({
+  type: z.literal("text"),
+  content: z.string(),
+});
+
+export const reportHeadingBlockSchema = z.object({
+  type: z.literal("heading"),
+  level: z.number().int().min(1).max(4).default(2),
+  text: z.string(),
+});
+
+export const reportBulletsBlockSchema = z.object({
+  type: z.literal("bullets"),
+  items: z.array(z.string()).min(1),
+});
+
+export const reportNumberedBlockSchema = z.object({
+  type: z.literal("numbered"),
+  items: z.array(z.string()).min(1),
+});
+
+export const reportTableBlockSchema = z.object({
+  type: z.literal("table"),
+  columns: z.array(z.string()).min(1),
+  rows: z.array(z.array(z.any())).default([]),
+  caption: z.string().nullable().optional(),
+});
+
+export const reportImageBlockSchema = z.object({
+  type: z.literal("image"),
+  url: z.string().url(),
+  alt: z.string().nullable().optional(),
+  caption: z.string().nullable().optional(),
+  width: z.number().nullable().optional().describe("Width in pixels or percentage"),
+});
+
+export const reportChartBlockSchema = z.object({
+  type: z.literal("chart"),
+  chart_type: z.enum(["bar", "line", "pie", "area"]).default("bar"),
+  title: z.string().nullable().optional(),
+  data: z.object({
+    labels: z.array(z.string()),
+    values: z.array(z.number()),
+  }),
+});
+
+export const reportQuoteBlockSchema = z.object({
+  type: z.literal("quote"),
+  text: z.string(),
+  attribution: z.string().nullable().optional(),
+});
+
+export const reportContentBlockSchema = z.discriminatedUnion("type", [
+  reportTextBlockSchema,
+  reportHeadingBlockSchema,
+  reportBulletsBlockSchema,
+  reportNumberedBlockSchema,
+  reportTableBlockSchema,
+  reportImageBlockSchema,
+  reportChartBlockSchema,
+  reportQuoteBlockSchema,
+]);
+
+export type ReportContentBlock = z.infer<typeof reportContentBlockSchema>;
+
+export const reportSectionSchema = z.object({
+  title: z.string().min(1),
+  content: z.array(reportContentBlockSchema).default([]),
+});
+
+export type ReportSection = z.infer<typeof reportSectionSchema>;
+
+export const reportSpecSchema = z.object({
+  header: reportHeaderSchema,
+  executive_summary: z.string().nullable().optional().describe("Executive summary paragraph"),
+  sections: z.array(reportSectionSchema).default([]),
+  show_toc: z.boolean().default(false).describe("Show table of contents"),
+  show_page_numbers: z.boolean().default(true),
+  template_style: z.enum(["corporate", "academic", "modern", "minimal"]).default("corporate"),
+});
+
+export type ReportSpec = z.infer<typeof reportSpecSchema>;
+
+// -------------------------
+// Letter specification
+// -------------------------
+
+export const letterSenderSchema = z.object({
+  name: z.string().min(1),
+  address: z.string().describe("Full address with line breaks or comma-separated"),
+  phone: z.string().nullable().optional(),
+  email: z.string().email().nullable().optional(),
+});
+
+export type LetterSender = z.infer<typeof letterSenderSchema>;
+
+export const letterRecipientSchema = z.object({
+  name: z.string().min(1),
+  title: z.string().nullable().optional().describe("Job title"),
+  organization: z.string().nullable().optional(),
+  address: z.string().describe("Full address"),
+});
+
+export type LetterRecipient = z.infer<typeof letterRecipientSchema>;
+
+export const letterSpecSchema = z.object({
+  sender: letterSenderSchema,
+  recipient: letterRecipientSchema,
+  date: z.string().describe("Letter date"),
+  subject: z.string().nullable().optional().describe("Subject line (optional for some letter types)"),
+  salutation: z.string().default("Dear").describe("Greeting, e.g. 'Dear Mr. Smith'"),
+  body_paragraphs: z.array(z.string()).min(1).describe("Body paragraphs of the letter"),
+  closing: z.string().default("Sincerely").describe("Closing phrase, e.g. 'Sincerely', 'Best regards'"),
+  signature_name: z.string().describe("Name to appear in signature"),
+  template_style: z.enum(["formal", "business", "personal", "modern"]).default("formal"),
+});
+
+export type LetterSpec = z.infer<typeof letterSpecSchema>;
+
+// -------------------------
+// JSON Schema exports for LLM prompts
+// -------------------------
+
+export const cvSpecJsonSchema = {
+  type: "object",
+  properties: {
+    header: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Full name" },
+        phone: { type: "string", description: "Phone number" },
+        email: { type: "string", format: "email", description: "Email address" },
+        address: { type: "string", description: "Physical address or city/country" },
+        website: { type: "string", format: "uri", nullable: true, description: "Personal website or portfolio URL" },
+        photo_url: { type: "string", format: "uri", nullable: true, description: "Profile photo URL" },
+      },
+      required: ["name", "phone", "email", "address"],
+    },
+    profile_summary: { type: "string", nullable: true, description: "Professional summary or objective" },
+    work_experience: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          company: { type: "string" },
+          role: { type: "string" },
+          start_date: { type: "string", description: "e.g. 'Jan 2020'" },
+          end_date: { type: "string", nullable: true, description: "End date or null for 'Present'" },
+          location: { type: "string", nullable: true },
+          description: { type: "string", nullable: true },
+          achievements: { type: "array", items: { type: "string" } },
+        },
+        required: ["company", "role", "start_date"],
+      },
+    },
+    education: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          institution: { type: "string" },
+          degree: { type: "string" },
+          field: { type: "string" },
+          start_date: { type: "string" },
+          end_date: { type: "string", nullable: true },
+          gpa: { type: "string", nullable: true },
+          achievements: { type: "array", items: { type: "string" } },
+        },
+        required: ["institution", "degree", "field", "start_date"],
+      },
+    },
+    skills: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Category name" },
+          skills: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                proficiency: { type: "integer", minimum: 1, maximum: 5 },
+              },
+              required: ["name", "proficiency"],
+            },
+          },
+        },
+        required: ["name", "skills"],
+      },
+    },
+    languages: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          proficiency: { type: "integer", minimum: 1, maximum: 5, description: "1=Basic, 5=Native" },
+        },
+        required: ["name", "proficiency"],
+      },
+    },
+    certifications: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          issuer: { type: "string" },
+          date: { type: "string" },
+          url: { type: "string", format: "uri", nullable: true },
+        },
+        required: ["name", "issuer", "date"],
+      },
+    },
+    projects: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          description: { type: "string" },
+          technologies: { type: "array", items: { type: "string" } },
+          url: { type: "string", format: "uri", nullable: true },
+        },
+        required: ["name", "description"],
+      },
+    },
+    template_style: { type: "string", enum: ["modern", "classic", "creative", "minimalist"], default: "modern" },
+    color_scheme: {
+      type: "object",
+      properties: {
+        primary: { type: "string", default: "#1a1a1a", description: "Primary color hex" },
+        accent: { type: "string", default: "#2563eb", description: "Accent color hex" },
+      },
+    },
+  },
+  required: ["header"],
+};
+
+export const reportSpecJsonSchema = {
+  type: "object",
+  properties: {
+    header: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        subtitle: { type: "string", nullable: true },
+        author: { type: "string", nullable: true },
+        date: { type: "string", nullable: true },
+        organization: { type: "string", nullable: true },
+        logo_url: { type: "string", format: "uri", nullable: true },
+      },
+      required: ["title"],
+    },
+    executive_summary: { type: "string", nullable: true, description: "Executive summary paragraph" },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          content: {
+            type: "array",
+            items: {
+              oneOf: [
+                {
+                  type: "object",
+                  properties: { type: { const: "text" }, content: { type: "string" } },
+                  required: ["type", "content"],
+                },
+                {
+                  type: "object",
+                  properties: { type: { const: "heading" }, level: { type: "integer", minimum: 1, maximum: 4 }, text: { type: "string" } },
+                  required: ["type", "text"],
+                },
+                {
+                  type: "object",
+                  properties: { type: { const: "bullets" }, items: { type: "array", items: { type: "string" } } },
+                  required: ["type", "items"],
+                },
+                {
+                  type: "object",
+                  properties: { type: { const: "numbered" }, items: { type: "array", items: { type: "string" } } },
+                  required: ["type", "items"],
+                },
+                {
+                  type: "object",
+                  properties: {
+                    type: { const: "table" },
+                    columns: { type: "array", items: { type: "string" } },
+                    rows: { type: "array", items: { type: "array" } },
+                    caption: { type: "string", nullable: true },
+                  },
+                  required: ["type", "columns"],
+                },
+                {
+                  type: "object",
+                  properties: {
+                    type: { const: "image" },
+                    url: { type: "string", format: "uri" },
+                    alt: { type: "string", nullable: true },
+                    caption: { type: "string", nullable: true },
+                    width: { type: "number", nullable: true },
+                  },
+                  required: ["type", "url"],
+                },
+                {
+                  type: "object",
+                  properties: {
+                    type: { const: "chart" },
+                    chart_type: { type: "string", enum: ["bar", "line", "pie", "area"] },
+                    title: { type: "string", nullable: true },
+                    data: {
+                      type: "object",
+                      properties: {
+                        labels: { type: "array", items: { type: "string" } },
+                        values: { type: "array", items: { type: "number" } },
+                      },
+                      required: ["labels", "values"],
+                    },
+                  },
+                  required: ["type", "data"],
+                },
+                {
+                  type: "object",
+                  properties: {
+                    type: { const: "quote" },
+                    text: { type: "string" },
+                    attribution: { type: "string", nullable: true },
+                  },
+                  required: ["type", "text"],
+                },
+              ],
+            },
+          },
+        },
+        required: ["title"],
+      },
+    },
+    show_toc: { type: "boolean", default: false, description: "Show table of contents" },
+    show_page_numbers: { type: "boolean", default: true },
+    template_style: { type: "string", enum: ["corporate", "academic", "modern", "minimal"], default: "corporate" },
+  },
+  required: ["header"],
+};
+
+export const letterSpecJsonSchema = {
+  type: "object",
+  properties: {
+    sender: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        address: { type: "string", description: "Full address" },
+        phone: { type: "string", nullable: true },
+        email: { type: "string", format: "email", nullable: true },
+      },
+      required: ["name", "address"],
+    },
+    recipient: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        title: { type: "string", nullable: true, description: "Job title" },
+        organization: { type: "string", nullable: true },
+        address: { type: "string" },
+      },
+      required: ["name", "address"],
+    },
+    date: { type: "string", description: "Letter date" },
+    subject: { type: "string", nullable: true, description: "Subject line" },
+    salutation: { type: "string", default: "Dear", description: "Greeting" },
+    body_paragraphs: { type: "array", items: { type: "string" }, minItems: 1, description: "Body paragraphs" },
+    closing: { type: "string", default: "Sincerely", description: "Closing phrase" },
+    signature_name: { type: "string", description: "Name in signature" },
+    template_style: { type: "string", enum: ["formal", "business", "personal", "modern"], default: "formal" },
+  },
+  required: ["sender", "recipient", "date", "body_paragraphs", "signature_name"],
+};
