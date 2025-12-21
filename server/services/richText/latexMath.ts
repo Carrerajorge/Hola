@@ -1,40 +1,48 @@
-import { Math as DocxMath, MathRun } from "docx";
+import { Math as DocxMath } from "docx";
 
-let latexToOmml: ((latex: string) => string) | null = null;
+type MathElement = ReturnType<typeof import("@hungknguyen/docx-math-converter").convertLatex2Math>;
+
+let convertLatex2Math: ((latex: string) => MathElement) | null = null;
+let mathJaxReady: (() => Promise<boolean>) | null = null;
+let converterInitialized = false;
 
 async function loadConverter(): Promise<void> {
-  if (latexToOmml !== null) return;
+  if (converterInitialized) return;
+  converterInitialized = true;
+  
   try {
     const converter = await import("@hungknguyen/docx-math-converter");
-    latexToOmml = converter.latexToOmml || converter.default?.latexToOmml;
-  } catch {
-    latexToOmml = null;
+    convertLatex2Math = converter.convertLatex2Math;
+    mathJaxReady = converter.mathJaxReady;
+    
+    if (mathJaxReady) {
+      await mathJaxReady();
+      console.log("[latexMath] MathJax initialized successfully");
+    }
+  } catch (err) {
+    console.warn("[latexMath] Failed to load converter:", err);
+    convertLatex2Math = null;
+    mathJaxReady = null;
   }
 }
 
 export async function createMathFromLatex(latex: string): Promise<DocxMath | null> {
   await loadConverter();
   
-  if (latexToOmml) {
+  if (convertLatex2Math) {
     try {
-      const omml = latexToOmml(latex);
-      if (omml) {
-        return new DocxMath({
-          children: [new MathRun(omml)],
-        });
+      const mathElement = convertLatex2Math(latex);
+      if (mathElement) {
+        return mathElement as unknown as DocxMath;
       }
     } catch (err) {
-      console.warn("[latexMath] Failed to convert LaTeX to OMML:", err);
+      console.warn("[latexMath] Failed to convert LaTeX:", latex, err);
     }
   }
   
-  return new DocxMath({
-    children: [new MathRun(latex)],
-  });
+  return null;
 }
 
-export function createMathPlaceholder(latex: string): DocxMath {
-  return new DocxMath({
-    children: [new MathRun(latex)],
-  });
+export async function createMathPlaceholder(latex: string): Promise<DocxMath | null> {
+  return createMathFromLatex(latex);
 }

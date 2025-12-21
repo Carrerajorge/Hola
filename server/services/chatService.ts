@@ -383,6 +383,30 @@ REGLAS DE ESCRITURA DE DOCUMENTOS:
 9. Si el usuario pide editar algo, escribe solo el texto editado/corregido.
 10. El contenido se insertará directamente en el editor del usuario.
 
+FORMATO DE TEXTO ENRIQUECIDO (se convertirá a estilos nativos de Office):
+- Para texto en **negrita**, usa **doble asterisco**
+- Para texto en *cursiva*, usa *asterisco simple*
+- Para \`código\`, usa \`comillas invertidas\`
+
+FÓRMULAS MATEMÁTICAS - OBLIGATORIO USAR SINTAXIS LaTeX:
+- Para fórmulas en línea: $x^2 + y^2 = z^2$
+- Para fórmulas en bloque: $$\\frac{a}{b}$$
+- Fracciones: $\\frac{numerador}{denominador}$
+- Exponentes: $x^2$, $x^{n+1}$
+- Subíndices: $x_1$, $a_{ij}$
+- Raíces: $\\sqrt{x}$, $\\sqrt[n]{x}$
+- Letras griegas: $\\alpha$, $\\beta$, $\\pi$, $\\theta$
+- Derivadas: $\\frac{d}{dx}$, $f'(x)$
+- Integrales: $\\int_{a}^{b} f(x) dx$
+- Sumas: $\\sum_{i=1}^{n} x_i$
+- Límites: $\\lim_{x \\to 0}$
+
+IMPORTANTE: SIEMPRE usa $ para envolver fórmulas matemáticas:
+- CORRECTO: "La función $f(x) = x^2$ tiene derivada $f'(x) = 2x$"
+- INCORRECTO: "La función f(x) = x²" (NO uses caracteres Unicode como ², ³, ⁴)
+- INCORRECTO: "f(x) = 8x⁴ - 6x³" (NO uses superíndices Unicode)
+- CORRECTO: "$f(x) = 8x^4 - 6x^3$" (USA LaTeX con $...$)
+
 Escribe contenido limpio y directo.`;
 
   const excelChartInstructions = `
