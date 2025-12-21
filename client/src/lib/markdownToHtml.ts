@@ -27,13 +27,6 @@ const LATEX_COMMANDS = [
  * Detects expressions containing LaTeX commands like \int, \frac, \sin, etc.
  */
 function wrapRawLatex(text: string): string {
-  // Create regex to match LaTeX command patterns not already in $ delimiters
-  const latexCommandPattern = new RegExp(
-    `(?<!\\$)(\\\\(?:${LATEX_COMMANDS.join('|')})(?:[^\\s$]*|\\{[^}]*\\}|\\([^)]*\\)|\\[[^\\]]*\\])*)(?!\\$)`,
-    'g'
-  );
-  
-  // Find lines or expressions containing LaTeX and wrap them appropriately
   const lines = text.split('\n');
   const processedLines = lines.map(line => {
     // Skip lines that are already properly delimited
@@ -47,22 +40,51 @@ function wrapRawLatex(text: string): string {
       return line;
     }
     
-    // If the entire line is a math expression, wrap it as display math
     const trimmed = line.trim();
-    if (trimmed.startsWith('\\') && !trimmed.includes(' ')) {
-      // Single expression on a line - display math
+    
+    // If line is purely a math expression (starts with \ and is mostly math), wrap entire line
+    if (trimmed.startsWith('\\')) {
       return `$$${trimmed}$$`;
     }
     
-    // For inline LaTeX within text, wrap individual expressions
-    // Match LaTeX expressions: starts with \ followed by command and optionally braces/content
-    return line.replace(
-      /(\\(?:int|sum|prod|lim|frac|sqrt|sin|cos|tan|log|ln|exp|infty|alpha|beta|gamma|delta|theta|pi|sigma|partial|nabla|cdot|times|div|pm|mp|leq|geq|neq|approx|equiv|left|right|vec|hat|bar|binom|mathbb|mathcal|mathbf|mathrm|text)(?:\{[^}]*\}|\([^)]*\)|\[[^\]]*\]|[a-zA-Z0-9_^{}()\[\]\s+\-*/=<>.,]+)*)/g,
-      (match) => {
-        // Don't double-wrap if already in delimiters
-        return `$${match}$`;
+    // Find where math expression starts (first backslash) and extract it
+    // Common pattern: "text: \int ... dx" or "text: \frac{...}{...}"
+    const colonIndex = line.lastIndexOf(':');
+    if (colonIndex !== -1) {
+      const beforeColon = line.substring(0, colonIndex + 1);
+      const afterColon = line.substring(colonIndex + 1).trim();
+      
+      // Check if what follows the colon contains LaTeX
+      const afterHasLatex = LATEX_COMMANDS.some(cmd => afterColon.includes(`\\${cmd}`));
+      if (afterHasLatex && afterColon.startsWith('\\')) {
+        // Wrap everything after the colon as math
+        return `${beforeColon} $${afterColon}$`;
       }
-    );
+    }
+    
+    // For lines like "f(x) = expression" or inline math, try to identify math segments
+    // Match continuous math expressions starting with \command and including related content
+    let result = line;
+    
+    // Pattern: match from first \command to end of math-like content
+    // This captures: \int ... dx, \frac{}{}, \sin(x), etc.
+    const mathStartPattern = /\\(int|sum|prod|lim|frac|sqrt|sin|cos|tan|log|ln|exp|partial|nabla|vec|hat|bar|binom|left|right)/;
+    const match = result.match(mathStartPattern);
+    
+    if (match && match.index !== undefined) {
+      const startIdx = match.index;
+      // Find where this math expression likely ends
+      // Look for: end of line, or a sentence-ending pattern not part of math
+      let endIdx = result.length;
+      
+      // Extract the potential math portion
+      const mathPortion = result.substring(startIdx);
+      
+      // Wrap the entire math portion
+      result = result.substring(0, startIdx) + `$${mathPortion}$`;
+    }
+    
+    return result;
   });
   
   return processedLines.join('\n');
