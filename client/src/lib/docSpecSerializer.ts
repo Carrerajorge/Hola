@@ -95,7 +95,8 @@ function convertNode(node: TipTapNode): DocBlock | DocBlock[] | null {
 
 function extractText(node: TipTapNode): string {
   // Handle math nodes from @aarkue/tiptap-math-extension
-  if (node.type === 'math' || node.type === 'mathInline' || node.type === 'mathBlock') {
+  // The extension uses 'inlineMath' as the node type name
+  if (node.type === 'inlineMath' || node.type === 'math' || node.type === 'mathInline' || node.type === 'mathBlock') {
     const latex = node.attrs?.latex as string || '';
     const isBlock = node.type === 'mathBlock' || node.attrs?.display === 'yes';
     return isBlock ? `$$${latex}$$` : `$${latex}$`;
