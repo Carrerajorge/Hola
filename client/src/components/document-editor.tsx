@@ -16,7 +16,7 @@ import { TableHeader } from '@tiptap/extension-table-header';
 import MathExtension from '@aarkue/tiptap-math-extension';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { markdownToHtml } from '@/lib/markdownToHtml';
+import { markdownToTipTap } from '@/lib/markdownToHtml';
 import 'katex/dist/katex.min.css';
 import {
   Bold,
@@ -109,7 +109,7 @@ export function DocumentEditor({
         },
       }),
     ],
-    content: markdownToHtml(content),
+    content: markdownToTipTap(content),
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
     },
@@ -173,8 +173,8 @@ export function DocumentEditor({
         
         if (!text || text.trim() === '') return;
         
-        // Use AST-based markdown to HTML conversion for accurate rendering
-        const htmlContent = markdownToHtml(text);
+        // Use AST-based markdown to HTML conversion that preserves math for TipTap
+        const htmlContent = markdownToTipTap(text);
         
         if (replaceMode) {
           // Replace entire content - used for streaming to show progressive content
