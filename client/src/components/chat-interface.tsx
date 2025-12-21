@@ -56,6 +56,7 @@ import { VirtualComputer } from "@/components/virtual-computer";
 import { DocumentEditor } from "@/components/document-editor";
 import { EnhancedDocumentEditor } from "@/components/ribbon";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
+import { PPTEditorShell } from "@/components/ppt";
 import { ETLDialog } from "@/components/etl-dialog";
 import { FigmaBlock } from "@/components/figma-block";
 import { CodeExecutionBlock } from "@/components/code-execution-block";
@@ -3028,7 +3029,12 @@ export function ChatInterface({
           {/* Right: Document Editor Panel */}
           <Panel defaultSize={50} minSize={25}>
             <div className="h-full animate-in slide-in-from-right duration-300">
-              {(activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
+              {(activeDocEditor?.type === "ppt") ? (
+                <PPTEditorShell
+                  onClose={closeDocEditor}
+                  onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                />
+              ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
                 <SpreadsheetEditor
                   key="excel-editor-stable"
                   title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}

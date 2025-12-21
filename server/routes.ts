@@ -41,6 +41,7 @@ import { renderWordFromSpec } from "./services/wordSpecRenderer";
 import { validateExcelSpec, validateDocSpec } from "./services/documentValidators";
 import { generateExcelFromPrompt, generateWordFromPrompt } from "./services/documentOrchestrator";
 import { excelSpecSchema, docSpecSchema } from "../shared/documentSpecs";
+import { pptExportRouter } from "./routes/pptExport";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -68,6 +69,9 @@ export async function registerRoutes(
   // Setup authentication BEFORE other routes
   await setupAuth(app);
   registerAuthRoutes(app);
+  
+  // PPT Export routes
+  app.use("/api/ppt", pptExportRouter);
 
   const objectStorageService = new ObjectStorageService();
 
