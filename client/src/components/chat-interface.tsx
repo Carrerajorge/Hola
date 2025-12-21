@@ -54,6 +54,7 @@ import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { DocumentEditor } from "@/components/document-editor";
+import { EnhancedDocumentEditor } from "@/components/ribbon";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 import { ETLDialog } from "@/components/etl-dialog";
 import { FigmaBlock } from "@/components/figma-block";
@@ -3039,7 +3040,7 @@ export function ChatInterface({
                   onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
                 />
               ) : (
-                <DocumentEditor
+                <EnhancedDocumentEditor
                   key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
                   title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
                   content={editedDocumentContent}
@@ -3056,7 +3057,6 @@ export function ChatInterface({
                       handleDownloadDocument(previewDocument);
                     }
                   }}
-                  documentType={activeDocEditor ? activeDocEditor.type : (previewDocument?.type || "word")}
                   onTextSelect={handleDocTextSelect}
                   onTextDeselect={handleDocTextDeselect}
                   onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}

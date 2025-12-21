@@ -1657,6 +1657,82 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     }
   });
 
+  // AI-powered document command planning
+  app.post("/api/documents/plan", async (req, res) => {
+    try {
+      const { prompt, selectedText, documentContent } = req.body;
+      
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+
+      const systemPrompt = `You are a document editing assistant. Given a user's instruction, generate a plan of document editing commands.
+
+Available commands:
+- bold: Toggle bold formatting
+- italic: Toggle italic formatting
+- underline: Toggle underline formatting
+- strikethrough: Toggle strikethrough
+- heading1, heading2, heading3: Set heading level
+- paragraph: Set as paragraph
+- bulletList: Toggle bullet list
+- orderedList: Toggle numbered list
+- alignLeft, alignCenter, alignRight, alignJustify: Text alignment
+- insertLink: Insert link (payload: {url: string})
+- insertImage: Insert image (payload: {src: string})
+- insertTable: Insert table (payload: {rows: number, cols: number})
+- blockquote: Toggle blockquote
+- codeBlock: Toggle code block
+- insertHorizontalRule: Insert horizontal line
+- setTextColor: Set text color (payload: {color: string})
+- setHighlight: Highlight text (payload: {color: string})
+- insertText: Insert text (payload: {text: string})
+- replaceSelection: Replace selected text (payload: {content: string})
+- clearFormatting: Remove all formatting
+
+Respond with a JSON object containing:
+{
+  "intent": "brief description of what user wants",
+  "commands": [
+    {"name": "commandName", "payload": {...}, "description": "what this step does"}
+  ]
+}
+
+Only respond with valid JSON, no markdown code blocks.`;
+
+      const userMessage = `User instruction: ${prompt}
+${selectedText ? `\nSelected text: "${selectedText}"` : ''}
+${documentContent ? `\nDocument context (first 500 chars): "${documentContent.substring(0, 500)}"` : ''}
+
+Generate the command plan:`;
+
+      const result = await llmGateway.chat([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage }
+      ], {
+        temperature: 0.3,
+        maxTokens: 1024,
+      });
+
+      let plan;
+      try {
+        const jsonStr = result.content.replace(/```json\n?|\n?```/g, '').trim();
+        plan = JSON.parse(jsonStr);
+      } catch {
+        plan = {
+          intent: prompt,
+          commands: [],
+          error: "Failed to parse AI response"
+        };
+      }
+
+      res.json(plan);
+    } catch (error: any) {
+      console.error("Document plan error:", error);
+      res.status(500).json({ error: "Failed to generate document plan", details: error.message });
+    }
+  });
+
   // Admin API Routes
   
   // Dashboard metrics
