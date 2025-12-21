@@ -1503,7 +1503,7 @@ export function ChatInterface({
     
     if (validFiles.length === 0) return;
 
-    const uploadPromises = validFiles.map(async (file) => {
+    for (const file of validFiles) {
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`;
       const isImage = file.type.startsWith("image/");
       
@@ -1522,77 +1522,59 @@ export function ChatInterface({
         type: file.type,
         mimeType: file.type,
         size: file.size,
-        status: "uploading",
+        status: "ready",
         dataUrl,
       };
       setUploadedFiles((prev) => [...prev, tempFile]);
 
-      try {
-        const urlRes = await fetch("/api/objects/upload", { method: "POST" });
-        const { uploadURL, storagePath } = await urlRes.json();
-        if (!uploadURL || !storagePath) throw new Error("No upload URL received");
+      uploadFileInBackground(file, tempId, isImage);
+    }
+  };
+  
+  const uploadFileInBackground = async (file: File, tempId: string, isImage: boolean) => {
+    try {
+      const urlRes = await fetch("/api/objects/upload", { method: "POST" });
+      const { uploadURL, storagePath } = await urlRes.json();
+      if (!uploadURL || !storagePath) throw new Error("No upload URL received");
 
-        const uploadRes = await fetch(uploadURL, {
-          method: "PUT",
-          headers: { "Content-Type": file.type },
-          body: file,
-        });
-        if (!uploadRes.ok) throw new Error("Upload failed");
+      const uploadRes = await fetch(uploadURL, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!uploadRes.ok) throw new Error("Upload failed");
 
-        if (isImage) {
-          const registerRes = await fetch("/api/files/quick", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: file.name,
-              type: file.type,
-              size: file.size,
-              storagePath,
-            }),
-          });
-          const registeredFile = await registerRes.json();
-          if (!registerRes.ok) throw new Error(registeredFile.error);
-          
-          setUploadedFiles((prev) =>
-            prev.map((f) =>
-              f.id === tempId
-                ? { ...f, id: registeredFile.id, storagePath, status: "ready" }
-                : f
-            )
-          );
-        } else {
-          const registerRes = await fetch("/api/files", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: file.name,
-              type: file.type,
-              size: file.size,
-              storagePath,
-            }),
-          });
-          const registeredFile = await registerRes.json();
-          if (!registerRes.ok) throw new Error(registeredFile.error);
+      const endpoint = isImage ? "/api/files/quick" : "/api/files";
+      const registerRes = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          storagePath,
+        }),
+      });
+      const registeredFile = await registerRes.json();
+      if (!registerRes.ok) throw new Error(registeredFile.error);
+      
+      setUploadedFiles((prev) =>
+        prev.map((f) =>
+          f.id === tempId
+            ? { ...f, id: registeredFile.id, storagePath }
+            : f
+        )
+      );
 
-          setUploadedFiles((prev) =>
-            prev.map((f) =>
-              f.id === tempId
-                ? { ...f, id: registeredFile.id, storagePath, status: "processing" }
-                : f
-            )
-          );
-
-          pollFileStatusFast(registeredFile.id, tempId);
-        }
-      } catch (error) {
-        console.error("File upload error:", error);
-        setUploadedFiles((prev) =>
-          prev.map((f) => (f.id === tempId ? { ...f, status: "error" } : f))
-        );
+      if (!isImage) {
+        pollFileStatusFast(registeredFile.id, tempId);
       }
-    });
-
-    await Promise.all(uploadPromises);
+    } catch (error) {
+      console.error("Background upload error:", error);
+      setUploadedFiles((prev) =>
+        prev.map((f) => (f.id === tempId ? { ...f, status: "error" } : f))
+      );
+    }
   };
   
   const pollFileStatusFast = async (fileId: string, trackingId: string) => {
