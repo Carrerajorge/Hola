@@ -22,8 +22,9 @@ function normalizeMarkdown(text: string): string {
 }
 
 /**
- * Custom rehype plugin that preserves math delimiters for TipTap's MathExtension.
- * Instead of rendering math with KaTeX, it keeps the $...$ and $$...$$ syntax intact.
+ * Custom rehype plugin that converts math nodes to TipTap-compatible format.
+ * Instead of rendering math with KaTeX, it creates span elements with
+ * data-type="inlineMath" that TipTap's MathExtension can parse.
  */
 function rehypePreserveMath() {
   return (tree: Root) => {
@@ -38,8 +39,19 @@ function rehypePreserveMath() {
         node.properties.className.includes('math-inline')
       ) {
         const latex = extractTextFromNode(node);
-        const textNode: Text = { type: 'text', value: `$${latex}$` };
-        (parent as Element).children.splice(index, 1, textNode);
+        // Create a TipTap-compatible math span
+        const mathSpan: Element = {
+          type: 'element',
+          tagName: 'span',
+          properties: {
+            'data-type': 'inlineMath',
+            'data-latex': latex,
+            'data-evaluate': 'no',
+            'data-display': 'no'
+          },
+          children: [{ type: 'text', value: `$${latex}$` }]
+        };
+        (parent as Element).children.splice(index, 1, mathSpan);
         return;
       }
       
@@ -51,12 +63,24 @@ function rehypePreserveMath() {
         node.properties.className.includes('math-display')
       ) {
         const latex = extractTextFromNode(node);
-        // Wrap in a paragraph with the display math
+        // Create a TipTap-compatible math span with display mode
+        const mathSpan: Element = {
+          type: 'element',
+          tagName: 'span',
+          properties: {
+            'data-type': 'inlineMath',
+            'data-latex': latex,
+            'data-evaluate': 'no',
+            'data-display': 'yes'
+          },
+          children: [{ type: 'text', value: `$$${latex}$$` }]
+        };
+        // Wrap in a paragraph
         const paragraph: Element = {
           type: 'element',
           tagName: 'p',
           properties: {},
-          children: [{ type: 'text', value: `$$${latex}$$` }]
+          children: [mathSpan]
         };
         (parent as Element).children.splice(index, 1, paragraph);
         return;
