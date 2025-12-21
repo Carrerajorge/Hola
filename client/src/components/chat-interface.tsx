@@ -33,7 +33,11 @@ import {
   MessageSquare,
   Square,
   Download,
-  GripVertical
+  GripVertical,
+  Pause,
+  Play,
+  Trash2,
+  Circle
 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
@@ -798,6 +802,9 @@ export function ChatInterface({
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isETLDialogOpen, setIsETLDialogOpen] = useState(false);
   const [figmaTokenInput, setFigmaTokenInput] = useState("");
   const [isFigmaConnecting, setIsFigmaConnecting] = useState(false);
@@ -853,6 +860,25 @@ export function ChatInterface({
       }
     };
   }, []);
+
+  // Recording timer effect
+  useEffect(() => {
+    if (isRecording && !isPaused) {
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, [isRecording, isPaused]);
 
   // Close file attachment preview on Escape key
   useEffect(() => {
@@ -1041,7 +1067,7 @@ export function ChatInterface({
     }
   };
 
-  const toggleVoiceRecording = () => {
+  const startVoiceRecording = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
@@ -1049,53 +1075,144 @@ export function ChatInterface({
       return;
     }
 
-    if (isRecording) {
-      if (speechRecognitionRef.current) {
-        speechRecognitionRef.current.stop();
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'es-ES';
+
+    let finalTranscript = '';
+    let interimTranscript = '';
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+      setRecordingTime(0);
+      setIsPaused(false);
+      finalTranscript = input;
+    };
+
+    recognition.onresult = (event: any) => {
+      interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+        } else {
+          interimTranscript = transcript;
+        }
+      }
+      setInput(finalTranscript + (interimTranscript ? ' ' + interimTranscript : ''));
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      setIsRecording(false);
+      setRecordingTime(0);
+      setIsPaused(false);
+      speechRecognitionRef.current = null;
+    };
+
+    recognition.onend = () => {
+      // Don't auto-reset if paused - user might resume
+      if (!isPaused) {
+        setIsRecording(false);
         speechRecognitionRef.current = null;
       }
-      setIsRecording(false);
+    };
+
+    speechRecognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const toggleVoiceRecording = () => {
+    if (isRecording) {
+      stopVoiceRecording();
     } else {
+      startVoiceRecording();
+    }
+  };
+
+  const pauseVoiceRecording = () => {
+    if (speechRecognitionRef.current && isRecording) {
+      speechRecognitionRef.current.stop();
+      setIsPaused(true);
+    }
+  };
+
+  const resumeVoiceRecording = () => {
+    if (isPaused) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
+
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = 'es-ES';
 
-      let finalTranscript = '';
-      let interimTranscript = '';
+      let currentInput = input;
 
       recognition.onstart = () => {
-        setIsRecording(true);
-        finalTranscript = input;
+        setIsPaused(false);
       };
 
       recognition.onresult = (event: any) => {
-        interimTranscript = '';
+        let interimTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
-            finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+            currentInput += (currentInput ? ' ' : '') + transcript;
           } else {
             interimTranscript = transcript;
           }
         }
-        setInput(finalTranscript + (interimTranscript ? ' ' + interimTranscript : ''));
+        setInput(currentInput + (interimTranscript ? ' ' + interimTranscript : ''));
       };
 
       recognition.onerror = (event: any) => {
         console.error('Speech recognition error:', event.error);
         setIsRecording(false);
+        setRecordingTime(0);
+        setIsPaused(false);
         speechRecognitionRef.current = null;
       };
 
       recognition.onend = () => {
-        setIsRecording(false);
-        speechRecognitionRef.current = null;
+        if (!isPaused) {
+          setIsRecording(false);
+          speechRecognitionRef.current = null;
+        }
       };
 
       speechRecognitionRef.current = recognition;
       recognition.start();
     }
+  };
+
+  const stopVoiceRecording = () => {
+    if (speechRecognitionRef.current) {
+      speechRecognitionRef.current.stop();
+      speechRecognitionRef.current = null;
+    }
+    setIsRecording(false);
+    setRecordingTime(0);
+    setIsPaused(false);
+  };
+
+  const discardVoiceRecording = () => {
+    stopVoiceRecording();
+    setInput("");
+  };
+
+  const sendVoiceRecording = () => {
+    stopVoiceRecording();
+    if (input.trim()) {
+      handleSubmit();
+    }
+  };
+
+  const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const handleOpenDocumentPreview = (doc: DocumentBlock) => {
@@ -4248,74 +4365,165 @@ export function ChatInterface({
                 />
 
                 <div className="flex items-center gap-1 pb-1">
-                  {/* Mic button for dictation - always visible when not recording */}
+                  {/* Compact Recording UI - shown when recording */}
                   {isRecording ? (
-                    <Button 
-                      onClick={toggleVoiceRecording}
-                      size="icon" 
-                      className="h-9 w-9 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50"
-                      data-testid="button-voice-recording-active"
-                    >
-                      <MicOff className="h-5 w-5" />
-                    </Button>
-                  ) : (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button 
-                          variant="ghost"
-                          onClick={toggleVoiceRecording}
-                          size="icon" 
-                          className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted"
-                          data-testid="button-voice-dictation"
-                        >
-                          <Mic className="h-5 w-5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Dictar texto</TooltipContent>
-                    </Tooltip>
-                  )}
-
-                  {/* Voice chat mode button - opens fullscreen conversation */}
-                  {aiState !== "idle" ? (
-                    <Button 
-                      onClick={handleStopChat}
-                      size="icon" 
-                      className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50"
-                      data-testid="button-stop-chat"
-                    >
-                      <Square className="h-5 w-5 fill-current" />
-                    </Button>
-                  ) : input.trim().length > 0 || uploadedFiles.length > 0 ? (
                     <motion.div
-                      initial={{ scale: 0.8, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      exit={{ scale: 0.8, opacity: 0 }}
-                      transition={{ duration: 0.2, ease: "easeOut" }}
-                      key="send-button"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      className="flex items-center gap-3 px-2"
+                      data-testid="recording-ui-compact"
                     >
-                      <Button 
-                        onClick={handleSubmit}
-                        size="icon" 
-                        className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn"
-                        data-testid="button-send-message"
-                      >
-                        <ArrowUp className="h-5 w-5" />
-                      </Button>
+                      {/* Trash/Discard Button */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={discardVoiceRecording}
+                            className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all"
+                            data-testid="button-discard-recording"
+                          >
+                            <Trash2 className="h-5 w-5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Descartar grabación</TooltipContent>
+                      </Tooltip>
+
+                      {/* Recording Indicator + Timer + Waveform */}
+                      <div className="flex items-center gap-2">
+                        {/* Red dot indicator */}
+                        <motion.div
+                          animate={isPaused ? {} : { scale: [1, 1.2, 1] }}
+                          transition={{ duration: 1, repeat: Infinity }}
+                          className={cn(
+                            "w-2.5 h-2.5 rounded-full",
+                            isPaused ? "bg-muted-foreground" : "bg-red-500"
+                          )}
+                        />
+                        
+                        {/* Timer */}
+                        <span className="text-lg font-medium tabular-nums min-w-[48px]" data-testid="recording-timer">
+                          {formatRecordingTime(recordingTime)}
+                        </span>
+
+                        {/* Simple Waveform Visualization */}
+                        <div className="flex items-center gap-0.5 h-6">
+                          {Array.from({ length: 20 }).map((_, i) => (
+                            <motion.div
+                              key={i}
+                              animate={isPaused ? { height: 4 } : { 
+                                height: [4, 8 + Math.random() * 12, 4, 12 + Math.random() * 8, 4]
+                              }}
+                              transition={{
+                                duration: 0.5 + Math.random() * 0.3,
+                                repeat: Infinity,
+                                delay: i * 0.05
+                              }}
+                              className="w-0.5 bg-muted-foreground/60 rounded-full"
+                              style={{ height: isPaused ? 4 : undefined }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Pause/Resume Button */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={isPaused ? resumeVoiceRecording : pauseVoiceRecording}
+                            className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 transition-all"
+                            data-testid={isPaused ? "button-resume-recording" : "button-pause-recording"}
+                          >
+                            {isPaused ? (
+                              <Play className="h-5 w-5" />
+                            ) : (
+                              <Pause className="h-5 w-5" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{isPaused ? "Continuar" : "Pausar"}</TooltipContent>
+                      </Tooltip>
+
+                      {/* Send Button */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon"
+                            onClick={sendVoiceRecording}
+                            disabled={!input.trim()}
+                            className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 bg-transparent hover:bg-muted text-foreground disabled:opacity-50 transition-all"
+                            data-testid="button-send-recording"
+                          >
+                            <ArrowUp className="h-5 w-5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Enviar mensaje</TooltipContent>
+                      </Tooltip>
                     </motion.div>
                   ) : (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+                    <>
+                      {/* Mic button for dictation - shown when not recording */}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button 
+                            variant="ghost"
+                            onClick={toggleVoiceRecording}
+                            size="icon" 
+                            className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted"
+                            data-testid="button-voice-dictation"
+                          >
+                            <Mic className="h-5 w-5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Dictar texto</TooltipContent>
+                      </Tooltip>
+
+                      {/* Voice chat mode button - opens fullscreen conversation */}
+                      {aiState !== "idle" ? (
                         <Button 
-                          onClick={() => setIsVoiceChatOpen(true)}
+                          onClick={handleStopChat}
                           size="icon" 
-                          className="h-9 w-9 rounded-full transition-all duration-300 bg-foreground text-background hover:bg-foreground/90"
-                          data-testid="button-voice-chat-mode"
+                          className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50"
+                          data-testid="button-stop-chat"
                         >
-                          <AudioLines className="h-5 w-5" />
+                          <Square className="h-5 w-5 fill-current" />
                         </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Modo conversación por voz</TooltipContent>
-                    </Tooltip>
+                      ) : input.trim().length > 0 || uploadedFiles.length > 0 ? (
+                        <motion.div
+                          initial={{ scale: 0.8, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          exit={{ scale: 0.8, opacity: 0 }}
+                          transition={{ duration: 0.2, ease: "easeOut" }}
+                          key="send-button"
+                        >
+                          <Button 
+                            onClick={handleSubmit}
+                            size="icon" 
+                            className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn"
+                            data-testid="button-send-message"
+                          >
+                            <ArrowUp className="h-5 w-5" />
+                          </Button>
+                        </motion.div>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button 
+                              onClick={() => setIsVoiceChatOpen(true)}
+                              size="icon" 
+                              className="h-9 w-9 rounded-full transition-all duration-300 bg-foreground text-background hover:bg-foreground/90"
+                              data-testid="button-voice-chat-mode"
+                            >
+                              <AudioLines className="h-5 w-5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Modo conversación por voz</TooltipContent>
+                        </Tooltip>
+                      )}
+                    </>
                   )}
                 </div>
                 </div>
