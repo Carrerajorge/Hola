@@ -1,5 +1,9 @@
 import ExcelJS from "exceljs";
-import type { ExcelSpec, TableSpec, ChartSpec, SheetLayoutSpec } from "../../shared/documentSpecs";
+import type { ExcelSpec, TableSpec, ChartSpec, SheetLayoutSpec, HeaderStyle } from "../../shared/documentSpecs";
+
+const FORMULA_PREFIXES = ["=", "+", "-", "@"];
+const MIN_COL_WIDTH = 8;
+const MAX_COL_WIDTH = 60;
 
 function parseCellReference(ref: string): { col: number; row: number } {
   const match = ref.match(/^([A-Z]+)(\d+)$/i);
@@ -23,6 +27,44 @@ function columnIndexToLetter(index: number): string {
     index = Math.floor((index - 1) / 26);
   }
   return letter || "A";
+}
+
+function escapeFormulaText(value: any): any {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return value;
+  }
+  const trimmed = value.trimStart();
+  if (trimmed.length > 0 && FORMULA_PREFIXES.includes(trimmed[0])) {
+    return "'" + value;
+  }
+  return value;
+}
+
+function sanitizeTableName(name: string | null | undefined, fallbackIndex: number): string {
+  if (!name) {
+    return `Table${fallbackIndex}`;
+  }
+  let cleaned = name.replace(/[^A-Za-z0-9_]/g, "_").trim();
+  if (!cleaned) {
+    return `Table${fallbackIndex}`;
+  }
+  if (!/^[A-Za-z_]/.test(cleaned)) {
+    cleaned = `T_${cleaned}`;
+  }
+  return cleaned.slice(0, 255);
+}
+
+function heuristicColumnWidth(values: any[]): number {
+  let maxLen = 0;
+  for (const v of values) {
+    const s = v === null || v === undefined ? "" : String(v);
+    maxLen = Math.max(maxLen, s.length);
+  }
+  const width = maxLen + 2;
+  return Math.min(Math.max(width, MIN_COL_WIDTH), MAX_COL_WIDTH);
 }
 
 let tableCounter = 0;
@@ -63,14 +105,26 @@ function renderTable(worksheet: ExcelJS.Worksheet, table: TableSpec): void {
   
   const endCol = startCol + table.headers.length - 1;
   const endRow = startRow + (table.rows?.length || 0);
-  const endColLetter = columnIndexToLetter(endCol);
-  const startColLetter = columnIndexToLetter(startCol);
   
   tableCounter++;
-  const tableName = `Table${tableCounter}`;
+  const tableName = sanitizeTableName(table.name, tableCounter);
   
   const tableStyle = table.table_style || "TableStyleMedium9";
-  
+  const formulas = table.formulas || {};
+  const formulaHeaders = new Set(Object.keys(formulas));
+
+  const processedRows = (table.rows || []).map((row, rowIdx) => {
+    const excelRowNum = startRow + 1 + rowIdx;
+    return row.map((value, colIdx) => {
+      const header = table.headers[colIdx];
+      if (formulaHeaders.has(header)) {
+        const template = formulas[header];
+        return template.replace(/\{row\}/g, String(excelRowNum));
+      }
+      return escapeFormulaText(value);
+    });
+  });
+
   worksheet.addTable({
     name: tableName,
     ref: table.anchor,
@@ -85,11 +139,14 @@ function renderTable(worksheet: ExcelJS.Worksheet, table: TableSpec): void {
       name: header,
       filterButton: table.autofilter !== false,
     })),
-    rows: table.rows || [],
+    rows: processedRows,
   });
-  
+
+  const headerStyle = table.header_style || {};
+  applyHeaderStyle(worksheet, startRow, startCol, table.headers, headerStyle);
+
   if (table.column_formats) {
-    for (let rowIdx = 0; rowIdx <= (table.rows?.length || 0); rowIdx++) {
+    for (let rowIdx = 1; rowIdx <= (table.rows?.length || 0); rowIdx++) {
       const excelRow = worksheet.getRow(startRow + rowIdx);
       table.headers.forEach((header, colIdx) => {
         if (table.column_formats![header]) {
@@ -100,6 +157,8 @@ function renderTable(worksheet: ExcelJS.Worksheet, table: TableSpec): void {
     }
   }
 
+  applyAutoFitForTable(worksheet, table, startCol);
+
   if (table.freeze_header !== false) {
     worksheet.views = [
       { state: "frozen", xSplit: 0, ySplit: startRow },
@@ -107,26 +166,80 @@ function renderTable(worksheet: ExcelJS.Worksheet, table: TableSpec): void {
   }
 }
 
-function renderChart(worksheet: ExcelJS.Worksheet, chart: ChartSpec, sheetName: string): void {
-  // NOTE: ExcelJS has very limited chart support - the addChart method doesn't exist
-  // in the standard ExcelJS API. Charts would require using a different library like
-  // xlsx-chart or generating the chart XML manually.
-  // 
-  // For now, we skip chart creation and add a placeholder comment cell instead.
-  // If charts are critical, consider:
-  // 1. Using xlsx-chart library for chart generation
-  // 2. Creating the data and letting users add charts manually in Excel
-  // 3. Using a Python-based solution with openpyxl which has better chart support
+function applyHeaderStyle(
+  worksheet: ExcelJS.Worksheet,
+  headerRow: number,
+  startCol: number,
+  headers: string[],
+  style: Partial<HeaderStyle>
+): void {
+  const row = worksheet.getRow(headerRow);
   
+  headers.forEach((_, colIdx) => {
+    const cell = row.getCell(startCol + colIdx);
+    
+    const fontOptions: Partial<ExcelJS.Font> = {};
+    if (style.bold !== false) {
+      fontOptions.bold = true;
+    }
+    if (Object.keys(fontOptions).length > 0) {
+      cell.font = { ...cell.font, ...fontOptions };
+    }
+
+    if (style.fill_color) {
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: `FF${style.fill_color.replace(/^#/, "")}` },
+      };
+    }
+
+    const alignmentOptions: Partial<ExcelJS.Alignment> = {};
+    if (style.text_align) {
+      alignmentOptions.horizontal = style.text_align;
+    }
+    if (style.wrap_text !== false) {
+      alignmentOptions.wrapText = true;
+    }
+    alignmentOptions.vertical = "middle";
+    
+    if (Object.keys(alignmentOptions).length > 0) {
+      cell.alignment = { ...cell.alignment, ...alignmentOptions };
+    }
+  });
+}
+
+function applyAutoFitForTable(
+  worksheet: ExcelJS.Worksheet,
+  table: TableSpec,
+  startCol: number
+): void {
+  table.headers.forEach((header, colIdx) => {
+    const colLetter = columnIndexToLetter(startCol + colIdx);
+    const column = worksheet.getColumn(startCol + colIdx);
+    
+    if (column.width !== undefined && column.width !== 8.43) {
+      return;
+    }
+
+    const columnValues: any[] = [header];
+    for (const row of table.rows || []) {
+      columnValues.push(row[colIdx]);
+    }
+
+    column.width = heuristicColumnWidth(columnValues);
+  });
+}
+
+function renderChart(worksheet: ExcelJS.Worksheet, chart: ChartSpec, sheetName: string): void {
   try {
     const position = parseCellReference(chart.position || "H2");
     const cell = worksheet.getRow(position.row).getCell(position.col);
     cell.value = `[Chart placeholder: ${chart.title || chart.type || 'Chart'} - Charts require manual creation in Excel]`;
     cell.font = { italic: true, color: { argb: "FF808080" } };
   } catch (error) {
-    // If position parsing fails, place chart info at a default location
     console.warn(`[ExcelRenderer] Invalid chart position "${chart.position}", using default H2`);
-    const cell = worksheet.getRow(2).getCell(8); // H2
+    const cell = worksheet.getRow(2).getCell(8);
     cell.value = `[Chart: ${chart.title || chart.type || 'Chart'}]`;
     cell.font = { italic: true, color: { argb: "FF808080" } };
   }
@@ -156,12 +269,13 @@ function applyLayout(worksheet: ExcelJS.Worksheet, layout: SheetLayoutSpec): voi
   if (layout.auto_fit_columns !== false) {
     worksheet.columns?.forEach(column => {
       if (column.width === undefined || column.width === 8.43) {
-        let maxLength = 10;
+        const values: any[] = [];
         column.eachCell?.({ includeEmpty: false }, cell => {
-          const cellValue = cell.value?.toString() || "";
-          maxLength = Math.max(maxLength, cellValue.length + 2);
+          values.push(cell.value);
         });
-        column.width = Math.min(maxLength, 50);
+        if (values.length > 0) {
+          column.width = heuristicColumnWidth(values);
+        }
       }
     });
   }
