@@ -3027,7 +3027,7 @@ export function ChatInterface({
           </PanelResizeHandle>
 
           {/* Right: Document Editor Panel */}
-          <Panel defaultSize={50} minSize={25}>
+          <Panel defaultSize={activeDocEditor ? 75 : 50} minSize={25}>
             <div className="h-full animate-in slide-in-from-right duration-300">
               {(activeDocEditor?.type === "ppt") ? (
                 <PPTEditorShell

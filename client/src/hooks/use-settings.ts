@@ -232,7 +232,10 @@ async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null
       credentials: 'include',
     });
     if (!response.ok) {
-      console.error("Failed to fetch settings from server:", response.status);
+      if (response.status === 401) {
+        return null;
+      }
+      console.warn("Failed to fetch settings from server:", response.status);
       return null;
     }
     return await response.json();
