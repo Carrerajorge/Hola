@@ -3,7 +3,7 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import { useEffect } from "react";
 import { SettingsProvider } from "@/contexts/SettingsContext";
 import Home from "@/pages/home";
 import ProfilePage from "@/pages/profile";
@@ -17,42 +17,15 @@ import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
 import NotFound from "@/pages/not-found";
 
-interface AuthContextType {
-  isLoggedIn: boolean;
-  login: () => void;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextType | null>(null);
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
-}
-
-function AuthProvider({ children }: { children: ReactNode }) {
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return localStorage.getItem("sira_logged_in") === "true";
-  });
-
-  const login = () => {
-    localStorage.setItem("sira_logged_in", "true");
-    setIsLoggedIn(true);
-  };
-
-  const logout = () => {
-    localStorage.removeItem("sira_logged_in");
-    setIsLoggedIn(false);
-  };
-
-  return (
-    <AuthContext.Provider value={{ isLoggedIn, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+function AuthCallbackHandler() {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("auth") === "success") {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+  return null;
 }
 
 function Router() {
@@ -76,14 +49,13 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <SettingsProvider>
-          <TooltipProvider>
-            <Toaster />
-            <Router />
-          </TooltipProvider>
-        </SettingsProvider>
-      </AuthProvider>
+      <SettingsProvider>
+        <TooltipProvider>
+          <AuthCallbackHandler />
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </SettingsProvider>
     </QueryClientProvider>
   );
 }

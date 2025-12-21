@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
 import type { User } from "@shared/schema";
 
 async function fetchUser(): Promise<User | null> {
@@ -7,32 +8,6 @@ async function fetchUser(): Promise<User | null> {
   });
 
   if (response.status === 401) {
-    // Check if admin is logged in via localStorage (admin login fallback)
-    const adminLoggedIn = localStorage.getItem("sira_admin_logged_in") === "true";
-    if (adminLoggedIn) {
-      return {
-        id: "admin-user-id",
-        email: localStorage.getItem("sira_admin_email") || "admin@gmail.com",
-        firstName: "Admin",
-        lastName: "User",
-        profileImageUrl: null,
-        role: "admin",
-      } as User;
-    }
-    // Check if regular user is logged in via localStorage
-    const userLoggedIn = localStorage.getItem("sira_logged_in") === "true";
-    const userDataStr = localStorage.getItem("sira_user_data");
-    if (userLoggedIn && userDataStr) {
-      try {
-        return JSON.parse(userDataStr) as User;
-      } catch {
-        localStorage.removeItem("sira_logged_in");
-        localStorage.removeItem("sira_user_data");
-      }
-    }
-    // Clear any stale login state
-    localStorage.removeItem("sira_logged_in");
-    localStorage.removeItem("sira_user_data");
     return null;
   }
 
@@ -44,16 +19,42 @@ async function fetchUser(): Promise<User | null> {
 }
 
 export function useAuth() {
-  const { data: user, isLoading } = useQuery<User | null>({
+  const queryClient = useQueryClient();
+  
+  const { data: user, isLoading, refetch } = useQuery<User | null>({
     queryKey: ["/api/auth/user"],
     queryFn: fetchUser,
     retry: false,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
+  const login = useCallback(() => {
+    window.location.href = "/api/login";
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (e) {
+      // Ignore errors, still clear local state
+    }
+    queryClient.setQueryData(["/api/auth/user"], null);
+    window.location.href = "/welcome";
+  }, [queryClient]);
+
+  const refreshAuth = useCallback(() => {
+    refetch();
+  }, [refetch]);
+
   return {
     user,
     isLoading,
     isAuthenticated: !!user,
+    login,
+    logout,
+    refreshAuth,
   };
 }

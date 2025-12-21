@@ -76,18 +76,9 @@ export function Sidebar({
   onOpenLibrary
 }: SidebarProps) {
   const [, setLocation] = useLocation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const handleLogout = () => {
-    // Clear all auth-related localStorage
-    localStorage.removeItem("sira_logged_in");
-    localStorage.removeItem("sira_admin_logged_in");
-    localStorage.removeItem("sira_admin_email");
-    // Call server logout to clear session then redirect
-    fetch("/api/logout").then(() => {
-      window.location.href = "/welcome";
-    }).catch(() => {
-      window.location.href = "/welcome";
-    });
+    logout();
   };
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");

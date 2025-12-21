@@ -25,23 +25,7 @@ export default function LoginPage() {
         });
         
         if (response.ok) {
-          const data = await response.json();
-          const user = data.user;
-          // Check if user is admin
-          if (user?.role === "admin") {
-            localStorage.setItem("sira_admin_logged_in", "true");
-            localStorage.setItem("sira_admin_email", email);
-          } else {
-            localStorage.setItem("sira_logged_in", "true");
-            localStorage.setItem("sira_user_email", email);
-            // Save user data for fallback auth
-            const userData = { ...user };
-            delete userData.password; // Don't store password
-            localStorage.setItem("sira_user_data", JSON.stringify(userData));
-          }
-          // Set user data in query cache directly for immediate access
-          queryClient.setQueryData(["/api/auth/user"], user);
-          // Navigate to home using React router (no page reload)
+          await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
           setLocation("/");
         } else {
           const data = await response.json();

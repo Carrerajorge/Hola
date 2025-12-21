@@ -43,9 +43,8 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/hooks/use-language";
 import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/App";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAuth as useAuthHook } from "@/hooks/use-auth";
+import { useAuth } from "@/hooks/use-auth";
 import { 
   Sparkles, 
   CheckSquare, 
@@ -139,7 +138,7 @@ const eventTypeIcons: Record<string, React.ReactNode> = {
 };
 
 function NotificationsSection() {
-  const { user } = useAuthHook();
+  const { user } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
 
@@ -409,7 +408,7 @@ interface PrivacySettings {
 }
 
 function AppsSection() {
-  const { user } = useAuthHook();
+  const { user } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -796,7 +795,7 @@ function AppsSection() {
 }
 
 function DataControlsSection() {
-  const { user } = useAuthHook();
+  const { user } = useAuth();
   const userId = user?.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();

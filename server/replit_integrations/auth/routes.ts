@@ -168,6 +168,32 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
+  // Logout via POST (for SPA - clears session without redirect)
+  app.post("/api/auth/logout", async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (userId) {
+        await storage.createAuditLog({
+          userId,
+          action: "user_logout",
+          resource: "auth",
+          details: {},
+          ipAddress: req.ip || req.socket.remoteAddress || null,
+          userAgent: req.headers["user-agent"] || null
+        });
+      }
+      req.logout((err: any) => {
+        if (err) {
+          console.error("Logout error:", err);
+        }
+        res.json({ success: true });
+      });
+    } catch (error) {
+      console.error("Logout error:", error);
+      res.json({ success: true });
+    }
+  });
+
   // Get current authenticated user
   app.get("/api/auth/user", async (req: any, res) => {
     try {
