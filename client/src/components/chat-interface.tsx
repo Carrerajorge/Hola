@@ -61,6 +61,7 @@ import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { SiraLogo } from "@/components/sira-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
+import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { useAuth } from "@/hooks/use-auth";
 import { Database, Sparkles, AudioLines } from "lucide-react";
@@ -802,6 +803,8 @@ export function ChatInterface({
   const [selectedModel, setSelectedModel] = useState<string>("gemini-3-flash-preview");
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
+  const [isDocGeneratorOpen, setIsDocGeneratorOpen] = useState(false);
+  const [docGeneratorType, setDocGeneratorType] = useState<"word" | "excel">("word");
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
@@ -3672,7 +3675,8 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => openBlankDocEditor("word")}
+                              onClick={() => { setDocGeneratorType("word"); setIsDocGeneratorOpen(true); onCloseSidebar?.(); }}
+                              data-testid="button-create-word"
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
                                 <span className="text-white text-xs font-bold">W</span>
@@ -3682,7 +3686,8 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => openBlankDocEditor("excel")}
+                              onClick={() => { setDocGeneratorType("excel"); setIsDocGeneratorOpen(true); onCloseSidebar?.(); }}
+                              data-testid="button-create-excel"
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
                                 <span className="text-white text-xs font-bold">X</span>
@@ -4052,6 +4057,20 @@ export function ChatInterface({
       <UpgradePlanDialog 
         open={isUpgradeDialogOpen} 
         onOpenChange={setIsUpgradeDialogOpen} 
+      />
+
+      <DocumentGeneratorDialog
+        open={isDocGeneratorOpen}
+        onClose={() => setIsDocGeneratorOpen(false)}
+        documentType={docGeneratorType}
+        onComplete={(message) => {
+          onSendMessage({
+            id: `doc-gen-${Date.now()}`,
+            role: "assistant",
+            content: message,
+            timestamp: new Date()
+          });
+        }}
       />
 
       {/* Voice Chat Mode - Fullscreen conversation with Grok */}
