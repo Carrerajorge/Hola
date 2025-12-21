@@ -25,11 +25,18 @@ Preferred communication style: Simple, everyday language.
 - **ETL Agent**: Automated economic data processing from official sources (e.g., World Bank API) into normalized schemas and ZIP bundles with Excel workbooks and audit reports.
 - **Multi-Intent Pipeline**: Processes complex user prompts via Plan → Decompose → Execute → Aggregate stages, featuring automatic detection, parallel execution, and error handling.
 - **Document Generation System**: Spec-based document rendering for Excel (.xlsx) and Word (.docx) files with LLM-driven generation and validation repair loops.
-  - `shared/documentSpecs.ts`: Zod schemas for ExcelSpec (workbooks, sheets, tables, charts) and DocSpec (headings, paragraphs, bullets, tables).
-  - `server/services/excelSpecRenderer.ts`: Renders Excel workbooks from ExcelSpec JSON using ExcelJS with tables, autofilter, column formats, freeze panes.
-  - `server/services/wordSpecRenderer.ts`: Renders Word documents from DocSpec JSON using docx package with headings, bullets, tables.
-  - `server/services/documentOrchestrator.ts`: LLM orchestrator with Gemini integration and 3-attempt repair loop for AI-driven document generation.
-  - API endpoints: POST `/api/documents/render/excel`, `/api/documents/render/word`, `/api/documents/generate/excel`, `/api/documents/generate/word`.
+  - `shared/documentSpecs.ts`: Zod schemas for ExcelSpec, DocSpec, CvSpec, ReportSpec, LetterSpec with typed sections.
+  - `server/services/excelSpecRenderer.ts`: Renders Excel workbooks from ExcelSpec JSON using ExcelJS.
+  - `server/services/wordSpecRenderer.ts`: Renders Word documents from DocSpec JSON using docx package.
+  - `server/services/documentOrchestrator.ts`: LLM orchestrator with Gemini integration and 3-attempt repair loop.
+  - API endpoints: `/api/documents/render/excel`, `/api/documents/render/word`, `/api/documents/generate/excel`, `/api/documents/generate/word`.
+- **Professional CV/Resume Generation System**: Three-layer architecture for structured document generation:
+  - **Structured Output Layer**: CvSpec schema with header, work_experience, education, skills (proficiency 1-5), languages, certifications, projects.
+  - **Template Engine**: `server/services/documentTemplates.ts` - 4 CV templates (modern, classic, creative, minimalist) with layout configs (single-column, two-column, sidebar), fonts, colors, skill styles (dots/bars/tags/percentage/text).
+  - **Intelligent Mapping Layer**: `server/services/documentMappingService.ts` - date formatting, skill visual generation (generateSkillDots, generateSkillBar), template selection.
+  - **CV Renderer**: `server/services/cvRenderer.ts` - Professional DOCX generation with two-column layouts, skill badges, photo placeholders, section styling.
+  - **Document Prompts**: `server/services/documentPrompts.ts` - CV-specific prompts with action verbs, quantifiable metrics, industry keywords.
+  - API endpoints: POST `/api/documents/generate/cv`, `/api/documents/generate/report`, `/api/documents/generate/letter`, `/api/documents/render/cv`.
 
 ### Data Storage
 - **Database ORM**: Drizzle ORM for PostgreSQL.
