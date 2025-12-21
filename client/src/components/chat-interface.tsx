@@ -3758,6 +3758,8 @@ export function ChatInterface({
                     {uploadedFiles.map((file, index) => {
                       const theme = getFileTheme(file.name, file.mimeType);
                       
+                      const isImage = file.type?.startsWith("image/") || file.mimeType?.startsWith("image/");
+                      
                       return (
                         <TooltipProvider key={file.id}>
                           <Tooltip>
@@ -3771,18 +3773,33 @@ export function ChatInterface({
                                   file.status === "error" && "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
                                 )}
                               >
-                                <div className={cn(
-                                  "flex items-center justify-center w-7 h-7 rounded shrink-0",
-                                  theme.bgColor
-                                )}>
-                                  {file.status === "uploading" || file.status === "processing" ? (
-                                    <Loader2 className="h-4 w-4 text-white animate-spin" />
-                                  ) : (
-                                    <span className="text-white text-xs font-bold">
-                                      {theme.icon}
-                                    </span>
-                                  )}
-                                </div>
+                                {isImage && file.dataUrl ? (
+                                  <div className="relative w-10 h-10 rounded overflow-hidden shrink-0">
+                                    <img 
+                                      src={file.dataUrl} 
+                                      alt={file.name}
+                                      className="w-full h-full object-cover"
+                                    />
+                                    {(file.status === "uploading" || file.status === "processing") && (
+                                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                        <Loader2 className="h-4 w-4 text-white animate-spin" />
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className={cn(
+                                    "flex items-center justify-center w-7 h-7 rounded shrink-0",
+                                    theme.bgColor
+                                  )}>
+                                    {file.status === "uploading" || file.status === "processing" ? (
+                                      <Loader2 className="h-4 w-4 text-white animate-spin" />
+                                    ) : (
+                                      <span className="text-white text-xs font-bold">
+                                        {theme.icon}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                                 <span className="max-w-[100px] truncate font-medium">{file.name}</span>
                                 <Button
                                   variant="ghost"
