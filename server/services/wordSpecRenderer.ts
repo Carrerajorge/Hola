@@ -12,15 +12,20 @@ import {
   PageBreak,
   TableOfContents,
   convertInchesToTwip,
-  StyleLevel,
   AlignmentType,
+  ExternalHyperlink,
+  Math as DocxMath,
+  MathRun,
 } from "docx";
 import { DocSpec, DocBlock, TitleBlock, TocBlock, NumberedBlock } from "../../shared/documentSpecs";
+import { tokenizeMarkdown, hasMarkdown, RichTextToken } from "./richText/markdownTokenizer";
 
 interface FontConfig {
   font: string;
   size: number;
 }
+
+type ParagraphChild = TextRun | ExternalHyperlink | DocxMath;
 
 function getStylesetConfig(styleset: "modern" | "classic"): FontConfig {
   if (styleset === "classic") {
@@ -37,6 +42,65 @@ const HEADING_LEVEL_MAP: Record<number, typeof HeadingLevel[keyof typeof Heading
   5: HeadingLevel.HEADING_5,
   6: HeadingLevel.HEADING_6,
 };
+
+function tokenToTextRun(token: RichTextToken, fontConfig: FontConfig, extraBold?: boolean): TextRun {
+  return new TextRun({
+    text: token.text,
+    font: token.code ? "Courier New" : fontConfig.font,
+    size: fontConfig.size,
+    bold: token.bold || extraBold,
+    italics: token.italic,
+    shading: token.code ? { fill: "F0F0F0", type: "clear", color: "auto" } : undefined,
+  });
+}
+
+function createMathElement(latex: string): DocxMath {
+  return new DocxMath({
+    children: [new MathRun(latex)],
+  });
+}
+
+function tokensToChildren(text: string, fontConfig: FontConfig, extraBold?: boolean): ParagraphChild[] {
+  if (!hasMarkdown(text)) {
+    return [
+      new TextRun({
+        text,
+        font: fontConfig.font,
+        size: fontConfig.size,
+        bold: extraBold,
+      }),
+    ];
+  }
+
+  const tokens = tokenizeMarkdown(text);
+  const children: ParagraphChild[] = [];
+
+  for (const token of tokens) {
+    if (token.isMath) {
+      children.push(createMathElement(token.text));
+    } else if (token.link) {
+      children.push(
+        new ExternalHyperlink({
+          children: [
+            new TextRun({
+              text: token.text,
+              font: fontConfig.font,
+              size: fontConfig.size,
+              bold: token.bold || extraBold,
+              italics: token.italic,
+              style: "Hyperlink",
+            }),
+          ],
+          link: token.link,
+        })
+      );
+    } else {
+      children.push(tokenToTextRun(token, fontConfig, extraBold));
+    }
+  }
+
+  return children;
+}
 
 function processTitleBlock(block: TitleBlock, fontConfig: FontConfig): Paragraph {
   return new Paragraph({
@@ -56,12 +120,7 @@ function processTitleBlock(block: TitleBlock, fontConfig: FontConfig): Paragraph
 
 function processHeadingBlock(block: Extract<DocBlock, { type: "heading" }>, fontConfig: FontConfig): Paragraph {
   return new Paragraph({
-    children: [
-      new TextRun({
-        text: block.text,
-        font: fontConfig.font,
-      }),
-    ],
+    children: tokensToChildren(block.text, fontConfig) as any,
     heading: HEADING_LEVEL_MAP[block.level] || HeadingLevel.HEADING_1,
     spacing: { before: 240, after: 120 },
   });
@@ -69,13 +128,7 @@ function processHeadingBlock(block: Extract<DocBlock, { type: "heading" }>, font
 
 function processParagraphBlock(block: Extract<DocBlock, { type: "paragraph" }>, fontConfig: FontConfig): Paragraph {
   const paragraphOptions: any = {
-    children: [
-      new TextRun({
-        text: block.text,
-        font: fontConfig.font,
-        size: fontConfig.size,
-      }),
-    ],
+    children: tokensToChildren(block.text, fontConfig),
     spacing: { after: 200, line: 276 },
   };
 
@@ -90,13 +143,7 @@ function processBulletsBlock(block: Extract<DocBlock, { type: "bullets" }>, font
   return block.items.map(
     (item) =>
       new Paragraph({
-        children: [
-          new TextRun({
-            text: item,
-            font: fontConfig.font,
-            size: fontConfig.size,
-          }),
-        ],
+        children: tokensToChildren(item, fontConfig) as any,
         bullet: { level: 0 },
         spacing: { after: 80 },
       })
@@ -105,15 +152,9 @@ function processBulletsBlock(block: Extract<DocBlock, { type: "bullets" }>, font
 
 function processNumberedBlock(block: NumberedBlock, fontConfig: FontConfig): Paragraph[] {
   return block.items.map(
-    (item, index) =>
+    (item) =>
       new Paragraph({
-        children: [
-          new TextRun({
-            text: item,
-            font: fontConfig.font,
-            size: fontConfig.size,
-          }),
-        ],
+        children: tokensToChildren(item, fontConfig) as any,
         numbering: { reference: "default-numbering", level: 0 },
         spacing: { after: 80 },
       })
@@ -137,14 +178,7 @@ function processTableBlock(block: Extract<DocBlock, { type: "table" }>, fontConf
           new TableCell({
             children: [
               new Paragraph({
-                children: [
-                  new TextRun({
-                    text: col,
-                    bold: true,
-                    font: fontConfig.font,
-                    size: fontConfig.size,
-                  }),
-                ],
+                children: tokensToChildren(col, fontConfig, true) as any,
               }),
             ],
             shading: { fill: "E7E6E6", type: "clear", color: "auto" },
@@ -168,13 +202,7 @@ function processTableBlock(block: Extract<DocBlock, { type: "table" }>, fontConf
             new TableCell({
               children: [
                 new Paragraph({
-                  children: [
-                    new TextRun({
-                      text: String(cell ?? ""),
-                      font: fontConfig.font,
-                      size: fontConfig.size,
-                    }),
-                  ],
+                  children: tokensToChildren(String(cell ?? ""), fontConfig) as any,
                 }),
               ],
               borders: {

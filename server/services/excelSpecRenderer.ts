@@ -1,7 +1,58 @@
 import ExcelJS from "exceljs";
 import type { ExcelSpec, TableSpec, ChartSpec, SheetLayoutSpec, HeaderStyle } from "../../shared/documentSpecs";
+import { tokenizeMarkdown, hasMarkdown, RichTextToken } from "./richText/markdownTokenizer";
 
 const FORMULA_PREFIXES = ["=", "+", "-", "@"];
+
+interface ExcelRichTextRun {
+  text: string;
+  font?: Partial<ExcelJS.Font>;
+}
+
+function tokensToExcelRichText(tokens: RichTextToken[]): ExcelRichTextRun[] {
+  return tokens.map((token) => {
+    const run: ExcelRichTextRun = { text: token.text };
+    const font: Partial<ExcelJS.Font> = {};
+
+    if (token.bold) font.bold = true;
+    if (token.italic) font.italic = true;
+    if (token.code) {
+      font.name = "Courier New";
+      font.color = { argb: "FF666666" };
+    }
+    if (token.link) {
+      font.underline = true;
+      font.color = { argb: "FF0066CC" };
+    }
+    if (token.isMath) {
+      font.italic = true;
+      font.color = { argb: "FF336699" };
+    }
+
+    if (Object.keys(font).length > 0) {
+      run.font = font;
+    }
+    return run;
+  });
+}
+
+function applyRichTextToCell(cell: ExcelJS.Cell, value: any): void {
+  if (value === null || value === undefined) {
+    cell.value = "";
+    return;
+  }
+
+  const strValue = String(value);
+  if (!hasMarkdown(strValue)) {
+    cell.value = strValue;
+    return;
+  }
+
+  const tokens = tokenizeMarkdown(strValue);
+  const richText = tokensToExcelRichText(tokens);
+  cell.value = { richText } as any;
+}
+
 const MIN_COL_WIDTH = 8;
 const MAX_COL_WIDTH = 60;
 
@@ -141,6 +192,19 @@ function renderTable(worksheet: ExcelJS.Worksheet, table: TableSpec): void {
     })),
     rows: processedRows,
   });
+
+  for (let rowIdx = 0; rowIdx < (table.rows?.length || 0); rowIdx++) {
+    const excelRowNum = startRow + 1 + rowIdx;
+    const excelRow = worksheet.getRow(excelRowNum);
+    const row = table.rows![rowIdx];
+    row.forEach((value, colIdx) => {
+      const header = table.headers[colIdx];
+      if (!formulaHeaders.has(header) && value != null && typeof value === "string" && hasMarkdown(value)) {
+        const cell = excelRow.getCell(startCol + colIdx);
+        applyRichTextToCell(cell, value);
+      }
+    });
+  }
 
   const headerStyle = table.header_style || {};
   applyHeaderStyle(worksheet, startRow, startCol, table.headers, headerStyle);
