@@ -8,6 +8,66 @@ import rehypeStringify from "rehype-stringify";
 import type { Root, Element, Text } from 'hast';
 import { visit } from 'unist-util-visit';
 
+/**
+ * Common LaTeX commands that indicate mathematical content
+ */
+const LATEX_COMMANDS = [
+  'int', 'sum', 'prod', 'lim', 'frac', 'sqrt', 'sin', 'cos', 'tan', 'log', 'ln',
+  'exp', 'infty', 'alpha', 'beta', 'gamma', 'delta', 'theta', 'pi', 'sigma',
+  'partial', 'nabla', 'cdot', 'times', 'div', 'pm', 'mp', 'leq', 'geq', 'neq',
+  'approx', 'equiv', 'subset', 'supset', 'cup', 'cap', 'in', 'notin', 'forall',
+  'exists', 'rightarrow', 'leftarrow', 'Rightarrow', 'Leftarrow', 'vec', 'hat',
+  'bar', 'dot', 'ddot', 'binom', 'matrix', 'begin', 'end', 'left', 'right',
+  'over', 'to', 'mapsto', 'implies', 'iff', 'land', 'lor', 'neg', 'oplus',
+  'otimes', 'mathbb', 'mathcal', 'mathbf', 'mathrm', 'text'
+];
+
+/**
+ * Wrap raw LaTeX expressions in $ delimiters so remark-math can parse them.
+ * Detects expressions containing LaTeX commands like \int, \frac, \sin, etc.
+ */
+function wrapRawLatex(text: string): string {
+  // Create regex to match LaTeX command patterns not already in $ delimiters
+  const latexCommandPattern = new RegExp(
+    `(?<!\\$)(\\\\(?:${LATEX_COMMANDS.join('|')})(?:[^\\s$]*|\\{[^}]*\\}|\\([^)]*\\)|\\[[^\\]]*\\])*)(?!\\$)`,
+    'g'
+  );
+  
+  // Find lines or expressions containing LaTeX and wrap them appropriately
+  const lines = text.split('\n');
+  const processedLines = lines.map(line => {
+    // Skip lines that are already properly delimited
+    if (line.includes('$') || line.includes('\\[') || line.includes('\\(')) {
+      return line;
+    }
+    
+    // Check if line contains LaTeX commands
+    const hasLatex = LATEX_COMMANDS.some(cmd => line.includes(`\\${cmd}`));
+    if (!hasLatex) {
+      return line;
+    }
+    
+    // If the entire line is a math expression, wrap it as display math
+    const trimmed = line.trim();
+    if (trimmed.startsWith('\\') && !trimmed.includes(' ')) {
+      // Single expression on a line - display math
+      return `$$${trimmed}$$`;
+    }
+    
+    // For inline LaTeX within text, wrap individual expressions
+    // Match LaTeX expressions: starts with \ followed by command and optionally braces/content
+    return line.replace(
+      /(\\(?:int|sum|prod|lim|frac|sqrt|sin|cos|tan|log|ln|exp|infty|alpha|beta|gamma|delta|theta|pi|sigma|partial|nabla|cdot|times|div|pm|mp|leq|geq|neq|approx|equiv|left|right|vec|hat|bar|binom|mathbb|mathcal|mathbf|mathrm|text)(?:\{[^}]*\}|\([^)]*\)|\[[^\]]*\]|[a-zA-Z0-9_^{}()\[\]\s+\-*/=<>.,]+)*)/g,
+      (match) => {
+        // Don't double-wrap if already in delimiters
+        return `$${match}$`;
+      }
+    );
+  });
+  
+  return processedLines.join('\n');
+}
+
 function normalizeMarkdown(text: string): string {
   let normalized = text
     .replace(/\r\n/g, "\n")
@@ -15,8 +75,12 @@ function normalizeMarkdown(text: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   
+  // Convert LaTeX bracket delimiters to dollar delimiters
   normalized = normalized.replace(/\\\[/g, '$$').replace(/\\\]/g, '$$');
   normalized = normalized.replace(/\\\(/g, '$').replace(/\\\)/g, '$');
+  
+  // Wrap any remaining raw LaTeX expressions
+  normalized = wrapRawLatex(normalized);
   
   return normalized;
 }
