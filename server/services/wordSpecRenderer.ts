@@ -19,6 +19,7 @@ import {
 } from "docx";
 import { DocSpec, DocBlock, TitleBlock, TocBlock, NumberedBlock } from "../../shared/documentSpecs";
 import { tokenizeMarkdown, hasMarkdown, RichTextToken } from "./richText/markdownTokenizer";
+import { createMathFromLatex } from "./richText/latexMath";
 
 interface FontConfig {
   font: string;
@@ -54,13 +55,7 @@ function tokenToTextRun(token: RichTextToken, fontConfig: FontConfig, extraBold?
   });
 }
 
-function createMathElement(latex: string): DocxMath {
-  return new DocxMath({
-    children: [new MathRun(latex)],
-  });
-}
-
-function tokensToChildren(text: string, fontConfig: FontConfig, extraBold?: boolean): ParagraphChild[] {
+async function tokensToChildren(text: string, fontConfig: FontConfig, extraBold?: boolean): Promise<ParagraphChild[]> {
   if (!hasMarkdown(text)) {
     return [
       new TextRun({
@@ -77,7 +72,12 @@ function tokensToChildren(text: string, fontConfig: FontConfig, extraBold?: bool
 
   for (const token of tokens) {
     if (token.isMath) {
-      children.push(createMathElement(token.text));
+      const mathElement = await createMathFromLatex(token.text);
+      if (mathElement) {
+        children.push(mathElement);
+      } else {
+        children.push(new DocxMath({ children: [new MathRun(token.text)] }));
+      }
     } else if (token.link) {
       children.push(
         new ExternalHyperlink({
@@ -118,17 +118,17 @@ function processTitleBlock(block: TitleBlock, fontConfig: FontConfig): Paragraph
   });
 }
 
-function processHeadingBlock(block: Extract<DocBlock, { type: "heading" }>, fontConfig: FontConfig): Paragraph {
+async function processHeadingBlock(block: Extract<DocBlock, { type: "heading" }>, fontConfig: FontConfig): Promise<Paragraph> {
   return new Paragraph({
-    children: tokensToChildren(block.text, fontConfig) as any,
+    children: await tokensToChildren(block.text, fontConfig) as any,
     heading: HEADING_LEVEL_MAP[block.level] || HeadingLevel.HEADING_1,
     spacing: { before: 240, after: 120 },
   });
 }
 
-function processParagraphBlock(block: Extract<DocBlock, { type: "paragraph" }>, fontConfig: FontConfig): Paragraph {
+async function processParagraphBlock(block: Extract<DocBlock, { type: "paragraph" }>, fontConfig: FontConfig): Promise<Paragraph> {
   const paragraphOptions: any = {
-    children: tokensToChildren(block.text, fontConfig),
+    children: await tokensToChildren(block.text, fontConfig),
     spacing: { after: 200, line: 276 },
   };
 
@@ -139,26 +139,32 @@ function processParagraphBlock(block: Extract<DocBlock, { type: "paragraph" }>, 
   return new Paragraph(paragraphOptions);
 }
 
-function processBulletsBlock(block: Extract<DocBlock, { type: "bullets" }>, fontConfig: FontConfig): Paragraph[] {
-  return block.items.map(
-    (item) =>
+async function processBulletsBlock(block: Extract<DocBlock, { type: "bullets" }>, fontConfig: FontConfig): Promise<Paragraph[]> {
+  const paragraphs: Paragraph[] = [];
+  for (const item of block.items) {
+    paragraphs.push(
       new Paragraph({
-        children: tokensToChildren(item, fontConfig) as any,
+        children: await tokensToChildren(item, fontConfig) as any,
         bullet: { level: 0 },
         spacing: { after: 80 },
       })
-  );
+    );
+  }
+  return paragraphs;
 }
 
-function processNumberedBlock(block: NumberedBlock, fontConfig: FontConfig): Paragraph[] {
-  return block.items.map(
-    (item) =>
+async function processNumberedBlock(block: NumberedBlock, fontConfig: FontConfig): Promise<Paragraph[]> {
+  const paragraphs: Paragraph[] = [];
+  for (const item of block.items) {
+    paragraphs.push(
       new Paragraph({
-        children: tokensToChildren(item, fontConfig) as any,
+        children: await tokensToChildren(item, fontConfig) as any,
         numbering: { reference: "default-numbering", level: 0 },
         spacing: { after: 80 },
       })
-  );
+    );
+  }
+  return paragraphs;
 }
 
 function processTocBlock(block: TocBlock): TableOfContents {
@@ -168,55 +174,53 @@ function processTocBlock(block: TocBlock): TableOfContents {
   });
 }
 
-function processTableBlock(block: Extract<DocBlock, { type: "table" }>, fontConfig: FontConfig): Table {
+async function processTableBlock(block: Extract<DocBlock, { type: "table" }>, fontConfig: FontConfig): Promise<Table> {
   const rows: TableRow[] = [];
 
   if (block.header !== false) {
-    const headerRow = new TableRow({
-      children: block.columns.map(
-        (col) =>
-          new TableCell({
-            children: [
-              new Paragraph({
-                children: tokensToChildren(col, fontConfig, true) as any,
-              }),
-            ],
-            shading: { fill: "E7E6E6", type: "clear", color: "auto" },
-            borders: {
-              top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-              bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-              left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-              right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-            },
-          })
-      ),
-    });
-    rows.push(headerRow);
+    const headerCells: TableCell[] = [];
+    for (const col of block.columns) {
+      headerCells.push(
+        new TableCell({
+          children: [
+            new Paragraph({
+              children: await tokensToChildren(col, fontConfig, true) as any,
+            }),
+          ],
+          shading: { fill: "E7E6E6", type: "clear", color: "auto" },
+          borders: {
+            top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+            bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+            left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+            right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+          },
+        })
+      );
+    }
+    rows.push(new TableRow({ children: headerCells }));
   }
 
-  const dataRows = block.rows.map(
-    (row) =>
-      new TableRow({
-        children: row.map(
-          (cell) =>
-            new TableCell({
-              children: [
-                new Paragraph({
-                  children: tokensToChildren(String(cell ?? ""), fontConfig) as any,
-                }),
-              ],
-              borders: {
-                top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-                bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-                left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-                right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-              },
-            })
-        ),
-      })
-  );
-
-  rows.push(...dataRows);
+  for (const row of block.rows) {
+    const dataCells: TableCell[] = [];
+    for (const cell of row) {
+      dataCells.push(
+        new TableCell({
+          children: [
+            new Paragraph({
+              children: await tokensToChildren(String(cell ?? ""), fontConfig) as any,
+            }),
+          ],
+          borders: {
+            top: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+            bottom: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+            left: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+            right: { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+          },
+        })
+      );
+    }
+    rows.push(new TableRow({ children: dataCells }));
+  }
 
   return new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
@@ -230,20 +234,20 @@ function processPageBreakBlock(): Paragraph {
   });
 }
 
-function processBlock(block: DocBlock, fontConfig: FontConfig): (Paragraph | Table | TableOfContents)[] {
+async function processBlock(block: DocBlock, fontConfig: FontConfig): Promise<(Paragraph | Table | TableOfContents)[]> {
   switch (block.type) {
     case "title":
       return [processTitleBlock(block, fontConfig)];
     case "heading":
-      return [processHeadingBlock(block, fontConfig)];
+      return [await processHeadingBlock(block, fontConfig)];
     case "paragraph":
-      return [processParagraphBlock(block, fontConfig)];
+      return [await processParagraphBlock(block, fontConfig)];
     case "bullets":
-      return processBulletsBlock(block, fontConfig);
+      return await processBulletsBlock(block, fontConfig);
     case "numbered":
-      return processNumberedBlock(block, fontConfig);
+      return await processNumberedBlock(block, fontConfig);
     case "table":
-      return [processTableBlock(block, fontConfig), new Paragraph({ spacing: { after: 200 } })];
+      return [await processTableBlock(block, fontConfig), new Paragraph({ spacing: { after: 200 } })];
     case "page_break":
       return [processPageBreakBlock()];
     case "toc":
@@ -269,7 +273,7 @@ export async function renderWordFromSpec(spec: DocSpec): Promise<Buffer> {
   }
 
   for (const block of spec.blocks) {
-    bodyElements.push(...processBlock(block, fontConfig));
+    bodyElements.push(...await processBlock(block, fontConfig));
   }
 
   const doc = new Document({
