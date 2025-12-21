@@ -27,62 +27,104 @@ import {
   CvCertification,
   CvProject,
 } from "../../shared/documentSpecs";
+import { CvTemplateConfig, getCvTemplate } from "./documentTemplates";
+import { formatDateRange, generateSkillDots, generateSkillBar, generateSkillPercentage, generateSkillTags } from "./documentMappingService";
 
-export interface CvTemplateConfig {
+interface InternalRenderConfig {
   layout: "single-column" | "two-column" | "sidebar";
   showPhoto: boolean;
-  skillStyle: "dots" | "bars" | "tags" | "percentage";
+  photoShape: "circle" | "square" | "rounded";
+  skillStyle: "dots" | "bars" | "tags" | "percentage" | "text";
   accentColor: string;
   primaryColor: string;
-  fontFamily: string;
-  fontSize: number;
+  secondaryColor: string;
+  textColor: string;
+  lightTextColor: string;
+  backgroundColor: string;
+  sidebarBgColor: string;
+  headingFont: string;
+  bodyFont: string;
+  accentFont: string;
+  nameSize: number;
+  headingSize: number;
+  sectionHeadingSize: number;
+  bodySize: number;
+  smallSize: number;
+  sectionGap: number;
+  itemGap: number;
+  lineHeight: number;
+  sidebarWidth: number;
+  twoColumnLeftWidth: number;
+  twoColumnRightWidth: number;
+  emptyIndicatorColor: string;
 }
-
-const DEFAULT_CONFIG: CvTemplateConfig = {
-  layout: "single-column",
-  showPhoto: true,
-  skillStyle: "dots",
-  accentColor: "2563eb",
-  primaryColor: "1a1a1a",
-  fontFamily: "Calibri",
-  fontSize: 22,
-};
 
 function hexToRgb(hex: string): string {
   return hex.replace("#", "");
 }
 
-function getTemplateConfig(spec: CvSpec, config?: Partial<CvTemplateConfig>): CvTemplateConfig {
-  const baseConfig = { ...DEFAULT_CONFIG, ...config };
+function templateConfigToInternal(templateConfig: CvTemplateConfig, spec?: CvSpec): InternalRenderConfig {
+  const baseBodySize = 22;
   
-  if (spec.color_scheme) {
-    baseConfig.accentColor = hexToRgb(spec.color_scheme.accent || "#2563eb");
-    baseConfig.primaryColor = hexToRgb(spec.color_scheme.primary || "#1a1a1a");
+  let config: InternalRenderConfig = {
+    layout: templateConfig.layout,
+    showPhoto: templateConfig.showPhoto,
+    photoShape: templateConfig.photoShape,
+    skillStyle: templateConfig.skillStyle,
+    accentColor: hexToRgb(templateConfig.colors.accent),
+    primaryColor: hexToRgb(templateConfig.colors.primary),
+    secondaryColor: hexToRgb(templateConfig.colors.secondary),
+    textColor: hexToRgb(templateConfig.colors.text),
+    lightTextColor: hexToRgb(templateConfig.colors.lightText),
+    backgroundColor: hexToRgb(templateConfig.colors.background),
+    sidebarBgColor: hexToRgb(templateConfig.colors.sidebarBg || templateConfig.colors.primary),
+    headingFont: templateConfig.fonts.heading,
+    bodyFont: templateConfig.fonts.body,
+    accentFont: templateConfig.fonts.accent,
+    nameSize: Math.round(baseBodySize * 2.5),
+    headingSize: Math.round(baseBodySize * 1.5),
+    sectionHeadingSize: Math.round(baseBodySize * 1.1),
+    bodySize: baseBodySize,
+    smallSize: baseBodySize - 2,
+    sectionGap: Math.round(templateConfig.spacing.sectionGap * 10),
+    itemGap: Math.round(templateConfig.spacing.itemGap * 5),
+    lineHeight: Math.round(templateConfig.spacing.lineHeight * 240),
+    sidebarWidth: templateConfig.sidebarWidth || 30,
+    twoColumnLeftWidth: templateConfig.twoColumnLeftWidth || 65,
+    twoColumnRightWidth: templateConfig.twoColumnRightWidth || 35,
+    emptyIndicatorColor: hexToRgb(templateConfig.colors.lightText),
+  };
+
+  if (spec?.color_scheme) {
+    if (spec.color_scheme.accent) {
+      config.accentColor = hexToRgb(spec.color_scheme.accent);
+    }
+    if (spec.color_scheme.primary) {
+      config.primaryColor = hexToRgb(spec.color_scheme.primary);
+    }
+    if (spec.color_scheme.text) {
+      config.textColor = hexToRgb(spec.color_scheme.text);
+    }
+    if (spec.color_scheme.background) {
+      config.backgroundColor = hexToRgb(spec.color_scheme.background);
+    }
   }
-  
-  if (spec.template_style === "classic") {
-    baseConfig.fontFamily = "Times New Roman";
-  } else if (spec.template_style === "creative") {
-    baseConfig.layout = "sidebar";
-  } else if (spec.template_style === "minimalist") {
-    baseConfig.skillStyle = "tags";
-  }
-  
-  return baseConfig;
+
+  return config;
 }
 
-function createSectionHeading(text: string, config: CvTemplateConfig): Paragraph {
+function createSectionHeading(text: string, config: InternalRenderConfig): Paragraph {
   return new Paragraph({
     children: [
       new TextRun({
         text: text.toUpperCase(),
-        font: config.fontFamily,
-        size: 24,
+        font: config.headingFont,
+        size: config.sectionHeadingSize,
         bold: true,
         color: config.accentColor,
       }),
     ],
-    spacing: { before: 300, after: 100 },
+    spacing: { before: config.sectionGap, after: config.itemGap },
     border: {
       bottom: {
         style: BorderStyle.SINGLE,
@@ -93,24 +135,77 @@ function createSectionHeading(text: string, config: CvTemplateConfig): Paragraph
   });
 }
 
-function createHeaderSection(header: CvHeader, config: CvTemplateConfig): Paragraph[] {
-  const paragraphs: Paragraph[] = [];
+function createSidebarSectionHeading(text: string, config: InternalRenderConfig): Paragraph {
+  return new Paragraph({
+    children: [
+      new TextRun({
+        text: text.toUpperCase(),
+        font: config.headingFont,
+        size: config.sectionHeadingSize - 4,
+        bold: true,
+        color: config.backgroundColor,
+      }),
+    ],
+    spacing: { before: config.sectionGap / 2, after: config.itemGap },
+    border: {
+      bottom: {
+        style: BorderStyle.SINGLE,
+        size: 8,
+        color: config.backgroundColor,
+      },
+    },
+  });
+}
+
+function createPhotoPlaceholder(config: InternalRenderConfig, forSidebar: boolean = false): Paragraph {
+  const textColor = forSidebar ? config.backgroundColor : config.accentColor;
+  const borderColor = forSidebar ? config.backgroundColor : config.accentColor;
+  const fontSize = forSidebar ? config.headingSize : config.nameSize;
   
-  paragraphs.push(
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: header.name,
-          font: config.fontFamily,
-          size: 56,
-          bold: true,
-          color: config.accentColor,
-        }),
-      ],
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 120 },
-    })
-  );
+  let shapeIndicator: string;
+  switch (config.photoShape) {
+    case "circle":
+      shapeIndicator = "◯";
+      break;
+    case "rounded":
+      shapeIndicator = "▢";
+      break;
+    case "square":
+    default:
+      shapeIndicator = "□";
+      break;
+  }
+  
+  return new Paragraph({
+    children: [
+      new TextRun({
+        text: shapeIndicator,
+        font: config.bodyFont,
+        size: fontSize * 2,
+        color: textColor,
+      }),
+    ],
+    alignment: AlignmentType.CENTER,
+    spacing: { after: config.itemGap },
+  });
+}
+
+function createHeaderSection(header: CvHeader, config: InternalRenderConfig): (Paragraph | Table)[] {
+  const showPhoto = config.showPhoto && header.photo_url;
+  
+  const nameParagraph = new Paragraph({
+    children: [
+      new TextRun({
+        text: header.name,
+        font: config.headingFont,
+        size: config.nameSize,
+        bold: true,
+        color: config.accentColor,
+      }),
+    ],
+    alignment: showPhoto ? AlignmentType.LEFT : AlignmentType.CENTER,
+    spacing: { after: config.itemGap },
+  });
   
   const contactParts: string[] = [];
   if (header.phone) contactParts.push(header.phone);
@@ -124,18 +219,18 @@ function createHeaderSection(header: CvHeader, config: CvTemplateConfig): Paragr
       contactChildren.push(
         new TextRun({
           text: "  |  ",
-          font: config.fontFamily,
-          size: config.fontSize,
-          color: "666666",
+          font: config.bodyFont,
+          size: config.bodySize,
+          color: config.lightTextColor,
         })
       );
     }
     contactChildren.push(
       new TextRun({
         text: part,
-        font: config.fontFamily,
-        size: config.fontSize,
-        color: config.primaryColor,
+        font: config.bodyFont,
+        size: config.bodySize,
+        color: config.textColor,
       })
     );
   });
@@ -145,9 +240,9 @@ function createHeaderSection(header: CvHeader, config: CvTemplateConfig): Paragr
       contactChildren.push(
         new TextRun({
           text: "  |  ",
-          font: config.fontFamily,
-          size: config.fontSize,
-          color: "666666",
+          font: config.bodyFont,
+          size: config.bodySize,
+          color: config.lightTextColor,
         })
       );
     }
@@ -156,8 +251,8 @@ function createHeaderSection(header: CvHeader, config: CvTemplateConfig): Paragr
         children: [
           new TextRun({
             text: header.website.replace(/^https?:\/\//, ""),
-            font: config.fontFamily,
-            size: config.fontSize,
+            font: config.bodyFont,
+            size: config.bodySize,
             color: config.accentColor,
             underline: {},
           }),
@@ -167,41 +262,76 @@ function createHeaderSection(header: CvHeader, config: CvTemplateConfig): Paragr
     );
   }
   
-  paragraphs.push(
-    new Paragraph({
-      children: contactChildren,
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 200 },
-    })
-  );
+  const contactParagraph = new Paragraph({
+    children: contactChildren,
+    alignment: showPhoto ? AlignmentType.LEFT : AlignmentType.CENTER,
+    spacing: { after: config.sectionGap / 2 },
+  });
   
-  return paragraphs;
+  if (showPhoto) {
+    const noBorder = {
+      style: BorderStyle.NONE,
+      size: 0,
+      color: config.backgroundColor,
+    };
+    
+    const headerTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              children: [nameParagraph, contactParagraph],
+              width: { size: 75, type: WidthType.PERCENTAGE },
+              borders: {
+                top: noBorder,
+                bottom: noBorder,
+                left: noBorder,
+                right: noBorder,
+              },
+              verticalAlign: VerticalAlign.CENTER,
+            }),
+            new TableCell({
+              children: [createPhotoPlaceholder(config, false)],
+              width: { size: 25, type: WidthType.PERCENTAGE },
+              borders: {
+                top: noBorder,
+                bottom: noBorder,
+                left: noBorder,
+                right: noBorder,
+              },
+              verticalAlign: VerticalAlign.CENTER,
+            }),
+          ],
+        }),
+      ],
+    });
+    
+    return [headerTable];
+  }
+  
+  return [nameParagraph, contactParagraph];
 }
 
-function createProfileSummary(summary: string, config: CvTemplateConfig): Paragraph[] {
+function createProfileSummary(summary: string, config: InternalRenderConfig): Paragraph[] {
   return [
     createSectionHeading("Profile", config),
     new Paragraph({
       children: [
         new TextRun({
           text: summary,
-          font: config.fontFamily,
-          size: config.fontSize,
-          color: "444444",
+          font: config.bodyFont,
+          size: config.bodySize,
+          color: config.lightTextColor,
           italics: true,
         }),
       ],
-      spacing: { after: 200, line: 276 },
+      spacing: { after: config.sectionGap / 2, line: config.lineHeight },
     }),
   ];
 }
 
-function formatDateRange(start: string, end?: string | null): string {
-  const endText = end || "Present";
-  return `${start} - ${endText}`;
-}
-
-function createWorkExperienceSection(experiences: CvWorkExperience[], config: CvTemplateConfig): (Paragraph | Table)[] {
+function createWorkExperienceSection(experiences: CvWorkExperience[], config: InternalRenderConfig): (Paragraph | Table)[] {
   if (experiences.length === 0) return [];
   
   const elements: (Paragraph | Table)[] = [createSectionHeading("Work Experience", config)];
@@ -210,10 +340,10 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: Cv
     const headerChildren: TextRun[] = [
       new TextRun({
         text: exp.company,
-        font: config.fontFamily,
-        size: config.fontSize,
+        font: config.bodyFont,
+        size: config.bodySize,
         bold: true,
-        color: config.primaryColor,
+        color: config.textColor,
       }),
     ];
     
@@ -221,9 +351,9 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: Cv
       headerChildren.push(
         new TextRun({
           text: `  •  ${exp.location}`,
-          font: config.fontFamily,
-          size: config.fontSize - 2,
-          color: "888888",
+          font: config.bodyFont,
+          size: config.smallSize,
+          color: config.lightTextColor,
         })
       );
     }
@@ -237,7 +367,7 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: Cv
             position: TabStopPosition.MAX,
           },
         ],
-        spacing: { before: 160, after: 40 },
+        spacing: { before: config.itemGap * 2, after: config.itemGap / 2 },
       })
     );
     
@@ -246,19 +376,19 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: Cv
         children: [
           new TextRun({
             text: exp.role,
-            font: config.fontFamily,
-            size: config.fontSize,
+            font: config.bodyFont,
+            size: config.bodySize,
             italics: true,
-            color: config.primaryColor,
+            color: config.textColor,
           }),
           new TextRun({
             text: "\t",
           }),
           new TextRun({
             text: formatDateRange(exp.start_date, exp.end_date),
-            font: config.fontFamily,
-            size: config.fontSize - 2,
-            color: "666666",
+            font: config.bodyFont,
+            size: config.smallSize,
+            color: config.lightTextColor,
           }),
         ],
         tabStops: [
@@ -267,7 +397,7 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: Cv
             position: TabStopPosition.MAX,
           },
         ],
-        spacing: { after: 80 },
+        spacing: { after: config.itemGap },
       })
     );
     
@@ -277,12 +407,12 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: Cv
           children: [
             new TextRun({
               text: exp.description,
-              font: config.fontFamily,
-              size: config.fontSize,
-              color: "444444",
+              font: config.bodyFont,
+              size: config.bodySize,
+              color: config.lightTextColor,
             }),
           ],
-          spacing: { after: 80, line: 260 },
+          spacing: { after: config.itemGap, line: config.lineHeight },
         })
       );
     }
@@ -293,13 +423,13 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: Cv
           children: [
             new TextRun({
               text: achievement,
-              font: config.fontFamily,
-              size: config.fontSize,
-              color: config.primaryColor,
+              font: config.bodyFont,
+              size: config.bodySize,
+              color: config.textColor,
             }),
           ],
           bullet: { level: 0 },
-          spacing: { after: 40 },
+          spacing: { after: config.itemGap / 2 },
         })
       );
     }
@@ -308,7 +438,7 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: Cv
   return elements;
 }
 
-function createEducationSection(education: CvEducation[], config: CvTemplateConfig): Paragraph[] {
+function createEducationSection(education: CvEducation[], config: InternalRenderConfig): Paragraph[] {
   if (education.length === 0) return [];
   
   const elements: Paragraph[] = [createSectionHeading("Education", config)];
@@ -319,19 +449,19 @@ function createEducationSection(education: CvEducation[], config: CvTemplateConf
         children: [
           new TextRun({
             text: edu.institution,
-            font: config.fontFamily,
-            size: config.fontSize,
+            font: config.bodyFont,
+            size: config.bodySize,
             bold: true,
-            color: config.primaryColor,
+            color: config.textColor,
           }),
           new TextRun({
             text: "\t",
           }),
           new TextRun({
             text: formatDateRange(edu.start_date, edu.end_date),
-            font: config.fontFamily,
-            size: config.fontSize - 2,
-            color: "666666",
+            font: config.bodyFont,
+            size: config.smallSize,
+            color: config.lightTextColor,
           }),
         ],
         tabStops: [
@@ -340,7 +470,7 @@ function createEducationSection(education: CvEducation[], config: CvTemplateConf
             position: TabStopPosition.MAX,
           },
         ],
-        spacing: { before: 160, after: 40 },
+        spacing: { before: config.itemGap * 2, after: config.itemGap / 2 },
       })
     );
     
@@ -348,10 +478,10 @@ function createEducationSection(education: CvEducation[], config: CvTemplateConf
     const degreeChildren: TextRun[] = [
       new TextRun({
         text: degreeText,
-        font: config.fontFamily,
-        size: config.fontSize,
+        font: config.bodyFont,
+        size: config.bodySize,
         italics: true,
-        color: config.primaryColor,
+        color: config.textColor,
       }),
     ];
     
@@ -359,9 +489,9 @@ function createEducationSection(education: CvEducation[], config: CvTemplateConf
       degreeChildren.push(
         new TextRun({
           text: `  •  GPA: ${edu.gpa}`,
-          font: config.fontFamily,
-          size: config.fontSize - 2,
-          color: "666666",
+          font: config.bodyFont,
+          size: config.smallSize,
+          color: config.lightTextColor,
         })
       );
     }
@@ -369,7 +499,7 @@ function createEducationSection(education: CvEducation[], config: CvTemplateConf
     elements.push(
       new Paragraph({
         children: degreeChildren,
-        spacing: { after: 80 },
+        spacing: { after: config.itemGap },
       })
     );
     
@@ -379,13 +509,13 @@ function createEducationSection(education: CvEducation[], config: CvTemplateConf
           children: [
             new TextRun({
               text: achievement,
-              font: config.fontFamily,
-              size: config.fontSize,
-              color: config.primaryColor,
+              font: config.bodyFont,
+              size: config.bodySize,
+              color: config.textColor,
             }),
           ],
           bullet: { level: 0 },
-          spacing: { after: 40 },
+          spacing: { after: config.itemGap / 2 },
         })
       );
     }
@@ -394,67 +524,74 @@ function createEducationSection(education: CvEducation[], config: CvTemplateConf
   return elements;
 }
 
-function createProficiencyVisual(proficiency: number, style: CvTemplateConfig["skillStyle"], config: CvTemplateConfig): TextRun[] {
+function createProficiencyVisual(proficiency: number, style: InternalRenderConfig["skillStyle"], config: InternalRenderConfig, forSidebar: boolean = false): TextRun[] {
   const maxLevel = 5;
+  const textColor = forSidebar ? config.backgroundColor : config.accentColor;
+  const emptyColor = forSidebar ? config.secondaryColor : config.emptyIndicatorColor;
+  const fontSize = forSidebar ? config.smallSize - 2 : config.smallSize;
   
   switch (style) {
     case "dots": {
-      const filled = "●".repeat(proficiency);
-      const empty = "○".repeat(maxLevel - proficiency);
+      const dotsStr = generateSkillDots(proficiency, maxLevel);
+      const filledCount = Math.min(Math.max(0, Math.round(proficiency)), maxLevel);
+      const filled = "●".repeat(filledCount);
+      const empty = "○".repeat(maxLevel - filledCount);
       return [
         new TextRun({
           text: filled,
-          font: config.fontFamily,
-          size: config.fontSize - 4,
-          color: config.accentColor,
+          font: config.bodyFont,
+          size: fontSize,
+          color: textColor,
         }),
         new TextRun({
           text: empty,
-          font: config.fontFamily,
-          size: config.fontSize - 4,
-          color: "CCCCCC",
+          font: config.bodyFont,
+          size: fontSize,
+          color: emptyColor,
         }),
       ];
     }
     
     case "bars": {
-      const filled = "█".repeat(proficiency);
-      const empty = "░".repeat(maxLevel - proficiency);
+      const barInfo = generateSkillBar(proficiency, maxLevel);
+      const filled = "█".repeat(barInfo.filled);
+      const empty = "░".repeat(barInfo.empty);
       return [
         new TextRun({
           text: filled,
-          font: "Courier New",
-          size: config.fontSize - 4,
-          color: config.accentColor,
+          font: config.accentFont,
+          size: fontSize,
+          color: textColor,
         }),
         new TextRun({
           text: empty,
-          font: "Courier New",
-          size: config.fontSize - 4,
-          color: "DDDDDD",
+          font: config.accentFont,
+          size: fontSize,
+          color: emptyColor,
         }),
       ];
     }
     
     case "percentage": {
-      const percentage = Math.round((proficiency / maxLevel) * 100);
+      const percentage = generateSkillPercentage(proficiency, maxLevel);
       return [
         new TextRun({
           text: `${percentage}%`,
-          font: config.fontFamily,
-          size: config.fontSize - 2,
-          color: config.accentColor,
+          font: config.bodyFont,
+          size: fontSize,
+          color: textColor,
         }),
       ];
     }
     
+    case "text":
     case "tags":
     default:
       return [];
   }
 }
 
-function createSkillsSection(skillCategories: CvSkillCategory[], config: CvTemplateConfig): Paragraph[] {
+function createSkillsSection(skillCategories: CvSkillCategory[], config: InternalRenderConfig): Paragraph[] {
   if (skillCategories.length === 0) return [];
   
   const elements: Paragraph[] = [createSectionHeading("Skills", config)];
@@ -465,29 +602,29 @@ function createSkillsSection(skillCategories: CvSkillCategory[], config: CvTempl
         children: [
           new TextRun({
             text: category.name,
-            font: config.fontFamily,
-            size: config.fontSize,
+            font: config.bodyFont,
+            size: config.bodySize,
             bold: true,
-            color: config.primaryColor,
+            color: config.textColor,
           }),
         ],
-        spacing: { before: 120, after: 60 },
+        spacing: { before: config.itemGap, after: config.itemGap / 2 },
       })
     );
     
-    if (config.skillStyle === "tags") {
-      const skillNames = category.skills.map(s => s.name).join(", ");
+    if (config.skillStyle === "tags" || config.skillStyle === "text") {
+      const skillNames = generateSkillTags(category.skills).join(", ");
       elements.push(
         new Paragraph({
           children: [
             new TextRun({
               text: skillNames,
-              font: config.fontFamily,
-              size: config.fontSize,
-              color: "444444",
+              font: config.bodyFont,
+              size: config.bodySize,
+              color: config.lightTextColor,
             }),
           ],
-          spacing: { after: 80 },
+          spacing: { after: config.itemGap },
         })
       );
     } else {
@@ -495,17 +632,17 @@ function createSkillsSection(skillCategories: CvSkillCategory[], config: CvTempl
         const skillChildren: TextRun[] = [
           new TextRun({
             text: skill.name + "  ",
-            font: config.fontFamily,
-            size: config.fontSize,
-            color: config.primaryColor,
+            font: config.bodyFont,
+            size: config.bodySize,
+            color: config.textColor,
           }),
-          ...createProficiencyVisual(skill.proficiency, config.skillStyle, config),
+          ...createProficiencyVisual(skill.proficiency, config.skillStyle, config, false),
         ];
         
         elements.push(
           new Paragraph({
             children: skillChildren,
-            spacing: { after: 40 },
+            spacing: { after: config.itemGap / 2 },
           })
         );
       }
@@ -515,34 +652,51 @@ function createSkillsSection(skillCategories: CvSkillCategory[], config: CvTempl
   return elements;
 }
 
-function createLanguagesSection(languages: CvLanguage[], config: CvTemplateConfig): Paragraph[] {
+function createLanguagesSection(languages: CvLanguage[], config: InternalRenderConfig): Paragraph[] {
   if (languages.length === 0) return [];
   
   const elements: Paragraph[] = [createSectionHeading("Languages", config)];
   
-  for (const lang of languages) {
-    const langChildren: TextRun[] = [
-      new TextRun({
-        text: lang.name + "  ",
-        font: config.fontFamily,
-        size: config.fontSize,
-        color: config.primaryColor,
-      }),
-      ...createProficiencyVisual(lang.proficiency, config.skillStyle, config),
-    ];
-    
+  if (config.skillStyle === "text" || config.skillStyle === "tags") {
+    const langNames = languages.map(l => l.name).join(", ");
     elements.push(
       new Paragraph({
-        children: langChildren,
-        spacing: { after: 60 },
+        children: [
+          new TextRun({
+            text: langNames,
+            font: config.bodyFont,
+            size: config.bodySize,
+            color: config.lightTextColor,
+          }),
+        ],
+        spacing: { after: config.itemGap },
       })
     );
+  } else {
+    for (const lang of languages) {
+      const langChildren: TextRun[] = [
+        new TextRun({
+          text: lang.name + "  ",
+          font: config.bodyFont,
+          size: config.bodySize,
+          color: config.textColor,
+        }),
+        ...createProficiencyVisual(lang.proficiency, config.skillStyle, config, false),
+      ];
+      
+      elements.push(
+        new Paragraph({
+          children: langChildren,
+          spacing: { after: config.itemGap },
+        })
+      );
+    }
   }
   
   return elements;
 }
 
-function createCertificationsSection(certifications: CvCertification[], config: CvTemplateConfig): Paragraph[] {
+function createCertificationsSection(certifications: CvCertification[], config: InternalRenderConfig): Paragraph[] {
   if (certifications.length === 0) return [];
   
   const elements: Paragraph[] = [createSectionHeading("Certifications", config)];
@@ -551,16 +705,16 @@ function createCertificationsSection(certifications: CvCertification[], config: 
     const certChildren: (TextRun | ExternalHyperlink)[] = [
       new TextRun({
         text: cert.name,
-        font: config.fontFamily,
-        size: config.fontSize,
+        font: config.bodyFont,
+        size: config.bodySize,
         bold: true,
-        color: config.primaryColor,
+        color: config.textColor,
       }),
       new TextRun({
         text: `  •  ${cert.issuer}  •  ${cert.date}`,
-        font: config.fontFamily,
-        size: config.fontSize - 2,
-        color: "666666",
+        font: config.bodyFont,
+        size: config.smallSize,
+        color: config.lightTextColor,
       }),
     ];
     
@@ -568,8 +722,8 @@ function createCertificationsSection(certifications: CvCertification[], config: 
       certChildren.push(
         new TextRun({
           text: "  ",
-          font: config.fontFamily,
-          size: config.fontSize,
+          font: config.bodyFont,
+          size: config.bodySize,
         })
       );
       certChildren.push(
@@ -577,8 +731,8 @@ function createCertificationsSection(certifications: CvCertification[], config: 
           children: [
             new TextRun({
               text: "Verify →",
-              font: config.fontFamily,
-              size: config.fontSize - 2,
+              font: config.bodyFont,
+              size: config.smallSize,
               color: config.accentColor,
               underline: {},
             }),
@@ -591,7 +745,7 @@ function createCertificationsSection(certifications: CvCertification[], config: 
     elements.push(
       new Paragraph({
         children: certChildren,
-        spacing: { after: 80 },
+        spacing: { after: config.itemGap },
       })
     );
   }
@@ -599,7 +753,7 @@ function createCertificationsSection(certifications: CvCertification[], config: 
   return elements;
 }
 
-function createProjectsSection(projects: CvProject[], config: CvTemplateConfig): Paragraph[] {
+function createProjectsSection(projects: CvProject[], config: InternalRenderConfig): Paragraph[] {
   if (projects.length === 0) return [];
   
   const elements: Paragraph[] = [createSectionHeading("Projects", config)];
@@ -608,10 +762,10 @@ function createProjectsSection(projects: CvProject[], config: CvTemplateConfig):
     const titleChildren: (TextRun | ExternalHyperlink)[] = [
       new TextRun({
         text: project.name,
-        font: config.fontFamily,
-        size: config.fontSize,
+        font: config.bodyFont,
+        size: config.bodySize,
         bold: true,
-        color: config.primaryColor,
+        color: config.textColor,
       }),
     ];
     
@@ -619,8 +773,8 @@ function createProjectsSection(projects: CvProject[], config: CvTemplateConfig):
       titleChildren.push(
         new TextRun({
           text: "  ",
-          font: config.fontFamily,
-          size: config.fontSize,
+          font: config.bodyFont,
+          size: config.bodySize,
         })
       );
       titleChildren.push(
@@ -628,8 +782,8 @@ function createProjectsSection(projects: CvProject[], config: CvTemplateConfig):
           children: [
             new TextRun({
               text: "View →",
-              font: config.fontFamily,
-              size: config.fontSize - 2,
+              font: config.bodyFont,
+              size: config.smallSize,
               color: config.accentColor,
               underline: {},
             }),
@@ -642,7 +796,7 @@ function createProjectsSection(projects: CvProject[], config: CvTemplateConfig):
     elements.push(
       new Paragraph({
         children: titleChildren,
-        spacing: { before: 120, after: 40 },
+        spacing: { before: config.itemGap, after: config.itemGap / 2 },
       })
     );
     
@@ -651,12 +805,12 @@ function createProjectsSection(projects: CvProject[], config: CvTemplateConfig):
         children: [
           new TextRun({
             text: project.description,
-            font: config.fontFamily,
-            size: config.fontSize,
-            color: "444444",
+            font: config.bodyFont,
+            size: config.bodySize,
+            color: config.lightTextColor,
           }),
         ],
-        spacing: { after: 60, line: 260 },
+        spacing: { after: config.itemGap / 2, line: config.lineHeight },
       })
     );
     
@@ -667,13 +821,13 @@ function createProjectsSection(projects: CvProject[], config: CvTemplateConfig):
           children: [
             new TextRun({
               text: techText,
-              font: config.fontFamily,
-              size: config.fontSize - 2,
+              font: config.accentFont,
+              size: config.smallSize,
               color: config.accentColor,
               italics: true,
             }),
           ],
-          spacing: { after: 80 },
+          spacing: { after: config.itemGap },
         })
       );
     }
@@ -682,7 +836,7 @@ function createProjectsSection(projects: CvProject[], config: CvTemplateConfig):
   return elements;
 }
 
-function createSingleColumnLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph | Table)[] {
+function createSingleColumnLayout(spec: CvSpec, config: InternalRenderConfig): (Paragraph | Table)[] {
   const elements: (Paragraph | Table)[] = [];
   
   elements.push(...createHeaderSection(spec.header, config));
@@ -701,7 +855,7 @@ function createSingleColumnLayout(spec: CvSpec, config: CvTemplateConfig): (Para
   return elements;
 }
 
-function createTwoColumnLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph | Table)[] {
+function createTwoColumnLayout(spec: CvSpec, config: InternalRenderConfig): (Paragraph | Table)[] {
   const elements: (Paragraph | Table)[] = [];
   
   elements.push(...createHeaderSection(spec.header, config));
@@ -730,8 +884,12 @@ function createTwoColumnLayout(spec: CvSpec, config: CvTemplateConfig): (Paragra
   const noBorder = {
     style: BorderStyle.NONE,
     size: 0,
-    color: "FFFFFF",
+    color: config.backgroundColor,
   };
+  
+  const gutterWidth = 5;
+  const leftWidth = config.twoColumnLeftWidth;
+  const rightWidth = 100 - leftWidth - gutterWidth;
   
   const table = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
@@ -740,7 +898,7 @@ function createTwoColumnLayout(spec: CvSpec, config: CvTemplateConfig): (Paragra
         children: [
           new TableCell({
             children: leftColumnContent,
-            width: { size: 65, type: WidthType.PERCENTAGE },
+            width: { size: leftWidth, type: WidthType.PERCENTAGE },
             borders: {
               top: noBorder,
               bottom: noBorder,
@@ -753,7 +911,7 @@ function createTwoColumnLayout(spec: CvSpec, config: CvTemplateConfig): (Paragra
             children: [
               new Paragraph({ spacing: { after: 0 } }),
             ],
-            width: { size: 5, type: WidthType.PERCENTAGE },
+            width: { size: gutterWidth, type: WidthType.PERCENTAGE },
             borders: {
               top: noBorder,
               bottom: noBorder,
@@ -763,7 +921,7 @@ function createTwoColumnLayout(spec: CvSpec, config: CvTemplateConfig): (Paragra
           }),
           new TableCell({
             children: rightColumnContent,
-            width: { size: 30, type: WidthType.PERCENTAGE },
+            width: { size: rightWidth, type: WidthType.PERCENTAGE },
             borders: {
               top: noBorder,
               bottom: noBorder,
@@ -782,21 +940,132 @@ function createTwoColumnLayout(spec: CvSpec, config: CvTemplateConfig): (Paragra
   return elements;
 }
 
-function createSidebarLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph | Table)[] {
+function createSidebarSkillsContent(skillCategories: CvSkillCategory[], config: InternalRenderConfig): Paragraph[] {
+  if (skillCategories.length === 0) return [];
+  
+  const elements: Paragraph[] = [createSidebarSectionHeading("Skills", config)];
+  
+  for (const category of skillCategories) {
+    elements.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: category.name,
+            font: config.bodyFont,
+            size: config.smallSize,
+            bold: true,
+            color: config.backgroundColor,
+          }),
+        ],
+        spacing: { before: config.itemGap, after: config.itemGap / 2 },
+      })
+    );
+    
+    if (config.skillStyle === "tags" || config.skillStyle === "text") {
+      const skillNames = generateSkillTags(category.skills).join(", ");
+      elements.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: skillNames,
+              font: config.bodyFont,
+              size: config.smallSize,
+              color: config.backgroundColor,
+            }),
+          ],
+          spacing: { after: config.itemGap / 2 },
+        })
+      );
+    } else {
+      for (const skill of category.skills) {
+        const proficiencyVisual = createProficiencyVisual(skill.proficiency, config.skillStyle, config, true);
+        const skillText = proficiencyVisual.length > 0 ? `${skill.name}  ` : skill.name;
+        
+        elements.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: skillText,
+                font: config.bodyFont,
+                size: config.smallSize,
+                color: config.backgroundColor,
+              }),
+              ...proficiencyVisual,
+            ],
+            spacing: { after: config.itemGap / 2 },
+          })
+        );
+      }
+    }
+  }
+  
+  return elements;
+}
+
+function createSidebarLanguagesContent(languages: CvLanguage[], config: InternalRenderConfig): Paragraph[] {
+  if (languages.length === 0) return [];
+  
+  const elements: Paragraph[] = [createSidebarSectionHeading("Languages", config)];
+  
+  if (config.skillStyle === "text" || config.skillStyle === "tags") {
+    const langNames = languages.map(l => l.name).join(", ");
+    elements.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: langNames,
+            font: config.bodyFont,
+            size: config.smallSize,
+            color: config.backgroundColor,
+          }),
+        ],
+        spacing: { after: config.itemGap / 2 },
+      })
+    );
+  } else {
+    for (const lang of languages) {
+      const proficiencyVisual = createProficiencyVisual(lang.proficiency, config.skillStyle, config, true);
+      const langText = proficiencyVisual.length > 0 ? `${lang.name}  ` : lang.name;
+      
+      elements.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: langText,
+              font: config.bodyFont,
+              size: config.smallSize,
+              color: config.backgroundColor,
+            }),
+            ...proficiencyVisual,
+          ],
+          spacing: { after: config.itemGap / 2 },
+        })
+      );
+    }
+  }
+  
+  return elements;
+}
+
+function createSidebarLayout(spec: CvSpec, config: InternalRenderConfig): (Paragraph | Table)[] {
   const sidebarContent: Paragraph[] = [];
+  
+  if (config.showPhoto && spec.header.photo_url) {
+    sidebarContent.push(createPhotoPlaceholder(config, true));
+  }
   
   sidebarContent.push(
     new Paragraph({
       children: [
         new TextRun({
           text: spec.header.name,
-          font: config.fontFamily,
-          size: 32,
+          font: config.headingFont,
+          size: config.headingSize,
           bold: true,
-          color: "FFFFFF",
+          color: config.backgroundColor,
         }),
       ],
-      spacing: { after: 200 },
+      spacing: { after: config.sectionGap / 2 },
     })
   );
   
@@ -813,12 +1082,12 @@ function createSidebarLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph
           children: [
             new TextRun({
               text: `${item.icon} ${item.value}`,
-              font: config.fontFamily,
-              size: config.fontSize - 2,
-              color: "FFFFFF",
+              font: config.bodyFont,
+              size: config.smallSize,
+              color: config.backgroundColor,
             }),
           ],
-          spacing: { after: 60 },
+          spacing: { after: config.itemGap },
         })
       );
     }
@@ -829,112 +1098,31 @@ function createSidebarLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph
       new Paragraph({
         children: [
           new TextRun({
-            text: "🌐 ",
-            font: config.fontFamily,
-            size: config.fontSize - 2,
+            text: "🔗 ",
+            font: config.bodyFont,
+            size: config.smallSize,
+            color: config.backgroundColor,
           }),
           new ExternalHyperlink({
             children: [
               new TextRun({
                 text: spec.header.website.replace(/^https?:\/\//, ""),
-                font: config.fontFamily,
-                size: config.fontSize - 2,
-                color: "FFFFFF",
+                font: config.bodyFont,
+                size: config.smallSize,
+                color: config.backgroundColor,
                 underline: {},
               }),
             ],
             link: spec.header.website,
           }),
         ],
-        spacing: { after: 120 },
+        spacing: { after: config.itemGap * 2 },
       })
     );
   }
   
-  if (spec.skills && spec.skills.length > 0) {
-    sidebarContent.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: "SKILLS",
-            font: config.fontFamily,
-            size: 20,
-            bold: true,
-            color: "FFFFFF",
-          }),
-        ],
-        spacing: { before: 200, after: 80 },
-      })
-    );
-    
-    for (const category of spec.skills) {
-      sidebarContent.push(
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: category.name,
-              font: config.fontFamily,
-              size: config.fontSize - 2,
-              bold: true,
-              color: "FFFFFF",
-            }),
-          ],
-          spacing: { before: 80, after: 40 },
-        })
-      );
-      
-      for (const skill of category.skills) {
-        const dots = "●".repeat(skill.proficiency) + "○".repeat(5 - skill.proficiency);
-        sidebarContent.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: `${skill.name}  ${dots}`,
-                font: config.fontFamily,
-                size: config.fontSize - 4,
-                color: "FFFFFF",
-              }),
-            ],
-            spacing: { after: 20 },
-          })
-        );
-      }
-    }
-  }
-  
-  if (spec.languages && spec.languages.length > 0) {
-    sidebarContent.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: "LANGUAGES",
-            font: config.fontFamily,
-            size: 20,
-            bold: true,
-            color: "FFFFFF",
-          }),
-        ],
-        spacing: { before: 200, after: 80 },
-      })
-    );
-    
-    for (const lang of spec.languages) {
-      const dots = "●".repeat(lang.proficiency) + "○".repeat(5 - lang.proficiency);
-      sidebarContent.push(
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: `${lang.name}  ${dots}`,
-              font: config.fontFamily,
-              size: config.fontSize - 2,
-              color: "FFFFFF",
-            }),
-          ],
-          spacing: { after: 40 },
-        })
-      );
-    }
-  }
+  sidebarContent.push(...createSidebarSkillsContent(spec.skills || [], config));
+  sidebarContent.push(...createSidebarLanguagesContent(spec.languages || [], config));
   
   const mainContent: Paragraph[] = [];
   
@@ -945,13 +1133,13 @@ function createSidebarLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph
         children: [
           new TextRun({
             text: spec.profile_summary,
-            font: config.fontFamily,
-            size: config.fontSize,
-            color: "444444",
+            font: config.bodyFont,
+            size: config.bodySize,
+            color: config.lightTextColor,
             italics: true,
           }),
         ],
-        spacing: { after: 200, line: 276 },
+        spacing: { after: config.sectionGap / 2, line: config.lineHeight },
       })
     );
   }
@@ -970,7 +1158,7 @@ function createSidebarLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph
   const noBorder = {
     style: BorderStyle.NONE,
     size: 0,
-    color: "FFFFFF",
+    color: config.backgroundColor,
   };
   
   const table = new Table({
@@ -980,9 +1168,9 @@ function createSidebarLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph
         children: [
           new TableCell({
             children: sidebarContent,
-            width: { size: 30, type: WidthType.PERCENTAGE },
+            width: { size: config.sidebarWidth, type: WidthType.PERCENTAGE },
             shading: {
-              fill: config.accentColor,
+              fill: config.sidebarBgColor,
               type: ShadingType.CLEAR,
               color: "auto",
             },
@@ -996,7 +1184,7 @@ function createSidebarLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph
           }),
           new TableCell({
             children: mainContent,
-            width: { size: 70, type: WidthType.PERCENTAGE },
+            width: { size: 100 - config.sidebarWidth, type: WidthType.PERCENTAGE },
             borders: {
               top: noBorder,
               bottom: noBorder,
@@ -1015,9 +1203,9 @@ function createSidebarLayout(spec: CvSpec, config: CvTemplateConfig): (Paragraph
 
 export async function renderCvFromSpec(
   spec: CvSpec,
-  templateConfig?: Partial<CvTemplateConfig>
+  templateConfig: CvTemplateConfig
 ): Promise<Buffer> {
-  const config = getTemplateConfig(spec, templateConfig);
+  const config = templateConfigToInternal(templateConfig, spec);
   
   let bodyElements: (Paragraph | Table)[];
   
@@ -1044,8 +1232,8 @@ export async function renderCvFromSpec(
           name: "Normal",
           basedOn: "Normal",
           next: "Normal",
-          run: { font: config.fontFamily, size: config.fontSize },
-          paragraph: { spacing: { line: 276 } },
+          run: { font: config.bodyFont, size: config.bodySize },
+          paragraph: { spacing: { line: config.lineHeight } },
         },
       ],
     },

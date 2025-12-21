@@ -3,6 +3,8 @@ export interface CvTemplateConfig {
   description: string;
   layout: 'single-column' | 'two-column' | 'sidebar';
   sidebarWidth?: number;
+  twoColumnLeftWidth?: number;
+  twoColumnRightWidth?: number;
   fonts: {
     heading: string;
     body: string;
@@ -32,6 +34,8 @@ export const cvTemplates: Record<string, CvTemplateConfig> = {
     name: 'modern',
     description: 'A contemporary two-column layout with blue accents and clean typography',
     layout: 'two-column',
+    twoColumnLeftWidth: 65,
+    twoColumnRightWidth: 35,
     fonts: {
       heading: 'Calibri',
       body: 'Calibri',
@@ -78,7 +82,7 @@ export const cvTemplates: Record<string, CvTemplateConfig> = {
       lineHeight: 1.4,
     },
     skillStyle: 'text',
-    showPhoto: true,
+    showPhoto: false,
     photoShape: 'square',
   },
 
@@ -115,6 +119,8 @@ export const cvTemplates: Record<string, CvTemplateConfig> = {
     name: 'minimalist',
     description: 'A clean single-column layout with grayscale palette and dot skill indicators',
     layout: 'single-column',
+    twoColumnLeftWidth: 60,
+    twoColumnRightWidth: 40,
     fonts: {
       heading: 'Helvetica',
       body: 'Helvetica',
