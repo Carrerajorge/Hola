@@ -3675,7 +3675,7 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => { setDocGeneratorType("word"); setIsDocGeneratorOpen(true); onCloseSidebar?.(); }}
+                              onClick={() => openBlankDocEditor("word")}
                               data-testid="button-create-word"
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-600">
@@ -3686,7 +3686,7 @@ export function ChatInterface({
                             <Button 
                               variant="ghost" 
                               className="justify-start gap-2 text-sm h-9"
-                              onClick={() => { setDocGeneratorType("excel"); setIsDocGeneratorOpen(true); onCloseSidebar?.(); }}
+                              onClick={() => openBlankDocEditor("excel")}
                               data-testid="button-create-excel"
                             >
                               <div className="flex items-center justify-center w-5 h-5 rounded bg-green-600">
