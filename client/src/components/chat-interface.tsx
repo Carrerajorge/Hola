@@ -998,6 +998,11 @@ export function ChatInterface({
       streamIntervalRef.current = null;
     }
     
+    // Clean up PPT streaming if active
+    if (pptStreaming.isStreaming) {
+      pptStreaming.stopStreaming();
+    }
+    
     // Save the partial content as a message if there's any (use ref for latest value)
     const currentContent = streamingContentRef.current;
     if (currentContent && currentContent.trim()) {
@@ -2048,6 +2053,11 @@ export function ChatInterface({
       }
       
     } catch (error: any) {
+      // Clean up PPT streaming on any error
+      if (pptStreaming.isStreaming) {
+        pptStreaming.stopStreaming();
+      }
+      
       if (error.name === "AbortError") {
         return;
       }
