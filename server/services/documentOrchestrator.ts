@@ -13,11 +13,26 @@ import {
 } from "./documentQualityGates";
 import { renderExcelFromSpec } from "./excelSpecRenderer";
 import { renderWordFromSpec } from "./wordSpecRenderer";
+import { renderCvFromSpec } from "./cvRenderer";
+import { selectCvTemplate } from "./documentMappingService";
+import {
+  getDocumentSystemPrompt,
+  getDocumentJsonSchema,
+} from "./documentPrompts";
 import {
   ExcelSpec,
   DocSpec,
+  CvSpec,
+  ReportSpec,
+  LetterSpec,
   excelSpecJsonSchema,
   docSpecJsonSchema,
+  cvSpecSchema,
+  reportSpecSchema,
+  letterSpecSchema,
+  cvSpecJsonSchema,
+  reportSpecJsonSchema,
+  letterSpecJsonSchema,
 } from "../../shared/documentSpecs";
 
 const MAX_RETRIES = 3;
@@ -477,4 +492,521 @@ export async function generateWordFromPrompt(
     finalSpec: null,
   } as RepairLoopResult<DocSpec>;
   throw error;
+}
+
+function buildDocumentRepairPrompt(
+  originalPrompt: string,
+  lastBadJson: string,
+  errors: string[],
+  schemaContext: string,
+  docType: "cv" | "report" | "letter"
+): string {
+  const specificRules: Record<string, string> = {
+    cv: `CV-SPECIFIC REPAIR RULES:
+- header object is REQUIRED with name, phone, email, address fields
+- Skill proficiency MUST be integer 1-5
+- Language proficiency MUST be integer 1-5
+- work_experience and education should be in reverse chronological order
+- end_date can be null for current positions`,
+    report: `REPORT-SPECIFIC REPAIR RULES:
+- header object is REQUIRED with at least title field
+- Each table row array length MUST equal columns array length
+- Chart data.labels and data.values arrays must have same length
+- Heading levels are 1-4`,
+    letter: `LETTER-SPECIFIC REPAIR RULES:
+- sender object is REQUIRED with name and address
+- recipient object is REQUIRED with name and address
+- date field is REQUIRED
+- body_paragraphs array is REQUIRED with at least one paragraph
+- signature_name is REQUIRED`,
+  };
+
+  return `${schemaContext}
+
+${specificRules[docType]}
+
+=== REPAIR REQUEST ===
+
+ORIGINAL USER REQUEST:
+${originalPrompt}
+
+YOUR PREVIOUS (INVALID) RESPONSE:
+\`\`\`json
+${lastBadJson}
+\`\`\`
+
+VALIDATION ERRORS (fix each one):
+${errors.map((e, i) => `${i + 1}. ${e}`).join('\n')}
+
+REQUIRED ACTIONS:
+1. Fix each validation error listed above
+2. Preserve all valid content unchanged
+3. Return ONLY the corrected JSON, no markdown, no explanations
+
+Respond with the fixed JSON now:`;
+}
+
+function validateCvSpec(spec: unknown): { valid: boolean; errors: string[] } {
+  const result = cvSpecSchema.safeParse(spec);
+  if (result.success) {
+    return { valid: true, errors: [] };
+  }
+  const errors = result.error.issues.map((issue) => {
+    const path = issue.path.join(".");
+    return path ? `${path}: ${issue.message}` : issue.message;
+  });
+  return { valid: false, errors };
+}
+
+function validateReportSpec(spec: unknown): { valid: boolean; errors: string[] } {
+  const result = reportSpecSchema.safeParse(spec);
+  if (result.success) {
+    return { valid: true, errors: [] };
+  }
+  const errors = result.error.issues.map((issue) => {
+    const path = issue.path.join(".");
+    return path ? `${path}: ${issue.message}` : issue.message;
+  });
+  return { valid: false, errors };
+}
+
+function validateLetterSpec(spec: unknown): { valid: boolean; errors: string[] } {
+  const result = letterSpecSchema.safeParse(spec);
+  if (result.success) {
+    return { valid: true, errors: [] };
+  }
+  const errors = result.error.issues.map((issue) => {
+    const path = issue.path.join(".");
+    return path ? `${path}: ${issue.message}` : issue.message;
+  });
+  return { valid: false, errors };
+}
+
+function createDefaultQualityReport(): QualityReport {
+  return {
+    valid: true,
+    errors: [],
+    warnings: [],
+    info: [],
+  };
+}
+
+export async function generateCvFromPrompt(
+  prompt: string
+): Promise<GenerationResult<CvSpec>> {
+  let lastErrors: string[] = [];
+  let lastBadJson: string = "";
+  const allAttemptErrors: string[][] = [];
+
+  const systemPrompt = getDocumentSystemPrompt("cv");
+  const jsonSchema = getDocumentJsonSchema("cv");
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    console.log(`[DocumentOrchestrator] CV generation attempt ${attempt}/${MAX_RETRIES}`);
+
+    let currentSystemPrompt: string;
+    let userPrompt: string;
+
+    if (attempt === 1 || lastErrors.length === 0) {
+      currentSystemPrompt = systemPrompt;
+      userPrompt = prompt;
+    } else {
+      currentSystemPrompt = REPAIR_SYSTEM_PROMPT;
+      userPrompt = buildDocumentRepairPrompt(
+        prompt,
+        lastBadJson,
+        lastErrors,
+        `SCHEMA REFERENCE:\n${JSON.stringify(jsonSchema, null, 2)}`,
+        "cv"
+      );
+      console.log(`[DocumentOrchestrator] Retry with ${lastErrors.length} error(s) to fix`);
+    }
+
+    const response = await callGeminiForSpec(currentSystemPrompt, userPrompt);
+    const jsonStr = extractJsonFromResponse(response);
+    lastBadJson = jsonStr;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (parseError) {
+      lastErrors = [`JSON parse error: ${(parseError as Error).message}`];
+      allAttemptErrors.push([...lastErrors]);
+      console.error(`[DocumentOrchestrator] JSON parse failed:`, lastErrors[0]);
+      continue;
+    }
+
+    const schemaValidation = validateCvSpec(parsed);
+    if (!schemaValidation.valid) {
+      lastErrors = schemaValidation.errors;
+      allAttemptErrors.push([...lastErrors]);
+      console.error(`[DocumentOrchestrator] Schema validation failed:`, schemaValidation.errors);
+      continue;
+    }
+
+    const spec = parsed as CvSpec;
+    const templateConfig = selectCvTemplate(spec.template_style || "modern");
+    const qualityReport = createDefaultQualityReport();
+
+    try {
+      const buffer = await renderCvFromSpec(spec, templateConfig);
+      
+      const postRenderValidation = await validateGeneratedWordBuffer(buffer);
+      if (!postRenderValidation.valid) {
+        lastErrors = postRenderValidation.errors;
+        allAttemptErrors.push([...lastErrors]);
+        console.error(`[DocumentOrchestrator] Post-render validation failed:`, postRenderValidation.errors);
+        continue;
+      }
+      
+      console.log(`[DocumentOrchestrator] CV generated successfully on attempt ${attempt}`);
+      return { 
+        buffer, 
+        spec, 
+        qualityReport,
+        postRenderValidation,
+        attemptsUsed: attempt,
+        repairLoop: {
+          ok: true,
+          iterations: attempt,
+          errors: allAttemptErrors.flat(),
+          finalSpec: spec,
+        },
+      };
+    } catch (renderError) {
+      lastErrors = [`Render error: ${(renderError as Error).message}`];
+      allAttemptErrors.push([...lastErrors]);
+      console.error(`[DocumentOrchestrator] Render failed:`, lastErrors[0]);
+      continue;
+    }
+  }
+
+  const allErrors = allAttemptErrors.flat();
+  const error = new Error(
+    `Failed to generate valid CV spec after ${MAX_RETRIES} attempts. Last errors: ${lastErrors.join("; ")}`
+  );
+  (error as any).repairLoopResult = {
+    ok: false,
+    iterations: MAX_RETRIES,
+    errors: allErrors,
+    finalSpec: null,
+  } as RepairLoopResult<CvSpec>;
+  throw error;
+}
+
+export async function generateReportFromPrompt(
+  prompt: string
+): Promise<GenerationResult<ReportSpec>> {
+  let lastErrors: string[] = [];
+  let lastBadJson: string = "";
+  const allAttemptErrors: string[][] = [];
+
+  const systemPrompt = getDocumentSystemPrompt("report");
+  const jsonSchema = getDocumentJsonSchema("report");
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    console.log(`[DocumentOrchestrator] Report generation attempt ${attempt}/${MAX_RETRIES}`);
+
+    let currentSystemPrompt: string;
+    let userPrompt: string;
+
+    if (attempt === 1 || lastErrors.length === 0) {
+      currentSystemPrompt = systemPrompt;
+      userPrompt = prompt;
+    } else {
+      currentSystemPrompt = REPAIR_SYSTEM_PROMPT;
+      userPrompt = buildDocumentRepairPrompt(
+        prompt,
+        lastBadJson,
+        lastErrors,
+        `SCHEMA REFERENCE:\n${JSON.stringify(jsonSchema, null, 2)}`,
+        "report"
+      );
+      console.log(`[DocumentOrchestrator] Retry with ${lastErrors.length} error(s) to fix`);
+    }
+
+    const response = await callGeminiForSpec(currentSystemPrompt, userPrompt);
+    const jsonStr = extractJsonFromResponse(response);
+    lastBadJson = jsonStr;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (parseError) {
+      lastErrors = [`JSON parse error: ${(parseError as Error).message}`];
+      allAttemptErrors.push([...lastErrors]);
+      console.error(`[DocumentOrchestrator] JSON parse failed:`, lastErrors[0]);
+      continue;
+    }
+
+    const schemaValidation = validateReportSpec(parsed);
+    if (!schemaValidation.valid) {
+      lastErrors = schemaValidation.errors;
+      allAttemptErrors.push([...lastErrors]);
+      console.error(`[DocumentOrchestrator] Schema validation failed:`, schemaValidation.errors);
+      continue;
+    }
+
+    const spec = parsed as ReportSpec;
+    const qualityReport = createDefaultQualityReport();
+
+    try {
+      const buffer = await renderWordFromSpec({
+        title: spec.header.title,
+        author: spec.header.author || undefined,
+        styleset: spec.template_style === "academic" ? "classic" : "modern",
+        add_toc: spec.show_toc,
+        blocks: convertReportToDocBlocks(spec),
+      });
+      
+      const postRenderValidation = await validateGeneratedWordBuffer(buffer);
+      if (!postRenderValidation.valid) {
+        lastErrors = postRenderValidation.errors;
+        allAttemptErrors.push([...lastErrors]);
+        console.error(`[DocumentOrchestrator] Post-render validation failed:`, postRenderValidation.errors);
+        continue;
+      }
+      
+      console.log(`[DocumentOrchestrator] Report generated successfully on attempt ${attempt}`);
+      return { 
+        buffer, 
+        spec, 
+        qualityReport,
+        postRenderValidation,
+        attemptsUsed: attempt,
+        repairLoop: {
+          ok: true,
+          iterations: attempt,
+          errors: allAttemptErrors.flat(),
+          finalSpec: spec,
+        },
+      };
+    } catch (renderError) {
+      lastErrors = [`Render error: ${(renderError as Error).message}`];
+      allAttemptErrors.push([...lastErrors]);
+      console.error(`[DocumentOrchestrator] Render failed:`, lastErrors[0]);
+      continue;
+    }
+  }
+
+  const allErrors = allAttemptErrors.flat();
+  const error = new Error(
+    `Failed to generate valid Report spec after ${MAX_RETRIES} attempts. Last errors: ${lastErrors.join("; ")}`
+  );
+  (error as any).repairLoopResult = {
+    ok: false,
+    iterations: MAX_RETRIES,
+    errors: allErrors,
+    finalSpec: null,
+  } as RepairLoopResult<ReportSpec>;
+  throw error;
+}
+
+function convertReportToDocBlocks(spec: ReportSpec): DocSpec["blocks"] {
+  const blocks: DocSpec["blocks"] = [];
+  
+  blocks.push({ type: "title", text: spec.header.title });
+  
+  if (spec.executive_summary) {
+    blocks.push({ type: "heading", level: 1, text: "Executive Summary" });
+    blocks.push({ type: "paragraph", text: spec.executive_summary });
+  }
+  
+  for (const section of spec.sections) {
+    blocks.push({ type: "heading", level: 1, text: section.title });
+    
+    for (const content of section.content) {
+      switch (content.type) {
+        case "text":
+          blocks.push({ type: "paragraph", text: content.content });
+          break;
+        case "heading":
+          blocks.push({ type: "heading", level: Math.min(content.level + 1, 6), text: content.text });
+          break;
+        case "bullets":
+          blocks.push({ type: "bullets", items: content.items });
+          break;
+        case "numbered":
+          blocks.push({ type: "numbered", items: content.items });
+          break;
+        case "table":
+          blocks.push({
+            type: "table",
+            columns: content.columns,
+            rows: content.rows || [],
+            style: "Table Grid",
+            header: true,
+          });
+          break;
+        case "quote":
+          const quoteText = content.attribution
+            ? `"${content.text}" — ${content.attribution}`
+            : `"${content.text}"`;
+          blocks.push({ type: "paragraph", text: quoteText, style: "Quote" });
+          break;
+      }
+    }
+  }
+  
+  return blocks;
+}
+
+export async function generateLetterFromPrompt(
+  prompt: string
+): Promise<GenerationResult<LetterSpec>> {
+  let lastErrors: string[] = [];
+  let lastBadJson: string = "";
+  const allAttemptErrors: string[][] = [];
+
+  const systemPrompt = getDocumentSystemPrompt("letter");
+  const jsonSchema = getDocumentJsonSchema("letter");
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    console.log(`[DocumentOrchestrator] Letter generation attempt ${attempt}/${MAX_RETRIES}`);
+
+    let currentSystemPrompt: string;
+    let userPrompt: string;
+
+    if (attempt === 1 || lastErrors.length === 0) {
+      currentSystemPrompt = systemPrompt;
+      userPrompt = prompt;
+    } else {
+      currentSystemPrompt = REPAIR_SYSTEM_PROMPT;
+      userPrompt = buildDocumentRepairPrompt(
+        prompt,
+        lastBadJson,
+        lastErrors,
+        `SCHEMA REFERENCE:\n${JSON.stringify(jsonSchema, null, 2)}`,
+        "letter"
+      );
+      console.log(`[DocumentOrchestrator] Retry with ${lastErrors.length} error(s) to fix`);
+    }
+
+    const response = await callGeminiForSpec(currentSystemPrompt, userPrompt);
+    const jsonStr = extractJsonFromResponse(response);
+    lastBadJson = jsonStr;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (parseError) {
+      lastErrors = [`JSON parse error: ${(parseError as Error).message}`];
+      allAttemptErrors.push([...lastErrors]);
+      console.error(`[DocumentOrchestrator] JSON parse failed:`, lastErrors[0]);
+      continue;
+    }
+
+    const schemaValidation = validateLetterSpec(parsed);
+    if (!schemaValidation.valid) {
+      lastErrors = schemaValidation.errors;
+      allAttemptErrors.push([...lastErrors]);
+      console.error(`[DocumentOrchestrator] Schema validation failed:`, schemaValidation.errors);
+      continue;
+    }
+
+    const spec = parsed as LetterSpec;
+    const qualityReport = createDefaultQualityReport();
+
+    try {
+      const buffer = await renderWordFromSpec({
+        title: spec.subject || "Letter",
+        styleset: spec.template_style === "formal" ? "classic" : "modern",
+        blocks: convertLetterToDocBlocks(spec),
+      });
+      
+      const postRenderValidation = await validateGeneratedWordBuffer(buffer);
+      if (!postRenderValidation.valid) {
+        lastErrors = postRenderValidation.errors;
+        allAttemptErrors.push([...lastErrors]);
+        console.error(`[DocumentOrchestrator] Post-render validation failed:`, postRenderValidation.errors);
+        continue;
+      }
+      
+      console.log(`[DocumentOrchestrator] Letter generated successfully on attempt ${attempt}`);
+      return { 
+        buffer, 
+        spec, 
+        qualityReport,
+        postRenderValidation,
+        attemptsUsed: attempt,
+        repairLoop: {
+          ok: true,
+          iterations: attempt,
+          errors: allAttemptErrors.flat(),
+          finalSpec: spec,
+        },
+      };
+    } catch (renderError) {
+      lastErrors = [`Render error: ${(renderError as Error).message}`];
+      allAttemptErrors.push([...lastErrors]);
+      console.error(`[DocumentOrchestrator] Render failed:`, lastErrors[0]);
+      continue;
+    }
+  }
+
+  const allErrors = allAttemptErrors.flat();
+  const error = new Error(
+    `Failed to generate valid Letter spec after ${MAX_RETRIES} attempts. Last errors: ${lastErrors.join("; ")}`
+  );
+  (error as any).repairLoopResult = {
+    ok: false,
+    iterations: MAX_RETRIES,
+    errors: allErrors,
+    finalSpec: null,
+  } as RepairLoopResult<LetterSpec>;
+  throw error;
+}
+
+function convertLetterToDocBlocks(spec: LetterSpec): DocSpec["blocks"] {
+  const blocks: DocSpec["blocks"] = [];
+  
+  const senderAddress = spec.sender.address.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+  blocks.push({ type: "paragraph", text: spec.sender.name });
+  for (const line of senderAddress) {
+    blocks.push({ type: "paragraph", text: line });
+  }
+  if (spec.sender.phone) {
+    blocks.push({ type: "paragraph", text: spec.sender.phone });
+  }
+  if (spec.sender.email) {
+    blocks.push({ type: "paragraph", text: spec.sender.email });
+  }
+  
+  blocks.push({ type: "paragraph", text: "" });
+  blocks.push({ type: "paragraph", text: spec.date });
+  blocks.push({ type: "paragraph", text: "" });
+  
+  blocks.push({ type: "paragraph", text: spec.recipient.name });
+  if (spec.recipient.title) {
+    blocks.push({ type: "paragraph", text: spec.recipient.title });
+  }
+  if (spec.recipient.organization) {
+    blocks.push({ type: "paragraph", text: spec.recipient.organization });
+  }
+  const recipientAddress = spec.recipient.address.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+  for (const line of recipientAddress) {
+    blocks.push({ type: "paragraph", text: line });
+  }
+  
+  blocks.push({ type: "paragraph", text: "" });
+  
+  if (spec.subject) {
+    blocks.push({ type: "paragraph", text: `Re: ${spec.subject}` });
+    blocks.push({ type: "paragraph", text: "" });
+  }
+  
+  blocks.push({ type: "paragraph", text: `${spec.salutation},` });
+  blocks.push({ type: "paragraph", text: "" });
+  
+  for (const paragraph of spec.body_paragraphs) {
+    blocks.push({ type: "paragraph", text: paragraph });
+    blocks.push({ type: "paragraph", text: "" });
+  }
+  
+  blocks.push({ type: "paragraph", text: `${spec.closing},` });
+  blocks.push({ type: "paragraph", text: "" });
+  blocks.push({ type: "paragraph", text: "" });
+  blocks.push({ type: "paragraph", text: spec.signature_name });
+  
+  return blocks;
 }

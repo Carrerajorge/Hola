@@ -39,8 +39,10 @@ import {
 import { renderExcelFromSpec } from "./services/excelSpecRenderer";
 import { renderWordFromSpec } from "./services/wordSpecRenderer";
 import { validateExcelSpec, validateDocSpec } from "./services/documentValidators";
-import { generateExcelFromPrompt, generateWordFromPrompt } from "./services/documentOrchestrator";
-import { excelSpecSchema, docSpecSchema } from "../shared/documentSpecs";
+import { generateExcelFromPrompt, generateWordFromPrompt, generateCvFromPrompt, generateReportFromPrompt, generateLetterFromPrompt } from "./services/documentOrchestrator";
+import { renderCvFromSpec } from "./services/cvRenderer";
+import { selectCvTemplate } from "./services/documentMappingService";
+import { excelSpecSchema, docSpecSchema, cvSpecSchema, reportSpecSchema, letterSpecSchema } from "../shared/documentSpecs";
 import { pptExportRouter } from "./routes/pptExport";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
@@ -1704,6 +1706,126 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     } catch (error: any) {
       console.error("Word generation error:", error);
       res.status(500).json({ error: "Failed to generate Word document", details: error.message });
+    }
+  });
+
+  // Generate CV from prompt (AI-powered)
+  app.post("/api/documents/generate/cv", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+      
+      const result = await generateCvFromPrompt(prompt);
+      const { buffer, qualityReport, postRenderValidation, attemptsUsed } = result;
+      
+      if (qualityReport.warnings.length > 0) {
+        res.setHeader("X-Quality-Warnings", JSON.stringify(qualityReport.warnings.map(w => w.message)));
+      }
+      if (postRenderValidation.warnings.length > 0) {
+        res.setHeader("X-PostRender-Warnings", JSON.stringify(postRenderValidation.warnings));
+      }
+      res.setHeader("X-Generation-Attempts", attemptsUsed.toString());
+      
+      const timestamp = Date.now();
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="cv_${timestamp}.docx"`);
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("CV generation error:", error);
+      res.status(500).json({ error: "Failed to generate CV document", details: error.message });
+    }
+  });
+
+  // Generate Report from prompt (AI-powered)
+  app.post("/api/documents/generate/report", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+      
+      const result = await generateReportFromPrompt(prompt);
+      const { buffer, qualityReport, postRenderValidation, attemptsUsed } = result;
+      
+      if (qualityReport.warnings.length > 0) {
+        res.setHeader("X-Quality-Warnings", JSON.stringify(qualityReport.warnings.map(w => w.message)));
+      }
+      if (postRenderValidation.warnings.length > 0) {
+        res.setHeader("X-PostRender-Warnings", JSON.stringify(postRenderValidation.warnings));
+      }
+      res.setHeader("X-Generation-Attempts", attemptsUsed.toString());
+      
+      const timestamp = Date.now();
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="report_${timestamp}.docx"`);
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Report generation error:", error);
+      res.status(500).json({ error: "Failed to generate Report document", details: error.message });
+    }
+  });
+
+  // Generate Letter from prompt (AI-powered)
+  app.post("/api/documents/generate/letter", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+      
+      const result = await generateLetterFromPrompt(prompt);
+      const { buffer, qualityReport, postRenderValidation, attemptsUsed } = result;
+      
+      if (qualityReport.warnings.length > 0) {
+        res.setHeader("X-Quality-Warnings", JSON.stringify(qualityReport.warnings.map(w => w.message)));
+      }
+      if (postRenderValidation.warnings.length > 0) {
+        res.setHeader("X-PostRender-Warnings", JSON.stringify(postRenderValidation.warnings));
+      }
+      res.setHeader("X-Generation-Attempts", attemptsUsed.toString());
+      
+      const timestamp = Date.now();
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="letter_${timestamp}.docx"`);
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Letter generation error:", error);
+      res.status(500).json({ error: "Failed to generate Letter document", details: error.message });
+    }
+  });
+
+  // Render CV from spec
+  app.post("/api/documents/render/cv", async (req, res) => {
+    try {
+      const parseResult = cvSpecSchema.safeParse(req.body);
+      
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          error: "Invalid CV spec", 
+          details: parseResult.error.flatten().fieldErrors 
+        });
+      }
+      
+      const spec = parseResult.data;
+      const templateConfig = selectCvTemplate(spec.template_style || "modern");
+      const buffer = await renderCvFromSpec(spec, templateConfig);
+      
+      const timestamp = Date.now();
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="cv_${timestamp}.docx"`);
+      res.setHeader("Content-Length", buffer.length);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("CV render error:", error);
+      res.status(500).json({ error: "Failed to render CV document", details: error.message });
     }
   });
 
