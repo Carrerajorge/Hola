@@ -99,6 +99,20 @@ CRITICAL VALIDATION RULES (MUST FOLLOW):
    - If table anchor is A1 with 3 headers and 5 rows, data is A2:C6 (row 2-6 for data, columns A-C)
 4. Sheet names: 1-31 chars, no special characters: \\ / : * ? [ ]
 
+RICH TEXT FORMATTING (IMPORTANT):
+Use these formatting conventions in cell content - they will be rendered with native Excel styles:
+- **bold text** for bold (double asterisks)
+- *italic text* for italics (single asterisks)
+- \`code\` for inline code (backticks)
+- [link text](url) for hyperlinks
+- $LaTeX$ for math formulas (will be rendered with formatting)
+
+MATH FORMULAS - Use LaTeX syntax:
+- Fractions: $\\frac{a}{b}$
+- Exponents: $x^2$, $x^{n+1}$
+- Subscripts: $x_1$, $a_{ij}$
+- Greek letters: $\\alpha$, $\\beta$, $\\pi$
+
 You MUST respond with ONLY valid JSON that conforms to this schema:
 ${JSON.stringify(excelSpecJsonSchema, null, 2)}
 
@@ -145,31 +159,47 @@ CRITICAL VALIDATION RULES (MUST FOLLOW):
 4. Heading level must be integer 1-6
 5. bullets and numbered blocks require non-empty "items" array
 
+RICH TEXT FORMATTING (IMPORTANT):
+Use these formatting conventions in text content - they will be rendered as native Office styles:
+- **bold text** for bold (double asterisks)
+- *italic text* for italics (single asterisks)
+- \`code\` for inline code (backticks)
+- [link text](url) for hyperlinks
+- $LaTeX$ for inline math formulas (single dollar signs)
+- $$LaTeX$$ for block math formulas (double dollar signs)
+
+MATH FORMULAS - Use LaTeX syntax:
+- Fractions: $\\frac{a}{b}$
+- Exponents: $x^2$, $x^{n+1}$
+- Subscripts: $x_1$, $a_{ij}$
+- Square roots: $\\sqrt{x}$, $\\sqrt[n]{x}$
+- Greek letters: $\\alpha$, $\\beta$, $\\pi$
+- Sums/integrals: $\\sum_{i=1}^{n}$, $\\int_{a}^{b}$
+- Derivatives: $\\frac{d}{dx}$, $f'(x)$
+
 You MUST respond with ONLY valid JSON that conforms to this schema:
 ${JSON.stringify(docSpecJsonSchema, null, 2)}
 
-Example valid response (note matching row/column counts):
+Example valid response with rich text and math:
 {
-  "title": "Quarterly Report",
-  "author": "Analytics Team",
+  "title": "Math Exercise",
+  "author": "Teacher",
   "blocks": [
-    { "type": "title", "text": "Quarterly Report" },
-    { "type": "toc", "max_level": 3 },
-    { "type": "heading", "level": 1, "text": "Executive Summary" },
-    { "type": "paragraph", "text": "This report covers key metrics for Q4 2024." },
-    { "type": "bullets", "items": ["Revenue +15%", "Satisfaction 92%"] },
-    { "type": "numbered", "items": ["First item", "Second item"] },
+    { "type": "title", "text": "Calculus Exercise" },
+    { "type": "heading", "level": 1, "text": "Derivatives" },
+    { "type": "paragraph", "text": "Calculate the derivative of $f(x) = x^3 + 2x^2 - 5x + 1$" },
+    { "type": "paragraph", "text": "**Solution:** Using the power rule $\\frac{d}{dx}[x^n] = nx^{n-1}$:" },
+    { "type": "paragraph", "text": "$$f'(x) = 3x^2 + 4x - 5$$" },
+    { "type": "bullets", "items": ["The *derivative* of $x^3$ is $3x^2$", "The derivative of $2x^2$ is $4x$"] },
     {
       "type": "table",
-      "columns": ["Metric", "Value", "Change"],
+      "columns": ["Function", "Derivative"],
       "rows": [
-        ["Revenue", "$1.2M", "+15%"],
-        ["Users", "50,000", "+20%"]
-      ],
-      "style": "Light Shading"
-    },
-    { "type": "page_break" },
-    { "type": "heading", "level": 2, "text": "Detailed Analysis" }
+        ["$x^3$", "$3x^2$"],
+        ["$2x^2$", "$4x$"],
+        ["$-5x$", "$-5$"]
+      ]
+    }
   ]
 }
 
