@@ -71,6 +71,7 @@ import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
+import { RecordingPanel } from "@/components/recording-panel";
 import { useAuth } from "@/hooks/use-auth";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
@@ -1204,15 +1205,9 @@ export function ChatInterface({
 
   const sendVoiceRecording = () => {
     stopVoiceRecording();
-    if (input.trim()) {
+    if (input.trim() || uploadedFiles.length > 0) {
       handleSubmit();
     }
-  };
-
-  const formatRecordingTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const handleOpenDocumentPreview = (doc: DocumentBlock) => {
@@ -4365,166 +4360,22 @@ export function ChatInterface({
                 />
 
                 <div className="flex items-center gap-1 pb-1">
-                  {/* Compact Recording UI - shown when recording */}
-                  {isRecording ? (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      className="flex items-center gap-3 px-2"
-                      data-testid="recording-ui-compact"
-                    >
-                      {/* Trash/Discard Button */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={discardVoiceRecording}
-                            className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all"
-                            data-testid="button-discard-recording"
-                          >
-                            <Trash2 className="h-5 w-5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Descartar grabación</TooltipContent>
-                      </Tooltip>
-
-                      {/* Recording Indicator + Timer + Waveform */}
-                      <div className="flex items-center gap-2">
-                        {/* Red dot indicator */}
-                        <motion.div
-                          animate={isPaused ? {} : { scale: [1, 1.2, 1] }}
-                          transition={{ duration: 1, repeat: Infinity }}
-                          className={cn(
-                            "w-2.5 h-2.5 rounded-full",
-                            isPaused ? "bg-muted-foreground" : "bg-red-500"
-                          )}
-                        />
-                        
-                        {/* Timer */}
-                        <span className="text-lg font-medium tabular-nums min-w-[48px]" data-testid="recording-timer">
-                          {formatRecordingTime(recordingTime)}
-                        </span>
-
-                        {/* Simple Waveform Visualization */}
-                        <div className="flex items-center gap-0.5 h-6">
-                          {Array.from({ length: 20 }).map((_, i) => (
-                            <motion.div
-                              key={i}
-                              animate={isPaused ? { height: 4 } : { 
-                                height: [4, 8 + Math.random() * 12, 4, 12 + Math.random() * 8, 4]
-                              }}
-                              transition={{
-                                duration: 0.5 + Math.random() * 0.3,
-                                repeat: Infinity,
-                                delay: i * 0.05
-                              }}
-                              className="w-0.5 bg-muted-foreground/60 rounded-full"
-                              style={{ height: isPaused ? 4 : undefined }}
-                            />
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Pause/Resume Button */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={isPaused ? resumeVoiceRecording : pauseVoiceRecording}
-                            className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 transition-all"
-                            data-testid={isPaused ? "button-resume-recording" : "button-pause-recording"}
-                          >
-                            {isPaused ? (
-                              <Play className="h-5 w-5" />
-                            ) : (
-                              <Pause className="h-5 w-5" />
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{isPaused ? "Continuar" : "Pausar"}</TooltipContent>
-                      </Tooltip>
-
-                      {/* Send Button */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            size="icon"
-                            onClick={sendVoiceRecording}
-                            disabled={!input.trim()}
-                            className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 bg-transparent hover:bg-muted text-foreground disabled:opacity-50 transition-all"
-                            data-testid="button-send-recording"
-                          >
-                            <ArrowUp className="h-5 w-5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Enviar mensaje</TooltipContent>
-                      </Tooltip>
-                    </motion.div>
-                  ) : (
-                    <>
-                      {/* Mic button for dictation - shown when not recording */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button 
-                            variant="ghost"
-                            onClick={toggleVoiceRecording}
-                            size="icon" 
-                            className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted"
-                            data-testid="button-voice-dictation"
-                          >
-                            <Mic className="h-5 w-5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Dictar texto</TooltipContent>
-                      </Tooltip>
-
-                      {/* Voice chat mode button - opens fullscreen conversation */}
-                      {aiState !== "idle" ? (
-                        <Button 
-                          onClick={handleStopChat}
-                          size="icon" 
-                          className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50"
-                          data-testid="button-stop-chat"
-                        >
-                          <Square className="h-5 w-5 fill-current" />
-                        </Button>
-                      ) : input.trim().length > 0 || uploadedFiles.length > 0 ? (
-                        <motion.div
-                          initial={{ scale: 0.8, opacity: 0 }}
-                          animate={{ scale: 1, opacity: 1 }}
-                          exit={{ scale: 0.8, opacity: 0 }}
-                          transition={{ duration: 0.2, ease: "easeOut" }}
-                          key="send-button"
-                        >
-                          <Button 
-                            onClick={handleSubmit}
-                            size="icon" 
-                            className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn"
-                            data-testid="button-send-message"
-                          >
-                            <ArrowUp className="h-5 w-5" />
-                          </Button>
-                        </motion.div>
-                      ) : (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button 
-                              onClick={() => setIsVoiceChatOpen(true)}
-                              size="icon" 
-                              className="h-9 w-9 rounded-full transition-all duration-300 bg-foreground text-background hover:bg-foreground/90"
-                              data-testid="button-voice-chat-mode"
-                            >
-                              <AudioLines className="h-5 w-5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Modo conversación por voz</TooltipContent>
-                        </Tooltip>
-                      )}
-                    </>
-                  )}
+                  <RecordingPanel
+                    isRecording={isRecording}
+                    isPaused={isPaused}
+                    recordingTime={recordingTime}
+                    canSend={input.trim().length > 0 || uploadedFiles.length > 0}
+                    onDiscard={discardVoiceRecording}
+                    onPause={pauseVoiceRecording}
+                    onResume={resumeVoiceRecording}
+                    onSend={sendVoiceRecording}
+                    onToggleRecording={toggleVoiceRecording}
+                    onOpenVoiceChat={() => setIsVoiceChatOpen(true)}
+                    onStopChat={handleStopChat}
+                    onSubmit={handleSubmit}
+                    aiState={aiState}
+                    hasContent={input.trim().length > 0 || uploadedFiles.length > 0}
+                  />
                 </div>
                 </div>
               </div>
