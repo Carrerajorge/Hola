@@ -2,6 +2,8 @@ import { useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -660,6 +662,9 @@ export function AdminPanel({ open, onOpenChange }: AdminPanelProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl h-[80vh] p-0 gap-0">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Panel de Administración</DialogTitle>
+        </DialogHeader>
         <div className="flex h-full">
           <div className="w-48 border-r bg-muted/30 p-2">
             <div className="p-2 mb-2">
