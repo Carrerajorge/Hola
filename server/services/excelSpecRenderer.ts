@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import type { ExcelSpec, TableSpec, ChartSpec, SheetLayoutSpec, HeaderStyle } from "../../shared/documentSpecs";
 import { tokenizeMarkdown, hasMarkdown, RichTextToken } from "./richText/markdownTokenizer";
+import { formatLatexForExcel } from "./richText/latexToImage";
 
 const FORMULA_PREFIXES = ["=", "+", "-", "@"];
 
@@ -11,7 +12,7 @@ interface ExcelRichTextRun {
 
 function tokensToExcelRichText(tokens: RichTextToken[]): ExcelRichTextRun[] {
   return tokens.map((token) => {
-    const run: ExcelRichTextRun = { text: token.text };
+    let displayText = token.text;
     const font: Partial<ExcelJS.Font> = {};
 
     if (token.bold) font.bold = true;
@@ -25,10 +26,12 @@ function tokensToExcelRichText(tokens: RichTextToken[]): ExcelRichTextRun[] {
       font.color = { argb: "FF0066CC" };
     }
     if (token.isMath) {
+      displayText = formatLatexForExcel(token.text);
       font.italic = true;
       font.color = { argb: "FF336699" };
     }
 
+    const run: ExcelRichTextRun = { text: displayText };
     if (Object.keys(font).length > 0) {
       run.font = font;
     }

@@ -29,6 +29,7 @@ export function tiptapToDocSpec(doc: TipTapDoc, title = 'Document'): DocSpec {
 
   return {
     title,
+    styleset: 'modern',
     blocks,
     add_toc: false,
   };
@@ -169,6 +170,7 @@ function convertTable(node: TipTapNode): DocBlock | null {
     columns,
     rows: dataRows,
     style: 'Light Shading',
+    header: true,
   };
 }
 
