@@ -177,6 +177,33 @@ export function validateDocSpec(spec: unknown): ValidationResult {
         }
       }
     }
+
+    if (block.type === "title") {
+      // Validate title text is non-empty
+      if (!block.text || block.text.trim() === "") {
+        errors.push(
+          `Block ${blockIdx + 1} (title): Title text must be non-empty`
+        );
+      }
+    }
+
+    if (block.type === "toc") {
+      // Validate max_level is 1-6 (already enforced by schema, but double-check)
+      if (block.max_level < 1 || block.max_level > 6) {
+        errors.push(
+          `Block ${blockIdx + 1} (toc): max_level must be between 1 and 6, got ${block.max_level}`
+        );
+      }
+    }
+
+    if (block.type === "numbered") {
+      // Validate numbered list items array like bullets
+      if (!block.items || block.items.length === 0) {
+        errors.push(
+          `Block ${blockIdx + 1} (numbered): Numbered list must have at least one item`
+        );
+      }
+    }
   }
 
   return { valid: errors.length === 0, errors };

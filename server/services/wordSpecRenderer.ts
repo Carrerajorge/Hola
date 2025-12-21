@@ -13,6 +13,7 @@ import {
   TableOfContents,
   convertInchesToTwip,
   StyleLevel,
+  AlignmentType,
 } from "docx";
 import { DocSpec, DocBlock, TitleBlock, TocBlock, NumberedBlock } from "../../shared/documentSpecs";
 
@@ -43,11 +44,12 @@ function processTitleBlock(block: TitleBlock, fontConfig: FontConfig): Paragraph
       new TextRun({
         text: block.text,
         font: fontConfig.font,
-        size: 52,
+        size: 56,
         bold: true,
       }),
     ],
     style: "Title",
+    alignment: AlignmentType.CENTER,
     spacing: { before: 0, after: 400 },
   });
 }
@@ -280,8 +282,8 @@ export async function renderWordFromSpec(spec: DocSpec): Promise<Buffer> {
           name: "Title",
           basedOn: "Normal",
           next: "Normal",
-          run: { font: fontConfig.font, size: 52, bold: true },
-          paragraph: { spacing: { after: 400 } },
+          run: { font: fontConfig.font, size: 56, bold: true },
+          paragraph: { spacing: { after: 400 }, alignment: AlignmentType.CENTER },
         },
       ],
     },

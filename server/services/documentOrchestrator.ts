@@ -22,12 +22,51 @@ import {
 
 const MAX_RETRIES = 3;
 
+const REPAIR_SYSTEM_PROMPT = `Your task is to repair an invalid JSON to conform to the schema. Return ONLY valid JSON with no explanations.
+
+CRITICAL INSTRUCTIONS:
+- Analyze the validation errors carefully
+- Fix ONLY the specific issues mentioned
+- Preserve all valid parts of the original JSON
+- Do not add explanatory text, markdown formatting, or comments
+- Return the corrected JSON immediately`;
+
 export interface GenerationResult<T> {
   buffer: Buffer;
   spec: T;
   qualityReport: QualityReport;
   postRenderValidation: PostRenderValidationResult;
   attemptsUsed: number;
+}
+
+function buildRepairPrompt(
+  originalPrompt: string,
+  lastBadJson: string,
+  errors: string[],
+  schemaContext: string
+): string {
+  return `${schemaContext}
+
+=== REPAIR REQUEST ===
+
+ORIGINAL USER REQUEST:
+${originalPrompt}
+
+YOUR PREVIOUS (INVALID) RESPONSE:
+\`\`\`json
+${lastBadJson}
+\`\`\`
+
+VALIDATION ERRORS FOUND:
+${errors.map((e, i) => `${i + 1}. ${e}`).join('\n')}
+
+REQUIRED FIXES:
+- Address each validation error listed above
+- Keep all valid content from the previous response
+- Ensure the output is valid JSON that conforms to the schema
+- Return ONLY the corrected JSON, no explanations
+
+Respond with the fixed JSON now:`;
 }
 
 const EXCEL_SYSTEM_PROMPT = `You are a JSON generator that creates Excel workbook specifications.
@@ -181,18 +220,32 @@ export async function generateExcelFromPrompt(
   prompt: string
 ): Promise<GenerationResult<ExcelSpec>> {
   let lastErrors: string[] = [];
+  let lastBadJson: string = "";
   let lastQualityReport: QualityReport | null = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     console.log(`[DocumentOrchestrator] Excel generation attempt ${attempt}/${MAX_RETRIES}`);
 
-    let systemPrompt = EXCEL_SYSTEM_PROMPT;
-    if (lastErrors.length > 0) {
-      systemPrompt += `\n\nPREVIOUS ATTEMPT FAILED with these errors:\n${lastErrors.join("\n")}\n\nPlease fix these issues in your response.`;
+    let systemPrompt: string;
+    let userPrompt: string;
+
+    if (attempt === 1 || lastErrors.length === 0) {
+      systemPrompt = EXCEL_SYSTEM_PROMPT;
+      userPrompt = prompt;
+    } else {
+      systemPrompt = REPAIR_SYSTEM_PROMPT;
+      userPrompt = buildRepairPrompt(
+        prompt,
+        lastBadJson,
+        lastErrors,
+        `SCHEMA REFERENCE:\n${JSON.stringify(excelSpecJsonSchema, null, 2)}`
+      );
+      console.log(`[DocumentOrchestrator] Retry with ${lastErrors.length} error(s) to fix`);
     }
 
-    const response = await callGeminiForSpec(systemPrompt, prompt);
+    const response = await callGeminiForSpec(systemPrompt, userPrompt);
     const jsonStr = extractJsonFromResponse(response);
+    lastBadJson = jsonStr;
 
     let parsed: unknown;
     try {
@@ -264,18 +317,32 @@ export async function generateWordFromPrompt(
   prompt: string
 ): Promise<GenerationResult<DocSpec>> {
   let lastErrors: string[] = [];
+  let lastBadJson: string = "";
   let lastQualityReport: QualityReport | null = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     console.log(`[DocumentOrchestrator] Word generation attempt ${attempt}/${MAX_RETRIES}`);
 
-    let systemPrompt = DOC_SYSTEM_PROMPT;
-    if (lastErrors.length > 0) {
-      systemPrompt += `\n\nPREVIOUS ATTEMPT FAILED with these errors:\n${lastErrors.join("\n")}\n\nPlease fix these issues in your response.`;
+    let systemPrompt: string;
+    let userPrompt: string;
+
+    if (attempt === 1 || lastErrors.length === 0) {
+      systemPrompt = DOC_SYSTEM_PROMPT;
+      userPrompt = prompt;
+    } else {
+      systemPrompt = REPAIR_SYSTEM_PROMPT;
+      userPrompt = buildRepairPrompt(
+        prompt,
+        lastBadJson,
+        lastErrors,
+        `SCHEMA REFERENCE:\n${JSON.stringify(docSpecJsonSchema, null, 2)}`
+      );
+      console.log(`[DocumentOrchestrator] Retry with ${lastErrors.length} error(s) to fix`);
     }
 
-    const response = await callGeminiForSpec(systemPrompt, prompt);
+    const response = await callGeminiForSpec(systemPrompt, userPrompt);
     const jsonStr = extractJsonFromResponse(response);
+    lastBadJson = jsonStr;
 
     let parsed: unknown;
     try {

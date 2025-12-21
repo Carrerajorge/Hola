@@ -40,6 +40,8 @@ export const DOC_WARNING_CODES = {
   LARGE_TABLE: "DOC_W003",
   NO_TITLE: "DOC_W004",
   DEEP_HEADING: "DOC_W005",
+  MULTIPLE_TITLES: "DOC_W006",
+  TOC_LATE: "DOC_W007",
 } as const;
 
 // Error codes for ExcelSpec validation
@@ -64,6 +66,8 @@ export const EXCEL_WARNING_CODES = {
   LARGE_TABLE: "EXCEL_W003",
   NO_WORKBOOK_TITLE: "EXCEL_W004",
   DUPLICATE_SHEET_NAMES: "EXCEL_W005",
+  TABLE_OVERLAP: "EXCEL_W006",
+  FORMULA_LIKE_TEXT: "EXCEL_W007",
 } as const;
 
 // Limits for DoS protection
@@ -156,6 +160,61 @@ function isValidCellReference(ref: string): boolean {
 
 function isValidRange(range: string): boolean {
   return RANGE_REGEX.test(range);
+}
+
+interface TableBoundingBox {
+  tableIndex: number;
+  minRow: number;
+  maxRow: number;
+  minCol: number;
+  maxCol: number;
+}
+
+function parseCellReferenceToCoords(ref: string): { row: number; col: number } | null {
+  const match = ref.match(/^([A-Z]+)(\d+)$/i);
+  if (!match) return null;
+
+  const colStr = match[1].toUpperCase();
+  const rowNum = parseInt(match[2], 10);
+
+  // Convert column letters to 0-based index (A=0, B=1, ..., Z=25, AA=26, etc.)
+  let col = 0;
+  for (let i = 0; i < colStr.length; i++) {
+    col = col * 26 + (colStr.charCodeAt(i) - 64);
+  }
+  col -= 1; // Convert to 0-based
+
+  return { row: rowNum, col };
+}
+
+function getTableBoundingBox(table: TableSpec, tableIndex: number): TableBoundingBox | null {
+  const anchorCoords = parseCellReferenceToCoords(table.anchor);
+  if (!anchorCoords) return null;
+
+  const headers = table.headers || [];
+  const rows = table.rows || [];
+
+  return {
+    tableIndex,
+    minRow: anchorCoords.row,
+    maxRow: anchorCoords.row + rows.length, // +1 for header row is included since anchor is row 1
+    minCol: anchorCoords.col,
+    maxCol: anchorCoords.col + headers.length - 1,
+  };
+}
+
+function tablesOverlap(a: TableBoundingBox, b: TableBoundingBox): boolean {
+  // Two rectangles do NOT overlap if one is completely to the left, right, above, or below the other
+  // They overlap if: !(a.maxRow < b.minRow || b.maxRow < a.minRow || a.maxCol < b.minCol || b.maxCol < a.minCol)
+  return !(a.maxRow < b.minRow || b.maxRow < a.minRow || a.maxCol < b.minCol || b.maxCol < a.minCol);
+}
+
+function isFormulaLikeText(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return false;
+  const firstChar = trimmed[0];
+  return firstChar === "=" || firstChar === "+" || firstChar === "-" || firstChar === "@";
 }
 
 /**
@@ -344,6 +403,32 @@ export function validateDocSpec(spec: DocSpec): QualityReport {
         DOC_WARNING_CODES.MANY_BULLETS,
         `Document has ${totalBulletItems} bullet items, consider grouping or summarizing`,
         "blocks",
+        "warning"
+      )
+    );
+  }
+
+  // Check for multiple title blocks (should only have 0 or 1)
+  const titleBlocks = blocks.filter((block) => block.type === "title");
+  if (titleBlocks.length > 1) {
+    issues.push(
+      createIssue(
+        DOC_WARNING_CODES.MULTIPLE_TITLES,
+        `Document has ${titleBlocks.length} title blocks, should have at most 1`,
+        "blocks",
+        "warning"
+      )
+    );
+  }
+
+  // Check TOC placement (should be near the top, within first 5 blocks)
+  const tocBlockIndex = blocks.findIndex((block) => block.type === "toc");
+  if (tocBlockIndex > 4) {
+    issues.push(
+      createIssue(
+        DOC_WARNING_CODES.TOC_LATE,
+        `Table of contents appears at block ${tocBlockIndex + 1}, should be within first 5 blocks`,
+        `blocks[${tocBlockIndex}]`,
         "warning"
       )
     );
@@ -630,6 +715,56 @@ function validateSheet(sheet: SheetSpec, sheetIndex: number, issues: ValidationI
         )
       );
     }
+  });
+
+  // Table overlap detection
+  const tableBoundingBoxes: TableBoundingBox[] = [];
+  tables.forEach((table, tableIndex) => {
+    const bbox = getTableBoundingBox(table, tableIndex);
+    if (bbox) {
+      tableBoundingBoxes.push(bbox);
+    }
+  });
+
+  // Check each pair of tables for overlap
+  for (let i = 0; i < tableBoundingBoxes.length; i++) {
+    for (let j = i + 1; j < tableBoundingBoxes.length; j++) {
+      const boxA = tableBoundingBoxes[i];
+      const boxB = tableBoundingBoxes[j];
+      if (tablesOverlap(boxA, boxB)) {
+        issues.push(
+          createIssue(
+            EXCEL_WARNING_CODES.TABLE_OVERLAP,
+            `Tables ${boxA.tableIndex + 1} and ${boxB.tableIndex + 1} overlap in sheet "${sheet.name}"`,
+            `${sheetPath}.tables`,
+            "warning"
+          )
+        );
+      }
+    }
+  }
+
+  // Formula-like text warnings (warn when cell values start with =, +, -, @)
+  tables.forEach((table, tableIndex) => {
+    const tablePath = `${sheetPath}.tables[${tableIndex}]`;
+    const rows = table.rows || [];
+
+    rows.forEach((row, rowIndex) => {
+      if (Array.isArray(row)) {
+        row.forEach((cell, cellIndex) => {
+          if (isFormulaLikeText(cell)) {
+            issues.push(
+              createIssue(
+                EXCEL_WARNING_CODES.FORMULA_LIKE_TEXT,
+                `Value "${String(cell).substring(0, 20)}${String(cell).length > 20 ? "..." : ""}" looks like a formula in data cell`,
+                `${tablePath}.rows[${rowIndex}][${cellIndex}]`,
+                "warning"
+              )
+            );
+          }
+        });
+      }
+    });
   });
 }
 
