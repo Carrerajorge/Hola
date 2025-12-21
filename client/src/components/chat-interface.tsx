@@ -57,6 +57,8 @@ import { DocumentEditor } from "@/components/document-editor";
 import { EnhancedDocumentEditor } from "@/components/ribbon";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 import { PPTEditorShell } from "@/components/ppt";
+import { usePptStreaming } from "@/hooks/usePptStreaming";
+import { PPT_STREAMING_SYSTEM_PROMPT } from "@/lib/pptPrompts";
 import { ETLDialog } from "@/components/etl-dialog";
 import { FigmaBlock } from "@/components/figma-block";
 import { CodeExecutionBlock } from "@/components/code-execution-block";
@@ -825,6 +827,9 @@ export function ChatInterface({
   const [copiedAttachmentContent, setCopiedAttachmentContent] = useState(false);
   const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
+  
+  // PPT streaming integration
+  const pptStreaming = usePptStreaming();
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
   const speechRecognitionRef = useRef<any>(null);
@@ -1801,15 +1806,22 @@ export function ChatInterface({
       const isDocumentMode = !!activeDocEditorRef.current;
       const documentType = activeDocEditorRef.current?.type || null;
       const isFigmaMode = selectedDocTool === "figma";
+      const isPptMode = documentType === "ppt";
+      
+      // Build chat history with PPT system prompt if in PPT mode
+      const finalChatHistory = isPptMode 
+        ? [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory]
+        : chatHistory;
       
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          messages: chatHistory,
+          messages: finalChatHistory,
           images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
-          documentMode: isDocumentMode ? { type: documentType } : undefined,
+          documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
           figmaMode: isFigmaMode,
+          pptMode: isPptMode,
           provider: selectedProvider,
           model: selectedModel,
           gptConfig: activeGpt ? {
@@ -1888,6 +1900,56 @@ export function ChatInterface({
             abortControllerRef.current = null;
           }
         }, 10);
+        return;
+      }
+      
+      // If PPT mode is active: Stream to PPT editor using special parser
+      if (isPptMode && shouldWriteToDoc) {
+        setAiState("responding");
+        
+        // Clear chat streaming - we write to PPT canvas
+        streamingContentRef.current = "";
+        setStreamingContent("");
+        
+        // Start PPT streaming
+        pptStreaming.startStreaming();
+        
+        // Stream content progressively through PPT parser
+        let currentIndex = 0;
+        
+        streamIntervalRef.current = setInterval(() => {
+          if (currentIndex < fullContent.length) {
+            // Get progressive chunk
+            const chunkSize = Math.floor(Math.random() * 8) + 4;
+            const newChunk = fullContent.slice(currentIndex, currentIndex + chunkSize);
+            currentIndex += chunkSize;
+            
+            // Route chunk through PPT stream parser
+            pptStreaming.processChunk(newChunk);
+          } else {
+            if (streamIntervalRef.current) {
+              clearInterval(streamIntervalRef.current);
+              streamIntervalRef.current = null;
+            }
+            
+            // Finalize PPT streaming
+            pptStreaming.stopStreaming();
+            
+            // Add confirmation message in chat
+            const confirmMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: "✓ Presentación generada correctamente",
+              timestamp: new Date(),
+            };
+            onSendMessage(confirmMsg);
+            
+            setAiState("idle");
+            setAiProcessSteps([]);
+            agent.complete();
+            abortControllerRef.current = null;
+          }
+        }, 20);
         return;
       }
       
