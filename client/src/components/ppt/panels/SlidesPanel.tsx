@@ -1,55 +1,40 @@
 import React from 'react';
 import { useDeckStore, selectDeck } from '../store/deckStore';
-import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, Copy, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const THUMB_WIDTH = 160;
-const THUMB_HEIGHT = 90;
+const THUMB_WIDTH = 50;
+const THUMB_HEIGHT = 28;
 
 export function SlidesPanel() {
   const deck = useDeckStore(selectDeck);
   const activeSlideId = useDeckStore((s) => s.activeSlideId);
   const setActiveSlide = useDeckStore((s) => s.setActiveSlide);
-  const addSlide = useDeckStore((s) => s.addSlide);
-  const duplicateSlide = useDeckStore((s) => s.duplicateSlide);
-  const deleteSlide = useDeckStore((s) => s.deleteSlide);
 
   return (
-    <div className="h-full flex flex-col bg-background border-r">
-      <div className="flex items-center justify-between p-3 border-b">
-        <h3 className="font-semibold text-sm">Diapositivas</h3>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={addSlide}
-          data-testid="btn-add-slide"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
-      
+    <div className="h-full flex flex-col bg-[#f6f7fb]">
       <ScrollArea className="flex-1">
-        <div className="p-2 space-y-2">
+        <div className="py-2">
           {deck.slides.map((slide, index) => (
             <div
               key={slide.id}
-              className={cn(
-                "group relative rounded-lg cursor-pointer transition-all",
-                "border-2 hover:border-primary/50",
-                activeSlideId === slide.id ? "border-primary ring-2 ring-primary/20" : "border-transparent"
-              )}
+              className="flex items-start gap-1 px-1 py-1 cursor-pointer group"
               onClick={() => setActiveSlide(slide.id)}
               data-testid={`slide-thumbnail-${index}`}
             >
+              <span className="text-[10px] text-gray-500 w-4 text-right mt-1 flex-shrink-0">
+                {index + 1}
+              </span>
               <div
-                className="rounded-md overflow-hidden"
+                className={cn(
+                  "rounded-sm overflow-hidden transition-all border-2",
+                  activeSlideId === slide.id 
+                    ? "border-[#D83B01] ring-1 ring-[#D83B01]/30" 
+                    : "border-gray-300 hover:border-gray-400"
+                )}
                 style={{
                   width: THUMB_WIDTH,
                   height: THUMB_HEIGHT,
-                  backgroundColor: slide.background.color
                 }}
               >
                 <div className="relative w-full h-full">
@@ -58,6 +43,7 @@ export function SlidesPanel() {
                     width={THUMB_WIDTH}
                     height={THUMB_HEIGHT}
                     className="w-full h-full"
+                    preserveAspectRatio="xMidYMid meet"
                   >
                     <rect
                       width="1280"
@@ -126,39 +112,6 @@ export function SlidesPanel() {
                     })}
                   </svg>
                 </div>
-              </div>
-              
-              <div className="absolute bottom-1 left-1 bg-background/80 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs">
-                {index + 1}
-              </div>
-
-              <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    duplicateSlide(slide.id);
-                  }}
-                  data-testid={`btn-duplicate-slide-${index}`}
-                >
-                  <Copy className="h-3 w-3" />
-                </Button>
-                {deck.slides.length > 1 && (
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteSlide(slide.id);
-                    }}
-                    data-testid={`btn-delete-slide-${index}`}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                )}
               </div>
             </div>
           ))}

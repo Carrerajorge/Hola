@@ -62,7 +62,7 @@ function defaultDeck(): Deck {
 }
 
 export type EditorMode = "manual" | "ai";
-export type RibbonTab = "Home" | "Insert" | "Layout" | "AI";
+export type RibbonTab = "Home" | "Insert" | "Layout" | "AI" | "Inicio" | "Insertar" | "Dibujar" | "Diseño" | "Transiciones" | "Animaciones" | "Presentación con diapositivas" | "Grabar" | "Revisar" | "Vista";
 
 type DeckState = {
   history: HistoryState<Deck>;
@@ -132,7 +132,7 @@ export const useDeckStore = create<DeckState>((set, get) => {
     history: createHistory(initial),
     selection: null,
     activeSlideId,
-    activeTab: "Home",
+    activeTab: "Inicio",
     editorMode: "manual",
     streaming: { active: false },
     zoom: 1,
