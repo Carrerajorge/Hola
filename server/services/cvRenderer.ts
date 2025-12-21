@@ -17,6 +17,7 @@ import {
   TabStopPosition,
   TabStopType,
 } from "docx";
+import { parseAndRenderToDocx, hasRichTextMarkers } from "./richText";
 import {
   CvSpec,
   CvHeader,
@@ -61,6 +62,32 @@ interface InternalRenderConfig {
 
 function hexToRgb(hex: string): string {
   return hex.replace("#", "");
+}
+
+function renderRichText(
+  text: string,
+  config: InternalRenderConfig,
+  options?: { color?: string; extraBold?: boolean }
+): (TextRun | ExternalHyperlink)[] {
+  const fontConfig = { font: config.bodyFont, size: config.bodySize };
+  const color = options?.color || config.textColor;
+
+  if (hasRichTextMarkers(text)) {
+    return parseAndRenderToDocx(text, fontConfig, {
+      extraBold: options?.extraBold,
+      defaultColor: color,
+    });
+  }
+
+  return [
+    new TextRun({
+      text,
+      font: config.bodyFont,
+      size: config.bodySize,
+      color,
+      bold: options?.extraBold,
+    }),
+  ];
 }
 
 function templateConfigToInternal(templateConfig: CvTemplateConfig, spec?: CvSpec): InternalRenderConfig {
@@ -317,15 +344,7 @@ function createProfileSummary(summary: string, config: InternalRenderConfig): Pa
   return [
     createSectionHeading("Profile", config),
     new Paragraph({
-      children: [
-        new TextRun({
-          text: summary,
-          font: config.bodyFont,
-          size: config.bodySize,
-          color: config.lightTextColor,
-          italics: true,
-        }),
-      ],
+      children: renderRichText(summary, config, { color: config.lightTextColor }),
       spacing: { after: config.sectionGap / 2, line: config.lineHeight },
     }),
   ];
@@ -404,14 +423,7 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: In
     if (exp.description) {
       elements.push(
         new Paragraph({
-          children: [
-            new TextRun({
-              text: exp.description,
-              font: config.bodyFont,
-              size: config.bodySize,
-              color: config.lightTextColor,
-            }),
-          ],
+          children: renderRichText(exp.description, config, { color: config.lightTextColor }),
           spacing: { after: config.itemGap, line: config.lineHeight },
         })
       );
@@ -420,14 +432,7 @@ function createWorkExperienceSection(experiences: CvWorkExperience[], config: In
     for (const achievement of exp.achievements || []) {
       elements.push(
         new Paragraph({
-          children: [
-            new TextRun({
-              text: achievement,
-              font: config.bodyFont,
-              size: config.bodySize,
-              color: config.textColor,
-            }),
-          ],
+          children: renderRichText(achievement, config),
           bullet: { level: 0 },
           spacing: { after: config.itemGap / 2 },
         })
@@ -506,14 +511,7 @@ function createEducationSection(education: CvEducation[], config: InternalRender
     for (const achievement of edu.achievements || []) {
       elements.push(
         new Paragraph({
-          children: [
-            new TextRun({
-              text: achievement,
-              font: config.bodyFont,
-              size: config.bodySize,
-              color: config.textColor,
-            }),
-          ],
+          children: renderRichText(achievement, config),
           bullet: { level: 0 },
           spacing: { after: config.itemGap / 2 },
         })
