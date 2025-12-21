@@ -825,7 +825,9 @@ export function ChatInterface({
     isProcessing?: boolean;
   } | null>(null);
   const [copiedAttachmentContent, setCopiedAttachmentContent] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
+  const dragCounterRef = useRef(0);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
   
   // PPT streaming integration
@@ -1410,29 +1412,92 @@ export function ChatInterface({
     const files = e.target.files;
     if (!files) return;
 
-    const ALLOWED_TYPES = [
-      "text/plain",
-      "text/markdown", 
-      "text/csv",
-      "text/html",
-      "application/json",
-      "application/pdf",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "application/vnd.ms-excel",
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      "application/vnd.ms-powerpoint",
-      "image/png",
-      "image/jpeg",
-      "image/jpg",
-      "image/gif",
-      "image/bmp",
-      "image/webp",
-      "image/tiff",
-    ];
+    await processFilesForUpload(Array.from(files));
 
-    for (const file of Array.from(files)) {
-      if (!ALLOWED_TYPES.includes(file.type)) {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const pollFileStatus = async (fileId: string, trackingId: string) => {
+    const maxAttempts = 30;
+    let attempts = 0;
+
+    const checkStatus = async () => {
+      try {
+        const contentRes = await fetch(`/api/files/${fileId}/content`);
+        
+        if (!contentRes.ok && contentRes.status !== 202) {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
+        }
+        
+        const contentData = await contentRes.json();
+
+        if (contentData.status === "ready") {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId 
+              ? { ...f, id: fileId, status: "ready", content: contentData.content } 
+              : f))
+          );
+          return;
+        } else if (contentData.status === "error") {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
+        }
+
+        attempts++;
+        if (attempts >= maxAttempts) {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+          );
+          console.warn(`File ${fileId} processing timed out`);
+          return;
+        }
+        setTimeout(checkStatus, 2000);
+      } catch (error) {
+        console.error("Error polling file status:", error);
+        setUploadedFiles((prev) =>
+          prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+        );
+      }
+    };
+
+    setTimeout(checkStatus, 2000);
+  };
+
+  const removeFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const ALLOWED_TYPES = [
+    "text/plain",
+    "text/markdown", 
+    "text/csv",
+    "text/html",
+    "application/json",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.ms-powerpoint",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/gif",
+    "image/bmp",
+    "image/webp",
+    "image/tiff",
+  ];
+
+  const processFilesForUpload = async (files: File[]) => {
+    for (const file of files) {
+      if (!ALLOWED_TYPES.includes(file.type) && !file.type.startsWith("image/")) {
         console.warn(`Tipo de archivo no soportado: ${file.type}`);
         continue;
       }
@@ -1500,65 +1565,68 @@ export function ChatInterface({
         );
       }
     }
+  };
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const filesToUpload: File[] = [];
+
+    for (const item of Array.from(items)) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) {
+          const mimeType = file.type || item.type || "image/png";
+          const ext = mimeType.split("/")[1] || "png";
+          const fileName = file.name && file.name !== "image.png" && file.name !== "" 
+            ? file.name 
+            : `pasted-${Date.now()}.${ext}`;
+          const renamedFile = new File([file], fileName, { type: mimeType });
+          filesToUpload.push(renamedFile);
+        }
+      }
+    }
+
+    if (filesToUpload.length > 0) {
+      e.preventDefault();
+      await processFilesForUpload(filesToUpload);
     }
   };
 
-  const pollFileStatus = async (fileId: string, trackingId: string) => {
-    const maxAttempts = 30;
-    let attempts = 0;
-
-    const checkStatus = async () => {
-      try {
-        const contentRes = await fetch(`/api/files/${fileId}/content`);
-        
-        if (!contentRes.ok && contentRes.status !== 202) {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
-          );
-          return;
-        }
-        
-        const contentData = await contentRes.json();
-
-        if (contentData.status === "ready") {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId 
-              ? { ...f, id: fileId, status: "ready", content: contentData.content } 
-              : f))
-          );
-          return;
-        } else if (contentData.status === "error") {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
-          );
-          return;
-        }
-
-        attempts++;
-        if (attempts >= maxAttempts) {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
-          );
-          console.warn(`File ${fileId} processing timed out`);
-          return;
-        }
-        setTimeout(checkStatus, 2000);
-      } catch (error) {
-        console.error("Error polling file status:", error);
-        setUploadedFiles((prev) =>
-          prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
-        );
-      }
-    };
-
-    setTimeout(checkStatus, 2000);
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
   };
 
-  const removeFile = (index: number) => {
-    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer?.types?.includes("Files")) {
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setIsDraggingOver(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDraggingOver(false);
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    await processFilesForUpload(Array.from(files));
   };
 
   const getFileIcon = (type: string, fileName?: string) => {
@@ -2740,8 +2808,23 @@ export function ChatInterface({
           {/* Sticky Input Area */}
           <div 
             ref={composerRef}
-            className="sticky bottom-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10"
+            className={cn(
+              "sticky bottom-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
+              isDraggingOver && "ring-2 ring-primary rounded-2xl"
+            )}
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
+            {isDraggingOver && (
+              <div className="absolute inset-0 z-50 bg-primary/10 backdrop-blur-sm rounded-2xl flex items-center justify-center border-2 border-dashed border-primary pointer-events-none">
+                <div className="flex flex-col items-center gap-2 text-primary">
+                  <Upload className="h-8 w-8" />
+                  <span className="text-sm font-medium">Suelta los archivos aquí</span>
+                </div>
+              </div>
+            )}
             {/* Virtual Computer - Always visible above input */}
             <div className="absolute left-4 sm:left-6 bottom-[calc(100%+8px)] z-20">
               <VirtualComputer
@@ -3650,10 +3733,25 @@ export function ChatInterface({
           
           {/* Input Bar */}
           <div className="shrink-0 px-4 pb-4">
-            <div className={cn(
-              "max-w-3xl mx-auto glass-card-light dark:glass-card rounded-2xl border border-white/30 dark:border-white/10 p-3",
-              selectedDocText && "ring-2 ring-primary/50"
-            )}>
+            <div 
+              className={cn(
+                "max-w-3xl mx-auto glass-card-light dark:glass-card rounded-2xl border border-white/30 dark:border-white/10 p-3 relative",
+                selectedDocText && "ring-2 ring-primary/50",
+                isDraggingOver && "ring-2 ring-primary border-primary"
+              )}
+              onDragOver={handleDragOver}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {isDraggingOver && (
+                <div className="absolute inset-0 z-50 bg-primary/10 backdrop-blur-sm rounded-2xl flex items-center justify-center border-2 border-dashed border-primary pointer-events-none">
+                  <div className="flex flex-col items-center gap-2 text-primary">
+                    <Upload className="h-8 w-8" />
+                    <span className="text-sm font-medium">Suelta los archivos aquí</span>
+                  </div>
+                </div>
+              )}
               <div className="flex flex-col gap-2">
                 {uploadedFiles.length > 0 && (
                   <div className="flex items-center gap-2 pl-2">
@@ -4042,6 +4140,7 @@ export function ChatInterface({
                       handleSubmit();
                     }
                   }}
+                  onPaste={handlePaste}
                   placeholder="Escribe tu mensaje aquí..."
                   className="min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-0 text-base leading-relaxed"
                   rows={1}
