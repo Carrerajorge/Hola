@@ -813,6 +813,7 @@ export function ChatInterface({
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [previewUploadedImage, setPreviewUploadedImage] = useState<{ name: string; dataUrl: string } | null>(null);
   const [previewFileAttachment, setPreviewFileAttachment] = useState<{
     name: string;
     type: string;
@@ -3760,6 +3761,36 @@ export function ChatInterface({
                       
                       const isImage = file.type?.startsWith("image/") || file.mimeType?.startsWith("image/");
                       
+                      if (isImage && file.dataUrl) {
+                        return (
+                          <div key={file.id} className="relative group">
+                            <div 
+                              className="relative w-14 h-14 rounded-lg overflow-hidden cursor-pointer border border-border hover:border-primary transition-colors"
+                              onClick={() => setPreviewUploadedImage({ name: file.name, dataUrl: file.dataUrl! })}
+                              data-testid={`preview-image-${index}`}
+                            >
+                              <img 
+                                src={file.dataUrl} 
+                                alt={file.name}
+                                className="w-full h-full object-cover"
+                              />
+                              {(file.status === "uploading" || file.status === "processing") && (
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                  <Loader2 className="h-4 w-4 text-white animate-spin" />
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                              onClick={(e) => { e.stopPropagation(); removeFile(index); }}
+                              data-testid={`button-remove-file-${index}`}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        );
+                      }
+                      
                       return (
                         <TooltipProvider key={file.id}>
                           <Tooltip>
@@ -3773,33 +3804,18 @@ export function ChatInterface({
                                   file.status === "error" && "bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800"
                                 )}
                               >
-                                {isImage && file.dataUrl ? (
-                                  <div className="relative w-10 h-10 rounded overflow-hidden shrink-0">
-                                    <img 
-                                      src={file.dataUrl} 
-                                      alt={file.name}
-                                      className="w-full h-full object-cover"
-                                    />
-                                    {(file.status === "uploading" || file.status === "processing") && (
-                                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                        <Loader2 className="h-4 w-4 text-white animate-spin" />
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div className={cn(
-                                    "flex items-center justify-center w-7 h-7 rounded shrink-0",
-                                    theme.bgColor
-                                  )}>
-                                    {file.status === "uploading" || file.status === "processing" ? (
-                                      <Loader2 className="h-4 w-4 text-white animate-spin" />
-                                    ) : (
-                                      <span className="text-white text-xs font-bold">
-                                        {theme.icon}
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
+                                <div className={cn(
+                                  "flex items-center justify-center w-7 h-7 rounded shrink-0",
+                                  theme.bgColor
+                                )}>
+                                  {file.status === "uploading" || file.status === "processing" ? (
+                                    <Loader2 className="h-4 w-4 text-white animate-spin" />
+                                  ) : (
+                                    <span className="text-white text-xs font-bold">
+                                      {theme.icon}
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="max-w-[100px] truncate font-medium">{file.name}</span>
                                 <Button
                                   variant="ghost"
@@ -4499,6 +4515,41 @@ export function ChatInterface({
                   )}
                 </motion.div>
               )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Uploaded Image Preview Modal */}
+      {previewUploadedImage && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setPreviewUploadedImage(null)}
+        >
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            className="relative max-w-4xl max-h-[90vh] rounded-lg overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img 
+              src={previewUploadedImage.dataUrl} 
+              alt={previewUploadedImage.name}
+              className="max-w-full max-h-[90vh] object-contain"
+            />
+            <button
+              onClick={() => setPreviewUploadedImage(null)}
+              className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors"
+              data-testid="button-close-image-preview"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
+              <p className="text-white text-sm truncate">{previewUploadedImage.name}</p>
             </div>
           </motion.div>
         </motion.div>
