@@ -162,10 +162,10 @@ export function DocumentEditor({
     };
   }, [handleTextSelection]);
 
-  // SINGLE WRITE approach - insert content only once, fully formatted using AST-based converter
+  // Content insertion with optional replace mode for streaming
   useEffect(() => {
     if (editor && onInsertContent) {
-      const insertContent = (text: string) => {
+      const insertContent = (text: string, replaceMode = false) => {
         if (!editor || editor.isDestroyed) {
           console.warn('[DocumentEditor] Editor not available');
           return;
@@ -176,10 +176,16 @@ export function DocumentEditor({
         // Use AST-based markdown to HTML conversion for accurate rendering
         const htmlContent = markdownToHtml(text);
         
-        editor.chain()
-          .focus('end')
-          .insertContent(htmlContent)
-          .run();
+        if (replaceMode) {
+          // Replace entire content - used for streaming to show progressive content
+          editor.commands.setContent(htmlContent);
+        } else {
+          // Append to end - original behavior
+          editor.chain()
+            .focus('end')
+            .insertContent(htmlContent)
+            .run();
+        }
       };
       
       onInsertContent(insertContent);

@@ -1890,54 +1890,63 @@ export function ChatInterface({
         return;
       }
       
-      // If document mode is active: Buffer approach - show progress in chat, single write to document at end
+      // If document mode is active: Stream DIRECTLY to document editor in real-time
       if (shouldWriteToDoc && docInsertContentRef.current) {
         setAiState("responding");
         
-        // Buffer the content - show typing animation in chat, write to doc ONCE at the end
+        // Clear chat streaming - we write directly to document
+        streamingContentRef.current = "";
+        setStreamingContent("");
+        
+        // Stream content progressively to document editor
         let currentIndex = 0;
         
         streamIntervalRef.current = setInterval(() => {
           if (currentIndex < fullContent.length) {
-            const chunkSize = Math.floor(Math.random() * 8) + 5; // Fast typing effect
+            // Get progressive chunk - larger chunks for smoother document typing
+            const chunkSize = Math.floor(Math.random() * 15) + 8;
             currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
-            const currentContent = fullContent.slice(0, currentIndex);
+            const contentSoFar = fullContent.slice(0, currentIndex);
             
-            // Show progress in chat bubble only - NO writes to document during streaming
-            streamingContentRef.current = currentContent;
-            setStreamingContent(currentContent);
+            // Replace entire document content with progressively more content
+            // This ensures markdown renders correctly at each step
+            try {
+              if (docInsertContentRef.current) {
+                docInsertContentRef.current(contentSoFar, true); // replaceMode = true
+              }
+            } catch (err) {
+              console.error('[ChatInterface] Error streaming to document:', err);
+            }
           } else {
             if (streamIntervalRef.current) {
               clearInterval(streamIntervalRef.current);
               streamIntervalRef.current = null;
             }
             
-            // SINGLE WRITE: Insert complete content to document once
+            // Final write with complete content to ensure nothing is missed
             try {
               if (docInsertContentRef.current) {
-                docInsertContentRef.current(fullContent);
+                docInsertContentRef.current(fullContent, true);
               }
             } catch (err) {
-              console.error('[ChatInterface] Error writing to document:', err);
+              console.error('[ChatInterface] Error finalizing document:', err);
             }
             
             // Add confirmation message in chat
             const confirmMsg: Message = {
               id: (Date.now() + 1).toString(),
               role: "assistant",
-              content: "✓ Contenido agregado al documento",
+              content: "✓ Documento generado correctamente",
               timestamp: new Date(),
             };
             onSendMessage(confirmMsg);
             
-            streamingContentRef.current = "";
-            setStreamingContent("");
             setAiState("idle");
             setAiProcessSteps([]);
             agent.complete();
             abortControllerRef.current = null;
           }
-        }, 8);
+        }, 25);
       } else {
         // Normal chat mode - stream to chat interface
         setAiState("responding");
