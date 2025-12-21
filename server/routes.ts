@@ -302,6 +302,30 @@ export async function registerRoutes(
     });
   });
 
+  app.post("/api/files/quick", async (req, res) => {
+    try {
+      const { name, type, size, storagePath } = req.body;
+
+      if (!name || !type || !size || !storagePath) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      const file = await storage.createFile({
+        name,
+        type,
+        size,
+        storagePath,
+        status: "ready",
+        userId: null,
+      });
+
+      res.json(file);
+    } catch (error: any) {
+      console.error("Error creating quick file:", error);
+      res.status(500).json({ error: "Failed to create file" });
+    }
+  });
+
   app.post("/api/files", async (req, res) => {
     try {
       const { name, type, size, storagePath } = req.body;

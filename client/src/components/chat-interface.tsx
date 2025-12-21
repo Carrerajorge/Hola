@@ -1497,16 +1497,18 @@ export function ChatInterface({
   ];
 
   const processFilesForUpload = async (files: File[]) => {
-    for (const file of files) {
-      if (!ALLOWED_TYPES.includes(file.type) && !file.type.startsWith("image/")) {
-        console.warn(`Tipo de archivo no soportado: ${file.type}`);
-        continue;
-      }
+    const validFiles = files.filter(file => 
+      ALLOWED_TYPES.includes(file.type) || file.type.startsWith("image/")
+    );
+    
+    if (validFiles.length === 0) return;
 
-      const tempId = `temp-${Date.now()}-${Math.random()}`;
+    const uploadPromises = validFiles.map(async (file) => {
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+      const isImage = file.type.startsWith("image/");
       
       let dataUrl: string | undefined;
-      if (file.type.startsWith("image/")) {
+      if (isImage) {
         dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
@@ -1537,35 +1539,115 @@ export function ChatInterface({
         });
         if (!uploadRes.ok) throw new Error("Upload failed");
 
-        const registerRes = await fetch("/api/files", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: file.name,
-            type: file.type,
-            size: file.size,
-            storagePath,
-          }),
-        });
-        const registeredFile = await registerRes.json();
-        if (!registerRes.ok) throw new Error(registeredFile.error);
+        if (isImage) {
+          const registerRes = await fetch("/api/files/quick", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              storagePath,
+            }),
+          });
+          const registeredFile = await registerRes.json();
+          if (!registerRes.ok) throw new Error(registeredFile.error);
+          
+          setUploadedFiles((prev) =>
+            prev.map((f) =>
+              f.id === tempId
+                ? { ...f, id: registeredFile.id, storagePath, status: "ready" }
+                : f
+            )
+          );
+        } else {
+          const registerRes = await fetch("/api/files", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              storagePath,
+            }),
+          });
+          const registeredFile = await registerRes.json();
+          if (!registerRes.ok) throw new Error(registeredFile.error);
 
-        setUploadedFiles((prev) =>
-          prev.map((f) =>
-            f.id === tempId
-              ? { ...f, id: registeredFile.id, storagePath, status: "processing" }
-              : f
-          )
-        );
+          setUploadedFiles((prev) =>
+            prev.map((f) =>
+              f.id === tempId
+                ? { ...f, id: registeredFile.id, storagePath, status: "processing" }
+                : f
+            )
+          );
 
-        pollFileStatus(registeredFile.id, tempId);
+          pollFileStatusFast(registeredFile.id, tempId);
+        }
       } catch (error) {
         console.error("File upload error:", error);
         setUploadedFiles((prev) =>
           prev.map((f) => (f.id === tempId ? { ...f, status: "error" } : f))
         );
       }
-    }
+    });
+
+    await Promise.all(uploadPromises);
+  };
+  
+  const pollFileStatusFast = async (fileId: string, trackingId: string) => {
+    const maxTime = 3000;
+    const pollInterval = 200;
+    const startTime = Date.now();
+
+    const checkStatus = async (): Promise<void> => {
+      if (Date.now() - startTime > maxTime) {
+        setUploadedFiles((prev) =>
+          prev.map((f) => (f.id === fileId || f.id === trackingId 
+            ? { ...f, id: fileId, status: "ready", content: "" } 
+            : f))
+        );
+        return;
+      }
+
+      try {
+        const contentRes = await fetch(`/api/files/${fileId}/content`);
+        
+        if (!contentRes.ok && contentRes.status !== 202) {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
+        }
+        
+        const contentData = await contentRes.json();
+
+        if (contentData.status === "ready") {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId 
+              ? { ...f, id: fileId, status: "ready", content: contentData.content } 
+              : f))
+          );
+          return;
+        } else if (contentData.status === "error") {
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          );
+          return;
+        }
+
+        setTimeout(checkStatus, pollInterval);
+      } catch (error) {
+        console.error("Polling error:", error);
+        setUploadedFiles((prev) =>
+          prev.map((f) => (f.id === fileId || f.id === trackingId 
+            ? { ...f, id: fileId, status: "ready", content: "" } 
+            : f))
+        );
+      }
+    };
+
+    checkStatus();
   };
 
   const handlePaste = async (e: React.ClipboardEvent) => {
