@@ -57,6 +57,7 @@ export const EXCEL_ERROR_CODES = {
   EMPTY_TABLE_HEADERS: "EXCEL_E009",
   MISMATCHED_ROW_LENGTH: "EXCEL_E010",
   INVALID_CHART_RANGE: "EXCEL_E011",
+  CHART_RANGE_OUT_OF_BOUNDS: "EXCEL_E012",
 } as const;
 
 // Warning codes for ExcelSpec validation
@@ -207,6 +208,48 @@ function tablesOverlap(a: TableBoundingBox, b: TableBoundingBox): boolean {
   // Two rectangles do NOT overlap if one is completely to the left, right, above, or below the other
   // They overlap if: !(a.maxRow < b.minRow || b.maxRow < a.minRow || a.maxCol < b.minCol || b.maxCol < a.minCol)
   return !(a.maxRow < b.minRow || b.maxRow < a.minRow || a.maxCol < b.minCol || b.maxCol < a.minCol);
+}
+
+function parseRangeToCoords(range: string): { start: { row: number; col: number }; end: { row: number; col: number } } | null {
+  const parts = range.split(":");
+  if (parts.length !== 2) return null;
+  
+  const start = parseCellReferenceToCoords(parts[0].trim());
+  const end = parseCellReferenceToCoords(parts[1].trim());
+  
+  if (!start || !end) return null;
+  return { start, end };
+}
+
+function isRangeWithinTableBounds(range: string, tables: TableSpec[]): { valid: boolean; reason: string } {
+  const rangeCoords = parseRangeToCoords(range);
+  if (!rangeCoords) {
+    return { valid: false, reason: "invalid range format" };
+  }
+
+  for (const table of tables) {
+    const anchorCoords = parseCellReferenceToCoords(table.anchor);
+    if (!anchorCoords) continue;
+
+    const headers = table.headers || [];
+    const rows = table.rows || [];
+
+    const tableMinRow = anchorCoords.row;
+    const tableMaxRow = anchorCoords.row + rows.length;
+    const tableMinCol = anchorCoords.col;
+    const tableMaxCol = anchorCoords.col + headers.length - 1;
+
+    if (
+      rangeCoords.start.row >= tableMinRow &&
+      rangeCoords.end.row <= tableMaxRow &&
+      rangeCoords.start.col >= tableMinCol &&
+      rangeCoords.end.col <= tableMaxCol
+    ) {
+      return { valid: true, reason: "" };
+    }
+  }
+
+  return { valid: false, reason: "range extends beyond all table boundaries" };
 }
 
 function isFormulaLikeText(value: unknown): boolean {
@@ -714,6 +757,37 @@ function validateSheet(sheet: SheetSpec, sheetIndex: number, issues: ValidationI
           "warning"
         )
       );
+    }
+
+    // Range consistency: verify chart ranges reference cells within table data
+    if (tables.length > 0) {
+      if (chart.categories_range) {
+        const catBoundsCheck = isRangeWithinTableBounds(chart.categories_range, tables);
+        if (!catBoundsCheck.valid) {
+          issues.push(
+            createIssue(
+              EXCEL_ERROR_CODES.CHART_RANGE_OUT_OF_BOUNDS,
+              `Chart categories_range "${chart.categories_range}" extends beyond table data (${catBoundsCheck.reason})`,
+              `${chartPath}.categories_range`,
+              "error"
+            )
+          );
+        }
+      }
+
+      if (chart.values_range) {
+        const valBoundsCheck = isRangeWithinTableBounds(chart.values_range, tables);
+        if (!valBoundsCheck.valid) {
+          issues.push(
+            createIssue(
+              EXCEL_ERROR_CODES.CHART_RANGE_OUT_OF_BOUNDS,
+              `Chart values_range "${chart.values_range}" extends beyond table data (${valBoundsCheck.reason})`,
+              `${chartPath}.values_range`,
+              "error"
+            )
+          );
+        }
+      }
     }
   });
 
