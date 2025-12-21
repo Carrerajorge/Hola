@@ -1618,13 +1618,36 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
   // Generate Excel from prompt (AI-powered)
   app.post("/api/documents/generate/excel", async (req, res) => {
     try {
-      const { prompt } = req.body;
+      const { prompt, returnMetadata } = req.body;
       
       if (!prompt || typeof prompt !== "string") {
         return res.status(400).json({ error: "Prompt is required" });
       }
       
-      const { buffer, spec } = await generateExcelFromPrompt(prompt);
+      const result = await generateExcelFromPrompt(prompt);
+      const { buffer, spec, qualityReport, postRenderValidation, attemptsUsed } = result;
+      
+      // Add quality gate warnings as response headers
+      if (qualityReport.warnings.length > 0) {
+        res.setHeader("X-Quality-Warnings", JSON.stringify(qualityReport.warnings.map(w => w.message)));
+      }
+      if (postRenderValidation.warnings.length > 0) {
+        res.setHeader("X-PostRender-Warnings", JSON.stringify(postRenderValidation.warnings));
+      }
+      res.setHeader("X-Generation-Attempts", attemptsUsed.toString());
+      
+      // If client requests metadata, return JSON with base64 buffer
+      if (returnMetadata === true) {
+        return res.json({
+          success: true,
+          filename: `${spec.workbook_title || 'generated'}.xlsx`,
+          buffer: buffer.toString("base64"),
+          qualityWarnings: qualityReport.warnings,
+          postRenderWarnings: postRenderValidation.warnings,
+          metadata: postRenderValidation.metadata,
+          attemptsUsed,
+        });
+      }
       
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="${spec.workbook_title || 'generated'}.xlsx"`);
@@ -1639,13 +1662,36 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
   // Generate Word from prompt (AI-powered)
   app.post("/api/documents/generate/word", async (req, res) => {
     try {
-      const { prompt } = req.body;
+      const { prompt, returnMetadata } = req.body;
       
       if (!prompt || typeof prompt !== "string") {
         return res.status(400).json({ error: "Prompt is required" });
       }
       
-      const { buffer, spec } = await generateWordFromPrompt(prompt);
+      const result = await generateWordFromPrompt(prompt);
+      const { buffer, spec, qualityReport, postRenderValidation, attemptsUsed } = result;
+      
+      // Add quality gate warnings as response headers
+      if (qualityReport.warnings.length > 0) {
+        res.setHeader("X-Quality-Warnings", JSON.stringify(qualityReport.warnings.map(w => w.message)));
+      }
+      if (postRenderValidation.warnings.length > 0) {
+        res.setHeader("X-PostRender-Warnings", JSON.stringify(postRenderValidation.warnings));
+      }
+      res.setHeader("X-Generation-Attempts", attemptsUsed.toString());
+      
+      // If client requests metadata, return JSON with base64 buffer
+      if (returnMetadata === true) {
+        return res.json({
+          success: true,
+          filename: `${spec.title || 'generated'}.docx`,
+          buffer: buffer.toString("base64"),
+          qualityWarnings: qualityReport.warnings,
+          postRenderWarnings: postRenderValidation.warnings,
+          metadata: postRenderValidation.metadata,
+          attemptsUsed,
+        });
+      }
       
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       res.setHeader("Content-Disposition", `attachment; filename="${spec.title || 'generated'}.docx"`);

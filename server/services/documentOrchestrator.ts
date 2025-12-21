@@ -1,5 +1,16 @@
 import { geminiClient, GEMINI_MODELS } from "../lib/gemini";
-import { validateExcelSpec, validateDocSpec } from "./documentValidators";
+import { 
+  validateExcelSpec, 
+  validateDocSpec,
+  validateGeneratedExcelBuffer,
+  validateGeneratedWordBuffer,
+  type PostRenderValidationResult,
+} from "./documentValidators";
+import {
+  validateExcelSpec as qualityGateExcelSpec,
+  validateDocSpec as qualityGateDocSpec,
+  type QualityReport,
+} from "./documentQualityGates";
 import { renderExcelFromSpec } from "./excelSpecRenderer";
 import { renderWordFromSpec } from "./wordSpecRenderer";
 import {
@@ -10,6 +21,14 @@ import {
 } from "../../shared/documentSpecs";
 
 const MAX_RETRIES = 3;
+
+export interface GenerationResult<T> {
+  buffer: Buffer;
+  spec: T;
+  qualityReport: QualityReport;
+  postRenderValidation: PostRenderValidationResult;
+  attemptsUsed: number;
+}
 
 const EXCEL_SYSTEM_PROMPT = `You are a JSON generator that creates Excel workbook specifications.
 
@@ -160,9 +179,9 @@ function extractJsonFromResponse(response: string): string {
 
 export async function generateExcelFromPrompt(
   prompt: string
-): Promise<{ buffer: Buffer; spec: ExcelSpec }> {
+): Promise<GenerationResult<ExcelSpec>> {
   let lastErrors: string[] = [];
-  let currentPrompt = prompt;
+  let lastQualityReport: QualityReport | null = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     console.log(`[DocumentOrchestrator] Excel generation attempt ${attempt}/${MAX_RETRIES}`);
@@ -172,7 +191,7 @@ export async function generateExcelFromPrompt(
       systemPrompt += `\n\nPREVIOUS ATTEMPT FAILED with these errors:\n${lastErrors.join("\n")}\n\nPlease fix these issues in your response.`;
     }
 
-    const response = await callGeminiForSpec(systemPrompt, currentPrompt);
+    const response = await callGeminiForSpec(systemPrompt, prompt);
     const jsonStr = extractJsonFromResponse(response);
 
     let parsed: unknown;
@@ -184,19 +203,51 @@ export async function generateExcelFromPrompt(
       continue;
     }
 
-    const validation = validateExcelSpec(parsed);
-    if (!validation.valid) {
-      lastErrors = validation.errors;
-      console.error(`[DocumentOrchestrator] Validation failed:`, validation.errors);
+    // Basic schema validation
+    const schemaValidation = validateExcelSpec(parsed);
+    if (!schemaValidation.valid) {
+      lastErrors = schemaValidation.errors;
+      console.error(`[DocumentOrchestrator] Schema validation failed:`, schemaValidation.errors);
       continue;
     }
 
     const spec = parsed as ExcelSpec;
+
+    // Run quality gate validation (DoS protection, limits, best practices)
+    const qualityReport = qualityGateExcelSpec(spec);
+    lastQualityReport = qualityReport;
+    
+    if (!qualityReport.valid) {
+      const errorMessages = qualityReport.errors.map(e => `[${e.code}] ${e.message} at ${e.path}`);
+      lastErrors = errorMessages;
+      console.error(`[DocumentOrchestrator] Quality gate failed:`, errorMessages);
+      continue;
+    }
+
+    // Log warnings but continue
+    if (qualityReport.warnings.length > 0) {
+      console.warn(`[DocumentOrchestrator] Quality warnings:`, qualityReport.warnings);
+    }
     
     try {
       const buffer = await renderExcelFromSpec(spec);
+      
+      // Post-render validation - verify the generated buffer is valid
+      const postRenderValidation = await validateGeneratedExcelBuffer(buffer);
+      if (!postRenderValidation.valid) {
+        lastErrors = postRenderValidation.errors;
+        console.error(`[DocumentOrchestrator] Post-render validation failed:`, postRenderValidation.errors);
+        continue;
+      }
+      
       console.log(`[DocumentOrchestrator] Excel generated successfully on attempt ${attempt}`);
-      return { buffer, spec };
+      return { 
+        buffer, 
+        spec, 
+        qualityReport,
+        postRenderValidation,
+        attemptsUsed: attempt,
+      };
     } catch (renderError) {
       lastErrors = [`Render error: ${(renderError as Error).message}`];
       console.error(`[DocumentOrchestrator] Render failed:`, lastErrors[0]);
@@ -211,9 +262,9 @@ export async function generateExcelFromPrompt(
 
 export async function generateWordFromPrompt(
   prompt: string
-): Promise<{ buffer: Buffer; spec: DocSpec }> {
+): Promise<GenerationResult<DocSpec>> {
   let lastErrors: string[] = [];
-  let currentPrompt = prompt;
+  let lastQualityReport: QualityReport | null = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     console.log(`[DocumentOrchestrator] Word generation attempt ${attempt}/${MAX_RETRIES}`);
@@ -223,7 +274,7 @@ export async function generateWordFromPrompt(
       systemPrompt += `\n\nPREVIOUS ATTEMPT FAILED with these errors:\n${lastErrors.join("\n")}\n\nPlease fix these issues in your response.`;
     }
 
-    const response = await callGeminiForSpec(systemPrompt, currentPrompt);
+    const response = await callGeminiForSpec(systemPrompt, prompt);
     const jsonStr = extractJsonFromResponse(response);
 
     let parsed: unknown;
@@ -235,19 +286,51 @@ export async function generateWordFromPrompt(
       continue;
     }
 
-    const validation = validateDocSpec(parsed);
-    if (!validation.valid) {
-      lastErrors = validation.errors;
-      console.error(`[DocumentOrchestrator] Validation failed:`, validation.errors);
+    // Basic schema validation
+    const schemaValidation = validateDocSpec(parsed);
+    if (!schemaValidation.valid) {
+      lastErrors = schemaValidation.errors;
+      console.error(`[DocumentOrchestrator] Schema validation failed:`, schemaValidation.errors);
       continue;
     }
 
     const spec = parsed as DocSpec;
+
+    // Run quality gate validation (DoS protection, limits, best practices)
+    const qualityReport = qualityGateDocSpec(spec);
+    lastQualityReport = qualityReport;
+    
+    if (!qualityReport.valid) {
+      const errorMessages = qualityReport.errors.map(e => `[${e.code}] ${e.message} at ${e.path}`);
+      lastErrors = errorMessages;
+      console.error(`[DocumentOrchestrator] Quality gate failed:`, errorMessages);
+      continue;
+    }
+
+    // Log warnings but continue
+    if (qualityReport.warnings.length > 0) {
+      console.warn(`[DocumentOrchestrator] Quality warnings:`, qualityReport.warnings);
+    }
     
     try {
       const buffer = await renderWordFromSpec(spec);
+      
+      // Post-render validation - verify the generated buffer is valid
+      const postRenderValidation = await validateGeneratedWordBuffer(buffer);
+      if (!postRenderValidation.valid) {
+        lastErrors = postRenderValidation.errors;
+        console.error(`[DocumentOrchestrator] Post-render validation failed:`, postRenderValidation.errors);
+        continue;
+      }
+      
       console.log(`[DocumentOrchestrator] Word generated successfully on attempt ${attempt}`);
-      return { buffer, spec };
+      return { 
+        buffer, 
+        spec, 
+        qualityReport,
+        postRenderValidation,
+        attemptsUsed: attempt,
+      };
     } catch (renderError) {
       lastErrors = [`Render error: ${(renderError as Error).message}`];
       console.error(`[DocumentOrchestrator] Render failed:`, lastErrors[0]);

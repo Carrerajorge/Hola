@@ -231,3 +231,145 @@ export function validateDocxFile(buffer: Buffer): ValidationResult {
 
   return { valid: true, errors: [] };
 }
+
+export interface PostRenderValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  metadata?: {
+    sheetCount?: number;
+    worksheetNames?: string[];
+    paragraphCount?: number;
+    tableCount?: number;
+  };
+}
+
+/**
+ * Deep validation of a generated Word document buffer by attempting to parse it
+ * This validates the actual document structure, not just the ZIP header
+ */
+export async function validateGeneratedWordBuffer(buffer: Buffer): Promise<PostRenderValidationResult> {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const metadata: PostRenderValidationResult["metadata"] = {};
+
+  // First check basic ZIP structure
+  const basicValidation = validateDocxFile(buffer);
+  if (!basicValidation.valid) {
+    return { valid: false, errors: basicValidation.errors, warnings };
+  }
+
+  try {
+    // Try to parse the DOCX using JSZip to verify structure
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(buffer);
+    
+    // Check for required DOCX components
+    const contentTypes = zip.file("[Content_Types].xml");
+    if (!contentTypes) {
+      errors.push("Missing [Content_Types].xml - invalid DOCX structure");
+    }
+
+    const documentXml = zip.file("word/document.xml");
+    if (!documentXml) {
+      errors.push("Missing word/document.xml - invalid DOCX structure");
+    } else {
+      // Parse the document XML to count elements
+      const documentContent = await documentXml.async("text");
+      
+      // Count paragraphs (rough estimate)
+      const paragraphMatches = documentContent.match(/<w:p[^>]*>/g);
+      metadata.paragraphCount = paragraphMatches ? paragraphMatches.length : 0;
+      
+      // Count tables
+      const tableMatches = documentContent.match(/<w:tbl[^>]*>/g);
+      metadata.tableCount = tableMatches ? tableMatches.length : 0;
+      
+      if (metadata.paragraphCount === 0 && metadata.tableCount === 0) {
+        warnings.push("Document appears to have no content (no paragraphs or tables found)");
+      }
+    }
+
+    // Check for styles
+    const stylesXml = zip.file("word/styles.xml");
+    if (!stylesXml) {
+      warnings.push("Missing word/styles.xml - document may have formatting issues");
+    }
+
+    // Check relationships file
+    const relsFile = zip.file("word/_rels/document.xml.rels");
+    if (!relsFile) {
+      warnings.push("Missing word/_rels/document.xml.rels - some references may not work");
+    }
+
+  } catch (parseError) {
+    errors.push(`Failed to parse DOCX structure: ${(parseError as Error).message}`);
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    metadata,
+  };
+}
+
+/**
+ * Deep validation of a generated Excel document buffer by attempting to parse it with ExcelJS
+ * This validates the actual workbook structure, not just the ZIP header
+ */
+export async function validateGeneratedExcelBuffer(buffer: Buffer): Promise<PostRenderValidationResult> {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const metadata: PostRenderValidationResult["metadata"] = {};
+
+  // First check basic ZIP structure
+  const basicValidation = validateExcelFile(buffer);
+  if (!basicValidation.valid) {
+    return { valid: false, errors: basicValidation.errors, warnings };
+  }
+
+  try {
+    // Try to parse with ExcelJS
+    const ExcelJS = await import("exceljs");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer);
+
+    // Get sheet information
+    metadata.sheetCount = workbook.worksheets.length;
+    metadata.worksheetNames = workbook.worksheets.map(ws => ws.name);
+
+    if (metadata.sheetCount === 0) {
+      errors.push("Workbook has no worksheets");
+    }
+
+    // Validate each worksheet
+    for (const worksheet of workbook.worksheets) {
+      if (!worksheet.name || worksheet.name.trim() === "") {
+        warnings.push(`Worksheet at index ${worksheet.id} has no name`);
+      }
+
+      // Check for some data
+      let cellCount = 0;
+      worksheet.eachRow((row, rowNumber) => {
+        row.eachCell((cell, colNumber) => {
+          cellCount++;
+        });
+      });
+
+      if (cellCount === 0) {
+        warnings.push(`Worksheet "${worksheet.name}" appears to be empty`);
+      }
+    }
+
+  } catch (parseError) {
+    errors.push(`Failed to parse Excel structure: ${(parseError as Error).message}`);
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    metadata,
+  };
+}

@@ -1,0 +1,655 @@
+import type { DocSpec, DocBlock, ExcelSpec, SheetSpec, TableSpec } from "../../shared/documentSpecs";
+
+// Severity levels for validation issues
+export type Severity = "error" | "warning" | "info";
+
+// Validation issue structure
+export interface ValidationIssue {
+  code: string;
+  message: string;
+  path: string;
+  severity: Severity;
+}
+
+// Quality report returned by validation functions
+export interface QualityReport {
+  valid: boolean;
+  errors: Array<{ code: string; message: string; path: string }>;
+  warnings: Array<{ code: string; message: string; path: string }>;
+  info: Array<{ code: string; message: string; path: string }>;
+}
+
+// Error codes for DocSpec validation
+export const DOC_ERROR_CODES = {
+  TOO_MANY_BLOCKS: "DOC_E001",
+  TOO_MANY_BULLETS: "DOC_E002",
+  TOO_MANY_TABLE_COLUMNS: "DOC_E003",
+  TOO_MANY_TABLE_ROWS: "DOC_E004",
+  INVALID_HEADING_LEVEL: "DOC_E005",
+  INVALID_TABLE_STYLE: "DOC_E006",
+  EMPTY_BLOCKS: "DOC_E007",
+  EMPTY_BULLET_ITEMS: "DOC_E008",
+  EMPTY_TABLE_COLUMNS: "DOC_E009",
+  MISMATCHED_ROW_LENGTH: "DOC_E010",
+} as const;
+
+// Warning codes for DocSpec validation
+export const DOC_WARNING_CODES = {
+  MANY_BLOCKS: "DOC_W001",
+  MANY_BULLETS: "DOC_W002",
+  LARGE_TABLE: "DOC_W003",
+  NO_TITLE: "DOC_W004",
+  DEEP_HEADING: "DOC_W005",
+} as const;
+
+// Error codes for ExcelSpec validation
+export const EXCEL_ERROR_CODES = {
+  TOO_MANY_SHEETS: "EXCEL_E001",
+  TOO_MANY_CELLS: "EXCEL_E002",
+  TOO_MANY_TABLE_ROWS: "EXCEL_E003",
+  TOO_MANY_TABLE_COLUMNS: "EXCEL_E004",
+  INVALID_COLUMN_FORMAT: "EXCEL_E005",
+  INVALID_SHEET_NAME: "EXCEL_E006",
+  INVALID_ANCHOR: "EXCEL_E007",
+  EMPTY_SHEETS: "EXCEL_E008",
+  EMPTY_TABLE_HEADERS: "EXCEL_E009",
+  MISMATCHED_ROW_LENGTH: "EXCEL_E010",
+  INVALID_CHART_RANGE: "EXCEL_E011",
+} as const;
+
+// Warning codes for ExcelSpec validation
+export const EXCEL_WARNING_CODES = {
+  MANY_SHEETS: "EXCEL_W001",
+  MANY_CELLS: "EXCEL_W002",
+  LARGE_TABLE: "EXCEL_W003",
+  NO_WORKBOOK_TITLE: "EXCEL_W004",
+  DUPLICATE_SHEET_NAMES: "EXCEL_W005",
+} as const;
+
+// Limits for DoS protection
+export const DOC_LIMITS = {
+  MAX_BLOCKS: 100,
+  MAX_BULLET_ITEMS_TOTAL: 500,
+  MAX_TABLE_COLUMNS: 26,
+  MAX_TABLE_ROWS: 1000,
+  MIN_HEADING_LEVEL: 1,
+  MAX_HEADING_LEVEL: 6,
+  // Warning thresholds
+  WARN_BLOCKS: 75,
+  WARN_BULLET_ITEMS: 300,
+  WARN_TABLE_ROWS: 500,
+} as const;
+
+export const EXCEL_LIMITS = {
+  MAX_SHEETS: 50,
+  MAX_CELLS_PER_SHEET: 100000,
+  MAX_TABLE_ROWS: 500,
+  MAX_TABLE_COLUMNS: 26,
+  MAX_SHEET_NAME_LENGTH: 31,
+  // Warning thresholds
+  WARN_SHEETS: 30,
+  WARN_CELLS_PER_SHEET: 50000,
+  WARN_TABLE_ROWS: 300,
+} as const;
+
+// Valid Word table styles
+const VALID_WORD_TABLE_STYLES = new Set([
+  "Table Grid",
+  "Light Shading",
+  "Light Shading Accent 1",
+  "Light Shading Accent 2",
+  "Light Shading Accent 3",
+  "Light Shading Accent 4",
+  "Light Shading Accent 5",
+  "Light Shading Accent 6",
+  "Light List",
+  "Light Grid",
+  "Medium Shading 1",
+  "Medium Shading 2",
+  "Medium List 1",
+  "Medium List 2",
+  "Medium Grid 1",
+  "Medium Grid 2",
+  "Medium Grid 3",
+  "Dark List",
+  "Colorful Shading",
+  "Colorful List",
+  "Colorful Grid",
+]);
+
+// Valid Excel number formats
+const VALID_EXCEL_FORMATS = new Set([
+  "General",
+  "0",
+  "0.00",
+  "#,##0",
+  "#,##0.00",
+  "0%",
+  "0.00%",
+  "$#,##0",
+  "$#,##0.00",
+  "mm/dd/yyyy",
+  "dd/mm/yyyy",
+  "yyyy-mm-dd",
+  "h:mm AM/PM",
+  "h:mm:ss AM/PM",
+  "m/d/yy h:mm",
+  "@", // Text format
+]);
+
+// Cell reference validation regex
+const CELL_REFERENCE_REGEX = /^[A-Z]{1,3}[1-9][0-9]*$/i;
+const RANGE_REGEX = /^[A-Z]{1,3}[1-9][0-9]*:[A-Z]{1,3}[1-9][0-9]*$/i;
+
+function createIssue(
+  code: string,
+  message: string,
+  path: string,
+  severity: Severity
+): ValidationIssue {
+  return { code, message, path, severity };
+}
+
+function isValidCellReference(ref: string): boolean {
+  return CELL_REFERENCE_REGEX.test(ref);
+}
+
+function isValidRange(range: string): boolean {
+  return RANGE_REGEX.test(range);
+}
+
+/**
+ * Validates a DocSpec for Word document generation
+ */
+export function validateDocSpec(spec: DocSpec): QualityReport {
+  const issues: ValidationIssue[] = [];
+  const blocks = spec.blocks || [];
+
+  // Check total blocks
+  if (blocks.length > DOC_LIMITS.MAX_BLOCKS) {
+    issues.push(
+      createIssue(
+        DOC_ERROR_CODES.TOO_MANY_BLOCKS,
+        `Document has ${blocks.length} blocks, maximum allowed is ${DOC_LIMITS.MAX_BLOCKS}`,
+        "blocks",
+        "error"
+      )
+    );
+  } else if (blocks.length > DOC_LIMITS.WARN_BLOCKS) {
+    issues.push(
+      createIssue(
+        DOC_WARNING_CODES.MANY_BLOCKS,
+        `Document has ${blocks.length} blocks, consider splitting into multiple documents`,
+        "blocks",
+        "warning"
+      )
+    );
+  }
+
+  if (blocks.length === 0) {
+    issues.push(
+      createIssue(
+        DOC_ERROR_CODES.EMPTY_BLOCKS,
+        "Document has no content blocks",
+        "blocks",
+        "error"
+      )
+    );
+  }
+
+  // Check title
+  if (!spec.title || spec.title.trim() === "") {
+    issues.push(
+      createIssue(
+        DOC_WARNING_CODES.NO_TITLE,
+        "Document has no title specified",
+        "title",
+        "warning"
+      )
+    );
+  }
+
+  // Count total bullet items and validate blocks
+  let totalBulletItems = 0;
+
+  blocks.forEach((block, index) => {
+    const blockPath = `blocks[${index}]`;
+
+    switch (block.type) {
+      case "heading":
+        if (block.level < DOC_LIMITS.MIN_HEADING_LEVEL || block.level > DOC_LIMITS.MAX_HEADING_LEVEL) {
+          issues.push(
+            createIssue(
+              DOC_ERROR_CODES.INVALID_HEADING_LEVEL,
+              `Heading level ${block.level} is invalid, must be between 1 and 6`,
+              `${blockPath}.level`,
+              "error"
+            )
+          );
+        } else if (block.level >= 5) {
+          issues.push(
+            createIssue(
+              DOC_WARNING_CODES.DEEP_HEADING,
+              `Heading level ${block.level} is very deep, consider restructuring`,
+              `${blockPath}.level`,
+              "warning"
+            )
+          );
+        }
+        break;
+
+      case "bullets":
+        const items = block.items || [];
+        totalBulletItems += items.length;
+        if (items.length === 0) {
+          issues.push(
+            createIssue(
+              DOC_ERROR_CODES.EMPTY_BULLET_ITEMS,
+              "Bullet block has no items",
+              `${blockPath}.items`,
+              "error"
+            )
+          );
+        }
+        break;
+
+      case "table":
+        const columns = block.columns || [];
+        const rows = block.rows || [];
+
+        if (columns.length === 0) {
+          issues.push(
+            createIssue(
+              DOC_ERROR_CODES.EMPTY_TABLE_COLUMNS,
+              "Table has no columns defined",
+              `${blockPath}.columns`,
+              "error"
+            )
+          );
+        }
+
+        if (columns.length > DOC_LIMITS.MAX_TABLE_COLUMNS) {
+          issues.push(
+            createIssue(
+              DOC_ERROR_CODES.TOO_MANY_TABLE_COLUMNS,
+              `Table has ${columns.length} columns, maximum allowed is ${DOC_LIMITS.MAX_TABLE_COLUMNS}`,
+              `${blockPath}.columns`,
+              "error"
+            )
+          );
+        }
+
+        if (rows.length > DOC_LIMITS.MAX_TABLE_ROWS) {
+          issues.push(
+            createIssue(
+              DOC_ERROR_CODES.TOO_MANY_TABLE_ROWS,
+              `Table has ${rows.length} rows, maximum allowed is ${DOC_LIMITS.MAX_TABLE_ROWS}`,
+              `${blockPath}.rows`,
+              "error"
+            )
+          );
+        } else if (rows.length > DOC_LIMITS.WARN_TABLE_ROWS) {
+          issues.push(
+            createIssue(
+              DOC_WARNING_CODES.LARGE_TABLE,
+              `Table has ${rows.length} rows, consider pagination`,
+              `${blockPath}.rows`,
+              "warning"
+            )
+          );
+        }
+
+        // Validate row lengths match column count
+        rows.forEach((row, rowIndex) => {
+          if (Array.isArray(row) && row.length !== columns.length) {
+            issues.push(
+              createIssue(
+                DOC_ERROR_CODES.MISMATCHED_ROW_LENGTH,
+                `Row ${rowIndex} has ${row.length} cells but table has ${columns.length} columns`,
+                `${blockPath}.rows[${rowIndex}]`,
+                "error"
+              )
+            );
+          }
+        });
+
+        // Validate table style
+        if (block.style && !VALID_WORD_TABLE_STYLES.has(block.style)) {
+          issues.push(
+            createIssue(
+              DOC_ERROR_CODES.INVALID_TABLE_STYLE,
+              `Unknown table style "${block.style}"`,
+              `${blockPath}.style`,
+              "warning"
+            )
+          );
+        }
+        break;
+    }
+  });
+
+  // Check total bullet items
+  if (totalBulletItems > DOC_LIMITS.MAX_BULLET_ITEMS_TOTAL) {
+    issues.push(
+      createIssue(
+        DOC_ERROR_CODES.TOO_MANY_BULLETS,
+        `Document has ${totalBulletItems} total bullet items, maximum allowed is ${DOC_LIMITS.MAX_BULLET_ITEMS_TOTAL}`,
+        "blocks",
+        "error"
+      )
+    );
+  } else if (totalBulletItems > DOC_LIMITS.WARN_BULLET_ITEMS) {
+    issues.push(
+      createIssue(
+        DOC_WARNING_CODES.MANY_BULLETS,
+        `Document has ${totalBulletItems} bullet items, consider grouping or summarizing`,
+        "blocks",
+        "warning"
+      )
+    );
+  }
+
+  return buildReport(issues);
+}
+
+/**
+ * Validates an ExcelSpec for Excel workbook generation
+ */
+export function validateExcelSpec(spec: ExcelSpec): QualityReport {
+  const issues: ValidationIssue[] = [];
+  const sheets = spec.sheets || [];
+
+  // Check workbook title
+  if (!spec.workbook_title || spec.workbook_title.trim() === "") {
+    issues.push(
+      createIssue(
+        EXCEL_WARNING_CODES.NO_WORKBOOK_TITLE,
+        "Workbook has no title specified",
+        "workbook_title",
+        "warning"
+      )
+    );
+  }
+
+  // Check sheet count
+  if (sheets.length === 0) {
+    issues.push(
+      createIssue(
+        EXCEL_ERROR_CODES.EMPTY_SHEETS,
+        "Workbook has no sheets",
+        "sheets",
+        "error"
+      )
+    );
+  }
+
+  if (sheets.length > EXCEL_LIMITS.MAX_SHEETS) {
+    issues.push(
+      createIssue(
+        EXCEL_ERROR_CODES.TOO_MANY_SHEETS,
+        `Workbook has ${sheets.length} sheets, maximum allowed is ${EXCEL_LIMITS.MAX_SHEETS}`,
+        "sheets",
+        "error"
+      )
+    );
+  } else if (sheets.length > EXCEL_LIMITS.WARN_SHEETS) {
+    issues.push(
+      createIssue(
+        EXCEL_WARNING_CODES.MANY_SHEETS,
+        `Workbook has ${sheets.length} sheets, consider splitting into multiple workbooks`,
+        "sheets",
+        "warning"
+      )
+    );
+  }
+
+  // Check for duplicate sheet names
+  const sheetNames = new Set<string>();
+  sheets.forEach((sheet, index) => {
+    const normalizedName = sheet.name.toLowerCase();
+    if (sheetNames.has(normalizedName)) {
+      issues.push(
+        createIssue(
+          EXCEL_WARNING_CODES.DUPLICATE_SHEET_NAMES,
+          `Duplicate sheet name "${sheet.name}"`,
+          `sheets[${index}].name`,
+          "warning"
+        )
+      );
+    }
+    sheetNames.add(normalizedName);
+  });
+
+  // Validate each sheet
+  sheets.forEach((sheet, sheetIndex) => {
+    validateSheet(sheet, sheetIndex, issues);
+  });
+
+  return buildReport(issues);
+}
+
+function validateSheet(sheet: SheetSpec, sheetIndex: number, issues: ValidationIssue[]): void {
+  const sheetPath = `sheets[${sheetIndex}]`;
+
+  // Validate sheet name
+  if (!sheet.name || sheet.name.trim() === "") {
+    issues.push(
+      createIssue(
+        EXCEL_ERROR_CODES.INVALID_SHEET_NAME,
+        "Sheet name is empty",
+        `${sheetPath}.name`,
+        "error"
+      )
+    );
+  } else if (sheet.name.length > EXCEL_LIMITS.MAX_SHEET_NAME_LENGTH) {
+    issues.push(
+      createIssue(
+        EXCEL_ERROR_CODES.INVALID_SHEET_NAME,
+        `Sheet name "${sheet.name}" exceeds ${EXCEL_LIMITS.MAX_SHEET_NAME_LENGTH} characters`,
+        `${sheetPath}.name`,
+        "error"
+      )
+    );
+  } else if (/[\\/:*?\[\]]/.test(sheet.name)) {
+    issues.push(
+      createIssue(
+        EXCEL_ERROR_CODES.INVALID_SHEET_NAME,
+        `Sheet name "${sheet.name}" contains invalid characters`,
+        `${sheetPath}.name`,
+        "error"
+      )
+    );
+  }
+
+  // Calculate total cells in sheet
+  let totalCells = 0;
+  const tables = sheet.tables || [];
+
+  tables.forEach((table, tableIndex) => {
+    const tablePath = `${sheetPath}.tables[${tableIndex}]`;
+    const headers = table.headers || [];
+    const rows = table.rows || [];
+
+    // Validate anchor
+    if (!table.anchor || !isValidCellReference(table.anchor)) {
+      issues.push(
+        createIssue(
+          EXCEL_ERROR_CODES.INVALID_ANCHOR,
+          `Invalid table anchor "${table.anchor}"`,
+          `${tablePath}.anchor`,
+          "error"
+        )
+      );
+    }
+
+    // Validate headers
+    if (headers.length === 0) {
+      issues.push(
+        createIssue(
+          EXCEL_ERROR_CODES.EMPTY_TABLE_HEADERS,
+          "Table has no headers defined",
+          `${tablePath}.headers`,
+          "error"
+        )
+      );
+    }
+
+    // Check column count
+    if (headers.length > EXCEL_LIMITS.MAX_TABLE_COLUMNS) {
+      issues.push(
+        createIssue(
+          EXCEL_ERROR_CODES.TOO_MANY_TABLE_COLUMNS,
+          `Table has ${headers.length} columns, maximum allowed is ${EXCEL_LIMITS.MAX_TABLE_COLUMNS}`,
+          `${tablePath}.headers`,
+          "error"
+        )
+      );
+    }
+
+    // Check row count
+    if (rows.length > EXCEL_LIMITS.MAX_TABLE_ROWS) {
+      issues.push(
+        createIssue(
+          EXCEL_ERROR_CODES.TOO_MANY_TABLE_ROWS,
+          `Table has ${rows.length} rows, maximum allowed is ${EXCEL_LIMITS.MAX_TABLE_ROWS}`,
+          `${tablePath}.rows`,
+          "error"
+        )
+      );
+    } else if (rows.length > EXCEL_LIMITS.WARN_TABLE_ROWS) {
+      issues.push(
+        createIssue(
+          EXCEL_WARNING_CODES.LARGE_TABLE,
+          `Table has ${rows.length} rows, performance may be impacted`,
+          `${tablePath}.rows`,
+          "warning"
+        )
+      );
+    }
+
+    // Validate row lengths match header count
+    rows.forEach((row, rowIndex) => {
+      if (Array.isArray(row) && row.length !== headers.length) {
+        issues.push(
+          createIssue(
+            EXCEL_ERROR_CODES.MISMATCHED_ROW_LENGTH,
+            `Row ${rowIndex} has ${row.length} cells but table has ${headers.length} headers`,
+            `${tablePath}.rows[${rowIndex}]`,
+            "error"
+          )
+        );
+      }
+    });
+
+    // Validate column formats
+    if (table.column_formats) {
+      for (const [header, format] of Object.entries(table.column_formats)) {
+        if (!headers.includes(header)) {
+          issues.push(
+            createIssue(
+              EXCEL_ERROR_CODES.INVALID_COLUMN_FORMAT,
+              `Column format specified for unknown header "${header}"`,
+              `${tablePath}.column_formats.${header}`,
+              "warning"
+            )
+          );
+        }
+        // Note: We allow custom formats, but warn about unrecognized ones
+        if (!VALID_EXCEL_FORMATS.has(format) && !format.includes("#") && !format.includes("0")) {
+          issues.push(
+            createIssue(
+              EXCEL_ERROR_CODES.INVALID_COLUMN_FORMAT,
+              `Unrecognized column format "${format}" for header "${header}"`,
+              `${tablePath}.column_formats.${header}`,
+              "warning"
+            )
+          );
+        }
+      }
+    }
+
+    // Calculate cells for this table
+    totalCells += headers.length * (rows.length + 1); // +1 for header row
+  });
+
+  // Check total cells per sheet
+  if (totalCells > EXCEL_LIMITS.MAX_CELLS_PER_SHEET) {
+    issues.push(
+      createIssue(
+        EXCEL_ERROR_CODES.TOO_MANY_CELLS,
+        `Sheet "${sheet.name}" has approximately ${totalCells} cells, maximum allowed is ${EXCEL_LIMITS.MAX_CELLS_PER_SHEET}`,
+        `${sheetPath}`,
+        "error"
+      )
+    );
+  } else if (totalCells > EXCEL_LIMITS.WARN_CELLS_PER_SHEET) {
+    issues.push(
+      createIssue(
+        EXCEL_WARNING_CODES.MANY_CELLS,
+        `Sheet "${sheet.name}" has approximately ${totalCells} cells, generation may be slow`,
+        `${sheetPath}`,
+        "warning"
+      )
+    );
+  }
+
+  // Validate charts
+  const charts = sheet.charts || [];
+  charts.forEach((chart, chartIndex) => {
+    const chartPath = `${sheetPath}.charts[${chartIndex}]`;
+
+    if (chart.categories_range && !isValidRange(chart.categories_range)) {
+      issues.push(
+        createIssue(
+          EXCEL_ERROR_CODES.INVALID_CHART_RANGE,
+          `Invalid categories range "${chart.categories_range}"`,
+          `${chartPath}.categories_range`,
+          "error"
+        )
+      );
+    }
+
+    if (chart.values_range && !isValidRange(chart.values_range)) {
+      issues.push(
+        createIssue(
+          EXCEL_ERROR_CODES.INVALID_CHART_RANGE,
+          `Invalid values range "${chart.values_range}"`,
+          `${chartPath}.values_range`,
+          "error"
+        )
+      );
+    }
+
+    if (chart.position && !isValidCellReference(chart.position)) {
+      issues.push(
+        createIssue(
+          EXCEL_ERROR_CODES.INVALID_CHART_RANGE,
+          `Invalid chart position "${chart.position}"`,
+          `${chartPath}.position`,
+          "warning"
+        )
+      );
+    }
+  });
+}
+
+function buildReport(issues: ValidationIssue[]): QualityReport {
+  const errors = issues
+    .filter((i) => i.severity === "error")
+    .map(({ code, message, path }) => ({ code, message, path }));
+  
+  const warnings = issues
+    .filter((i) => i.severity === "warning")
+    .map(({ code, message, path }) => ({ code, message, path }));
+  
+  const info = issues
+    .filter((i) => i.severity === "info")
+    .map(({ code, message, path }) => ({ code, message, path }));
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    info,
+  };
+}
