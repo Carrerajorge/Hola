@@ -26,8 +26,6 @@ export interface ETLPipelineResult {
 }
 
 export async function runETLPipeline(spec: ETLSpec): Promise<ETLPipelineResult> {
-  console.log('[ETL] Starting pipeline with spec:', JSON.stringify(spec, null, 2));
-  
   const allRaw: RawDataRecord[] = [];
   const allNormalized: NormalizedRecord[] = [];
   const allSources: SourceMetadata[] = [];
@@ -44,8 +42,6 @@ export async function runETLPipeline(spec: ETLSpec): Promise<ETLPipelineResult> 
     }
 
     for (const indicator of spec.indicators) {
-      console.log(`[ETL] Fetching ${indicator.id} for ${country} (${countryCode})`);
-      
       try {
         const result = await fetchDataForIndicator(
           countryCode,
@@ -76,18 +72,10 @@ export async function runETLPipeline(spec: ETLSpec): Promise<ETLPipelineResult> 
     }
   }
 
-  console.log(`[ETL] Fetched ${allNormalized.length} total records`);
-
   const cleanData = deduplicateAndClean(allNormalized);
-  console.log(`[ETL] Clean data: ${cleanData.length} records after deduplication`);
-
   const modelMetrics = calculateModelMetrics(cleanData, spec);
-  console.log(`[ETL] Model metrics calculated`);
-
   const dashboardConfig = createDashboardConfig(cleanData, spec);
-
   const auditResults = runAuditTests(spec, allRaw, cleanData, allNormalized);
-  console.log(`[ETL] Audit complete: ${auditResults.overallResult}`);
 
   const readme = createReadme(spec, auditResults);
 

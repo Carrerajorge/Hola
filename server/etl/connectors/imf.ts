@@ -30,18 +30,14 @@ export async function fetchIMFData(
 ): Promise<{ raw: RawDataRecord; normalized: NormalizedRecord[] } | null> {
   const imfIndicator = INDICATOR_MAPPING[indicatorId];
   if (!imfIndicator) {
-    console.log(`[IMF] Unknown indicator: ${indicatorId}`);
     return null;
   }
 
   const url = `${IMF_API}/${imfIndicator}/${countryCode}`;
   
-  console.log(`[IMF] Fetching: ${url}`);
-  
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      console.log(`[IMF] API error: ${response.status}`);
       return null;
     }
 
@@ -92,11 +88,8 @@ export async function fetchIMFData(
       }
     }
 
-    console.log(`[IMF] Fetched ${normalized.length} records for ${countryCode}/${indicatorId}`);
-    
     return { raw: rawRecord, normalized };
   } catch (error) {
-    console.error('[IMF] Fetch error:', error);
     return null;
   }
 }

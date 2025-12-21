@@ -23,8 +23,6 @@ class ToolRegistry {
       }
       this.capabilityIndex.get(capability)!.add(tool.id);
     }
-    
-    console.log(`Registered tool: ${tool.id} (${tool.category})`);
   }
 
   unregister(toolId: string): boolean {

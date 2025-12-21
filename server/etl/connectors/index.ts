@@ -37,13 +37,12 @@ export async function fetchDataForIndicator(
           result = await fetchIMFData(countryCode, indicatorId, startDate, endDate);
           break;
         default:
-          console.log(`[Connectors] Source ${source} not implemented yet`);
+          break;
       }
 
       if (result && result.normalized.length > 0) {
         raw.push(result.raw);
         normalized.push(...result.normalized);
-        console.log(`[Connectors] Success: ${source} returned ${result.normalized.length} records`);
         break;
       }
     } catch (error) {

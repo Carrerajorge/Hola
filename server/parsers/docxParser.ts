@@ -9,9 +9,6 @@ export class DocxParser implements FileParser {
   ];
 
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
-    const startTime = Date.now();
-    console.log(`[DocxParser] Starting DOCX parse, size: ${content.length} bytes`);
-
     try {
       const [htmlResult, metadata] = await Promise.all([
         this.extractStructuredContent(content),
@@ -19,10 +16,6 @@ export class DocxParser implements FileParser {
       ]);
 
       const structuredText = this.htmlToStructuredText(htmlResult.value);
-      
-      const elapsed = Date.now() - startTime;
-      console.log(`[DocxParser] Completed in ${elapsed}ms`);
-
       const formattedOutput = this.formatOutput(metadata, structuredText);
 
       return {

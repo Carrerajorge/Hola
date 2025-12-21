@@ -43,24 +43,19 @@ export async function fetchFredData(
 ): Promise<{ raw: RawDataRecord; normalized: NormalizedRecord[] } | null> {
   const fredSeriesId = INDICATOR_MAPPING[indicatorId];
   if (!fredSeriesId) {
-    console.log(`[FRED] Unknown indicator: ${indicatorId}`);
     return null;
   }
 
   const key = apiKey || process.env.FRED_API_KEY;
   if (!key) {
-    console.log('[FRED] No API key available, skipping FRED data source');
     return null;
   }
 
   const url = `${FRED_API}/series/observations?series_id=${fredSeriesId}&api_key=${key}&file_type=json&observation_start=${startDate}&observation_end=${endDate}`;
   
-  console.log(`[FRED] Fetching: ${fredSeriesId}`);
-  
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      console.log(`[FRED] API error: ${response.status}`);
       return null;
     }
 
@@ -110,11 +105,8 @@ export async function fetchFredData(
       }
     }
 
-    console.log(`[FRED] Fetched ${normalized.length} records for ${indicatorId}`);
-    
     return { raw: rawRecord, normalized };
   } catch (error) {
-    console.error('[FRED] Fetch error:', error);
     return null;
   }
 }

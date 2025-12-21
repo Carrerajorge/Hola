@@ -23,8 +23,6 @@ etlRouter.post("/run", async (req, res) => {
       return res.status(400).json({ error: "Countries array is required" });
     }
 
-    console.log("[ETL API] Starting ETL for countries:", countries);
-
     const result = await runETLAgent({
       countries,
       indicators,

@@ -7,8 +7,6 @@ export class PdfParser implements FileParser {
 
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
     const startTime = Date.now();
-    console.log(`[PdfParser] Starting PDF parse, size: ${content.length} bytes`);
-
     let timeoutId: NodeJS.Timeout | null = null;
     
     try {
@@ -22,9 +20,6 @@ export class PdfParser implements FileParser {
       const result = await Promise.race([parsePromise, timeoutPromise]);
       
       if (timeoutId) clearTimeout(timeoutId);
-      
-      const elapsed = Date.now() - startTime;
-      console.log(`[PdfParser] Completed in ${elapsed}ms`);
       
       return result;
     } catch (error) {

@@ -11,8 +11,6 @@ imageRouter.post("/generate", async (req, res) => {
       return res.status(400).json({ error: "Prompt is required" });
     }
 
-    console.log("[ImageGen] Generating image for prompt:", prompt);
-    
     const result = await generateImage(prompt);
     
     res.json({

@@ -28,5 +28,4 @@ xlsxChart.writeFile(opts, (err: Error | null) => {
     console.error('Error creating template:', err);
     process.exit(1);
   }
-  console.log('Template created:', templatePath);
 });

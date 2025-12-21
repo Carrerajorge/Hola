@@ -12,9 +12,6 @@ export class XlsxParser implements FileParser {
   private readonly MAX_COLS_PREVIEW = 20;
 
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
-    const startTime = Date.now();
-    console.log(`[XlsxParser] Starting Excel parse, size: ${content.length} bytes`);
-
     try {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(content);
@@ -35,9 +32,6 @@ export class XlsxParser implements FileParser {
       });
 
       const formattedOutput = this.formatOutput(metadata, sheetData);
-      
-      const elapsed = Date.now() - startTime;
-      console.log(`[XlsxParser] Completed in ${elapsed}ms, ${sheetData.length} sheets processed`);
 
       return {
         text: formattedOutput,

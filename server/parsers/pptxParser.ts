@@ -18,7 +18,6 @@ export class PptxParser implements FileParser {
 
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
     const startTime = Date.now();
-    console.log(`[PptxParser] Starting PowerPoint parse, size: ${content.length} bytes`);
 
     try {
       const zip = await JSZip.loadAsync(content);
@@ -29,9 +28,6 @@ export class PptxParser implements FileParser {
       ]);
 
       const formattedText = this.formatOutput(metadata, slides);
-      
-      const elapsed = Date.now() - startTime;
-      console.log(`[PptxParser] Completed in ${elapsed}ms, ${slides.length} slides extracted`);
 
       return {
         text: formattedText,

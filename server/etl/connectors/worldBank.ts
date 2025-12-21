@@ -40,8 +40,6 @@ export async function fetchWorldBankData(
   
   const url = `${WORLD_BANK_API}/country/${countryCode}/indicator/${wbIndicator}?format=json&date=${startYearNum}:${endYearNum}&per_page=1000`;
   
-  console.log(`[WorldBank] Fetching: ${url}`);
-  
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`World Bank API error: ${response.status}`);
@@ -90,8 +88,6 @@ export async function fetchWorldBankData(
     }
   }
 
-  console.log(`[WorldBank] Fetched ${normalized.length} records for ${countryCode}/${indicatorId}`);
-  
   return { raw: rawRecord, normalized };
 }
 
