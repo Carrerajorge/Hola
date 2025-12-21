@@ -942,6 +942,22 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     }
   });
 
+  app.get("/api/chats/bulk", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      if (!userId) {
+        return res.json([]);
+      }
+      
+      const chatsWithMessages = await storage.getChatsWithMessages(userId);
+      res.json(chatsWithMessages);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/chats", async (req, res) => {
     try {
       const { title } = req.body;

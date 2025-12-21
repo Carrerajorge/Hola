@@ -64,33 +64,27 @@ export function useChats() {
 
   const loadChatsFromServer = useCallback(async () => {
     try {
-      const res = await fetch("/api/chats");
+      const res = await fetch("/api/chats/bulk");
       if (!res.ok) throw new Error("Failed to load chats");
       const serverChats = await res.json();
       
-      const formattedChats: Chat[] = await Promise.all(
-        serverChats.map(async (chat: any) => {
-          const chatRes = await fetch(`/api/chats/${chat.id}`);
-          const fullChat = await chatRes.json();
-          return {
-            id: chat.id,
-            stableKey: `stable-${chat.id}`, // Use ID as stable key for server chats
-            title: chat.title,
-            timestamp: new Date(chat.updatedAt).getTime(),
-            archived: chat.archived === "true",
-            hidden: chat.hidden === "true",
-            messages: (fullChat.messages || []).map((msg: any) => ({
-              id: msg.id,
-              role: msg.role,
-              content: msg.content,
-              timestamp: new Date(msg.createdAt),
-              attachments: msg.attachments,
-              sources: msg.sources,
-              figmaDiagram: msg.figmaDiagram,
-            })),
-          };
-        })
-      );
+      const formattedChats: Chat[] = serverChats.map((chat: any) => ({
+        id: chat.id,
+        stableKey: `stable-${chat.id}`,
+        title: chat.title,
+        timestamp: new Date(chat.updatedAt).getTime(),
+        archived: chat.archived === "true",
+        hidden: chat.hidden === "true",
+        messages: (chat.messages || []).map((msg: any) => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          timestamp: new Date(msg.createdAt),
+          attachments: msg.attachments,
+          sources: msg.sources,
+          figmaDiagram: msg.figmaDiagram,
+        })),
+      }));
       
       return formattedChats.sort((a, b) => b.timestamp - a.timestamp);
     } catch (error) {
