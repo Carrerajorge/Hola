@@ -19,10 +19,12 @@ const getOidcConfig = memoize(
   { maxAge: 3600 * 1000 }
 );
 
+let sharedSessionStore: any = null;
+
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   const pgStore = connectPg(session);
-  const sessionStore = new pgStore({
+  sharedSessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
     createTableIfMissing: false,
     ttl: sessionTtl,
@@ -30,7 +32,7 @@ export function getSession() {
   });
   return session({
     secret: process.env.SESSION_SECRET!,
-    store: sessionStore,
+    store: sharedSessionStore,
     resave: true,
     saveUninitialized: true,
     cookie: {
@@ -39,6 +41,54 @@ export function getSession() {
       sameSite: "lax",
       maxAge: sessionTtl,
     },
+  });
+}
+
+export interface WebSocketUser {
+  id: string;
+  email?: string;
+}
+
+export function validateWebSocketSession(cookieHeader: string | undefined): Promise<WebSocketUser | null> {
+  return new Promise((resolve) => {
+    if (!cookieHeader || !sharedSessionStore) {
+      return resolve(null);
+    }
+
+    try {
+      const cookies: Record<string, string> = {};
+      cookieHeader.split(';').forEach(cookie => {
+        const parts = cookie.trim().split('=');
+        if (parts.length >= 2) {
+          cookies[parts[0]] = parts.slice(1).join('=');
+        }
+      });
+
+      const signedCookie = cookies['connect.sid'];
+      if (!signedCookie) {
+        return resolve(null);
+      }
+
+      const sessionId = decodeURIComponent(signedCookie).replace(/^s:/, '').split('.')[0];
+      
+      sharedSessionStore.get(sessionId, (err: any, session: any) => {
+        if (err || !session) {
+          return resolve(null);
+        }
+
+        const passport = session.passport;
+        if (!passport?.user?.claims?.sub) {
+          return resolve(null);
+        }
+
+        resolve({
+          id: passport.user.claims.sub,
+          email: passport.user.claims.email
+        });
+      });
+    } catch {
+      resolve(null);
+    }
   });
 }
 

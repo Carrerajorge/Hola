@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { StepUpdate } from "./agent";
 import { FileStatusUpdate, fileProcessingQueue } from "./lib/fileProcessingQueue";
-import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { setupAuth, registerAuthRoutes, validateWebSocketSession } from "./replit_integrations/auth";
 
 import { pptExportRouter } from "./routes/pptExport";
 import { agentRouter } from "./routes/agent";
@@ -150,24 +150,31 @@ export async function registerRoutes(
     });
   });
 
-  httpServer.on("upgrade", (request, socket, head) => {
+  httpServer.on("upgrade", async (request, socket, head) => {
     const url = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = url.pathname;
+
+    const user = await validateWebSocketSession(request.headers.cookie);
+    if (!user) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
 
     if (pathname.startsWith("/ws/agent/")) {
       const runId = pathname.replace("/ws/agent/", "");
       wssAgent.handleUpgrade(request, socket, head, (ws) => {
-        wssAgent.emit("connection", ws, runId);
+        wssAgent.emit("connection", ws, runId, user);
       });
     } else if (pathname.startsWith("/ws/browser/")) {
       const sessionId = pathname.replace("/ws/browser/", "");
       wssBrowser.handleUpgrade(request, socket, head, (ws) => {
-        wssBrowser.emit("connection", ws, sessionId);
+        wssBrowser.emit("connection", ws, sessionId, user);
       });
     } else if (pathname.startsWith("/ws/file-status/")) {
       const fileId = pathname.replace("/ws/file-status/", "");
       wssFileStatus.handleUpgrade(request, socket, head, (ws) => {
-        wssFileStatus.emit("connection", ws, fileId);
+        wssFileStatus.emit("connection", ws, fileId, user);
       });
     } else {
       socket.destroy();
