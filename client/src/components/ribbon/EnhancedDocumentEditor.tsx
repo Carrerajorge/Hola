@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { X, Download, Sparkles, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { markdownToHtml } from '@/lib/markdownToHtml';
+import { markdownToTipTap } from '@/lib/markdownToHtml';
 import 'katex/dist/katex.min.css';
 
 interface EnhancedDocumentEditorProps {
@@ -74,7 +74,7 @@ export function EnhancedDocumentEditor({
         katexOptions: { throwOnError: false, displayMode: false },
       }),
     ],
-    content: markdownToHtml(content),
+    content: markdownToTipTap(content),
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
     },
@@ -120,9 +120,9 @@ export function EnhancedDocumentEditor({
     
     const insertFn = (text: string, replaceMode = false) => {
       if (replaceMode) {
-        editor.commands.setContent(markdownToHtml(text));
+        editor.commands.setContent(markdownToTipTap(text));
       } else {
-        editor.chain().focus().insertContent(text).run();
+        editor.chain().focus().insertContent(markdownToTipTap(text)).run();
       }
     };
     
