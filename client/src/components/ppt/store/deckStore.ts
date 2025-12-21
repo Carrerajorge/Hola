@@ -99,9 +99,11 @@ type DeckState = {
   deleteElement(elementId: string): void;
 
   updateTextDelta(elementId: string, delta: Delta): void;
+  appendTextDelta(elementId: string, appendText: string): void;
   applyTextStyleToDefault(elementId: string, patch: Partial<TextStyle>): void;
 
   addTextElement(): void;
+  createStreamingTextElement(slideId: string, x: number, y: number, initialText?: string): string;
   addShapeElement(shapeType: "rect" | "ellipse"): void;
   addImageElement(src: string, naturalW?: number, naturalH?: number): void;
   addChartElement(spec: any): void;
@@ -353,6 +355,27 @@ export const useDeckStore = create<DeckState>((set, get) => {
       set({ history: pushHistory(get().history, deck) });
     },
 
+    appendTextDelta(elementId, appendText) {
+      const deck = deepCloneDeck(get().history.present);
+      const slideId = get().activeSlideId;
+      const slide = deck.slides.find(s => s.id === slideId);
+      if (slide) {
+        const element = slide.elements.find(e => e.id === elementId) as TextElement | undefined;
+        if (element && element.type === 'text') {
+          const ops = element.delta.ops || [];
+          if (ops.length > 0) {
+            const lastOp = ops[ops.length - 1];
+            if (typeof lastOp.insert === 'string' && lastOp.insert.endsWith('\n')) {
+              ops[ops.length - 1] = { insert: lastOp.insert.slice(0, -1) + appendText + '\n' };
+            } else if (typeof lastOp.insert === 'string') {
+              ops[ops.length - 1] = { insert: lastOp.insert + appendText };
+            }
+          }
+        }
+      }
+      set({ history: { ...get().history, present: deck } });
+    },
+
     applyTextStyleToDefault(elementId, patch) {
       const deck = deepCloneDeck(get().history.present);
       const slideId = get().activeSlideId;
@@ -383,6 +406,30 @@ export const useDeckStore = create<DeckState>((set, get) => {
         }
       };
       get().addElement(el);
+    },
+
+    createStreamingTextElement(slideId, x, y, initialText = '') {
+      const previousActiveSlide = get().activeSlideId;
+      if (slideId !== previousActiveSlide) {
+        set({ activeSlideId: slideId });
+      }
+      const el: TextElement = {
+        id: nanoid(),
+        type: "text",
+        x,
+        y,
+        w: 600,
+        h: 80,
+        zIndex: Date.now(),
+        delta: { ops: [{ insert: initialText + '\n' }] },
+        defaultTextStyle: {
+          fontFamily: "Inter",
+          fontSize: 24,
+          color: "#111111"
+        }
+      };
+      get().addElement(el);
+      return el.id;
     },
 
     addShapeElement(shapeType) {
