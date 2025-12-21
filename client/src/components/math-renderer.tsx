@@ -1,7 +1,33 @@
-import React, { memo, useState, useEffect, useRef } from "react";
+import React, { memo, useState, useEffect, useRef, useMemo } from "react";
+import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
 import { convertToLatex, sanitizeMathInput } from "@/lib/mathParser";
 import { Loader2, AlertCircle } from "lucide-react";
+
+const EVENT_HANDLER_PATTERN = /^on[a-z]/i;
+
+function sanitizeMathHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { mathMl: true, svg: true, html: true },
+    ADD_TAGS: ['semantics', 'annotation', 'annotation-xml'],
+    ADD_ATTR: ['encoding', 'aria-hidden', 'aria-label', 'role', 'focusable', 'tabindex',
+               'space', 'size', 'minsize', 'maxsize', 'stretchy', 'variant', 'texclass',
+               'fence', 'separator', 'accent', 'largeop', 'movablelimits', 'symmetric',
+               'lspace', 'rspace', 'form', 'mathvariant', 'mathsize', 'mathcolor',
+               'mathbackground', 'displaystyle', 'scriptlevel', 'scriptsizemultiplier',
+               'infixlinebreakstyle', 'linethickness', 'notation', 'open', 'close',
+               'separators', 'columnalign', 'rowalign', 'columnspacing', 'rowspacing'],
+    CUSTOM_ELEMENT_HANDLING: {
+      tagNameCheck: (tagName: string) => /^mjx-/i.test(tagName) || /^katex-/i.test(tagName),
+      attributeNameCheck: (attrName: string) => !EVENT_HANDLER_PATTERN.test(attrName),
+      allowCustomizedBuiltInElements: true,
+    },
+    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea'],
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 
+                  'onmousedown', 'onmouseup', 'onkeydown', 'onkeyup', 'onkeypress',
+                  'onsubmit', 'onreset', 'onchange', 'oninput', 'ondblclick', 'oncontextmenu'],
+  });
+}
 
 declare global {
   interface Window {
@@ -253,6 +279,8 @@ export const MathRenderer = memo(function MathRenderer({
     );
   }
 
+  const sanitizedHtml = useMemo(() => sanitizeMathHtml(state.html), [state.html]);
+
   if (state.status === "fallback") {
     return (
       <span
@@ -261,7 +289,7 @@ export const MathRenderer = memo(function MathRenderer({
           block ? "block my-4 overflow-x-auto" : "inline",
           className
         )}
-        dangerouslySetInnerHTML={{ __html: state.html }}
+        dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
         data-testid="math-mathjax"
       />
     );
@@ -274,7 +302,7 @@ export const MathRenderer = memo(function MathRenderer({
         block ? "katex-display block my-4 overflow-x-auto" : "inline",
         className
       )}
-      dangerouslySetInnerHTML={{ __html: state.html }}
+      dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
       data-testid="math-katex"
     />
   );

@@ -1,4 +1,5 @@
 import React, { memo, useMemo, useState, useEffect, useRef, lazy, Suspense, useCallback } from "react";
+import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
 import { parseDocument, detectFormat, type DocumentFormat } from "@/lib/rstParser";
 import { Loader2 } from "lucide-react";
@@ -42,10 +43,18 @@ function splitIntoChunks(content: string, chunkSize: number): ContentChunk[] {
 }
 
 const RstContent = memo(function RstContent({ html, className }: { html: string; className?: string }) {
+  const sanitizedHtml = useMemo(() => DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 
+                   'pre', 'code', 'strong', 'em', 'a', 'br', 'span', 'div', 'table', 'thead',
+                   'tbody', 'tr', 'th', 'td', 'img', 'hr', 'dl', 'dt', 'dd', 'sub', 'sup'],
+    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'id', 'target', 'rel'],
+    ALLOW_DATA_ATTR: false,
+  }), [html]);
+  
   return (
     <div 
       className={cn("rst-content", className)}
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
       data-testid="rst-content"
     />
   );
