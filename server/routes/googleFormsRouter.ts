@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { storage } from "../storage";
 import {
   getAuthUrl,
+  parseStateParam,
   exchangeCodeForTokens,
   getUserInfo,
   revokeTokens,
@@ -64,7 +65,7 @@ export function createGoogleFormsRouter(): Router {
         });
       }
       
-      const authUrl = getAuthUrl();
+      const authUrl = getAuthUrl(userId);
       res.redirect(authUrl);
     } catch (error: any) {
       console.error("Error generating OAuth URL:", error);
@@ -77,7 +78,7 @@ export function createGoogleFormsRouter(): Router {
 
   router.get("/callback", async (req: Request, res: Response) => {
     try {
-      const { code, error: oauthError } = req.query;
+      const { code, state, error: oauthError } = req.query;
       
       if (oauthError) {
         console.error("OAuth error:", oauthError);
@@ -88,10 +89,17 @@ export function createGoogleFormsRouter(): Router {
         return res.redirect("/?error=no_code");
       }
       
-      const userId = (req as any).user?.id;
+      let userId = (req as any).user?.id;
+      
+      if (!userId && state && typeof state === "string") {
+        const stateData = parseStateParam(state);
+        if (stateData) {
+          userId = stateData.userId;
+        }
+      }
       
       if (!userId) {
-        return res.redirect("/login?redirect=/api/integrations/google/forms/connect");
+        return res.redirect("/?error=auth_failed&message=Could not identify user");
       }
       
       const tokens = await exchangeCodeForTokens(code);

@@ -55,13 +55,27 @@ export function createOAuth2Client(): OAuth2Client {
   return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI);
 }
 
-export function getAuthUrl(): string {
+export function getAuthUrl(userId: string): string {
   const oauth2Client = createOAuth2Client();
   return oauth2Client.generateAuthUrl({
     access_type: "offline",
     scope: SCOPES,
     prompt: "consent",
+    state: Buffer.from(JSON.stringify({ userId })).toString("base64"),
   });
+}
+
+export function parseStateParam(state: string): { userId: string } | null {
+  try {
+    const decoded = Buffer.from(state, "base64").toString("utf-8");
+    const parsed = JSON.parse(decoded);
+    if (parsed && typeof parsed.userId === "string") {
+      return { userId: parsed.userId };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function exchangeCodeForTokens(code: string): Promise<TokenData> {
