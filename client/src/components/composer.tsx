@@ -14,7 +14,8 @@ import {
   Loader2,
   CheckCircle2,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Users
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -479,6 +480,15 @@ export function Composer({
               >
                 <Bot className="h-4 w-4" />
                 Agente
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="justify-start gap-2 text-sm h-9"
+                onClick={() => { onCloseSidebar?.(); }}
+                data-testid="button-knowledge-base"
+              >
+                <Users className="h-4 w-4" />
+                Conocimientos de la empresa
               </Button>
               
               <HoverCard openDelay={100} closeDelay={100}>
