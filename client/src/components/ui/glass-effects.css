@@ -267,6 +267,112 @@
     0 0 0 4px hsl(var(--ring));
 }
 
+/* Liquid Effect Badge - Animated flowing gradient */
+.liquid-badge {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.liquid-badge::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    rgba(168, 85, 247, 0.4) 0%,
+    rgba(139, 92, 246, 0.6) 25%,
+    rgba(168, 85, 247, 0.4) 50%,
+    rgba(139, 92, 246, 0.6) 75%,
+    rgba(168, 85, 247, 0.4) 100%
+  );
+  background-size: 200% 100%;
+  animation: liquid-flow 3s ease-in-out infinite;
+  z-index: -1;
+  opacity: 0.8;
+}
+
+.liquid-badge::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(250, 245, 255, 0.95) 0%,
+    rgba(243, 232, 255, 0.9) 100%
+  );
+  z-index: -1;
+}
+
+.dark .liquid-badge::after {
+  background: linear-gradient(
+    135deg,
+    rgba(88, 28, 135, 0.85) 0%,
+    rgba(76, 29, 149, 0.9) 100%
+  );
+}
+
+@keyframes liquid-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* Liquid blob animation overlay */
+.liquid-badge .liquid-blob {
+  position: absolute;
+  width: 120%;
+  height: 120%;
+  top: -10%;
+  left: -10%;
+  background: radial-gradient(
+    ellipse 40% 40% at 30% 30%,
+    rgba(168, 85, 247, 0.3),
+    transparent 50%
+  ),
+  radial-gradient(
+    ellipse 35% 35% at 70% 70%,
+    rgba(139, 92, 246, 0.25),
+    transparent 50%
+  );
+  animation: liquid-blob-move 4s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes liquid-blob-move {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(5%, 3%) scale(1.02);
+  }
+  50% {
+    transform: translate(0, 5%) scale(0.98);
+  }
+  75% {
+    transform: translate(-5%, 2%) scale(1.01);
+  }
+}
+
+/* Shimmer effect on hover */
+.liquid-badge:hover::before {
+  animation: liquid-flow 1.5s ease-in-out infinite;
+  opacity: 1;
+}
+
+.liquid-badge:hover .liquid-blob {
+  animation: liquid-blob-move 2s ease-in-out infinite;
+}
+
 /* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   .toggle-switch-track,
@@ -277,7 +383,10 @@
   .source-list-item-glass,
   .source-list-item-glass::before,
   .glass-menu-item,
-  .glass-menu-item::before {
+  .glass-menu-item::before,
+  .liquid-badge::before,
+  .liquid-badge .liquid-blob {
     transition: none !important;
+    animation: none !important;
   }
 }
