@@ -25,8 +25,11 @@ export default function LoginPage() {
         });
         
         if (response.ok) {
-          await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-          setLocation("/");
+          const data = await response.json();
+          if (data.user) {
+            queryClient.setQueryData(["/api/auth/user"], data.user);
+          }
+          window.location.href = "/";
         } else {
           const data = await response.json();
           setError(data.message || "Credenciales inválidas");
