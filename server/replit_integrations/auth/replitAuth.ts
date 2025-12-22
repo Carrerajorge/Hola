@@ -28,6 +28,7 @@ export function getSession() {
     ttl: sessionTtl,
     tableName: "sessions",
   });
+  const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
   return session({
     name: "siragpt.sid",
     secret: process.env.SESSION_SECRET!,
@@ -35,10 +36,11 @@ export function getSession() {
     resave: false,
     saveUninitialized: false,
     rolling: true,
+    proxy: true,
     cookie: {
       httpOnly: true,
-      secure: true,
-      sameSite: "none" as const,
+      secure: isProduction,
+      sameSite: isProduction ? "none" as const : "lax" as const,
       maxAge: sessionTtl,
       path: "/",
     },
