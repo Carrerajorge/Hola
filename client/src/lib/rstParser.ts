@@ -223,12 +223,12 @@ export function parseRst(content: string): ParsedDocument {
       i++;
       continue;
     }
-    let processed = line;
-    processed = processed.replace(/``([^`]+)``/g, '<code>$1</code>');
-    processed = processed.replace(/`([^`]+)`_/g, '<a href="#">$1</a>');
-    processed = processed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    processed = processed.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    processed = processed.replace(/:(\w+):`([^`]+)`/g, '<span class="role-$1">$2</span>');
+    let processed = escapeHtml(line);
+    processed = processed.replace(/``([^`]+)``/g, (_, content) => `<code>${content}</code>`);
+    processed = processed.replace(/`([^`]+)`_/g, (_, content) => `<a href="#">${content}</a>`);
+    processed = processed.replace(/\*\*([^*]+)\*\*/g, (_, content) => `<strong>${content}</strong>`);
+    processed = processed.replace(/\*([^*]+)\*/g, (_, content) => `<em>${content}</em>`);
+    processed = processed.replace(/:(\w+):`([^`]+)`/g, (_, role, content) => `<span class="role-${role}">${content}</span>`);
 
     if (inList) {
       listItems[listItems.length - 1] += ' ' + processed;
