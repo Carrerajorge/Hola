@@ -284,7 +284,6 @@ export async function generateExcelFromPrompt(
         `SCHEMA REFERENCE:\n${JSON.stringify(excelSpecJsonSchema, null, 2)}`,
         "excel"
       );
-      console.log(`[DocumentOrchestrator] Retry with ${lastErrors.length} error(s) to fix`);
     }
 
     const response = await callGeminiForSpec(systemPrompt, userPrompt);
@@ -402,7 +401,6 @@ export async function generateWordFromPrompt(
         `SCHEMA REFERENCE:\n${JSON.stringify(docSpecJsonSchema, null, 2)}`,
         "word"
       );
-      console.log(`[DocumentOrchestrator] Retry with ${lastErrors.length} error(s) to fix`);
     }
 
     const response = await callGeminiForSpec(systemPrompt, userPrompt);
@@ -619,7 +617,6 @@ export async function generateCvFromPrompt(
         `SCHEMA REFERENCE:\n${JSON.stringify(jsonSchema, null, 2)}`,
         "cv"
       );
-      console.log(`[DocumentOrchestrator] Retry with ${lastErrors.length} error(s) to fix`);
     }
 
     const response = await callGeminiForSpec(currentSystemPrompt, userPrompt);
@@ -911,6 +908,7 @@ export async function generateLetterFromPrompt(
       const buffer = await renderWordFromSpec({
         title: spec.subject || "Letter",
         styleset: spec.template_style === "formal" ? "classic" : "modern",
+        add_toc: false,
         blocks: convertLetterToDocBlocks(spec),
       });
       

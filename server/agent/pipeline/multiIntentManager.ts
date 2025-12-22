@@ -93,22 +93,11 @@ export class MultiIntentManager {
     
     const isMultiIntent = confidence >= MULTI_INTENT_THRESHOLD && taskCount > 1;
     
-    console.log("[MultiIntentManager] Detection:", {
-      message: message.substring(0, 100) + "...",
-      taskSegments: taskSegments.length,
-      intentTypes: intentCount,
-      hasSeparators,
-      confidence,
-      isMultiIntent
-    });
-    
     let suggestedPlan: TaskPlan[] | undefined;
     if (isMultiIntent) {
       if (taskSegments.length >= detectedIntents.length) {
-        console.log("[MultiIntentManager] Using segment-based plan with", taskSegments.length, "segments");
         suggestedPlan = this.generateSuggestedPlanFromSegments(message, taskSegments);
       } else {
-        console.log("[MultiIntentManager] Using intent-based plan with", detectedIntents.length, "intents");
         suggestedPlan = this.generateSuggestedPlan(message, detectedIntents);
       }
     }
@@ -132,7 +121,6 @@ export class MultiIntentManager {
         .filter(s => s.length > 5);
       
       if (commaAndYSegments.length > 1) {
-        console.log("[MultiIntentManager] Split using comma/y pattern:", commaAndYSegments.length, "segments");
         return commaAndYSegments;
       }
     }
@@ -237,8 +225,6 @@ export class MultiIntentManager {
         priority: segments.length - index
       });
     });
-    
-    console.log("[MultiIntentManager] Generated plan:", plan.map(p => ({ id: p.id, title: p.title, intentType: p.intentType })));
     
     return plan;
   }

@@ -55,12 +55,10 @@ export async function fetchFredData(
 
   const url = `${FRED_API}/series/observations?series_id=${fredSeriesId}&api_key=${key}&file_type=json&observation_start=${startDate}&observation_end=${endDate}`;
   
-  console.log(`[FRED] Fetching: ${fredSeriesId}`);
-  
   try {
     const response = await fetch(url);
     if (!response.ok) {
-      console.log(`[FRED] API error: ${response.status}`);
+      console.error(`[FRED] API error: ${response.status}`);
       return null;
     }
 
