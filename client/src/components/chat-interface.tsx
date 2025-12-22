@@ -70,6 +70,7 @@ import { SiraLogo } from "@/components/sira-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
+import { GoogleFormsDialog } from "@/components/google-forms-dialog";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { RecordingPanel } from "@/components/recording-panel";
 import { Composer } from "@/components/composer";
@@ -754,6 +755,8 @@ export function ChatInterface({
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [isDocGeneratorOpen, setIsDocGeneratorOpen] = useState(false);
   const [docGeneratorType, setDocGeneratorType] = useState<"word" | "excel">("word");
+  const [isGoogleFormsOpen, setIsGoogleFormsOpen] = useState(false);
+  const [googleFormsPrompt, setGoogleFormsPrompt] = useState("");
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
@@ -2821,6 +2824,7 @@ export function ChatInterface({
             isFigmaConnecting={isFigmaConnecting}
             handleFigmaConnect={handleFigmaConnect}
             handleFigmaDisconnect={handleFigmaDisconnect}
+            onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
           />
         </div>
       )}
@@ -2853,6 +2857,23 @@ export function ChatInterface({
             id: `doc-gen-${Date.now()}`,
             role: "assistant",
             content: message,
+            timestamp: new Date()
+          });
+        }}
+      />
+
+      <GoogleFormsDialog
+        open={isGoogleFormsOpen}
+        onClose={() => {
+          setIsGoogleFormsOpen(false);
+          setGoogleFormsPrompt("");
+        }}
+        initialPrompt={googleFormsPrompt}
+        onComplete={(message, formUrl) => {
+          onSendMessage({
+            id: `forms-gen-${Date.now()}`,
+            role: "assistant",
+            content: message + (formUrl ? `\n\n[Abrir en Google Forms](${formUrl})` : ""),
             timestamp: new Date()
           });
         }}

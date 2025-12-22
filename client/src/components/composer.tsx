@@ -98,6 +98,7 @@ export interface ComposerProps {
   isFigmaConnecting?: boolean;
   handleFigmaConnect?: () => void;
   handleFigmaDisconnect?: () => void;
+  onOpenGoogleForms?: () => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -157,6 +158,7 @@ export function Composer({
   isFigmaConnecting,
   handleFigmaConnect,
   handleFigmaDisconnect,
+  onOpenGoogleForms,
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
@@ -938,16 +940,19 @@ export function Composer({
                         <div className="grid gap-1">
                           <SourceListItem
                             icon={
-                              <img 
-                                src="/attached_assets/Google_Forms_2020_Logo.svg_1766378822327.png" 
-                                alt="Google Forms" 
-                                className="h-5 w-5 object-contain"
-                              />
+                              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                                <path d="M7.5 3C6.12 3 5 4.12 5 5.5v13C5 19.88 6.12 21 7.5 21h9c1.38 0 2.5-1.12 2.5-2.5v-13C19 4.12 17.88 3 16.5 3h-9z" fill="#673AB7"/>
+                                <circle cx="9" cy="9" r="1.5" fill="white"/>
+                                <rect x="12" y="8" width="5" height="2" rx="1" fill="white"/>
+                                <circle cx="9" cy="13" r="1.5" fill="white"/>
+                                <rect x="12" y="12" width="5" height="2" rx="1" fill="white"/>
+                                <circle cx="9" cy="17" r="1.5" fill="white"/>
+                                <rect x="12" y="16" width="5" height="2" rx="1" fill="white"/>
+                              </svg>
                             }
                             label="Formularios"
-                            variant="toggle"
-                            checked={knowledgeSources.github}
-                            onCheckedChange={() => toggleKnowledgeSource('github')}
+                            variant="connect"
+                            onConnect={() => onOpenGoogleForms?.()}
                             data-testid="source-formularios"
                           />
                           
