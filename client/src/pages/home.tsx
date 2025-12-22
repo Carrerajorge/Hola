@@ -4,6 +4,7 @@ import { ChatInterface } from "@/components/chat-interface";
 import { GptExplorer, Gpt } from "@/components/gpt-explorer";
 import { GptBuilder } from "@/components/gpt-builder";
 import { UserLibrary } from "@/components/user-library";
+import { AppsDialog } from "@/components/apps-dialog";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useLocation } from "wouter";
@@ -31,6 +32,7 @@ export default function Home() {
   const [isGptExplorerOpen, setIsGptExplorerOpen] = useState(false);
   const [isGptBuilderOpen, setIsGptBuilderOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
   const [editingGpt, setEditingGpt] = useState<Gpt | null>(null);
   const [activeGpt, setActiveGpt] = useState<Gpt | null>(null);
   
@@ -115,7 +117,7 @@ export default function Home() {
   };
 
   const handleOpenApps = () => {
-    setLocation("/workspace-settings?section=apps");
+    setIsAppsDialogOpen(true);
   };
 
   const handleOpenLibrary = () => {
@@ -237,6 +239,12 @@ export default function Home() {
       <UserLibrary
         open={isLibraryOpen}
         onOpenChange={setIsLibraryOpen}
+      />
+
+      {/* Apps Dialog */}
+      <AppsDialog
+        open={isAppsDialogOpen}
+        onOpenChange={setIsAppsDialogOpen}
       />
     </div>
   );
