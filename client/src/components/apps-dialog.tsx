@@ -962,6 +962,37 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
                   <p>No se encontraron aplicaciones</p>
                 </div>
               )}
+
+              <div className="mt-6 pt-6 border-t">
+                <h3 className="text-sm font-medium text-muted-foreground mb-3">Tus aplicaciones conectadas</h3>
+                <button
+                  className="flex items-center gap-4 p-3 rounded-xl bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 border border-purple-200 dark:border-purple-800 transition-colors text-left group w-full"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onOpenGoogleForms?.();
+                  }}
+                  data-testid="app-item-google-forms-connected"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-[#673AB7] flex items-center justify-center flex-shrink-0">
+                    <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
+                      <circle cx="9" cy="9" r="1.5" fill="white"/>
+                      <rect x="12" y="8" width="5" height="2" rx="1" fill="white"/>
+                      <circle cx="9" cy="13" r="1.5" fill="white"/>
+                      <rect x="12" y="12" width="5" height="2" rx="1" fill="white"/>
+                      <circle cx="9" cy="17" r="1.5" fill="white"/>
+                      <rect x="12" y="16" width="5" height="2" rx="1" fill="white"/>
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-purple-700 dark:text-purple-300">Formularios de Google</span>
+                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
+                    </div>
+                    <p className="text-sm text-purple-600/70 dark:text-purple-400/70 truncate">Crea y gestiona formularios con IA</p>
+                  </div>
+                  <ChevronRight className="h-5 w-5 text-purple-400 group-hover:text-purple-600 transition-colors flex-shrink-0" />
+                </button>
+              </div>
             </div>
           </ScrollArea>
         </div>
