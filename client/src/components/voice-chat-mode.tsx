@@ -224,16 +224,49 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     }
     
     try {
-      // For now, show a message about the file
-      setResponse(`Archivo recibido: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+      // Get signed upload URL from server
+      const uploadRes = await fetch("/api/objects/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
       
-      // TODO: Implement actual file upload to storage
-      // const formData = new FormData();
-      // formData.append("file", file);
-      // const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!uploadRes.ok) {
+        throw new Error("No se pudo obtener la URL de subida");
+      }
+      
+      const { uploadURL, storagePath } = await uploadRes.json();
+      
+      // Upload file directly to storage
+      const putRes = await fetch(uploadURL, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      
+      if (!putRes.ok) {
+        throw new Error("Error al subir el archivo al almacenamiento");
+      }
+      
+      // Register file in database
+      const registerRes = await fetch("/api/files/quick", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: file.name,
+          type: file.type || "application/octet-stream",
+          size: file.size,
+          storagePath,
+        }),
+      });
+      
+      if (!registerRes.ok) {
+        throw new Error("Archivo subido pero no se pudo registrar");
+      }
+      
+      setResponse(`Archivo subido: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
       
     } catch (err: any) {
-      setError("Error al subir el archivo");
+      setError(err.message || "Error al subir el archivo");
     } finally {
       setInputMode("idle");
       if (fileInputRef.current) {
