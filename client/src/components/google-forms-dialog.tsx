@@ -25,9 +25,10 @@ interface ConnectionStatus {
   connected: boolean;
   email?: string;
   displayName?: string;
+  needsLogin?: boolean;
 }
 
-type Status = "loading" | "not_connected" | "idle" | "generating" | "success" | "error";
+type Status = "loading" | "needs_login" | "not_connected" | "idle" | "generating" | "success" | "error";
 
 const questionTypeLabels: Record<string, string> = {
   text: "Respuesta corta",
@@ -61,18 +62,23 @@ export function GoogleFormsDialog({
       });
       if (res.ok) {
         const data = await res.json();
-        setConnection({
-          connected: data.connected,
-          email: data.email,
-          displayName: data.displayName
-        });
-        setStatus(data.connected ? "idle" : "not_connected");
+        if (data.message === "Usuario no autenticado") {
+          setConnection({ connected: false, needsLogin: true });
+          setStatus("needs_login");
+        } else {
+          setConnection({
+            connected: data.connected,
+            email: data.email,
+            displayName: data.displayName
+          });
+          setStatus(data.connected ? "idle" : "not_connected");
+        }
       } else {
-        setStatus("not_connected");
+        setStatus("needs_login");
       }
     } catch (err) {
       console.error("Error checking connection:", err);
-      setStatus("not_connected");
+      setStatus("needs_login");
     }
   }, []);
 
@@ -222,6 +228,31 @@ export function GoogleFormsDialog({
           <div className="py-12 flex flex-col items-center justify-center">
             <Loader2 className="h-8 w-8 text-purple-600 animate-spin" />
             <p className="mt-4 text-muted-foreground">Verificando conexión...</p>
+          </div>
+        ) : status === "needs_login" ? (
+          <div className="py-8 flex flex-col items-center justify-center space-y-6">
+            <div className="w-20 h-20 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+              <User className="h-10 w-10 text-amber-600" />
+            </div>
+            
+            <div className="text-center space-y-2">
+              <h3 className="font-semibold text-lg">Inicia sesión primero</h3>
+              <p className="text-muted-foreground text-sm max-w-sm">
+                Para conectar Google Forms, primero necesitas iniciar sesión en Sira GPT
+              </p>
+            </div>
+
+            <Button 
+              onClick={() => window.location.href = "/login"}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-8"
+              data-testid="button-go-to-login"
+            >
+              Iniciar Sesión
+            </Button>
+
+            <Button variant="ghost" onClick={onClose} data-testid="button-cancel-login">
+              Cancelar
+            </Button>
           </div>
         ) : status === "not_connected" ? (
           <div className="py-8 flex flex-col items-center justify-center space-y-6">
