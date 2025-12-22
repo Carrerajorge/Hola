@@ -28,16 +28,52 @@ interface FigmaBlockProps {
   fileUrl?: string;
 }
 
+const FONT_FAMILY = "Inter, system-ui, sans-serif";
+const FONT_SIZE = 13;
+const MIN_NODE_WIDTH = 100;
+const MAX_NODE_WIDTH = 200;
+const NODE_HEIGHT = 50;
+const HORIZONTAL_PADDING = 24;
+const MAX_LABEL_LENGTH = 20;
+
+function truncateLabel(label: string, maxLength: number = MAX_LABEL_LENGTH): { text: string; isTruncated: boolean } {
+  if (label.length <= maxLength) return { text: label, isTruncated: false };
+  return { text: label.slice(0, maxLength - 1) + "…", isTruncated: true };
+}
+
+function estimateTextWidth(text: string, fontSize: number = FONT_SIZE): number {
+  const avgCharWidth = fontSize * 0.55;
+  return text.length * avgCharWidth;
+}
+
+function getNodeDimensions(label: string): { width: number; height: number } {
+  const { text } = truncateLabel(label);
+  const textWidth = estimateTextWidth(text);
+  const width = Math.min(MAX_NODE_WIDTH, Math.max(MIN_NODE_WIDTH, textWidth + HORIZONTAL_PADDING));
+  return { width, height: NODE_HEIGHT };
+}
+
 export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
   const [zoom, setZoom] = useState(1);
   const [isMaximized, setIsMaximized] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [fontsLoaded, setFontsLoaded] = useState(false);
   const { toast } = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    document.fonts.ready.then(() => setFontsLoaded(true));
+  }, []);
+
+  const nodeDimensions = useMemo(() => {
+    const dims: Record<string, { width: number; height: number }> = {};
+    diagram.nodes.forEach(node => {
+      dims[node.id] = getNodeDimensions(node.label);
+    });
+    return dims;
+  }, [diagram.nodes]);
+
   const contentBounds = useMemo(() => {
-    const nodeWidth = 120;
-    const nodeHeight = 50;
     const padding = 60;
     
     if (diagram.nodes.length === 0) {
@@ -47,10 +83,11 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     
     diagram.nodes.forEach(node => {
+      const dims = nodeDimensions[node.id] || { width: MIN_NODE_WIDTH, height: NODE_HEIGHT };
       minX = Math.min(minX, node.x);
       minY = Math.min(minY, node.y);
-      maxX = Math.max(maxX, node.x + nodeWidth);
-      maxY = Math.max(maxY, node.y + nodeHeight);
+      maxX = Math.max(maxX, node.x + dims.width);
+      maxY = Math.max(maxY, node.y + dims.height);
     });
     
     return {
@@ -61,7 +98,7 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
       width: maxX - minX + padding * 2,
       height: maxY - minY + padding * 2
     };
-  }, [diagram.nodes]);
+  }, [diagram.nodes, nodeDimensions]);
 
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 2));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.5));
@@ -92,33 +129,35 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
   };
 
   const getNodePath = (node: FigmaNode) => {
-    const width = 120;
-    const height = 50;
+    const dims = nodeDimensions[node.id] || { width: MIN_NODE_WIDTH, height: NODE_HEIGHT };
+    const { width, height } = dims;
     
     switch (node.type) {
       case "start":
       case "end":
-        return `M ${node.x} ${node.y + height/2} 
-                Q ${node.x} ${node.y} ${node.x + width/4} ${node.y}
-                L ${node.x + width*3/4} ${node.y}
-                Q ${node.x + width} ${node.y} ${node.x + width} ${node.y + height/2}
-                Q ${node.x + width} ${node.y + height} ${node.x + width*3/4} ${node.y + height}
-                L ${node.x + width/4} ${node.y + height}
-                Q ${node.x} ${node.y + height} ${node.x} ${node.y + height/2} Z`;
+        const r = height / 2;
+        return `M ${node.x + r} ${node.y} 
+                L ${node.x + width - r} ${node.y}
+                A ${r} ${r} 0 0 1 ${node.x + width - r} ${node.y + height}
+                L ${node.x + r} ${node.y + height}
+                A ${r} ${r} 0 0 1 ${node.x + r} ${node.y} Z`;
       case "decision":
-        const cx = node.x + width/2;
-        const cy = node.y + height/2;
-        return `M ${cx} ${node.y} L ${node.x + width} ${cy} L ${cx} ${node.y + height} L ${node.x} ${cy} Z`;
+        const cx = node.x + width / 2;
+        const cy = node.y + height / 2;
+        return `M ${cx} ${node.y - 5} L ${node.x + width + 10} ${cy} L ${cx} ${node.y + height + 5} L ${node.x - 10} ${cy} Z`;
       case "process":
       default:
         return `M ${node.x} ${node.y} L ${node.x + width} ${node.y} L ${node.x + width} ${node.y + height} L ${node.x} ${node.y + height} Z`;
     }
   };
 
-  const getNodeCenter = (node: FigmaNode) => ({
-    x: node.x + 60,
-    y: node.y + 25
-  });
+  const getNodeCenter = (node: FigmaNode) => {
+    const dims = nodeDimensions[node.id] || { width: MIN_NODE_WIDTH, height: NODE_HEIGHT };
+    return {
+      x: node.x + dims.width / 2,
+      y: node.y + dims.height / 2
+    };
+  };
 
   const renderConnection = (conn: FigmaConnection, index: number) => {
     const fromNode = diagram.nodes.find(n => n.id === conn.from);
@@ -160,7 +199,9 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
             x={midX}
             y={midY - 5}
             textAnchor="middle"
+            dominantBaseline="middle"
             fontSize="12"
+            fontFamily={FONT_FAMILY}
             fill="#F24E1E"
             fontWeight="500"
           >
@@ -174,9 +215,11 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
   const renderNode = (node: FigmaNode) => {
     const center = getNodeCenter(node);
     const isTerminal = node.type === "start" || node.type === "end";
+    const { text: displayText, isTruncated } = truncateLabel(node.label);
     
     return (
       <g key={node.id}>
+        {isTruncated && <title>{node.label}</title>}
         <path
           d={getNodePath(node)}
           fill={isTerminal ? "#f5f5f5" : "white"}
@@ -185,13 +228,15 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
         />
         <text
           x={center.x}
-          y={center.y + 5}
+          y={center.y}
           textAnchor="middle"
-          fontSize="14"
+          dominantBaseline="middle"
+          fontSize={FONT_SIZE}
+          fontFamily={FONT_FAMILY}
           fill="#333"
           fontWeight={isTerminal ? "600" : "400"}
         >
-          {node.label}
+          {displayText}
         </text>
       </g>
     );
