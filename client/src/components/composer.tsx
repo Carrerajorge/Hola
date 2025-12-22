@@ -30,6 +30,7 @@ import { SourceListItem } from "@/components/ui/source-list-item";
 import { RecordingPanel } from "@/components/recording-panel";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { getFileTheme } from "@/lib/fileTypeTheme";
+import "@/components/ui/glass-effects.css";
 
 interface UploadedFile {
   id?: string;
