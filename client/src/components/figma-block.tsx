@@ -37,9 +37,11 @@ const FONT_FAMILY = "Inter, system-ui, sans-serif";
 const FONT_SIZE = 13;
 const MIN_NODE_WIDTH = 100;
 const MAX_NODE_WIDTH = 200;
+const MAX_NODE_WIDTH_ORGCHART = 180;
 const NODE_HEIGHT = 50;
 const HORIZONTAL_PADDING = 24;
 const MAX_LABEL_LENGTH = 20;
+const MAX_LABEL_LENGTH_ORGCHART = 25;
 
 function truncateLabel(label: string, maxLength: number = MAX_LABEL_LENGTH): { text: string; isTruncated: boolean } {
   if (label.length <= maxLength) return { text: label, isTruncated: false };
@@ -51,10 +53,12 @@ function estimateTextWidth(text: string, fontSize: number = FONT_SIZE): number {
   return text.length * avgCharWidth;
 }
 
-function getNodeDimensions(label: string): { width: number; height: number } {
-  const { text } = truncateLabel(label);
+function getNodeDimensions(label: string, isOrgChart: boolean = false): { width: number; height: number } {
+  const maxLen = isOrgChart ? MAX_LABEL_LENGTH_ORGCHART : MAX_LABEL_LENGTH;
+  const maxWidth = isOrgChart ? MAX_NODE_WIDTH_ORGCHART : MAX_NODE_WIDTH;
+  const { text } = truncateLabel(label, maxLen);
   const textWidth = estimateTextWidth(text);
-  const width = Math.min(MAX_NODE_WIDTH, Math.max(MIN_NODE_WIDTH, textWidth + HORIZONTAL_PADDING));
+  const width = Math.min(maxWidth, Math.max(MIN_NODE_WIDTH, textWidth + HORIZONTAL_PADDING));
   return { width, height: NODE_HEIGHT };
 }
 
@@ -72,11 +76,12 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
 
   const nodeDimensions = useMemo(() => {
     const dims: Record<string, { width: number; height: number }> = {};
+    const isOrgChart = diagram.diagramType === "orgchart";
     diagram.nodes.forEach(node => {
-      dims[node.id] = getNodeDimensions(node.label);
+      dims[node.id] = getNodeDimensions(node.label, isOrgChart);
     });
     return dims;
-  }, [diagram.nodes]);
+  }, [diagram.nodes, diagram.diagramType]);
 
   const contentBounds = useMemo(() => {
     const padding = 60;
@@ -164,11 +169,48 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
     };
   };
 
+  const getNodeAnchor = (node: FigmaNode, position: "top" | "bottom" | "left" | "right") => {
+    const dims = nodeDimensions[node.id] || { width: MIN_NODE_WIDTH, height: NODE_HEIGHT };
+    const cx = node.x + dims.width / 2;
+    const cy = node.y + dims.height / 2;
+    switch (position) {
+      case "top": return { x: cx, y: node.y };
+      case "bottom": return { x: cx, y: node.y + dims.height };
+      case "left": return { x: node.x, y: cy };
+      case "right": return { x: node.x + dims.width, y: cy };
+    }
+  };
+
   const renderConnection = (conn: FigmaConnection, index: number) => {
     const fromNode = diagram.nodes.find(n => n.id === conn.from);
     const toNode = diagram.nodes.find(n => n.id === conn.to);
     
     if (!fromNode || !toNode) return null;
+    
+    const isOrgChart = diagram.diagramType === "orgchart";
+    
+    if (isOrgChart) {
+      const fromAnchor = getNodeAnchor(fromNode, "bottom");
+      const toAnchor = getNodeAnchor(toNode, "top");
+      const midY = (fromAnchor.y + toAnchor.y) / 2;
+      
+      const pathD = `M ${fromAnchor.x} ${fromAnchor.y} 
+                     L ${fromAnchor.x} ${midY} 
+                     L ${toAnchor.x} ${midY} 
+                     L ${toAnchor.x} ${toAnchor.y}`;
+      
+      return (
+        <g key={`conn-${index}`}>
+          <path
+            d={pathD}
+            stroke="#666"
+            strokeWidth="2"
+            fill="none"
+            strokeLinejoin="round"
+          />
+        </g>
+      );
+    }
     
     const from = getNodeCenter(fromNode);
     const to = getNodeCenter(toNode);
@@ -236,7 +278,9 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
 
   const renderNode = (node: FigmaNode) => {
     const center = getNodeCenter(node);
-    const { text: displayText, isTruncated } = truncateLabel(node.label);
+    const isOrgChart = diagram.diagramType === "orgchart";
+    const maxLen = isOrgChart ? MAX_LABEL_LENGTH_ORGCHART : MAX_LABEL_LENGTH;
+    const { text: displayText, isTruncated } = truncateLabel(node.label, maxLen);
     const style = getNodeStyle(node);
     
     return (
