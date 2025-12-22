@@ -361,7 +361,7 @@ export function Composer({
             <>
               <Button 
                 variant="ghost" 
-                className="justify-start gap-2 text-sm h-9"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => fileInputRef.current?.click()}
                 data-testid="button-upload-files"
               >
@@ -370,25 +370,25 @@ export function Composer({
               </Button>
               <Button 
                 variant="ghost" 
-                className="justify-start gap-2 text-sm h-9"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => setIsBrowserOpen(!isBrowserOpen)}
               >
                 <Search className="h-4 w-4" />
                 Web Search
               </Button>
-              <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+              <Button variant="ghost" className="justify-start gap-2 text-sm h-9 glass-menu-item">
                 <Image className="h-4 w-4" />
                 Image Generation
               </Button>
-              <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+              <Button variant="ghost" className="justify-start gap-2 text-sm h-9 glass-menu-item">
                 <Video className="h-4 w-4" />
                 Video Generation
               </Button>
-              <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+              <Button variant="ghost" className="justify-start gap-2 text-sm h-9 glass-menu-item">
                 <Bot className="h-4 w-4" />
                 Agente
               </Button>
-              <Button variant="ghost" className="justify-start gap-2 text-sm h-9">
+              <Button variant="ghost" className="justify-start gap-2 text-sm h-9 glass-menu-item">
                 <Plug className="h-4 w-4" />
                 Connectors MPC
               </Button>
@@ -403,7 +403,7 @@ export function Composer({
                   accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.gif,.webp"
                   onChange={handleFileUpload}
                 />
-                <Button variant="ghost" className="w-full justify-start gap-2 text-sm h-9" asChild>
+                <Button variant="ghost" className="w-full justify-start gap-2 text-sm h-9 glass-menu-item" asChild>
                   <span>
                     <Upload className="h-4 w-4" />
                     Subir archivo
@@ -412,7 +412,7 @@ export function Composer({
               </label>
               <Button 
                 variant="ghost" 
-                className="justify-start gap-2 text-sm h-9"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => { setShowKnowledgeBase(true); onCloseSidebar?.(); }}
                 data-testid="button-knowledge-base"
               >
@@ -421,7 +421,7 @@ export function Composer({
               </Button>
               <Button 
                 variant="ghost" 
-                className="justify-start gap-2 text-sm h-9"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => { setSelectedTool("web"); onCloseSidebar?.(); }}
               >
                 <Globe className="h-4 w-4" />
@@ -429,7 +429,7 @@ export function Composer({
               </Button>
               <Button 
                 variant="ghost" 
-                className="justify-start gap-2 text-sm h-9"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => { setSelectedTool("image"); onCloseSidebar?.(); }}
               >
                 <Image className="h-4 w-4" />
@@ -438,7 +438,7 @@ export function Composer({
               
               <HoverCard openDelay={100} closeDelay={100}>
                 <HoverCardTrigger asChild>
-                  <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full">
+                  <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item">
                     <span className="flex items-center gap-2">
                       <FileText className="h-4 w-4" />
                       Crear documento
@@ -450,7 +450,7 @@ export function Composer({
                   <div className="grid gap-1">
                     <Button 
                       variant="ghost" 
-                      className="justify-start gap-2 text-sm h-9"
+                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => openBlankDocEditor("word")}
                       data-testid="button-create-word"
                     >
@@ -461,7 +461,7 @@ export function Composer({
                     </Button>
                     <Button 
                       variant="ghost" 
-                      className="justify-start gap-2 text-sm h-9"
+                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => openBlankDocEditor("excel")}
                       data-testid="button-create-excel"
                     >
@@ -472,7 +472,7 @@ export function Composer({
                     </Button>
                     <Button 
                       variant="ghost" 
-                      className="justify-start gap-2 text-sm h-9"
+                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => openBlankDocEditor("ppt")}
                     >
                       <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
@@ -482,7 +482,7 @@ export function Composer({
                     </Button>
                     <Button 
                       variant="ghost" 
-                      className="justify-start gap-2 text-sm h-9"
+                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
                     >
                       <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
@@ -502,7 +502,7 @@ export function Composer({
               
               <Button 
                 variant="ghost" 
-                className="justify-start gap-2 text-sm h-9"
+                className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => { setSelectedTool("agent"); onCloseSidebar?.(); }}
               >
                 <Bot className="h-4 w-4" />
@@ -511,7 +511,7 @@ export function Composer({
               
               <HoverCard openDelay={100} closeDelay={100}>
                 <HoverCardTrigger asChild>
-                  <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full">
+                  <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item">
                     <span className="flex items-center gap-2">
                       <Plug className="h-4 w-4" />
                       Conectores
@@ -521,7 +521,7 @@ export function Composer({
                 </HoverCardTrigger>
                 <HoverCardContent side="right" align="start" className="w-56 p-2">
                   <div className="grid gap-1">
-                    <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-gmail">
+                    <div className="flex items-center justify-between px-2 py-2 rounded-md glass-menu-item" data-testid="mcp-gmail">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center">
                           <svg width="18" height="14" viewBox="0 0 24 18" fill="none">
@@ -537,7 +537,7 @@ export function Composer({
                       </Button>
                     </div>
                     
-                    <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-google-drive">
+                    <div className="flex items-center justify-between px-2 py-2 rounded-md glass-menu-item" data-testid="mcp-google-drive">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center">
                           <svg width="20" height="18" viewBox="0 0 87.3 78" fill="none">
@@ -556,7 +556,7 @@ export function Composer({
                       </Button>
                     </div>
                     
-                    <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-onedrive">
+                    <div className="flex items-center justify-between px-2 py-2 rounded-md glass-menu-item" data-testid="mcp-onedrive">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center">
                           <svg width="20" height="14" viewBox="0 0 24 16" fill="none">
@@ -573,7 +573,7 @@ export function Composer({
                       </Button>
                     </div>
                     
-                    <div className="flex flex-col gap-2 px-2 py-2 rounded-md hover:bg-accent/50" data-testid="mcp-figma">
+                    <div className="flex flex-col gap-2 px-2 py-2 rounded-md glass-menu-item" data-testid="mcp-figma">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center">
