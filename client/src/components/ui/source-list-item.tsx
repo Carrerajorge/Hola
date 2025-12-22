@@ -1,6 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { ToggleSwitch } from "./toggle-switch";
+import "./glass-effects.css";
 
 const SOURCE_ITEM_TOKENS = {
   height: 44,
@@ -43,8 +44,8 @@ export function SourceListItem({
   return (
     <div
       className={cn(
-        "flex items-center justify-between rounded-md",
-        "hover:bg-accent/50 transition-colors",
+        "source-list-item-glass",
+        "flex items-center justify-between",
         disabled && "opacity-50 pointer-events-none",
       )}
       style={{
@@ -59,7 +60,7 @@ export function SourceListItem({
       data-testid={testId}
     >
       <div 
-        className="flex items-center"
+        className="flex items-center relative z-10"
         style={{ gap: SOURCE_ITEM_TOKENS.gap }}
       >
         <div 
@@ -86,13 +87,15 @@ export function SourceListItem({
       </div>
 
       {variant === "toggle" && onCheckedChange && (
-        <ToggleSwitch
-          checked={checked}
-          onCheckedChange={onCheckedChange}
-          disabled={disabled}
-          loading={loading}
-          data-testid={testId ? `${testId}-toggle` : undefined}
-        />
+        <div className="relative z-10">
+          <ToggleSwitch
+            checked={checked}
+            onCheckedChange={onCheckedChange}
+            disabled={disabled}
+            loading={loading}
+            data-testid={testId ? `${testId}-toggle` : undefined}
+          />
+        </div>
       )}
 
       {variant === "connect" && (
@@ -101,16 +104,9 @@ export function SourceListItem({
           onClick={onConnect}
           disabled={disabled || loading}
           className={cn(
-            "text-muted-foreground hover:text-foreground",
-            "transition-colors duration-150",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-            "disabled:cursor-not-allowed disabled:opacity-50",
+            "connect-button-glass",
+            "relative z-10",
           )}
-          style={{
-            fontSize: 12,
-            lineHeight: "16px",
-            padding: "4px 0",
-          }}
           data-testid={testId ? `${testId}-connect` : undefined}
         >
           Conectar

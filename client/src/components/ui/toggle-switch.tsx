@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import "./glass-effects.css";
 
 const TOGGLE_TOKENS = {
   track: {
@@ -12,7 +13,7 @@ const TOGGLE_TOKENS = {
     size: 20,
     borderRadius: 9999,
   },
-  transition: "all 150ms cubic-bezier(0.4, 0, 0.2, 1)",
+  transition: "all 180ms cubic-bezier(0.4, 0, 0.2, 1)",
 } as const;
 
 export interface ToggleSwitchProps {
@@ -54,7 +55,9 @@ export function ToggleSwitch({
       onKeyDown={handleKeyDown}
       data-testid={testId}
       className={cn(
-        "relative inline-flex shrink-0 box-border",
+        "toggle-switch-track",
+        checked ? "toggle-switch-track--checked" : "toggle-switch-track--unchecked",
+        "relative inline-flex shrink-0 box-border overflow-hidden",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         disabled || loading ? "cursor-not-allowed opacity-50" : "cursor-pointer",
       )}
@@ -64,14 +67,17 @@ export function ToggleSwitch({
         borderRadius: TOGGLE_TOKENS.track.borderRadius,
         padding: TOGGLE_TOKENS.track.padding,
         backgroundColor: checked ? "hsl(var(--primary))" : "hsl(var(--muted))",
+        border: `1px solid rgba(255, 255, 255, 0.18)`,
+        boxShadow: `
+          0 2px 8px -2px rgba(0, 0, 0, 0.15),
+          0 1px 2px rgba(0, 0, 0, 0.08),
+          inset 0 1px 1px rgba(255, 255, 255, 0.1)
+        `,
         transition: TOGGLE_TOKENS.transition,
       }}
     >
       <span
-        className={cn(
-          "pointer-events-none block rounded-full bg-white shadow-sm",
-          "ring-0",
-        )}
+        className="toggle-switch-thumb pointer-events-none block rounded-full relative z-10"
         style={{
           width: TOGGLE_TOKENS.thumb.size,
           height: TOGGLE_TOKENS.thumb.size,
@@ -80,7 +86,6 @@ export function ToggleSwitch({
             ? `translateX(${TOGGLE_TOKENS.track.width - TOGGLE_TOKENS.thumb.size - TOGGLE_TOKENS.track.padding * 2}px)` 
             : "translateX(0px)",
           transition: TOGGLE_TOKENS.transition,
-          boxShadow: "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
         }}
       />
     </button>

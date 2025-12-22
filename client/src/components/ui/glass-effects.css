@@ -1,0 +1,221 @@
+/* Glass/Liquid Effects for Toggle Switch and Source List Items */
+
+/* Base glass effect variables */
+:root {
+  --glass-blur: 12px;
+  --glass-saturate: 170%;
+  --glass-bg-alpha: 0.25;
+  --glass-border-alpha: 0.18;
+  --glass-transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Toggle Switch Track - Glass Effect */
+.toggle-switch-track {
+  position: relative;
+  overflow: hidden;
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .toggle-switch-track--checked {
+    background-color: rgba(124, 58, 237, 0.75) !important;
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+  
+  .toggle-switch-track--unchecked {
+    background-color: rgba(128, 128, 128, 0.25) !important;
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .toggle-switch-track--checked {
+    background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.9) 100%);
+  }
+  
+  .toggle-switch-track--unchecked {
+    background: linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--muted) / 0.9) 100%);
+  }
+}
+
+/* Liquid highlight overlay using ::before pseudo-element */
+.toggle-switch-track::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 9999px;
+  opacity: 0.7;
+  transition: var(--glass-transition);
+}
+
+.toggle-switch-track--checked::before {
+  background: radial-gradient(ellipse 60% 50% at 70% 30%, rgba(255, 255, 255, 0.12), transparent 60%);
+}
+
+.toggle-switch-track--unchecked::before {
+  background: radial-gradient(ellipse 60% 50% at 30% 30%, rgba(255, 255, 255, 0.12), transparent 60%);
+}
+
+.toggle-switch-track--checked:hover::before {
+  background: radial-gradient(ellipse 80% 60% at 70% 30%, rgba(255, 255, 255, 0.25), transparent 70%);
+  opacity: 1;
+}
+
+.toggle-switch-track--unchecked:hover::before {
+  background: radial-gradient(ellipse 80% 60% at 30% 30%, rgba(255, 255, 255, 0.25), transparent 70%);
+  opacity: 1;
+}
+
+.toggle-switch-track:active::before {
+  transform: scale(0.98);
+}
+
+.toggle-switch-track--checked:active::before {
+  background: radial-gradient(ellipse 80% 60% at 70% 30%, rgba(255, 255, 255, 0.35), transparent 70%);
+}
+
+.toggle-switch-track--unchecked:active::before {
+  background: radial-gradient(ellipse 80% 60% at 30% 30%, rgba(255, 255, 255, 0.35), transparent 70%);
+}
+
+/* Thumb with glass reflection */
+.toggle-switch-thumb {
+  position: relative;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(240, 240, 240, 0.9));
+  box-shadow: 
+    0 2px 6px -1px rgba(0, 0, 0, 0.2),
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    inset 0 1px 2px rgba(255, 255, 255, 0.8),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.05);
+}
+
+.toggle-switch-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, transparent 50%, rgba(0, 0, 0, 0.02) 100%);
+  pointer-events: none;
+}
+
+/* Connect Button - Glass Effect */
+.connect-button-glass {
+  position: relative;
+  overflow: hidden;
+  border-radius: 9999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  border: 1px solid rgba(255, 255, 255, var(--glass-border-alpha));
+  box-shadow: 
+    0 2px 8px -2px rgba(0, 0, 0, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    inset 0 1px 1px rgba(255, 255, 255, 0.15);
+  transition: var(--glass-transition);
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--muted));
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .connect-button-glass {
+    background-color: rgba(128, 128, 128, 0.15) !important;
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .connect-button-glass {
+    background: linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--muted) / 0.9) 100%);
+  }
+}
+
+.connect-button-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, transparent 50%);
+  opacity: 0.7;
+  transition: var(--glass-transition);
+  pointer-events: none;
+}
+
+.connect-button-glass:hover::before {
+  background: radial-gradient(ellipse 100% 80% at 50% 20%, rgba(255, 255, 255, 0.3), transparent 60%);
+  opacity: 1;
+}
+
+.connect-button-glass:active::before {
+  background: radial-gradient(ellipse 100% 80% at 50% 20%, rgba(255, 255, 255, 0.4), transparent 60%);
+  transform: scale(0.98);
+}
+
+.connect-button-glass:hover {
+  box-shadow: 
+    0 4px 12px -2px rgba(0, 0, 0, 0.15),
+    0 2px 4px rgba(0, 0, 0, 0.08),
+    inset 0 1px 1px rgba(255, 255, 255, 0.2);
+}
+
+.connect-button-glass:focus-visible {
+  outline: none;
+  box-shadow: 
+    0 0 0 2px hsl(var(--background)),
+    0 0 0 4px hsl(var(--ring)),
+    0 4px 12px -2px rgba(0, 0, 0, 0.15);
+}
+
+.connect-button-glass:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Source List Item - Glass Hover Effect */
+.source-list-item-glass {
+  position: relative;
+  overflow: hidden;
+  transition: var(--glass-transition);
+}
+
+.source-list-item-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: var(--glass-transition);
+  pointer-events: none;
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .source-list-item-glass:hover::before {
+    opacity: 1;
+    background-color: rgba(128, 128, 128, 0.08);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .source-list-item-glass:hover::before {
+    opacity: 1;
+    background-color: hsl(var(--accent) / 0.5);
+  }
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .toggle-switch-track,
+  .toggle-switch-highlight,
+  .toggle-switch-thumb,
+  .connect-button-glass,
+  .connect-button-glass::before,
+  .source-list-item-glass,
+  .source-list-item-glass::before {
+    transition: none !important;
+  }
+}
