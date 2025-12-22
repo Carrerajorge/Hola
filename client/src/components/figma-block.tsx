@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Maximize2, Minimize2, Plus, Minus, ExternalLink, Copy, Check } from "lucide-react";
+import { Maximize2, Minimize2, Plus, Minus, ExternalLink, Copy, Check, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface FigmaNode {
@@ -33,9 +33,39 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const contentBounds = useMemo(() => {
+    const nodeWidth = 120;
+    const nodeHeight = 50;
+    const padding = 60;
+    
+    if (diagram.nodes.length === 0) {
+      return { minX: 0, minY: 0, maxX: 400, maxY: 200, width: 400, height: 200 };
+    }
+    
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    
+    diagram.nodes.forEach(node => {
+      minX = Math.min(minX, node.x);
+      minY = Math.min(minY, node.y);
+      maxX = Math.max(maxX, node.x + nodeWidth);
+      maxY = Math.max(maxY, node.y + nodeHeight);
+    });
+    
+    return {
+      minX: minX - padding,
+      minY: minY - padding,
+      maxX: maxX + padding,
+      maxY: maxY + padding,
+      width: maxX - minX + padding * 2,
+      height: maxY - minY + padding * 2
+    };
+  }, [diagram.nodes]);
 
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 2));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.5));
+  const handleResetZoom = useCallback(() => setZoom(1), []);
 
   const handleEditInFigma = () => {
     if (fileUrl) {
@@ -167,9 +197,6 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
     );
   };
 
-  const svgWidth = 800;
-  const svgHeight = 400;
-
   return (
     <div className={`relative rounded-xl border bg-card overflow-hidden ${isMaximized ? 'fixed inset-4 z-50' : ''}`}>
       <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30">
@@ -192,18 +219,24 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
       </div>
 
       <div 
+        ref={containerRef}
         className="relative bg-[#f5f5f5] overflow-auto"
         style={{ 
           backgroundImage: 'radial-gradient(circle, #ddd 1px, transparent 1px)',
           backgroundSize: '20px 20px',
-          minHeight: isMaximized ? 'calc(100% - 100px)' : '300px'
+          minHeight: isMaximized ? 'calc(100% - 100px)' : '350px'
         }}
       >
         <svg 
-          width={svgWidth * zoom} 
-          height={svgHeight * zoom}
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          className="mx-auto"
+          width="100%"
+          height="100%"
+          viewBox={`${contentBounds.minX} ${contentBounds.minY} ${contentBounds.width} ${contentBounds.height}`}
+          preserveAspectRatio="xMidYMid meet"
+          style={{
+            minWidth: Math.max(contentBounds.width * zoom, 400),
+            minHeight: Math.max(contentBounds.height * zoom, 300),
+            display: 'block'
+          }}
         >
           {diagram.connections.map((conn, i) => renderConnection(conn, i))}
           {diagram.nodes.map(node => renderNode(node))}
@@ -241,11 +274,15 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
           </Button>
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleZoomOut}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleZoomOut} data-testid="button-zoom-out">
             <Minus className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleZoomIn}>
+          <span className="text-xs text-muted-foreground min-w-[3rem] text-center">{Math.round(zoom * 100)}%</span>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleZoomIn} data-testid="button-zoom-in">
             <Plus className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleResetZoom} data-testid="button-reset-zoom" title="Reset zoom">
+            <RotateCcw className="h-4 w-4" />
           </Button>
         </div>
       </div>
