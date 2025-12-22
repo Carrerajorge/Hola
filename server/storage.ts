@@ -38,7 +38,7 @@ import {
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, sql, desc, and, isNull, inArray } from "drizzle-orm";
+import { eq, sql, desc, and, isNull } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -79,7 +79,6 @@ export interface IStorage {
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessages(chatId: string): Promise<ChatMessage[]>;
-  getChatsWithMessages(userId: string): Promise<Array<Chat & { messages: ChatMessage[] }>>;
   // Chat Share operations
   createChatShare(share: InsertChatShare): Promise<ChatShare>;
   getChatShares(chatId: string): Promise<ChatShare[]>;
@@ -416,27 +415,6 @@ export class MemStorage implements IStorage {
 
   async getChatMessages(chatId: string): Promise<ChatMessage[]> {
     return db.select().from(chatMessages).where(eq(chatMessages.chatId, chatId)).orderBy(chatMessages.createdAt);
-  }
-
-  async getChatsWithMessages(userId: string): Promise<Array<Chat & { messages: ChatMessage[] }>> {
-    const userChats = await db.select().from(chats).where(eq(chats.userId, userId)).orderBy(desc(chats.updatedAt));
-    if (userChats.length === 0) return [];
-    
-    const chatIds = userChats.map(c => c.id);
-    const allMessages = await db.select().from(chatMessages).where(inArray(chatMessages.chatId, chatIds)).orderBy(chatMessages.createdAt);
-    
-    const messagesByChat = new Map<string, ChatMessage[]>();
-    for (const msg of allMessages) {
-      if (!messagesByChat.has(msg.chatId)) {
-        messagesByChat.set(msg.chatId, []);
-      }
-      messagesByChat.get(msg.chatId)!.push(msg);
-    }
-    
-    return userChats.map(chat => ({
-      ...chat,
-      messages: messagesByChat.get(chat.id) || []
-    }));
   }
 
   // Chat Share operations

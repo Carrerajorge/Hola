@@ -54,6 +54,7 @@ class BrowserWorker {
           "--window-size=1920,1080"
         ]
       });
+      console.log("Browser worker initialized");
     } catch (error) {
       console.error("Failed to initialize browser:", error);
       throw error;

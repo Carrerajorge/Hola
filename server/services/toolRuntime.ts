@@ -51,8 +51,10 @@ export async function executeToolCall(
     idempotencyKey,
   } = options;
 
+  // Check idempotency
   if (idempotencyKey && idempotencyCache.has(idempotencyKey)) {
     const cached = idempotencyCache.get(idempotencyKey)!;
+    console.log(`[ToolRuntime] Returning cached result for ${idempotencyKey}`);
     return cached;
   }
 
@@ -93,6 +95,12 @@ export async function executeToolCall(
     } catch (error: any) {
       lastError = error;
       attempt++;
+
+      if (error.message === "TIMEOUT") {
+        console.log(`[ToolRuntime] Timeout on attempt ${attempt} for ${toolId}`);
+      } else {
+        console.log(`[ToolRuntime] Error on attempt ${attempt} for ${toolId}:`, error.message);
+      }
 
       if (attempt <= retries) {
         // Exponential backoff: 1s, 2s, 4s...

@@ -29,6 +29,8 @@ export interface ETLAgentResponse {
 }
 
 export async function runETLAgent(request: ETLAgentRequest): Promise<ETLAgentResponse> {
+  console.log('[ETL Agent] Starting with request:', JSON.stringify(request, null, 2));
+
   if (!request.countries || request.countries.length === 0) {
     return {
       success: false,
@@ -67,6 +69,8 @@ export async function runETLAgent(request: ETLAgentRequest): Promise<ETLAgentRes
     if (request.endDate) spec.dateRange.end = request.endDate;
   }
 
+  console.log('[ETL Agent] Running pipeline with spec:', JSON.stringify(spec, null, 2));
+
   try {
     const result: ETLPipelineResult = await runETLPipeline(spec);
 
@@ -81,6 +85,8 @@ export async function runETLAgent(request: ETLAgentRequest): Promise<ETLAgentRes
     const workbookBuffer = await buildExcelWorkbookBundle(result.workbook);
     const timestamp = new Date().toISOString().split('T')[0];
     const filename = `ETL_Data_${validCountries.join('_')}_${timestamp}.zip`;
+
+    console.log('[ETL Agent] Workbook generated:', filename, 'Size:', workbookBuffer.length, 'bytes');
 
     return {
       success: result.success,

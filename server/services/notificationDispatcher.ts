@@ -33,6 +33,7 @@ async function sendPushNotification(
   actionUrl?: string
 ): Promise<ChannelResult> {
   try {
+    console.log(`[Push] Sending to ${userId}: ${title}`);
     return { sent: true };
   } catch (error: any) {
     console.error(`[Push] Failed for ${userId}:`, error);
@@ -52,6 +53,7 @@ async function sendEmailNotification(
     if (!user?.email) {
       return { sent: false, error: "No email address" };
     }
+    console.log(`[Email] Would send to ${user.email}: ${title}`);
     return { sent: true };
   } catch (error: any) {
     console.error(`[Email] Failed for ${userId}:`, error);

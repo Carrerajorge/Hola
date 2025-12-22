@@ -15,6 +15,8 @@ export function registerBuiltinTools(): void {
   toolRegistry.register(respondTool);
   toolRegistry.register(searchWebTool);
   toolRegistry.register(analyzeDataTool);
+  
+  console.log(`Registered ${toolRegistry.getAll().length} built-in tools`);
 }
 
 export * from "./web-navigate";

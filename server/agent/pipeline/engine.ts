@@ -20,6 +20,7 @@ export function initializePipeline(): void {
   if (initialized) return;
   registerBuiltinTools();
   initialized = true;
+  console.log("Pipeline engine initialized");
 }
 
 export interface PipelineRunOptions {
