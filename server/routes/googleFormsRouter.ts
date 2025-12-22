@@ -19,7 +19,7 @@ export function createGoogleFormsRouter(): Router {
 
   router.get("/status", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = (req as any).user?.claims?.sub;
       
       if (!userId) {
         return res.json({
@@ -57,7 +57,7 @@ export function createGoogleFormsRouter(): Router {
 
   router.get("/connect", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = (req as any).user?.claims?.sub;
       
       if (!userId) {
         return res.status(401).json({
@@ -65,7 +65,8 @@ export function createGoogleFormsRouter(): Router {
         });
       }
       
-      const authUrl = getAuthUrl(userId);
+      const host = req.get("host") || req.headers.host || "localhost:5000";
+      const authUrl = getAuthUrl(userId, host);
       res.redirect(authUrl);
     } catch (error: any) {
       console.error("Error generating OAuth URL:", error);
@@ -89,12 +90,18 @@ export function createGoogleFormsRouter(): Router {
         return res.redirect("/?error=no_code");
       }
       
-      let userId = (req as any).user?.id;
+      let userId = (req as any).user?.claims?.sub;
+      let host = req.get("host") || req.headers.host || "localhost:5000";
       
-      if (!userId && state && typeof state === "string") {
+      if (state && typeof state === "string") {
         const stateData = parseStateParam(state);
         if (stateData) {
-          userId = stateData.userId;
+          if (!userId) {
+            userId = stateData.userId;
+          }
+          if (stateData.host) {
+            host = stateData.host;
+          }
         }
       }
       
@@ -102,7 +109,7 @@ export function createGoogleFormsRouter(): Router {
         return res.redirect("/?error=auth_failed&message=Could not identify user");
       }
       
-      const tokens = await exchangeCodeForTokens(code);
+      const tokens = await exchangeCodeForTokens(code, host);
       const userInfo = await getUserInfo(tokens.accessToken);
       
       const existingAccount = await storage.getIntegrationAccountByProvider(userId, PROVIDER_ID);
@@ -157,7 +164,7 @@ export function createGoogleFormsRouter(): Router {
 
   router.post("/disconnect", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.id;
+      const userId = (req as any).user?.claims?.sub;
       
       if (!userId) {
         return res.status(401).json({
@@ -206,7 +213,7 @@ export function createGoogleFormsRouter(): Router {
         });
       }
       
-      const userId = (req as any).user?.id;
+      const userId = (req as any).user?.claims?.sub;
       
       if (!userId) {
         return res.status(401).json({

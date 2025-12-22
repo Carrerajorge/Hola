@@ -6,7 +6,6 @@ const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-const REDIRECT_URI = "https://c8de8182-93b8-40c0-96f1-23c96d638a68-00-pmgk23y9x7wl.riker.replit.dev/api/integrations/google/forms/callback";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/forms.body",
@@ -51,26 +50,32 @@ export interface GoogleUserInfo {
   picture?: string;
 }
 
-export function createOAuth2Client(): OAuth2Client {
-  return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI);
+export function createOAuth2Client(redirectUri?: string): OAuth2Client {
+  return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, redirectUri);
 }
 
-export function getAuthUrl(userId: string): string {
-  const oauth2Client = createOAuth2Client();
+export function getRedirectUri(host: string): string {
+  const protocol = host.includes("localhost") ? "http" : "https";
+  return `${protocol}://${host}/api/integrations/google/forms/callback`;
+}
+
+export function getAuthUrl(userId: string, host: string): string {
+  const redirectUri = getRedirectUri(host);
+  const oauth2Client = createOAuth2Client(redirectUri);
   return oauth2Client.generateAuthUrl({
     access_type: "offline",
     scope: SCOPES,
     prompt: "consent",
-    state: Buffer.from(JSON.stringify({ userId })).toString("base64"),
+    state: Buffer.from(JSON.stringify({ userId, host })).toString("base64"),
   });
 }
 
-export function parseStateParam(state: string): { userId: string } | null {
+export function parseStateParam(state: string): { userId: string; host?: string } | null {
   try {
     const decoded = Buffer.from(state, "base64").toString("utf-8");
     const parsed = JSON.parse(decoded);
     if (parsed && typeof parsed.userId === "string") {
-      return { userId: parsed.userId };
+      return { userId: parsed.userId, host: parsed.host };
     }
     return null;
   } catch {
@@ -78,8 +83,9 @@ export function parseStateParam(state: string): { userId: string } | null {
   }
 }
 
-export async function exchangeCodeForTokens(code: string): Promise<TokenData> {
-  const oauth2Client = createOAuth2Client();
+export async function exchangeCodeForTokens(code: string, host: string): Promise<TokenData> {
+  const redirectUri = getRedirectUri(host);
+  const oauth2Client = createOAuth2Client(redirectUri);
   const { tokens } = await oauth2Client.getToken(code);
   
   if (!tokens.access_token) {
