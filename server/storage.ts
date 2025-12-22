@@ -84,6 +84,7 @@ export interface IStorage {
   getChatShares(chatId: string): Promise<ChatShare[]>;
   getChatSharesByEmail(email: string): Promise<ChatShare[]>;
   getChatSharesByUserId(userId: string): Promise<ChatShare[]>;
+  getSharedChatsWithDetails(userId: string): Promise<(Chat & { shareRole: string; shareId: string })[]>;
   getChatShareByEmailAndChat(email: string, chatId: string): Promise<ChatShare | undefined>;
   getChatShareByUserAndChat(userId: string, chatId: string): Promise<ChatShare | undefined>;
   updateChatShare(id: string, updates: Partial<InsertChatShare>): Promise<ChatShare | undefined>;
@@ -434,6 +435,29 @@ export class MemStorage implements IStorage {
 
   async getChatSharesByUserId(userId: string): Promise<ChatShare[]> {
     return db.select().from(chatShares).where(eq(chatShares.recipientUserId, userId)).orderBy(desc(chatShares.createdAt));
+  }
+
+  async getSharedChatsWithDetails(userId: string): Promise<(Chat & { shareRole: string; shareId: string })[]> {
+    const results = await db
+      .select({
+        id: chats.id,
+        title: chats.title,
+        userId: chats.userId,
+        gptId: chats.gptId,
+        archived: chats.archived,
+        hidden: chats.hidden,
+        deletedAt: chats.deletedAt,
+        createdAt: chats.createdAt,
+        updatedAt: chats.updatedAt,
+        shareRole: chatShares.role,
+        shareId: chatShares.id,
+      })
+      .from(chatShares)
+      .innerJoin(chats, eq(chatShares.chatId, chats.id))
+      .where(eq(chatShares.recipientUserId, userId))
+      .orderBy(desc(chatShares.createdAt));
+    
+    return results as (Chat & { shareRole: string; shareId: string })[];
   }
 
   async getChatShareByEmailAndChat(email: string, chatId: string): Promise<ChatShare | undefined> {

@@ -1246,6 +1246,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
   });
 
   // Get chats shared with the current user (uses userId for secure auth)
+  // Optimized: Uses single JOIN query instead of N+1 pattern
   app.get("/api/shared-chats", async (req, res) => {
     try {
       const user = (req as any).user;
@@ -1255,16 +1256,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         return res.json([]);
       }
       
-      const shares = await storage.getChatSharesByUserId(userId);
-      const sharedChats = [];
-      
-      for (const share of shares) {
-        const chat = await storage.getChat(share.chatId);
-        if (chat) {
-          sharedChats.push({ ...chat, shareRole: share.role, shareId: share.id });
-        }
-      }
-      
+      const sharedChats = await storage.getSharedChatsWithDetails(userId);
       res.json(sharedChats);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
