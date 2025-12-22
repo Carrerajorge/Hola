@@ -21,6 +21,7 @@ import { createLibraryRouter } from "./routes/libraryRouter";
 import { createCodeRouter } from "./routes/codeRouter";
 import { createUserRouter } from "./routes/userRouter";
 import { createChatAiRouter } from "./routes/chatAiRouter";
+import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -53,10 +54,8 @@ export async function registerRoutes(
   });
 
   const wss = new WebSocketServer({ server: httpServer, path: "/ws/agent" });
-  console.log("Agent WebSocket server created at /ws/agent");
   
-  wss.on("connection", (ws) => {
-    console.log("Agent WebSocket client connected");
+  createAuthenticatedWebSocketHandler(wss, true, (ws: AuthenticatedWebSocket) => {
     let subscribedRunId: string | null = null;
     
     ws.on("message", (message) => {
@@ -88,13 +87,10 @@ export async function registerRoutes(
   });
 
   const browserWss = new WebSocketServer({ server: httpServer, path: "/ws/browser" });
-  console.log("Browser WebSocket server created at /ws/browser");
 
   const fileStatusWss = new WebSocketServer({ server: httpServer, path: "/ws/file-status" });
-  console.log("File status WebSocket server created at /ws/file-status");
 
-  fileStatusWss.on("connection", (ws) => {
-    console.log("File status WebSocket client connected");
+  createAuthenticatedWebSocketHandler(fileStatusWss, true, (ws: AuthenticatedWebSocket) => {
     let subscribedFileIds: Set<string> = new Set();
     
     ws.on("message", (message) => {
@@ -201,8 +197,7 @@ export async function registerRoutes(
     }
   });
   
-  browserWss.on("connection", (ws) => {
-    console.log("Browser WebSocket client connected");
+  createAuthenticatedWebSocketHandler(browserWss, true, (ws: AuthenticatedWebSocket) => {
     let subscribedSessionId: string | null = null;
     
     ws.on("message", async (message) => {
