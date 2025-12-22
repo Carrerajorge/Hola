@@ -271,39 +271,39 @@
 .liquid-badge {
   position: relative;
   overflow: hidden;
-  isolation: isolate;
+  z-index: 0;
+  background: transparent;
 }
 
 .liquid-badge::before {
   content: '';
   position: absolute;
-  inset: -2px;
+  inset: 0;
   border-radius: inherit;
   background: linear-gradient(
     90deg,
-    rgba(168, 85, 247, 0.4) 0%,
-    rgba(139, 92, 246, 0.6) 25%,
-    rgba(168, 85, 247, 0.4) 50%,
-    rgba(139, 92, 246, 0.6) 75%,
-    rgba(168, 85, 247, 0.4) 100%
+    rgba(168, 85, 247, 0.6) 0%,
+    rgba(139, 92, 246, 0.8) 25%,
+    rgba(168, 85, 247, 0.6) 50%,
+    rgba(139, 92, 246, 0.8) 75%,
+    rgba(168, 85, 247, 0.6) 100%
   );
   background-size: 200% 100%;
   animation: liquid-flow 3s ease-in-out infinite;
-  z-index: -1;
-  opacity: 0.8;
+  z-index: 0;
 }
 
 .liquid-badge::after {
   content: '';
   position: absolute;
-  inset: 1px;
+  inset: 2px;
   border-radius: inherit;
   background: linear-gradient(
     135deg,
-    rgba(250, 245, 255, 0.95) 0%,
-    rgba(243, 232, 255, 0.9) 100%
+    rgba(250, 245, 255, 0.97) 0%,
+    rgba(243, 232, 255, 0.95) 100%
   );
-  z-index: -1;
+  z-index: 1;
 }
 
 .dark .liquid-badge::after {
@@ -329,23 +329,23 @@
 /* Liquid blob animation overlay */
 .liquid-badge .liquid-blob {
   position: absolute;
-  width: 120%;
-  height: 120%;
-  top: -10%;
-  left: -10%;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
   background: radial-gradient(
-    ellipse 40% 40% at 30% 30%,
-    rgba(168, 85, 247, 0.3),
+    ellipse 50% 80% at 20% 30%,
+    rgba(168, 85, 247, 0.15),
     transparent 50%
   ),
   radial-gradient(
-    ellipse 35% 35% at 70% 70%,
-    rgba(139, 92, 246, 0.25),
+    ellipse 50% 80% at 80% 70%,
+    rgba(139, 92, 246, 0.12),
     transparent 50%
   );
   animation: liquid-blob-move 4s ease-in-out infinite;
   pointer-events: none;
-  z-index: 1;
+  z-index: 2;
 }
 
 @keyframes liquid-blob-move {

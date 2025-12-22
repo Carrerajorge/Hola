@@ -913,13 +913,13 @@ export function Composer({
                 
                 {showKnowledgeBase && (
                   <>
-                    <div className="liquid-badge flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-purple-200 dark:border-purple-700 text-purple-700 dark:text-purple-300 text-sm" data-testid="knowledge-base-active">
+                    <div className="liquid-badge flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-purple-700 dark:text-purple-300 text-sm" data-testid="knowledge-base-active">
                       <span className="liquid-blob" />
-                      <Users className="h-3.5 w-3.5 relative z-10" />
-                      <span className="max-w-[120px] truncate relative z-10">Conocimientos de la e...</span>
+                      <Users className="h-3.5 w-3.5 relative z-[3]" />
+                      <span className="max-w-[120px] truncate relative z-[3]">Conocimientos de la e...</span>
                       <button 
                         onClick={() => setShowKnowledgeBase(false)}
-                        className="ml-0.5 hover:bg-purple-200 dark:hover:bg-purple-800 rounded-full p-0.5 transition-colors relative z-10"
+                        className="ml-0.5 hover:bg-purple-200/50 dark:hover:bg-purple-800/50 rounded-full p-0.5 transition-colors relative z-[3]"
                         data-testid="button-close-knowledge-base"
                       >
                         <X className="h-3 w-3" />
