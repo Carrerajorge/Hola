@@ -29,15 +29,18 @@ export function getSession() {
     tableName: "sessions",
   });
   return session({
+    name: "siragpt.sid",
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
-    resave: true,
-    saveUninitialized: true,
+    resave: false,
+    saveUninitialized: false,
+    rolling: true,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production" || process.env.REPL_SLUG !== undefined,
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none" as const,
       maxAge: sessionTtl,
+      path: "/",
     },
   });
 }

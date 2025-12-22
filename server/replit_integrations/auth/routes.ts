@@ -44,8 +44,15 @@ export function registerAuthRoutes(app: Express): void {
           if (err) {
             return res.status(500).json({ message: "Error al iniciar sesión" });
           }
-          const user = await authStorage.getUser(adminId);
-          res.json({ success: true, user });
+          // Force session save before responding
+          req.session.save(async (saveErr: any) => {
+            if (saveErr) {
+              console.error("Session save error:", saveErr);
+              return res.status(500).json({ message: "Error al guardar sesión" });
+            }
+            const user = await authStorage.getUser(adminId);
+            res.json({ success: true, user });
+          });
         });
       }
       
@@ -97,7 +104,14 @@ export function registerAuthRoutes(app: Express): void {
           console.error("Failed to create audit log:", auditError);
         }
         
-        res.json({ success: true, user: dbUser });
+        // Force session save before responding
+        req.session.save((saveErr: any) => {
+          if (saveErr) {
+            console.error("Session save error:", saveErr);
+            return res.status(500).json({ message: "Error al guardar sesión" });
+          }
+          res.json({ success: true, user: dbUser });
+        });
       });
     } catch (error) {
       console.error("Login error:", error);
@@ -160,7 +174,14 @@ export function registerAuthRoutes(app: Express): void {
           console.error("Failed to create audit log:", auditError);
         }
         
-        res.json({ success: true, user: { id: adminId, email: ADMIN_EMAIL, firstName: "Admin", lastName: "User", role: "admin" } });
+        // Force session save before responding
+        req.session.save((saveErr: any) => {
+          if (saveErr) {
+            console.error("Session save error:", saveErr);
+            return res.status(500).json({ message: "Error saving session" });
+          }
+          res.json({ success: true, user: { id: adminId, email: ADMIN_EMAIL, firstName: "Admin", lastName: "User", role: "admin" } });
+        });
       });
     } catch (error) {
       console.error("Admin login error:", error);
