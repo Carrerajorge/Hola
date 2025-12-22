@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { 
   Plus, 
   Upload, 
@@ -10,12 +10,15 @@ import {
   Globe,
   FileText,
   ChevronRight,
+  ChevronDown,
   X,
   Loader2,
   CheckCircle2,
   Maximize2,
   Minimize2,
-  Users
+  Users,
+  Calendar,
+  Contact
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -155,6 +158,20 @@ export function Composer({
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
+  
+  const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
+  const [knowledgeSources, setKnowledgeSources] = useState({
+    github: false,
+    teams: true,
+    gmail: false,
+    box: false,
+    outlook: false,
+    googleContacts: false,
+  });
+
+  const toggleKnowledgeSource = (source: keyof typeof knowledgeSources) => {
+    setKnowledgeSources(prev => ({ ...prev, [source]: !prev[source] }));
+  };
 
   const renderAttachmentPreview = () => {
     if (uploadedFiles.length === 0) return null;
@@ -395,7 +412,7 @@ export function Composer({
               <Button 
                 variant="ghost" 
                 className="justify-start gap-2 text-sm h-9"
-                onClick={() => { onCloseSidebar?.(); }}
+                onClick={() => { setShowKnowledgeBase(true); onCloseSidebar?.(); }}
                 data-testid="button-knowledge-base"
               >
                 <Users className="h-4 w-4" />
@@ -867,6 +884,158 @@ export function Composer({
             
             {!isDocumentMode && renderSelectedToolLogo()}
             {renderSelectedDocToolLogo()}
+            
+            {showKnowledgeBase && (
+              <div className="flex items-center gap-1 shrink-0" data-testid="knowledge-base-active">
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-700 text-purple-700 dark:text-purple-300 text-sm">
+                  <Users className="h-3.5 w-3.5" />
+                  <span className="max-w-[120px] truncate">Conocimientos de la e...</span>
+                  <button 
+                    onClick={() => setShowKnowledgeBase(false)}
+                    className="ml-0.5 hover:bg-purple-200 dark:hover:bg-purple-800 rounded-full p-0.5 transition-colors"
+                    data-testid="button-close-knowledge-base"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button 
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-muted hover:bg-muted/80 border border-border text-sm font-medium transition-colors"
+                      data-testid="button-fuentes-dropdown"
+                    >
+                      <Users className="h-3.5 w-3.5" />
+                      <span>Fuentes</span>
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-64 p-2" data-testid="fuentes-popover">
+                    <div className="grid gap-1">
+                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50">
+                        <div className="flex items-center gap-3">
+                          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
+                          </svg>
+                          <span className="text-sm font-medium">GitHub</span>
+                        </div>
+                        <button 
+                          onClick={() => toggleKnowledgeSource('github')}
+                          className={cn(
+                            "w-10 h-6 rounded-full transition-colors relative",
+                            knowledgeSources.github ? "bg-primary" : "bg-muted"
+                          )}
+                          data-testid="toggle-github"
+                        >
+                          <span className={cn(
+                            "absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform",
+                            knowledgeSources.github ? "translate-x-5" : "translate-x-1"
+                          )} />
+                        </button>
+                      </div>
+                      
+                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50">
+                        <div className="flex items-center gap-3">
+                          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                            <path d="M20.625 4.5H3.375C2.96016 4.5 2.625 4.83516 2.625 5.25V18.75C2.625 19.1648 2.96016 19.5 3.375 19.5H20.625C21.0398 19.5 21.375 19.1648 21.375 18.75V5.25C21.375 4.83516 21.0398 4.5 20.625 4.5Z" fill="#5059C9"/>
+                            <path d="M12 10.5H21.375V17.625C21.375 18.6605 20.5355 19.5 19.5 19.5H12V10.5Z" fill="#7B83EB"/>
+                            <circle cx="16.5" cy="7.5" r="2.25" fill="#7B83EB"/>
+                            <circle cx="9" cy="9" r="3" fill="#5059C9"/>
+                            <path d="M13.5 12H4.5V18C4.5 18.8284 5.17157 19.5 6 19.5H12C12.8284 19.5 13.5 18.8284 13.5 18V12Z" fill="#7B83EB"/>
+                          </svg>
+                          <span className="text-sm font-medium">Teams</span>
+                        </div>
+                        <button 
+                          onClick={() => toggleKnowledgeSource('teams')}
+                          className={cn(
+                            "w-10 h-6 rounded-full transition-colors relative",
+                            knowledgeSources.teams ? "bg-primary" : "bg-muted"
+                          )}
+                          data-testid="toggle-teams"
+                        >
+                          <span className={cn(
+                            "absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform",
+                            knowledgeSources.teams ? "translate-x-5" : "translate-x-1"
+                          )} />
+                        </button>
+                      </div>
+                      
+                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50">
+                        <div className="flex items-center gap-3">
+                          <svg className="h-5 w-5" viewBox="0 0 24 18" fill="none">
+                            <path d="M1.5 5.25V15.75C1.5 16.1478 1.65804 16.5294 1.93934 16.8107C2.22064 17.092 2.60218 17.25 3 17.25H21C21.3978 17.25 21.7794 17.092 22.0607 16.8107C22.342 16.5294 22.5 16.1478 22.5 15.75V5.25L12 12L1.5 5.25Z" fill="#EA4335"/>
+                            <path d="M22.5 2.25V5.25L12 12L1.5 5.25V2.25C1.5 1.85218 1.65804 1.47064 1.93934 1.18934C2.22064 0.908035 2.60218 0.75 3 0.75H21C21.3978 0.75 21.7794 0.908035 22.0607 1.18934C22.342 1.47064 22.5 1.85218 22.5 2.25Z" fill="#FBBC05"/>
+                          </svg>
+                          <span className="text-sm font-medium">Gmail</span>
+                        </div>
+                        <button 
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          data-testid="connect-gmail-source"
+                        >
+                          Conectar
+                        </button>
+                      </div>
+                      
+                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50">
+                        <div className="flex items-center gap-3">
+                          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                            <rect x="2" y="4" width="20" height="16" rx="2" fill="#0061D5"/>
+                            <text x="12" y="15" textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">box</text>
+                          </svg>
+                          <span className="text-sm font-medium">Box</span>
+                        </div>
+                        <button 
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          data-testid="connect-box-source"
+                        >
+                          Conectar
+                        </button>
+                      </div>
+                      
+                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50">
+                        <div className="flex items-center gap-3">
+                          <Calendar className="h-5 w-5 text-blue-500" />
+                          <span className="text-sm font-medium truncate max-w-[100px]">Calendario de Outl...</span>
+                        </div>
+                        <button 
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          data-testid="connect-outlook-source"
+                        >
+                          Conectar
+                        </button>
+                      </div>
+                      
+                      <div className="flex items-center justify-between px-2 py-2 rounded-md hover:bg-accent/50">
+                        <div className="flex items-center gap-3">
+                          <Contact className="h-5 w-5 text-blue-600" />
+                          <span className="text-sm font-medium">Contactos de Google</span>
+                        </div>
+                        <button 
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          data-testid="connect-google-contacts-source"
+                        >
+                          Conectar
+                        </button>
+                      </div>
+                      
+                      <div className="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-accent/50 cursor-pointer" data-testid="connect-more-sources">
+                        <div className="flex items-center justify-center w-5 h-5">
+                          <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
+                            <circle cx="4" cy="8" r="1.5" />
+                            <circle cx="8" cy="8" r="1.5" />
+                            <circle cx="12" cy="8" r="1.5" />
+                            <circle cx="4" cy="4" r="1.5" />
+                            <circle cx="8" cy="4" r="1.5" />
+                            <circle cx="12" cy="4" r="1.5" />
+                          </svg>
+                        </div>
+                        <span className="text-sm font-medium">Conectar más</span>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
             
             <Textarea
               ref={textareaRef}
