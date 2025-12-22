@@ -3,12 +3,16 @@ import { Button } from "@/components/ui/button";
 import { Maximize2, Minimize2, Plus, Minus, ExternalLink, Copy, Check, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
+type DiagramType = "flowchart" | "orgchart" | "mindmap";
+
 interface FigmaNode {
   id: string;
-  type: "start" | "end" | "process" | "decision";
+  type: "start" | "end" | "process" | "decision" | "role" | "department" | "person";
   label: string;
   x: number;
   y: number;
+  level?: number;
+  parentId?: string;
 }
 
 interface FigmaConnection {
@@ -18,6 +22,7 @@ interface FigmaConnection {
 }
 
 interface FigmaDiagram {
+  diagramType?: DiagramType;
   nodes: FigmaNode[];
   connections: FigmaConnection[];
   title?: string;
@@ -212,18 +217,35 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
     );
   };
 
+  const getNodeStyle = (node: FigmaNode) => {
+    const isOrgChart = diagram.diagramType === "orgchart";
+    if (isOrgChart) {
+      switch (node.type) {
+        case "role": return { fill: "#E3F2FD", stroke: "#1976D2", fontWeight: "600" };
+        case "department": return { fill: "#F3E5F5", stroke: "#7B1FA2", fontWeight: "500" };
+        case "person": return { fill: "#E8F5E9", stroke: "#388E3C", fontWeight: "400" };
+        default: return { fill: "#FFF3E0", stroke: "#F57C00", fontWeight: "500" };
+      }
+    }
+    switch (node.type) {
+      case "start": case "end": return { fill: "#f5f5f5", stroke: "#333", fontWeight: "600" };
+      case "decision": return { fill: "white", stroke: "#F24E1E", fontWeight: "500" };
+      default: return { fill: "white", stroke: "#333", fontWeight: "400" };
+    }
+  };
+
   const renderNode = (node: FigmaNode) => {
     const center = getNodeCenter(node);
-    const isTerminal = node.type === "start" || node.type === "end";
     const { text: displayText, isTruncated } = truncateLabel(node.label);
+    const style = getNodeStyle(node);
     
     return (
       <g key={node.id}>
         {isTruncated && <title>{node.label}</title>}
         <path
           d={getNodePath(node)}
-          fill={isTerminal ? "#f5f5f5" : "white"}
-          stroke={node.type === "decision" ? "#F24E1E" : "#333"}
+          fill={style.fill}
+          stroke={style.stroke}
           strokeWidth="2"
         />
         <text
@@ -234,7 +256,7 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
           fontSize={FONT_SIZE}
           fontFamily={FONT_FAMILY}
           fill="#333"
-          fontWeight={isTerminal ? "600" : "400"}
+          fontWeight={style.fontWeight}
         >
           {displayText}
         </text>

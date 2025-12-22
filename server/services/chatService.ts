@@ -48,13 +48,18 @@ interface DocumentMode {
   type: "word" | "excel" | "ppt";
 }
 
+type DiagramType = "flowchart" | "orgchart" | "mindmap";
+
 interface FigmaDiagram {
+  diagramType: DiagramType;
   nodes: Array<{
     id: string;
-    type: "start" | "end" | "process" | "decision";
+    type: "start" | "end" | "process" | "decision" | "role" | "department" | "person";
     label: string;
     x: number;
     y: number;
+    level?: number;
+    parentId?: string;
   }>;
   connections: Array<{
     from: string;
@@ -62,6 +67,90 @@ interface FigmaDiagram {
     label?: string;
   }>;
   title?: string;
+}
+
+function detectDiagramType(prompt: string): DiagramType {
+  const lowerPrompt = prompt.toLowerCase();
+  const orgChartKeywords = ["organigrama", "org chart", "estructura organizacional", "jerarqu", "organización", "equipo", "departamento", "ceo", "director", "gerente", "jefe"];
+  const mindmapKeywords = ["mapa mental", "mindmap", "lluvia de ideas", "brainstorm"];
+  
+  if (orgChartKeywords.some(kw => lowerPrompt.includes(kw))) return "orgchart";
+  if (mindmapKeywords.some(kw => lowerPrompt.includes(kw))) return "mindmap";
+  return "flowchart";
+}
+
+function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  
+  const hasStartEnd = diagram.nodes.some(n => n.type === "start" || n.type === "end");
+  if (hasStartEnd) errors.push("Org charts should not have start/end nodes");
+  
+  const invalidWords = ["inicio", "fin", "start", "end", "aleta"];
+  diagram.nodes.forEach(node => {
+    if (invalidWords.some(w => node.label.toLowerCase() === w)) {
+      errors.push(`Invalid label: ${node.label}`);
+    }
+  });
+  
+  const nodeIds = new Set(diagram.nodes.map(n => n.id));
+  const childIds = new Set(diagram.connections.map(c => c.to));
+  const roots = diagram.nodes.filter(n => !childIds.has(n.id));
+  if (roots.length !== 1) errors.push(`Expected 1 root, found ${roots.length}`);
+  
+  return { valid: errors.length === 0, errors };
+}
+
+function applyTreeLayout(diagram: FigmaDiagram): FigmaDiagram {
+  if (diagram.diagramType !== "orgchart") return diagram;
+  
+  const nodeMap = new Map(diagram.nodes.map(n => [n.id, n]));
+  const childrenMap = new Map<string, string[]>();
+  const childIds = new Set(diagram.connections.map(c => c.to));
+  
+  diagram.connections.forEach(conn => {
+    const children = childrenMap.get(conn.from) || [];
+    children.push(conn.to);
+    childrenMap.set(conn.from, children);
+  });
+  
+  const root = diagram.nodes.find(n => !childIds.has(n.id));
+  if (!root) return diagram;
+  
+  const NODE_WIDTH = 140;
+  const NODE_HEIGHT = 50;
+  const HORIZONTAL_GAP = 40;
+  const VERTICAL_GAP = 80;
+  
+  function getSubtreeWidth(nodeId: string): number {
+    const children = childrenMap.get(nodeId) || [];
+    if (children.length === 0) return NODE_WIDTH;
+    return children.reduce((sum, childId) => sum + getSubtreeWidth(childId), 0) + (children.length - 1) * HORIZONTAL_GAP;
+  }
+  
+  function positionNode(nodeId: string, x: number, y: number, level: number) {
+    const node = nodeMap.get(nodeId);
+    if (!node) return;
+    
+    node.x = x;
+    node.y = y;
+    node.level = level;
+    
+    const children = childrenMap.get(nodeId) || [];
+    if (children.length === 0) return;
+    
+    const totalWidth = children.reduce((sum, childId) => sum + getSubtreeWidth(childId), 0) + (children.length - 1) * HORIZONTAL_GAP;
+    let childX = x - totalWidth / 2 + NODE_WIDTH / 2;
+    
+    children.forEach(childId => {
+      const childWidth = getSubtreeWidth(childId);
+      positionNode(childId, childX + childWidth / 2 - NODE_WIDTH / 2, y + NODE_HEIGHT + VERTICAL_GAP, level + 1);
+      childX += childWidth + HORIZONTAL_GAP;
+    });
+  }
+  
+  positionNode(root.id, 400, 50, 0);
+  
+  return diagram;
 }
 
 interface ChatSource {
@@ -572,11 +661,14 @@ ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
 
   // Handle Figma diagram generation mode
   if (figmaMode && lastUserMessage) {
-    const figmaSystemPrompt = `Eres un generador de diagramas de flujo. Analiza la solicitud del usuario y genera un diagrama de flujo estructurado.
+    const diagramType = detectDiagramType(lastUserMessage.content);
+    
+    const flowchartPrompt = `Eres un generador de diagramas de flujo. Analiza la solicitud del usuario y genera un diagrama de flujo estructurado.
 
 DEBES responder ÚNICAMENTE con un objeto JSON válido en el siguiente formato:
 {
   "title": "Título del diagrama",
+  "diagramType": "flowchart",
   "nodes": [
     { "id": "node1", "type": "start", "label": "Inicio", "x": 100, "y": 50 },
     { "id": "node2", "type": "process", "label": "Paso 1", "x": 100, "y": 150 },
@@ -596,19 +688,52 @@ DEBES responder ÚNICAMENTE con un objeto JSON válido en el siguiente formato:
 }
 
 TIPOS DE NODOS:
-- "start": Nodo de inicio (óvalo verde)
-- "end": Nodo de fin (óvalo rojo)  
-- "process": Proceso o acción (rectángulo azul)
-- "decision": Decisión/bifurcación (rombo amarillo)
+- "start": Nodo de inicio (óvalo)
+- "end": Nodo de fin (óvalo)  
+- "process": Proceso o acción (rectángulo)
+- "decision": Decisión/bifurcación (rombo)
 
 REGLAS:
 1. Cada diagrama DEBE tener exactamente UN nodo "start" y al menos UN nodo "end"
-2. Posiciona los nodos verticalmente con Y incrementando hacia abajo (separación de ~100px)
-3. Para bifurcaciones, usa X negativo para "No" y X positivo para "Sí"
-4. Los labels deben ser concisos (máximo 5 palabras)
-5. SOLO responde con el JSON, sin explicaciones ni texto adicional
+2. Los labels deben ser concisos (máximo 4 palabras)
+3. SOLO responde con el JSON, sin explicaciones`;
 
-Genera el diagrama basándote en la solicitud del usuario.`;
+    const orgchartPrompt = `Eres un generador de organigramas empresariales. Analiza la solicitud del usuario y genera una estructura jerárquica.
+
+DEBES responder ÚNICAMENTE con un objeto JSON válido en el siguiente formato:
+{
+  "title": "Organigrama de la Empresa",
+  "diagramType": "orgchart",
+  "nodes": [
+    { "id": "ceo", "type": "role", "label": "Director General", "x": 0, "y": 0 },
+    { "id": "cfo", "type": "role", "label": "Director Financiero", "x": 0, "y": 0 },
+    { "id": "coo", "type": "role", "label": "Director Operaciones", "x": 0, "y": 0 },
+    { "id": "team1", "type": "department", "label": "Equipo Finanzas", "x": 0, "y": 0 },
+    { "id": "team2", "type": "department", "label": "Equipo Operaciones", "x": 0, "y": 0 }
+  ],
+  "connections": [
+    { "from": "ceo", "to": "cfo" },
+    { "from": "ceo", "to": "coo" },
+    { "from": "cfo", "to": "team1" },
+    { "from": "coo", "to": "team2" }
+  ]
+}
+
+TIPOS DE NODOS:
+- "role": Cargo o posición (Director, Gerente, Jefe)
+- "department": Departamento o área (Finanzas, Ventas, RRHH)
+- "person": Persona específica con nombre
+
+REGLAS OBLIGATORIAS:
+1. NUNCA uses nodos "start", "end", "Inicio" o "Fin" - esto es un organigrama, NO un diagrama de flujo
+2. Debe haber exactamente UN nodo raíz (CEO/Director General) sin padre
+3. La estructura debe ser jerárquica (árbol), sin ciclos
+4. Labels deben ser cargos o departamentos reales en español
+5. Las posiciones x,y serán recalculadas automáticamente, ponlas en 0
+6. SOLO responde con el JSON, sin explicaciones
+7. NO inventes palabras, usa vocabulario empresarial estándar`;
+
+    const figmaSystemPrompt = diagramType === "orgchart" ? orgchartPrompt : flowchartPrompt;
 
     try {
       const figmaResponse = await llmGateway.chat(
@@ -618,7 +743,7 @@ Genera el diagrama basándote en la solicitud del usuario.`;
         ],
         {
           model: MODELS.TEXT,
-          temperature: 0.3,
+          temperature: 0.2,
           topP: 1,
           userId: conversationId,
           requestId: `figma_${Date.now()}`,
@@ -632,24 +757,40 @@ Genera el diagrama basándote en la solicitud del usuario.`;
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
           figmaDiagram = {
+            diagramType: parsed.diagramType || diagramType,
             title: parsed.title || "Diagrama",
             nodes: parsed.nodes || [],
             connections: parsed.connections || []
           };
+          
+          // Apply tree layout for org charts
+          if (figmaDiagram.diagramType === "orgchart") {
+            const validation = validateOrgChart(figmaDiagram);
+            if (!validation.valid) {
+              console.warn("Org chart validation warnings:", validation.errors);
+              // Filter out invalid nodes
+              figmaDiagram.nodes = figmaDiagram.nodes.filter(n => 
+                n.type !== "start" && n.type !== "end" && 
+                !["inicio", "fin", "aleta"].includes(n.label.toLowerCase())
+              );
+            }
+            figmaDiagram = applyTreeLayout(figmaDiagram);
+          }
         }
       } catch (parseError) {
         console.error("Failed to parse Figma diagram JSON:", parseError);
       }
 
       if (figmaDiagram && figmaDiagram.nodes.length > 0) {
+        const typeLabel = diagramType === "orgchart" ? "organigrama" : "diagrama";
         return {
-          content: `He creado el diagrama "${figmaDiagram.title}". Puedes verlo abajo y editarlo en Figma.`,
+          content: `Ha creado el ${typeLabel} "${figmaDiagram.title}". Puedes verlo abajo y editarlo en Figma.`,
           role: "assistant",
           figmaDiagram
         };
       } else {
         return {
-          content: "No pude generar el diagrama. Por favor, describe el proceso o flujo que quieres visualizar con más detalle.",
+          content: "No pude generar el diagrama. Por favor, describe la estructura que quieres visualizar con más detalle.",
           role: "assistant"
         };
       }
