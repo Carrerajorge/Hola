@@ -18,8 +18,8 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ message: "Email y contraseña son requeridos" });
       }
       
-      // Check if it's the admin
-      if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+      // Check if it's the admin (case-insensitive email comparison)
+      if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase() && password === ADMIN_PASSWORD) {
         const adminId = "admin-user-id";
         await authStorage.upsertUser({
           id: adminId,
@@ -114,7 +114,7 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ message: "Email and password required" });
       }
       
-      if (email !== ADMIN_EMAIL || password !== ADMIN_PASSWORD) {
+      if (email.toLowerCase() !== ADMIN_EMAIL.toLowerCase() || password !== ADMIN_PASSWORD) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
       
