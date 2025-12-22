@@ -86,9 +86,14 @@ function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: stri
   if (hasStartEnd) errors.push("Org charts should not have start/end nodes");
   
   const invalidWords = ["inicio", "fin", "start", "end", "aleta"];
+  const validOrgTypes = ["role", "department", "person"];
+  
   diagram.nodes.forEach(node => {
     if (invalidWords.some(w => node.label.toLowerCase() === w)) {
       errors.push(`Invalid label: ${node.label}`);
+    }
+    if (!validOrgTypes.includes(node.type)) {
+      errors.push(`Invalid node type for org chart: ${node.type}`);
     }
   });
   
@@ -96,6 +101,47 @@ function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: stri
   const childIds = new Set(diagram.connections.map(c => c.to));
   const roots = diagram.nodes.filter(n => !childIds.has(n.id));
   if (roots.length !== 1) errors.push(`Expected 1 root, found ${roots.length}`);
+  
+  const parentCount = new Map<string, number>();
+  diagram.connections.forEach(conn => {
+    const count = parentCount.get(conn.to) || 0;
+    parentCount.set(conn.to, count + 1);
+  });
+  parentCount.forEach((count, nodeId) => {
+    if (count > 1) errors.push(`Node ${nodeId} has multiple parents (${count})`);
+  });
+  
+  function hasCycle(): boolean {
+    const visited = new Set<string>();
+    const recStack = new Set<string>();
+    const childrenMap = new Map<string, string[]>();
+    diagram.connections.forEach(conn => {
+      const children = childrenMap.get(conn.from) || [];
+      children.push(conn.to);
+      childrenMap.set(conn.from, children);
+    });
+    
+    function dfs(nodeId: string): boolean {
+      visited.add(nodeId);
+      recStack.add(nodeId);
+      for (const child of childrenMap.get(nodeId) || []) {
+        if (!visited.has(child)) {
+          if (dfs(child)) return true;
+        } else if (recStack.has(child)) {
+          return true;
+        }
+      }
+      recStack.delete(nodeId);
+      return false;
+    }
+    
+    for (const node of diagram.nodes) {
+      if (!visited.has(node.id) && dfs(node.id)) return true;
+    }
+    return false;
+  }
+  
+  if (hasCycle()) errors.push("Org chart contains cycles");
   
   return { valid: errors.length === 0, errors };
 }
@@ -121,13 +167,29 @@ function applyTreeLayout(diagram: FigmaDiagram): FigmaDiagram {
   const HORIZONTAL_GAP = 40;
   const VERTICAL_GAP = 80;
   
+  const subtreeWidthCache = new Map<string, number>();
+  const visited = new Set<string>();
+  
   function getSubtreeWidth(nodeId: string): number {
+    if (subtreeWidthCache.has(nodeId)) return subtreeWidthCache.get(nodeId)!;
+    if (visited.has(nodeId)) return NODE_WIDTH;
+    visited.add(nodeId);
+    
     const children = childrenMap.get(nodeId) || [];
-    if (children.length === 0) return NODE_WIDTH;
-    return children.reduce((sum, childId) => sum + getSubtreeWidth(childId), 0) + (children.length - 1) * HORIZONTAL_GAP;
+    const width = children.length === 0 
+      ? NODE_WIDTH 
+      : children.reduce((sum, childId) => sum + getSubtreeWidth(childId), 0) + (children.length - 1) * HORIZONTAL_GAP;
+    
+    subtreeWidthCache.set(nodeId, width);
+    return width;
   }
   
+  const positioned = new Set<string>();
+  
   function positionNode(nodeId: string, x: number, y: number, level: number) {
+    if (positioned.has(nodeId)) return;
+    positioned.add(nodeId);
+    
     const node = nodeMap.get(nodeId);
     if (!node) return;
     
@@ -765,16 +827,36 @@ REGLAS OBLIGATORIAS:
           
           // Apply tree layout for org charts
           if (figmaDiagram.diagramType === "orgchart") {
+            const validOrgTypes = ["role", "department", "person"];
+            const invalidLabels = ["inicio", "fin", "start", "end", "aleta"];
+            
+            // Filter out invalid nodes
+            const validNodeIds = new Set<string>();
+            figmaDiagram.nodes = figmaDiagram.nodes.filter(node => {
+              const isValidType = validOrgTypes.includes(node.type);
+              const isValidLabel = !invalidLabels.includes(node.label.toLowerCase());
+              if (isValidType && isValidLabel) {
+                validNodeIds.add(node.id);
+                return true;
+              }
+              console.warn(`Filtering out invalid org chart node: ${node.id} (type: ${node.type}, label: ${node.label})`);
+              return false;
+            });
+            
+            // Filter connections to only reference valid nodes
+            figmaDiagram.connections = figmaDiagram.connections.filter(conn => 
+              validNodeIds.has(conn.from) && validNodeIds.has(conn.to)
+            );
+            
+            // Validate the cleaned diagram - reject if still invalid
             const validation = validateOrgChart(figmaDiagram);
             if (!validation.valid) {
-              console.warn("Org chart validation warnings:", validation.errors);
-              // Filter out invalid nodes
-              figmaDiagram.nodes = figmaDiagram.nodes.filter(n => 
-                n.type !== "start" && n.type !== "end" && 
-                !["inicio", "fin", "aleta"].includes(n.label.toLowerCase())
-              );
+              console.warn("Org chart validation errors after filtering:", validation.errors);
+              // Reject the diagram entirely if structural issues remain
+              figmaDiagram = undefined;
+            } else {
+              figmaDiagram = applyTreeLayout(figmaDiagram);
             }
-            figmaDiagram = applyTreeLayout(figmaDiagram);
           }
         }
       } catch (parseError) {

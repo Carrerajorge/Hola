@@ -22,7 +22,7 @@ interface FigmaConnection {
 }
 
 interface FigmaDiagram {
-  diagramType?: DiagramType;
+  diagramType: DiagramType;
   nodes: FigmaNode[];
   connections: FigmaConnection[];
   title?: string;
@@ -361,7 +361,13 @@ export function parseFigmaDiagram(text: string): FigmaDiagram | null {
   try {
     const match = text.match(/```figma\s*([\s\S]*?)```/);
     if (match) {
-      return JSON.parse(match[1]);
+      const parsed = JSON.parse(match[1]);
+      return {
+        diagramType: parsed.diagramType || "flowchart",
+        nodes: parsed.nodes || [],
+        connections: parsed.connections || [],
+        title: parsed.title
+      };
     }
     return null;
   } catch {
@@ -400,5 +406,5 @@ export function generateFlowchartFromDescription(description: string): FigmaDiag
   nodes.push({ id: "end", type: "end", label: "Fin", x: xPos, y: 175 });
   connections.push({ from: lastId, to: "end" });
   
-  return { nodes, connections };
+  return { diagramType: "flowchart", nodes, connections };
 }
