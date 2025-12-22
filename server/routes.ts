@@ -47,7 +47,7 @@ export async function registerRoutes(
   app.use(createCodeRouter());
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
-  app.use("/api/google-forms", createGoogleFormsRouter());
+  app.use("/api/integrations/google/forms", createGoogleFormsRouter());
 
   const objectStorageService = new ObjectStorageService();
 

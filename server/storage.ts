@@ -159,6 +159,7 @@ export interface IStorage {
   // Integration Management
   getIntegrationProviders(): Promise<IntegrationProvider[]>;
   getIntegrationProvider(id: string): Promise<IntegrationProvider | null>;
+  createIntegrationProvider(provider: InsertIntegrationProvider): Promise<IntegrationProvider>;
   getIntegrationAccounts(userId: string): Promise<IntegrationAccount[]>;
   getIntegrationAccount(id: string): Promise<IntegrationAccount | null>;
   getIntegrationAccountByProvider(userId: string, providerId: string): Promise<IntegrationAccount | null>;
@@ -883,6 +884,11 @@ export class MemStorage implements IStorage {
   async getIntegrationProvider(id: string): Promise<IntegrationProvider | null> {
     const [result] = await db.select().from(integrationProviders).where(eq(integrationProviders.id, id));
     return result || null;
+  }
+
+  async createIntegrationProvider(provider: InsertIntegrationProvider): Promise<IntegrationProvider> {
+    const [result] = await db.insert(integrationProviders).values(provider).returning();
+    return result;
   }
 
   async getIntegrationAccounts(userId: string): Promise<IntegrationAccount[]> {

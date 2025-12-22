@@ -1,8 +1,21 @@
+import { google, forms_v1 } from "googleapis";
+import { OAuth2Client } from "google-auth-library";
 import { GoogleGenAI } from "@google/genai";
 
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-interface FormQuestion {
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const REDIRECT_URI = "https://c8de8182-93b8-40c0-96f1-23c96d638a68-00-pmgk23y9x7wl.riker.replit.dev/api/integrations/google/forms/callback";
+
+const SCOPES = [
+  "https://www.googleapis.com/auth/forms.body",
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+];
+
+export interface FormQuestion {
   id: string;
   title: string;
   type: "text" | "paragraph" | "multiple_choice" | "checkbox" | "dropdown";
@@ -10,16 +23,96 @@ interface FormQuestion {
   required: boolean;
 }
 
-interface GeneratedForm {
+export interface GeneratedFormStructure {
+  title: string;
+  description: string;
+  questions: FormQuestion[];
+}
+
+export interface CreatedForm {
+  formId: string;
   title: string;
   description: string;
   questions: FormQuestion[];
   responderUrl: string;
   editUrl: string;
-  formId: string;
 }
 
-export async function generateGoogleForm(prompt: string, customTitle?: string): Promise<GeneratedForm> {
+export interface TokenData {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date;
+}
+
+export interface GoogleUserInfo {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+}
+
+export function createOAuth2Client(): OAuth2Client {
+  return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, REDIRECT_URI);
+}
+
+export function getAuthUrl(): string {
+  const oauth2Client = createOAuth2Client();
+  return oauth2Client.generateAuthUrl({
+    access_type: "offline",
+    scope: SCOPES,
+    prompt: "consent",
+  });
+}
+
+export async function exchangeCodeForTokens(code: string): Promise<TokenData> {
+  const oauth2Client = createOAuth2Client();
+  const { tokens } = await oauth2Client.getToken(code);
+  
+  if (!tokens.access_token) {
+    throw new Error("No access token received from Google");
+  }
+
+  return {
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token || "",
+    expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : new Date(Date.now() + 3600 * 1000),
+  };
+}
+
+export async function getUserInfo(accessToken: string): Promise<GoogleUserInfo> {
+  const oauth2Client = createOAuth2Client();
+  oauth2Client.setCredentials({ access_token: accessToken });
+  
+  const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
+  const { data } = await oauth2.userinfo.get();
+  
+  return {
+    id: data.id || "",
+    email: data.email || "",
+    name: data.name || "",
+    picture: data.picture || undefined,
+  };
+}
+
+export async function revokeTokens(accessToken: string): Promise<void> {
+  const oauth2Client = createOAuth2Client();
+  await oauth2Client.revokeToken(accessToken);
+}
+
+export async function refreshAccessToken(refreshToken: string): Promise<TokenData> {
+  const oauth2Client = createOAuth2Client();
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
+  
+  const { credentials } = await oauth2Client.refreshAccessToken();
+  
+  return {
+    accessToken: credentials.access_token || "",
+    refreshToken: credentials.refresh_token || refreshToken,
+    expiresAt: credentials.expiry_date ? new Date(credentials.expiry_date) : new Date(Date.now() + 3600 * 1000),
+  };
+}
+
+export async function generateFormStructure(prompt: string, customTitle?: string): Promise<GeneratedFormStructure> {
   const systemPrompt = `Eres un experto en crear formularios de Google. Dado un prompt del usuario, genera un JSON con la estructura del formulario.
 
 IMPORTANTE: Responde SOLO con un JSON válido, sin markdown, sin explicaciones.
@@ -74,7 +167,7 @@ Crea entre 5-15 preguntas relevantes y bien estructuradas. Usa variedad de tipos
   }
   jsonText = jsonText.trim();
 
-  let formData: { title: string; description: string; questions: FormQuestion[] };
+  let formData: GeneratedFormStructure;
   try {
     formData = JSON.parse(jsonText);
   } catch (e) {
@@ -86,11 +179,6 @@ Crea entre 5-15 preguntas relevantes y bien estructuradas. Usa variedad de tipos
     formData.title = customTitle;
   }
 
-  const formId = `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
-  const responderUrl = `https://docs.google.com/forms/d/e/${formId}/viewform`;
-  const editUrl = `https://docs.google.com/forms/d/${formId}/edit`;
-
   return {
     title: formData.title,
     description: formData.description,
@@ -98,8 +186,168 @@ Crea entre 5-15 preguntas relevantes y bien estructuradas. Usa variedad de tipos
       ...q,
       id: q.id || `q${idx + 1}`
     })),
-    responderUrl,
-    editUrl,
-    formId
+  };
+}
+
+function mapQuestionTypeToGoogleForms(type: FormQuestion["type"]): forms_v1.Schema$Item {
+  const baseItem: forms_v1.Schema$Item = {};
+  
+  switch (type) {
+    case "text":
+      baseItem.questionItem = {
+        question: {
+          textQuestion: {
+            paragraph: false,
+          },
+        },
+      };
+      break;
+    case "paragraph":
+      baseItem.questionItem = {
+        question: {
+          textQuestion: {
+            paragraph: true,
+          },
+        },
+      };
+      break;
+    case "multiple_choice":
+      baseItem.questionItem = {
+        question: {
+          choiceQuestion: {
+            type: "RADIO",
+            options: [],
+          },
+        },
+      };
+      break;
+    case "checkbox":
+      baseItem.questionItem = {
+        question: {
+          choiceQuestion: {
+            type: "CHECKBOX",
+            options: [],
+          },
+        },
+      };
+      break;
+    case "dropdown":
+      baseItem.questionItem = {
+        question: {
+          choiceQuestion: {
+            type: "DROP_DOWN",
+            options: [],
+          },
+        },
+      };
+      break;
+    default:
+      baseItem.questionItem = {
+        question: {
+          textQuestion: {
+            paragraph: false,
+          },
+        },
+      };
+  }
+  
+  return baseItem;
+}
+
+export async function createGoogleForm(
+  accessToken: string,
+  formStructure: GeneratedFormStructure
+): Promise<CreatedForm> {
+  const oauth2Client = createOAuth2Client();
+  oauth2Client.setCredentials({ access_token: accessToken });
+  
+  const forms = google.forms({ version: "v1", auth: oauth2Client });
+  
+  const createResponse = await forms.forms.create({
+    requestBody: {
+      info: {
+        title: formStructure.title,
+        documentTitle: formStructure.title,
+      },
+    },
+  });
+  
+  const formId = createResponse.data.formId;
+  if (!formId) {
+    throw new Error("Failed to create form - no formId returned");
+  }
+  
+  const requests: forms_v1.Schema$Request[] = [];
+  
+  if (formStructure.description) {
+    requests.push({
+      updateFormInfo: {
+        info: {
+          description: formStructure.description,
+        },
+        updateMask: "description",
+      },
+    });
+  }
+  
+  formStructure.questions.forEach((question, index) => {
+    const item = mapQuestionTypeToGoogleForms(question.type);
+    
+    item.title = question.title;
+    
+    if (item.questionItem?.question) {
+      item.questionItem.question.required = question.required;
+      
+      if (question.options && item.questionItem.question.choiceQuestion) {
+        item.questionItem.question.choiceQuestion.options = question.options.map(opt => ({
+          value: opt,
+        }));
+      }
+    }
+    
+    requests.push({
+      createItem: {
+        item,
+        location: {
+          index,
+        },
+      },
+    });
+  });
+  
+  if (requests.length > 0) {
+    await forms.forms.batchUpdate({
+      formId,
+      requestBody: {
+        requests,
+      },
+    });
+  }
+  
+  const getResponse = await forms.forms.get({ formId });
+  const responderUri = getResponse.data.responderUri || `https://docs.google.com/forms/d/e/${formId}/viewform`;
+  
+  return {
+    formId,
+    title: formStructure.title,
+    description: formStructure.description,
+    questions: formStructure.questions,
+    responderUrl: responderUri,
+    editUrl: `https://docs.google.com/forms/d/${formId}/edit`,
+  };
+}
+
+export async function generateGoogleForm(prompt: string, customTitle?: string): Promise<CreatedForm> {
+  const formStructure = await generateFormStructure(prompt, customTitle);
+  
+  const formId = `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  return {
+    formId,
+    title: formStructure.title,
+    description: formStructure.description,
+    questions: formStructure.questions,
+    responderUrl: `https://docs.google.com/forms/d/e/${formId}/viewform`,
+    editUrl: `https://docs.google.com/forms/d/${formId}/edit`,
   };
 }
