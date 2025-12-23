@@ -224,7 +224,7 @@ export async function searchEmails(
           messageId,
           threadId,
           labels,
-          permalink: `https://mail.google.com/mail/u/0/#inbox/${threadId}`
+          permalink: `https://mail.google.com/mail/u/0/#all/${messageId}`
         }
       });
     } catch (error) {
@@ -280,7 +280,7 @@ export async function getEmailThread(threadId: string): Promise<EmailThread | nu
           messageId,
           threadId,
           labels: msgLabels,
-          permalink: `https://mail.google.com/mail/u/0/#inbox/${threadId}`
+          permalink: `https://mail.google.com/mail/u/0/#all/${messageId}`
         }
       });
     }
