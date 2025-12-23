@@ -118,14 +118,23 @@ export function createGmailRouter() {
   router.get("/connect", (req: Request, res: Response) => {
     const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
     if (hostname) {
-      res.redirect(`https://${hostname}/oauth/google-mail`);
+      res.redirect(`https://${hostname}/connectors/google-mail/connect`);
     } else {
       res.status(500).json({ error: "Connector not available" });
     }
   });
 
   router.post("/disconnect", async (req: Request, res: Response) => {
-    res.json({ success: true, message: "Para desconectar Gmail, usa la configuración del conector de Replit" });
+    const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
+    if (hostname) {
+      res.json({ 
+        success: true, 
+        disconnectUrl: `https://${hostname}/connectors/google-mail/disconnect`,
+        message: "Para desconectar Gmail, visita la URL de desconexión" 
+      });
+    } else {
+      res.json({ success: false, message: "Connector not available" });
+    }
   });
 
   return router;
