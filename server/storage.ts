@@ -30,12 +30,13 @@ import {
   type ToolCallLog, type InsertToolCallLog,
   type ConsentLog, type SharedLink, type InsertSharedLink,
   type CompanyKnowledge, type InsertCompanyKnowledge,
+  type GmailOAuthToken, type InsertGmailOAuthToken,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   gpts, gptCategories, gptVersions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
   notificationEventTypes, notificationPreferences, userSettings,
   integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs,
-  consentLogs, sharedLinks, companyKnowledge
+  consentLogs, sharedLinks, companyKnowledge, gmailOAuthTokens
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
@@ -198,6 +199,11 @@ export interface IStorage {
   createCompanyKnowledge(knowledge: InsertCompanyKnowledge): Promise<CompanyKnowledge>;
   updateCompanyKnowledge(id: string, updates: Partial<InsertCompanyKnowledge>): Promise<CompanyKnowledge | null>;
   deleteCompanyKnowledge(id: string): Promise<void>;
+  // Gmail OAuth Token operations (Custom MCP)
+  getGmailOAuthToken(userId: string): Promise<GmailOAuthToken | null>;
+  saveGmailOAuthToken(token: InsertGmailOAuthToken): Promise<GmailOAuthToken>;
+  updateGmailOAuthToken(userId: string, updates: Partial<InsertGmailOAuthToken>): Promise<GmailOAuthToken | null>;
+  deleteGmailOAuthToken(userId: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -1148,6 +1154,38 @@ export class MemStorage implements IStorage {
 
   async deleteCompanyKnowledge(id: string): Promise<void> {
     await db.delete(companyKnowledge).where(eq(companyKnowledge.id, id));
+  }
+
+  // Gmail OAuth Token operations (Custom MCP)
+  async getGmailOAuthToken(userId: string): Promise<GmailOAuthToken | null> {
+    const [token] = await db.select().from(gmailOAuthTokens)
+      .where(eq(gmailOAuthTokens.userId, userId));
+    return token || null;
+  }
+
+  async saveGmailOAuthToken(token: InsertGmailOAuthToken): Promise<GmailOAuthToken> {
+    const existing = await this.getGmailOAuthToken(token.userId);
+    if (existing) {
+      const [updated] = await db.update(gmailOAuthTokens)
+        .set({ ...token, updatedAt: new Date() })
+        .where(eq(gmailOAuthTokens.userId, token.userId))
+        .returning();
+      return updated;
+    }
+    const [result] = await db.insert(gmailOAuthTokens).values(token).returning();
+    return result;
+  }
+
+  async updateGmailOAuthToken(userId: string, updates: Partial<InsertGmailOAuthToken>): Promise<GmailOAuthToken | null> {
+    const [result] = await db.update(gmailOAuthTokens)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(gmailOAuthTokens.userId, userId))
+      .returning();
+    return result || null;
+  }
+
+  async deleteGmailOAuthToken(userId: string): Promise<void> {
+    await db.delete(gmailOAuthTokens).where(eq(gmailOAuthTokens.userId, userId));
   }
 }
 

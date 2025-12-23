@@ -973,3 +973,31 @@ export const insertCompanyKnowledgeSchema = createInsertSchema(companyKnowledge)
 
 export type InsertCompanyKnowledge = z.infer<typeof insertCompanyKnowledgeSchema>;
 export type CompanyKnowledge = typeof companyKnowledge.$inferSelect;
+
+// ========================================
+// Gmail OAuth Tokens (Custom MCP Integration)
+// ========================================
+
+export const gmailOAuthTokens = pgTable("gmail_oauth_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  accountEmail: text("account_email").notNull(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  scopes: text("scopes").array().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("gmail_oauth_user_idx").on(table.userId),
+  uniqueIndex("gmail_oauth_user_email_idx").on(table.userId, table.accountEmail),
+]);
+
+export const insertGmailOAuthTokenSchema = createInsertSchema(gmailOAuthTokens).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertGmailOAuthToken = z.infer<typeof insertGmailOAuthTokenSchema>;
+export type GmailOAuthToken = typeof gmailOAuthTokens.$inferSelect;
