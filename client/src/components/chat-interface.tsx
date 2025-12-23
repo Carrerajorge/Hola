@@ -73,6 +73,8 @@ import { DocumentGeneratorDialog } from "@/components/document-generator-dialog"
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
 import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDetector";
+import { detectGmailIntent } from "@/lib/gmailIntentDetector";
+import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { RecordingPanel } from "@/components/recording-panel";
 import { Composer } from "@/components/composer";
@@ -762,6 +764,7 @@ export function ChatInterface({
   const [isGoogleFormsOpen, setIsGoogleFormsOpen] = useState(false);
   const [googleFormsPrompt, setGoogleFormsPrompt] = useState("");
   const [isGoogleFormsActive, setIsGoogleFormsActive] = useState(true);
+  const [isGmailActive, setIsGmailActive] = useState(true);
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
@@ -1907,6 +1910,33 @@ export function ChatInterface({
       };
       
       onSendMessage(formPreviewMsg);
+      setAiState("idle");
+      setAiProcessSteps([]);
+      return;
+    }
+
+    // Check for Gmail intent
+    const hasGmailMention = userInput.toLowerCase().includes('@gmail');
+    const gmailIntent = detectGmailIntent(cleanPrompt, isGmailActive, hasGmailMention);
+    
+    if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== 'low') {
+      const gmailPreviewMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "Buscando en tu correo electrónico...",
+        timestamp: new Date(),
+        gmailPreview: {
+          query: gmailIntent.searchQuery || cleanPrompt,
+          action: gmailIntent.suggestedAction === 'search' || gmailIntent.suggestedAction === 'list' 
+            ? 'search' 
+            : gmailIntent.suggestedAction === 'read' 
+              ? 'recent' 
+              : 'recent',
+          filters: gmailIntent.filters
+        }
+      };
+      
+      onSendMessage(gmailPreviewMsg);
       setAiState("idle");
       setAiProcessSteps([]);
       return;

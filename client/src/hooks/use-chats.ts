@@ -23,6 +23,13 @@ export interface GoogleFormPreview {
   autoStart?: boolean;
 }
 
+export interface GmailPreview {
+  query?: string;
+  action?: "search" | "unread" | "recent" | "thread";
+  threadId?: string;
+  filters?: string[];
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -35,6 +42,7 @@ export interface Message {
   figmaDiagram?: FigmaDiagram;
   generatedImage?: string;
   googleFormPreview?: GoogleFormPreview;
+  gmailPreview?: GmailPreview;
 }
 
 export interface Chat {
@@ -95,6 +103,7 @@ export function useChats() {
               sources: msg.sources,
               figmaDiagram: msg.figmaDiagram,
               googleFormPreview: msg.googleFormPreview,
+              gmailPreview: msg.gmailPreview,
               generatedImage: msg.generatedImage,
             })),
           };
@@ -207,6 +216,7 @@ export function useChats() {
               sources: msg.sources,
               figmaDiagram: msg.figmaDiagram,
               googleFormPreview: msg.googleFormPreview,
+              gmailPreview: msg.gmailPreview,
               generatedImage: msg.generatedImage
             })
           });
@@ -298,6 +308,7 @@ export function useChats() {
             sources: message.sources,
             figmaDiagram: message.figmaDiagram,
             googleFormPreview: message.googleFormPreview,
+            gmailPreview: message.gmailPreview,
             generatedImage: message.generatedImage
           })
         });

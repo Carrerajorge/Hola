@@ -171,7 +171,7 @@ export function createChatsRouter() {
         return res.status(403).json({ error: "Access denied" });
       }
       
-      const { role, content, attachments, sources, figmaDiagram, googleFormPreview, generatedImage } = req.body;
+      const { role, content, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage } = req.body;
       if (!role || !content) {
         return res.status(400).json({ error: "role and content are required" });
       }
@@ -183,6 +183,7 @@ export function createChatsRouter() {
         sources: sources || null,
         figmaDiagram: figmaDiagram || null,
         googleFormPreview: googleFormPreview || null,
+        gmailPreview: gmailPreview || null,
         generatedImage: generatedImage || null
       });
       
