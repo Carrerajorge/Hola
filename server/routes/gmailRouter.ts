@@ -2,12 +2,19 @@
 import { Router, Request, Response } from "express";
 import {
   checkGmailConnection,
+  checkGmailConnectionForUser,
   searchEmails,
+  searchEmailsForUser,
   getEmailThread,
+  getEmailThreadForUser,
   sendReply,
+  sendEmailForUser,
   getLabels,
+  getLabelsForUser,
   markAsRead,
-  markAsUnread
+  markEmailAsReadForUser,
+  markAsUnread,
+  markEmailAsUnreadForUser
 } from "../services/gmailService";
 
 export function createGmailRouter() {
@@ -15,8 +22,15 @@ export function createGmailRouter() {
 
   router.get("/status", async (req: Request, res: Response) => {
     try {
-      const status = await checkGmailConnection();
-      res.json(status);
+      const userId = (req as any).userId;
+      
+      if (userId) {
+        const status = await checkGmailConnectionForUser(userId);
+        res.json(status);
+      } else {
+        const status = await checkGmailConnection();
+        res.json(status);
+      }
     } catch (error: any) {
       console.error("[Gmail] Status check error:", error);
       res.json({ connected: false, error: error.message });
@@ -25,6 +39,7 @@ export function createGmailRouter() {
 
   router.get("/search", async (req: Request, res: Response) => {
     try {
+      const userId = (req as any).userId;
       const { q, maxResults, labelIds, pageToken } = req.query;
       
       const query = typeof q === 'string' ? q : '';
@@ -32,7 +47,10 @@ export function createGmailRouter() {
       const labels = typeof labelIds === 'string' ? labelIds.split(',') : undefined;
       const token = typeof pageToken === 'string' ? pageToken : undefined;
 
-      const result = await searchEmails(query, max, labels, token);
+      const result = userId 
+        ? await searchEmailsForUser(userId, query, max, labels, token)
+        : await searchEmails(query, max, labels, token);
+      
       res.json({ emails: result.emails, nextPageToken: result.nextPageToken });
     } catch (error: any) {
       console.error("[Gmail] Search error:", error);
@@ -42,13 +60,16 @@ export function createGmailRouter() {
 
   router.get("/threads/:threadId", async (req: Request, res: Response) => {
     try {
+      const userId = (req as any).userId;
       const { threadId } = req.params;
       
       if (!threadId) {
         return res.status(400).json({ error: "Thread ID required" });
       }
 
-      const thread = await getEmailThread(threadId);
+      const thread = userId
+        ? await getEmailThreadForUser(userId, threadId)
+        : await getEmailThread(threadId);
       
       if (!thread) {
         return res.status(404).json({ error: "Thread not found" });
@@ -63,6 +84,7 @@ export function createGmailRouter() {
 
   router.post("/reply", async (req: Request, res: Response) => {
     try {
+      const userId = (req as any).userId;
       const { threadId, to, subject, body } = req.body;
       
       if (!threadId || !to || !body) {
@@ -71,7 +93,9 @@ export function createGmailRouter() {
         });
       }
 
-      const result = await sendReply(threadId, to, subject || '', body);
+      const result = userId
+        ? await sendEmailForUser(userId, to, subject || '', body, threadId)
+        : await sendReply(threadId, to, subject || '', body);
       
       if (result.success) {
         res.json({ success: true, messageId: result.messageId });
@@ -84,9 +108,40 @@ export function createGmailRouter() {
     }
   });
 
+  router.post("/send", async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const { to, subject, body, threadId } = req.body;
+      
+      if (!to || !body) {
+        return res.status(400).json({ 
+          error: "Missing required fields: to, body" 
+        });
+      }
+
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const result = await sendEmailForUser(userId, to, subject || '', body, threadId);
+      
+      if (result.success) {
+        res.json({ success: true, messageId: result.messageId });
+      } else {
+        res.status(500).json({ success: false, error: result.error });
+      }
+    } catch (error: any) {
+      console.error("[Gmail] Send error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   router.get("/labels", async (req: Request, res: Response) => {
     try {
-      const labels = await getLabels();
+      const userId = (req as any).userId;
+      const labels = userId 
+        ? await getLabelsForUser(userId)
+        : await getLabels();
       res.json({ labels });
     } catch (error: any) {
       console.error("[Gmail] Labels fetch error:", error);
@@ -96,8 +151,11 @@ export function createGmailRouter() {
 
   router.post("/messages/:messageId/read", async (req: Request, res: Response) => {
     try {
+      const userId = (req as any).userId;
       const { messageId } = req.params;
-      const success = await markAsRead(messageId);
+      const success = userId
+        ? await markEmailAsReadForUser(userId, messageId)
+        : await markAsRead(messageId);
       res.json({ success });
     } catch (error: any) {
       console.error("[Gmail] Mark read error:", error);
@@ -107,8 +165,11 @@ export function createGmailRouter() {
 
   router.post("/messages/:messageId/unread", async (req: Request, res: Response) => {
     try {
+      const userId = (req as any).userId;
       const { messageId } = req.params;
-      const success = await markAsUnread(messageId);
+      const success = userId
+        ? await markEmailAsUnreadForUser(userId, messageId)
+        : await markAsUnread(messageId);
       res.json({ success });
     } catch (error: any) {
       console.error("[Gmail] Mark unread error:", error);
@@ -118,15 +179,27 @@ export function createGmailRouter() {
 
   router.get("/connect", async (req: Request, res: Response) => {
     try {
-      const status = await checkGmailConnection();
-      if (status.connected) {
-        const returnUrl = req.query.return_url || '/';
-        res.redirect(`${returnUrl}?gmail_connected=true`);
+      const userId = (req as any).userId;
+      
+      if (userId) {
+        const status = await checkGmailConnectionForUser(userId);
+        if (status.connected) {
+          const returnUrl = req.query.return_url || '/';
+          res.redirect(`${returnUrl}?gmail_connected=true`);
+        } else {
+          res.redirect('/api/oauth/google/gmail/start');
+        }
       } else {
-        res.status(400).json({ 
-          error: "Gmail no está configurado",
-          message: "Gmail necesita ser conectado a través del panel de integraciones de Replit" 
-        });
+        const status = await checkGmailConnection();
+        if (status.connected) {
+          const returnUrl = req.query.return_url || '/';
+          res.redirect(`${returnUrl}?gmail_connected=true`);
+        } else {
+          res.status(400).json({ 
+            error: "Gmail no está configurado",
+            message: "Gmail necesita ser conectado a través del panel de integraciones de Replit" 
+          });
+        }
       }
     } catch (error: any) {
       res.status(400).json({ 
@@ -138,15 +211,21 @@ export function createGmailRouter() {
   });
 
   router.post("/disconnect", async (req: Request, res: Response) => {
-    const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-    if (hostname) {
-      res.json({ 
-        success: true, 
-        disconnectUrl: `https://${hostname}/connectors/google-mail/disconnect`,
-        message: "Para desconectar Gmail, visita la URL de desconexión" 
-      });
+    const userId = (req as any).userId;
+    
+    if (userId) {
+      res.redirect(307, '/api/oauth/google/gmail/disconnect');
     } else {
-      res.json({ success: false, message: "Connector not available" });
+      const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
+      if (hostname) {
+        res.json({ 
+          success: true, 
+          disconnectUrl: `https://${hostname}/connectors/google-mail/disconnect`,
+          message: "Para desconectar Gmail, visita la URL de desconexión" 
+        });
+      } else {
+        res.json({ success: false, message: "Connector not available" });
+      }
     }
   });
 

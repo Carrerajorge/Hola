@@ -48,6 +48,8 @@ interface GmailConnectionStatus {
   connected: boolean;
   email?: string;
   error?: string;
+  useCustomOAuth?: boolean;
+  hasFullPermissions?: boolean;
 }
 
 interface EmailsResponse {
@@ -69,28 +71,68 @@ interface ReplyParams {
 }
 
 export function useGmailConnection() {
+  const queryClient = useQueryClient();
+
   const query = useQuery<GmailConnectionStatus>({
     queryKey: ["gmail", "connection"],
     queryFn: async () => {
-      const res = await fetch("/api/integrations/google/gmail/status");
+      const res = await fetch("/api/oauth/google/gmail/status");
       const data = await res.json();
       return {
         connected: data.connected ?? false,
         email: data.email,
-        error: data.error
+        error: data.error,
+        useCustomOAuth: data.useCustomOAuth ?? true,
+        hasFullPermissions: data.hasFullPermissions ?? false
       };
     },
     staleTime: 60 * 1000,
     retry: 1
   });
 
+  const connectGmail = async () => {
+    try {
+      const res = await fetch("/api/oauth/google/gmail/start");
+      const data = await res.json();
+      if (data.authUrl) {
+        window.location.href = data.authUrl;
+      } else {
+        throw new Error(data.error || "Failed to start Gmail connection");
+      }
+    } catch (error: any) {
+      console.error("[Gmail] Connect error:", error);
+      throw error;
+    }
+  };
+
+  const disconnectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/oauth/google/gmail/disconnect", {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (!data.success && !res.ok) {
+        throw new Error(data.error || "Failed to disconnect Gmail");
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gmail"] });
+    }
+  });
+
   return {
     isConnected: query.data?.connected ?? false,
     email: query.data?.email ?? "",
+    useCustomOAuth: query.data?.useCustomOAuth ?? true,
+    hasFullPermissions: query.data?.hasFullPermissions ?? false,
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.data?.error || (query.error as Error)?.message,
-    refetch: query.refetch
+    refetch: query.refetch,
+    connectGmail,
+    disconnectGmail: disconnectMutation.mutate,
+    isDisconnecting: disconnectMutation.isPending
   };
 }
 
@@ -116,7 +158,6 @@ export function useGmailEmails(
         const errorData = await res.json().catch(() => ({}));
         const errorMessage = errorData.error || "Error al cargar correos";
         
-        // Handle specific permission errors
         if (errorMessage.includes("Insufficient Permission") || res.status === 403) {
           throw new Error("INSUFFICIENT_SCOPE: El conector de Gmail no tiene los permisos necesarios para leer correos. Es necesario reconectar con permisos completos.");
         }
@@ -242,6 +283,48 @@ export function useGmailReply() {
   return {
     sendReply: mutation.mutate,
     sendReplyAsync: mutation.mutateAsync,
+    isSending: mutation.isPending,
+    isError: mutation.isError,
+    error: (mutation.error as Error)?.message,
+    isSuccess: mutation.isSuccess,
+    reset: mutation.reset
+  };
+}
+
+export function useGmailSend() {
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: async (params: { to: string; subject: string; body: string; threadId?: string }) => {
+      const res = await fetch("/api/integrations/google/gmail/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params)
+      });
+
+      const data = await res.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Error al enviar email");
+      }
+
+      return data;
+    },
+    onSuccess: (_, variables) => {
+      if (variables.threadId) {
+        queryClient.invalidateQueries({
+          queryKey: ["gmail", "thread", variables.threadId]
+        });
+      }
+      queryClient.invalidateQueries({
+        queryKey: ["gmail", "emails"]
+      });
+    }
+  });
+
+  return {
+    sendEmail: mutation.mutate,
+    sendEmailAsync: mutation.mutateAsync,
     isSending: mutation.isPending,
     isError: mutation.isError,
     error: (mutation.error as Error)?.message,

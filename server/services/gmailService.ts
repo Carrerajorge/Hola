@@ -1,10 +1,15 @@
-// Gmail Service - Replit Gmail Integration
-// Uses Replit Connectors for OAuth token management
+// Gmail Service - Custom OAuth Integration
+// Uses custom OAuth tokens from database for user-specific Gmail access
 
 import { google, gmail_v1 } from 'googleapis';
+import { storage } from '../storage';
+import type { GmailOAuthToken } from '@shared/schema';
 
 let connectionSettings: any;
 
+/**
+ * @deprecated Use getGmailClientForUser instead for user-specific connections
+ */
 async function getAccessToken(): Promise<string> {
   if (connectionSettings && connectionSettings.settings?.expires_at && 
       new Date(connectionSettings.settings.expires_at).getTime() > Date.now()) {
@@ -44,7 +49,9 @@ async function getAccessToken(): Promise<string> {
   return accessToken;
 }
 
-// WARNING: Never cache this client - access tokens expire
+/**
+ * @deprecated Use getGmailClientForUser instead for user-specific connections
+ */
 async function getGmailClient(): Promise<gmail_v1.Gmail> {
   const accessToken = await getAccessToken();
 
@@ -52,6 +59,48 @@ async function getGmailClient(): Promise<gmail_v1.Gmail> {
   oauth2Client.setCredentials({
     access_token: accessToken
   });
+
+  return google.gmail({ version: 'v1', auth: oauth2Client });
+}
+
+async function getGmailClientForUser(userId: string): Promise<gmail_v1.Gmail> {
+  const token = await storage.getGmailOAuthToken(userId);
+  
+  if (!token) {
+    throw new Error('Gmail not connected for this user');
+  }
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+
+  const isExpired = new Date(token.expiresAt).getTime() <= Date.now();
+  
+  if (isExpired && token.refreshToken) {
+    oauth2Client.setCredentials({
+      refresh_token: token.refreshToken
+    });
+
+    try {
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      
+      await storage.updateGmailOAuthToken(userId, {
+        accessToken: credentials.access_token!,
+        expiresAt: new Date(credentials.expiry_date!)
+      });
+
+      oauth2Client.setCredentials(credentials);
+    } catch (error: any) {
+      console.error('[Gmail] Token refresh failed:', error.message);
+      throw new Error('Gmail token expired. Please reconnect.');
+    }
+  } else {
+    oauth2Client.setCredentials({
+      access_token: token.accessToken,
+      refresh_token: token.refreshToken
+    });
+  }
 
   return google.gmail({ version: 'v1', auth: oauth2Client });
 }
@@ -107,10 +156,12 @@ export interface EmailMessage {
   source: SourceMetadata;
 }
 
+/**
+ * @deprecated Use checkGmailConnectionForUser instead
+ */
 export async function checkGmailConnection(): Promise<GmailConnectionStatus> {
   try {
     const gmail = await getGmailClient();
-    // Use labels.list instead of getProfile since we have gmail.labels scope
     const labels = await gmail.users.labels.list({ userId: 'me' });
     
     if (labels.data.labels && labels.data.labels.length > 0) {
@@ -121,6 +172,30 @@ export async function checkGmailConnection(): Promise<GmailConnectionStatus> {
     return { connected: false };
   } catch (error: any) {
     console.log("[Gmail] Connection check failed:", error.message);
+    return { connected: false };
+  }
+}
+
+export async function checkGmailConnectionForUser(userId: string): Promise<GmailConnectionStatus> {
+  try {
+    const token = await storage.getGmailOAuthToken(userId);
+    
+    if (!token) {
+      return { connected: false };
+    }
+
+    const gmail = await getGmailClientForUser(userId);
+    const labels = await gmail.users.labels.list({ userId: 'me' });
+    
+    if (labels.data.labels && labels.data.labels.length > 0) {
+      return {
+        connected: true,
+        email: token.accountEmail
+      };
+    }
+    return { connected: false };
+  } catch (error: any) {
+    console.log("[Gmail] Connection check failed for user:", error.message);
     return { connected: false };
   }
 }
@@ -176,14 +251,13 @@ export interface SearchEmailsResult {
   nextPageToken?: string;
 }
 
-export async function searchEmails(
+async function searchEmailsInternal(
+  gmail: gmail_v1.Gmail,
   query: string = '',
   maxResults: number = 20,
   labelIds?: string[],
   pageToken?: string
 ): Promise<SearchEmailsResult> {
-  const gmail = await getGmailClient();
-  
   const listParams: gmail_v1.Params$Resource$Users$Messages$List = {
     userId: 'me',
     maxResults,
@@ -243,10 +317,32 @@ export async function searchEmails(
   return { emails: emailSummaries, nextPageToken };
 }
 
-export async function getEmailThread(threadId: string): Promise<EmailThread | null> {
+/**
+ * @deprecated Use searchEmailsForUser instead
+ */
+export async function searchEmails(
+  query: string = '',
+  maxResults: number = 20,
+  labelIds?: string[],
+  pageToken?: string
+): Promise<SearchEmailsResult> {
+  const gmail = await getGmailClient();
+  return searchEmailsInternal(gmail, query, maxResults, labelIds, pageToken);
+}
+
+export async function searchEmailsForUser(
+  userId: string,
+  query: string = '',
+  maxResults: number = 20,
+  labelIds?: string[],
+  pageToken?: string
+): Promise<SearchEmailsResult> {
+  const gmail = await getGmailClientForUser(userId);
+  return searchEmailsInternal(gmail, query, maxResults, labelIds, pageToken);
+}
+
+async function getEmailThreadInternal(gmail: gmail_v1.Gmail, threadId: string): Promise<EmailThread | null> {
   try {
-    const gmail = await getGmailClient();
-    
     const thread = await gmail.users.threads.get({
       userId: 'me',
       id: threadId,
@@ -305,24 +401,36 @@ export async function getEmailThread(threadId: string): Promise<EmailThread | nu
   }
 }
 
-export async function sendReply(
-  threadId: string,
+/**
+ * @deprecated Use getEmailThreadForUser instead
+ */
+export async function getEmailThread(threadId: string): Promise<EmailThread | null> {
+  const gmail = await getGmailClient();
+  return getEmailThreadInternal(gmail, threadId);
+}
+
+export async function getEmailThreadForUser(userId: string, threadId: string): Promise<EmailThread | null> {
+  const gmail = await getGmailClientForUser(userId);
+  return getEmailThreadInternal(gmail, threadId);
+}
+
+async function sendEmailInternal(
+  gmail: gmail_v1.Gmail,
   to: string,
   subject: string,
-  body: string
+  body: string,
+  threadId?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
-    const gmail = await getGmailClient();
-    
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const from = profile.data.emailAddress;
 
-    const replySubject = subject.startsWith('Re:') ? subject : `Re: ${subject}`;
+    const emailSubject = threadId && !subject.startsWith('Re:') ? `Re: ${subject}` : subject;
     
     const emailLines = [
       `From: ${from}`,
       `To: ${to}`,
-      `Subject: ${replySubject}`,
+      `Subject: ${emailSubject}`,
       `Content-Type: text/plain; charset=utf-8`,
       '',
       body
@@ -338,20 +446,43 @@ export async function sendReply(
       userId: 'me',
       requestBody: {
         raw: rawMessage,
-        threadId
+        threadId: threadId || undefined
       }
     });
 
     return { success: true, messageId: response.data.id || undefined };
   } catch (error: any) {
-    console.error('[Gmail] Error sending reply:', error);
+    console.error('[Gmail] Error sending email:', error);
     return { success: false, error: error.message };
   }
 }
 
-export async function getLabels(): Promise<Array<{ id: string; name: string; type: string }>> {
+/**
+ * @deprecated Use sendEmailForUser instead
+ */
+export async function sendReply(
+  threadId: string,
+  to: string,
+  subject: string,
+  body: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const gmail = await getGmailClient();
+  return sendEmailInternal(gmail, to, subject, body, threadId);
+}
+
+export async function sendEmailForUser(
+  userId: string,
+  to: string,
+  subject: string,
+  body: string,
+  threadId?: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const gmail = await getGmailClientForUser(userId);
+  return sendEmailInternal(gmail, to, subject, body, threadId);
+}
+
+async function getLabelsInternal(gmail: gmail_v1.Gmail): Promise<Array<{ id: string; name: string; type: string }>> {
   try {
-    const gmail = await getGmailClient();
     const response = await gmail.users.labels.list({ userId: 'me' });
     
     return (response.data.labels || []).map(label => ({
@@ -365,9 +496,21 @@ export async function getLabels(): Promise<Array<{ id: string; name: string; typ
   }
 }
 
-export async function markAsRead(messageId: string): Promise<boolean> {
+/**
+ * @deprecated Use getLabelsForUser instead
+ */
+export async function getLabels(): Promise<Array<{ id: string; name: string; type: string }>> {
+  const gmail = await getGmailClient();
+  return getLabelsInternal(gmail);
+}
+
+export async function getLabelsForUser(userId: string): Promise<Array<{ id: string; name: string; type: string }>> {
+  const gmail = await getGmailClientForUser(userId);
+  return getLabelsInternal(gmail);
+}
+
+async function markAsReadInternal(gmail: gmail_v1.Gmail, messageId: string): Promise<boolean> {
   try {
-    const gmail = await getGmailClient();
     await gmail.users.messages.modify({
       userId: 'me',
       id: messageId,
@@ -382,9 +525,21 @@ export async function markAsRead(messageId: string): Promise<boolean> {
   }
 }
 
-export async function markAsUnread(messageId: string): Promise<boolean> {
+/**
+ * @deprecated Use markEmailAsReadForUser instead
+ */
+export async function markAsRead(messageId: string): Promise<boolean> {
+  const gmail = await getGmailClient();
+  return markAsReadInternal(gmail, messageId);
+}
+
+export async function markEmailAsReadForUser(userId: string, messageId: string): Promise<boolean> {
+  const gmail = await getGmailClientForUser(userId);
+  return markAsReadInternal(gmail, messageId);
+}
+
+async function markAsUnreadInternal(gmail: gmail_v1.Gmail, messageId: string): Promise<boolean> {
   try {
-    const gmail = await getGmailClient();
     await gmail.users.messages.modify({
       userId: 'me',
       id: messageId,
@@ -397,4 +552,17 @@ export async function markAsUnread(messageId: string): Promise<boolean> {
     console.error('[Gmail] Error marking as unread:', error);
     return false;
   }
+}
+
+/**
+ * @deprecated Use markEmailAsUnreadForUser instead
+ */
+export async function markAsUnread(messageId: string): Promise<boolean> {
+  const gmail = await getGmailClient();
+  return markAsUnreadInternal(gmail, messageId);
+}
+
+export async function markEmailAsUnreadForUser(userId: string, messageId: string): Promise<boolean> {
+  const gmail = await getGmailClientForUser(userId);
+  return markAsUnreadInternal(gmail, messageId);
 }
