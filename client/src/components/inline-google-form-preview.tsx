@@ -4,7 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { 
   Loader2, ExternalLink, CheckCircle2, Copy, Check, 
   User, LogOut, ClipboardList, AlertCircle, FileText,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, RefreshCw
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -363,9 +363,23 @@ export function InlineGoogleFormPreview({
             )}
 
             {error && (
-              <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                {error}
+              <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
+                  <div className="flex-1">
+                    <p className="text-red-700 dark:text-red-300 text-sm font-medium">No se pudo crear el formulario</p>
+                    <p className="text-red-600 dark:text-red-400 text-xs mt-1">{error}</p>
+                  </div>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => { setError(null); createForm(); }}
+                  className="mt-2 w-full text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
+                >
+                  <RefreshCw className="h-3 w-3 mr-1" />
+                  Reintentar
+                </Button>
               </div>
             )}
 

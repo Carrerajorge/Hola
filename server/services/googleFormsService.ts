@@ -133,6 +133,8 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenDat
 }
 
 export async function generateFormStructure(prompt: string, customTitle?: string): Promise<GeneratedFormStructure> {
+  console.log("[GoogleForms] Generating form structure for prompt:", prompt.slice(0, 100));
+  
   const systemPrompt = `Eres un experto en crear formularios de Google. Dado un prompt del usuario, genera un JSON con la estructura del formulario.
 
 IMPORTANTE: Responde SOLO con un JSON válido, sin markdown, sin explicaciones.
@@ -161,52 +163,59 @@ Tipos de preguntas disponibles:
 
 Crea entre 5-15 preguntas relevantes y bien estructuradas. Usa variedad de tipos de preguntas.`;
 
-  const model = genAI.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: [
-      { role: "user", parts: [{ text: `${systemPrompt}\n\nPrompt del usuario: ${prompt}${customTitle ? `\nTítulo preferido: ${customTitle}` : ""}` }] }
-    ],
-    config: {
-      temperature: 0.7,
-      maxOutputTokens: 2000,
-    }
-  });
-
-  const response = await model;
-  const text = response.text || "";
-  
-  let jsonText = text.trim();
-  if (jsonText.startsWith("```json")) {
-    jsonText = jsonText.slice(7);
-  }
-  if (jsonText.startsWith("```")) {
-    jsonText = jsonText.slice(3);
-  }
-  if (jsonText.endsWith("```")) {
-    jsonText = jsonText.slice(0, -3);
-  }
-  jsonText = jsonText.trim();
-
-  let formData: GeneratedFormStructure;
   try {
-    formData = JSON.parse(jsonText);
-  } catch (e) {
-    console.error("Failed to parse form JSON:", e, jsonText);
-    throw new Error("Error al generar la estructura del formulario");
-  }
+    const response = await genAI.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        { role: "user", parts: [{ text: `${systemPrompt}\n\nPrompt del usuario: ${prompt}${customTitle ? `\nTítulo preferido: ${customTitle}` : ""}` }] }
+      ],
+      config: {
+        temperature: 0.7,
+        maxOutputTokens: 2000,
+      }
+    });
 
-  if (customTitle) {
-    formData.title = customTitle;
-  }
+    const text = response.text ?? "";
+    console.log("[GoogleForms] Gemini response length:", text.length);
+  
+    let jsonText = text.trim();
+    if (jsonText.startsWith("```json")) {
+      jsonText = jsonText.slice(7);
+    }
+    if (jsonText.startsWith("```")) {
+      jsonText = jsonText.slice(3);
+    }
+    if (jsonText.endsWith("```")) {
+      jsonText = jsonText.slice(0, -3);
+    }
+    jsonText = jsonText.trim();
 
-  return {
-    title: formData.title,
-    description: formData.description,
-    questions: formData.questions.map((q, idx) => ({
-      ...q,
-      id: q.id || `q${idx + 1}`
-    })),
-  };
+    let formData: GeneratedFormStructure;
+    try {
+      formData = JSON.parse(jsonText);
+    } catch (e) {
+      console.error("Failed to parse form JSON:", e, jsonText);
+      throw new Error("Error al generar la estructura del formulario - respuesta inválida");
+    }
+
+    if (customTitle) {
+      formData.title = customTitle;
+    }
+
+    console.log("[GoogleForms] Form structure generated:", formData.title, formData.questions.length, "questions");
+
+    return {
+      title: formData.title,
+      description: formData.description,
+      questions: formData.questions.map((q, idx) => ({
+        ...q,
+        id: q.id || `q${idx + 1}`
+      })),
+    };
+  } catch (error: any) {
+    console.error("[GoogleForms] Error generating form structure:", error.message);
+    throw error;
+  }
 }
 
 function mapQuestionTypeToGoogleForms(type: FormQuestion["type"]): forms_v1.Schema$Item {
