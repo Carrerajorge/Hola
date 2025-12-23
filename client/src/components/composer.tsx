@@ -100,6 +100,9 @@ export interface ComposerProps {
   handleFigmaDisconnect?: () => void;
   onOpenGoogleForms?: () => void;
   onOpenApps?: () => void;
+  onFormSubmit?: (prompt: string, fileContext: Array<{ name: string; content: string; type: string }>) => void;
+  isGoogleFormsActive?: boolean;
+  setIsGoogleFormsActive?: (value: boolean) => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -161,6 +164,9 @@ export function Composer({
   handleFigmaDisconnect,
   onOpenGoogleForms,
   onOpenApps,
+  onFormSubmit,
+  isGoogleFormsActive,
+  setIsGoogleFormsActive,
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
@@ -173,7 +179,7 @@ export function Composer({
     box: false,
     outlook: false,
     googleContacts: false,
-    googleForms: true,
+    googleForms: isGoogleFormsActive ?? true,
   });
   
   const [showMentionPopover, setShowMentionPopover] = useState(false);
@@ -234,7 +240,10 @@ export function Composer({
     setMentionSearch("");
     textareaRef.current?.focus();
     
-    source.action();
+    if (source.id === 'googleForms') {
+      setIsGoogleFormsActive?.(true);
+      setKnowledgeSources(prev => ({ ...prev, googleForms: true }));
+    }
   };
 
   const handleMentionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -258,8 +267,8 @@ export function Composer({
     const newValue = !knowledgeSources[source];
     setKnowledgeSources(prev => ({ ...prev, [source]: newValue }));
     
-    if (newValue && source === 'googleForms') {
-      onOpenGoogleForms?.();
+    if (source === 'googleForms') {
+      setIsGoogleFormsActive?.(newValue);
     }
   };
 

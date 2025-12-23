@@ -42,6 +42,7 @@ import { Message, storeGeneratedImage, getGeneratedImage } from "@/hooks/use-cha
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { FigmaBlock } from "@/components/figma-block";
 import { CodeExecutionBlock } from "@/components/code-execution-block";
+import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
 import { getFileTheme, getFileCategory } from "@/lib/fileTypeTheme";
 
 interface DocumentBlock {
@@ -801,6 +802,16 @@ const AssistantMessage = memo(function AssistantMessage({
       {message.figmaDiagram && (
         <div className="mt-3 w-full">
           <FigmaBlock diagram={message.figmaDiagram} />
+        </div>
+      )}
+
+      {message.googleFormPreview && (
+        <div className="mt-3 w-full">
+          <InlineGoogleFormPreview
+            prompt={message.googleFormPreview.prompt}
+            fileContext={message.googleFormPreview.fileContext}
+            autoStart={message.googleFormPreview.autoStart}
+          />
         </div>
       )}
     </div>

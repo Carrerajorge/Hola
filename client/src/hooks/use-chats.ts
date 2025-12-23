@@ -17,6 +17,12 @@ export interface FigmaDiagram {
   title?: string;
 }
 
+export interface GoogleFormPreview {
+  prompt: string;
+  fileContext?: Array<{ name: string; content: string; type: string }>;
+  autoStart?: boolean;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -28,6 +34,7 @@ export interface Message {
   sources?: { fileName: string; content: string }[];
   figmaDiagram?: FigmaDiagram;
   generatedImage?: string;
+  googleFormPreview?: GoogleFormPreview;
 }
 
 export interface Chat {

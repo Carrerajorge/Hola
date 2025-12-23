@@ -71,6 +71,8 @@ import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
+import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
+import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDetector";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { RecordingPanel } from "@/components/recording-panel";
 import { Composer } from "@/components/composer";
@@ -759,6 +761,7 @@ export function ChatInterface({
   const [docGeneratorType, setDocGeneratorType] = useState<"word" | "excel">("word");
   const [isGoogleFormsOpen, setIsGoogleFormsOpen] = useState(false);
   const [googleFormsPrompt, setGoogleFormsPrompt] = useState("");
+  const [isGoogleFormsActive, setIsGoogleFormsActive] = useState(true);
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
@@ -1876,6 +1879,39 @@ export function ChatInterface({
 
     onSendMessage(userMsg);
 
+    // Check for Google Forms intent
+    const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
+    const formIntent = detectFormIntent(cleanPrompt, isGoogleFormsActive, hasMention);
+    
+    if (formIntent.hasFormIntent && formIntent.confidence !== 'low') {
+      // Create file context from uploaded files
+      const fileContext = currentFiles
+        .filter(f => f.content && f.status === "ready")
+        .map(f => ({
+          name: f.name,
+          content: f.content || "",
+          type: f.type
+        }));
+      
+      // Create assistant message with inline form preview
+      const formPreviewMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "Creando formulario en base a tu solicitud...",
+        timestamp: new Date(),
+        googleFormPreview: {
+          prompt: cleanPrompt,
+          fileContext: fileContext.length > 0 ? fileContext : undefined,
+          autoStart: true
+        }
+      };
+      
+      onSendMessage(formPreviewMsg);
+      setAiState("idle");
+      setAiProcessSteps([]);
+      return;
+    }
+
     try {
       abortControllerRef.current = new AbortController();
       
@@ -2828,6 +2864,8 @@ export function ChatInterface({
             handleFigmaDisconnect={handleFigmaDisconnect}
             onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
             onOpenApps={onOpenApps}
+            isGoogleFormsActive={isGoogleFormsActive}
+            setIsGoogleFormsActive={setIsGoogleFormsActive}
           />
         </div>
       )}
