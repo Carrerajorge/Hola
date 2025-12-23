@@ -964,6 +964,25 @@ export function Composer({
                             onCheckedChange={() => toggleKnowledgeSource('googleForms')}
                             data-testid="source-google-forms"
                           />
+                          
+                          <div className="border-t border-border mt-1 pt-1">
+                            <SourceListItem
+                              icon={
+                                <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
+                                  <circle cx="4" cy="8" r="1.5" />
+                                  <circle cx="8" cy="8" r="1.5" />
+                                  <circle cx="12" cy="8" r="1.5" />
+                                  <circle cx="4" cy="4" r="1.5" />
+                                  <circle cx="8" cy="4" r="1.5" />
+                                  <circle cx="12" cy="4" r="1.5" />
+                                </svg>
+                              }
+                              label="Conectar más"
+                              variant="connect"
+                              onConnect={() => onOpenApps?.()}
+                              data-testid="source-connect-more"
+                            />
+                          </div>
                         </div>
                       </PopoverContent>
                     </Popover>
