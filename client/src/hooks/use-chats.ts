@@ -94,6 +94,8 @@ export function useChats() {
               attachments: msg.attachments,
               sources: msg.sources,
               figmaDiagram: msg.figmaDiagram,
+              googleFormPreview: msg.googleFormPreview,
+              generatedImage: msg.generatedImage,
             })),
           };
         })
@@ -203,7 +205,9 @@ export function useChats() {
               content: msg.content,
               attachments: msg.attachments,
               sources: msg.sources,
-              figmaDiagram: msg.figmaDiagram
+              figmaDiagram: msg.figmaDiagram,
+              googleFormPreview: msg.googleFormPreview,
+              generatedImage: msg.generatedImage
             })
           });
         } catch (error) {
@@ -292,7 +296,9 @@ export function useChats() {
             content: message.content,
             attachments: message.attachments,
             sources: message.sources,
-            figmaDiagram: message.figmaDiagram
+            figmaDiagram: message.figmaDiagram,
+            googleFormPreview: message.googleFormPreview,
+            generatedImage: message.generatedImage
           })
         });
       } catch (error) {

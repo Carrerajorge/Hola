@@ -498,6 +498,9 @@ export const chatMessages = pgTable("chat_messages", {
   attachments: jsonb("attachments"), // array of attachments
   sources: jsonb("sources"), // array of sources
   figmaDiagram: jsonb("figma_diagram"), // Figma diagram data
+  googleFormPreview: jsonb("google_form_preview"), // Google Forms preview data
+  generatedImage: text("generated_image"), // Base64 or URL of generated image
+  metadata: jsonb("metadata"), // Additional metadata for extensibility
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("chat_messages_chat_idx").on(table.chatId),

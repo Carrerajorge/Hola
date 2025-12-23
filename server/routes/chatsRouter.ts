@@ -171,7 +171,7 @@ export function createChatsRouter() {
         return res.status(403).json({ error: "Access denied" });
       }
       
-      const { role, content, attachments, sources, figmaDiagram } = req.body;
+      const { role, content, attachments, sources, figmaDiagram, googleFormPreview, generatedImage } = req.body;
       if (!role || !content) {
         return res.status(400).json({ error: "role and content are required" });
       }
@@ -181,7 +181,9 @@ export function createChatsRouter() {
         content,
         attachments: attachments || null,
         sources: sources || null,
-        figmaDiagram: figmaDiagram || null
+        figmaDiagram: figmaDiagram || null,
+        googleFormPreview: googleFormPreview || null,
+        generatedImage: generatedImage || null
       });
       
       if (chat.title === "New Chat" && role === "user") {
