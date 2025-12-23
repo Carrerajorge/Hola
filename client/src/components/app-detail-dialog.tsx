@@ -4,7 +4,8 @@ import {
   Dialog, 
   DialogContent, 
   DialogHeader,
-  DialogTitle 
+  DialogTitle,
+  DialogDescription
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ExternalLink, Loader2, ChevronLeft, AlertCircle, RefreshCw, XCircle, Clock, Ban, WifiOff } from "lucide-react";
@@ -271,20 +272,24 @@ export function AppDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg p-0 gap-0">
+      <DialogContent className="max-w-lg p-0 gap-0" aria-describedby="app-dialog-description">
         <DialogHeader className="p-4 pb-0">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
             <button 
               onClick={() => onOpenChange(false)}
-              className="hover:text-foreground transition-colors flex items-center gap-1"
+              className="hover:text-foreground transition-colors flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm"
+              aria-label="Go back to applications"
               data-testid="button-back-apps"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
               Aplicaciones
             </button>
             <span>/</span>
             <span>{app.name}</span>
           </div>
+          <DialogDescription id="app-dialog-description" className="sr-only">
+            Details and connection settings for {app.name}. {app.shortDescription}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="px-6 pb-6">
@@ -374,23 +379,24 @@ export function AppDetailDialog({
                 <button
                   onClick={() => setConnectionError(null)}
                   className={cn(
-                    "p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-colors",
+                    "p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
                     connectionError.type === 'rate_limited' || connectionError.type === 'token_expired'
                       ? "text-amber-600 dark:text-amber-400"
                       : "text-red-600 dark:text-red-400"
                   )}
+                  aria-label="Dismiss error message"
                   data-testid={`button-dismiss-error-${app.id}`}
                 >
-                  <XCircle className="h-4 w-4" />
+                  <XCircle className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
             </div>
           )}
 
           {isConnected && connectionEmail && (
-            <div className="mb-6 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+            <div className="mb-6 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800" role="status" aria-live="polite">
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                <div className="w-2 h-2 rounded-full bg-green-500" aria-hidden="true"></div>
                 <span className="text-sm text-green-700 dark:text-green-400">
                   Conectado como <strong>{connectionEmail}</strong>
                 </span>
@@ -399,9 +405,9 @@ export function AppDetailDialog({
           )}
 
           {isConnected && !connectionEmail && (
-            <div className="mb-6 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+            <div className="mb-6 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800" role="status" aria-live="polite">
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                <div className="w-2 h-2 rounded-full bg-green-500" aria-hidden="true"></div>
                 <span className="text-sm text-green-700 dark:text-green-400">
                   Conectado correctamente
                 </span>
@@ -435,10 +441,11 @@ export function AppDetailDialog({
                     href={app.websiteUrl} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="text-primary hover:underline flex items-center gap-1"
+                    className="text-primary hover:underline flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm"
+                    aria-label={`Visit ${app.name} website (opens in new tab)`}
                     data-testid={`link-website-${app.id}`}
                   >
-                    <ExternalLink className="h-3 w-3" />
+                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
                   </a>
                 </div>
               )}
@@ -450,10 +457,11 @@ export function AppDetailDialog({
                     href={app.privacyUrl} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="text-primary hover:underline flex items-center gap-1"
+                    className="text-primary hover:underline flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm"
+                    aria-label={`${app.name} privacy policy (opens in new tab)`}
                     data-testid={`link-privacy-${app.id}`}
                   >
-                    <ExternalLink className="h-3 w-3" />
+                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
                   </a>
                 </div>
               )}

@@ -58,10 +58,11 @@ export function RecordingPanel({
               variant="ghost"
               size="icon"
               onClick={onDiscard}
-              className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all"
+              className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all focus-visible:ring-2 focus-visible:ring-primary/50"
+              aria-label="Discard recording"
               data-testid="button-discard-recording"
             >
-              <Trash2 className="h-5 w-5" />
+              <Trash2 className="h-5 w-5" aria-hidden="true" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Descartar grabación</TooltipContent>
@@ -106,13 +107,14 @@ export function RecordingPanel({
               variant="ghost"
               size="icon"
               onClick={isPaused ? onResume : onPause}
-              className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 transition-all"
+              className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 transition-all focus-visible:ring-2 focus-visible:ring-primary/50"
+              aria-label={isPaused ? "Resume recording" : "Pause recording"}
               data-testid={isPaused ? "button-resume-recording" : "button-pause-recording"}
             >
               {isPaused ? (
-                <Play className="h-5 w-5" />
+                <Play className="h-5 w-5" aria-hidden="true" />
               ) : (
-                <Pause className="h-5 w-5" />
+                <Pause className="h-5 w-5" aria-hidden="true" />
               )}
             </Button>
           </TooltipTrigger>
@@ -125,10 +127,11 @@ export function RecordingPanel({
               size="icon"
               onClick={onSend}
               disabled={!canSend}
-              className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 bg-transparent hover:bg-muted text-foreground disabled:opacity-50 transition-all"
+              className="h-10 w-10 rounded-full border-2 border-muted-foreground/30 hover:border-foreground/50 bg-transparent hover:bg-muted text-foreground disabled:opacity-50 transition-all focus-visible:ring-2 focus-visible:ring-primary/50"
+              aria-label="Send message"
               data-testid="button-send-recording"
             >
-              <ArrowUp className="h-5 w-5" />
+              <ArrowUp className="h-5 w-5" aria-hidden="true" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Enviar mensaje</TooltipContent>
@@ -145,10 +148,11 @@ export function RecordingPanel({
             variant="ghost"
             onClick={onToggleRecording}
             size="icon" 
-            className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted"
+            className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary/50"
+            aria-label="Start voice dictation"
             data-testid="button-voice-dictation"
           >
-            <Mic className="h-5 w-5" />
+            <Mic className="h-5 w-5" aria-hidden="true" />
           </Button>
         </TooltipTrigger>
         <TooltipContent>Dictar texto</TooltipContent>
@@ -158,10 +162,11 @@ export function RecordingPanel({
         <Button 
           onClick={onStopChat}
           size="icon" 
-          className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50"
+          className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50 focus-visible:ring-2 focus-visible:ring-white/50"
+          aria-label="Stop AI response"
           data-testid="button-stop-chat"
         >
-          <Square className="h-5 w-5 fill-current" />
+          <Square className="h-5 w-5 fill-current" aria-hidden="true" />
         </Button>
       ) : hasContent ? (
         <motion.div
@@ -174,10 +179,11 @@ export function RecordingPanel({
           <Button 
             onClick={onSubmit}
             size="icon" 
-            className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn"
+            className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn focus-visible:ring-2 focus-visible:ring-primary/50"
+            aria-label="Send message (Cmd+Enter)"
             data-testid="button-send-message"
           >
-            <ArrowUp className="h-5 w-5" />
+            <ArrowUp className="h-5 w-5" aria-hidden="true" />
           </Button>
         </motion.div>
       ) : (
@@ -186,10 +192,11 @@ export function RecordingPanel({
             <Button 
               onClick={onOpenVoiceChat}
               size="icon" 
-              className="h-9 w-9 rounded-full transition-all duration-300 bg-foreground text-background hover:bg-foreground/90"
+              className="h-9 w-9 rounded-full transition-all duration-300 bg-foreground text-background hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-primary/50"
+              aria-label="Start voice conversation mode"
               data-testid="button-voice-chat-mode"
             >
-              <AudioLines className="h-5 w-5" />
+              <AudioLines className="h-5 w-5" aria-hidden="true" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Modo conversación por voz</TooltipContent>

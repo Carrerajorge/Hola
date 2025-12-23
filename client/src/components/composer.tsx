@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { 
   Plus, 
   Upload, 
@@ -339,8 +339,9 @@ export function Composer({
               data-testid={`inline-file-${index}`}
             >
               <button
-                className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white z-10 transition-colors opacity-0 group-hover:opacity-100"
+                className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white z-10 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/50"
                 onClick={() => removeFile(index)}
+                aria-label={`Remove file ${file.name}`}
                 data-testid={`button-remove-file-${index}`}
               >
                 <X className="h-3 w-3" />
@@ -430,8 +431,9 @@ export function Composer({
                   )}
                 </div>
                 <button
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shadow-md focus:outline-none focus:ring-2 focus:ring-destructive/50"
                   onClick={(e) => { e.stopPropagation(); removeFile(index); }}
+                  aria-label={`Remove file ${file.name}`}
                   data-testid={`button-remove-file-${index}`}
                 >
                   <X className="h-3 w-3" />
@@ -494,8 +496,9 @@ export function Composer({
         <Button 
           variant="ghost" 
           size="icon" 
+          aria-label="Open tools menu"
           className={cn(
-            "h-9 w-9 rounded-full text-muted-foreground hover:text-foreground flex-shrink-0",
+            "h-9 w-9 rounded-full text-muted-foreground hover:text-foreground flex-shrink-0 focus-visible:ring-2 focus-visible:ring-primary/50",
             isDocumentMode && "h-10 w-10"
           )}
         >
@@ -1037,6 +1040,14 @@ export function Composer({
                 if (showMentionPopover) return;
                 
                 const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                
+                // Cmd/Ctrl + Enter to send message (keyboard shortcut)
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
+                  e.preventDefault();
+                  handleSubmit();
+                  return;
+                }
+                
                 if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
                   e.preventDefault();
                   handleSubmit();
@@ -1044,8 +1055,10 @@ export function Composer({
               }}
               onPaste={handlePaste}
               placeholder={placeholder}
+              aria-label="Message input"
+              aria-describedby="composer-hint"
               className={cn(
-                "min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-0 text-base",
+                "min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-0 text-base transition-shadow",
                 !isDocumentMode && "leading-relaxed"
               )}
               rows={1}
@@ -1097,21 +1110,24 @@ export function Composer({
                       <Users className="h-3.5 w-3.5 relative z-[3]" />
                       <button 
                         onClick={() => setShowKnowledgeDialog(true)}
-                        className="max-w-[120px] truncate relative z-[3] hover:underline cursor-pointer"
+                        className="max-w-[120px] truncate relative z-[3] hover:underline cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-400 rounded"
+                        aria-label="Open company knowledge settings"
                         data-testid="button-open-knowledge-dialog"
                       >
                         Conocimientos de la e...
                       </button>
                       <button 
                         onClick={() => setShowKnowledgeDialog(true)}
-                        className="hover:bg-purple-200/50 dark:hover:bg-purple-800/50 rounded-full p-0.5 transition-colors relative z-[3]"
+                        className="hover:bg-purple-200/50 dark:hover:bg-purple-800/50 rounded-full p-0.5 transition-colors relative z-[3] focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        aria-label="Knowledge settings"
                         data-testid="button-settings-knowledge"
                       >
                         <Settings2 className="h-3 w-3" />
                       </button>
                       <button 
                         onClick={() => setShowKnowledgeBase(false)}
-                        className="ml-0.5 hover:bg-purple-200/50 dark:hover:bg-purple-800/50 rounded-full p-0.5 transition-colors relative z-[3]"
+                        className="ml-0.5 hover:bg-purple-200/50 dark:hover:bg-purple-800/50 rounded-full p-0.5 transition-colors relative z-[3] focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        aria-label="Close knowledge base"
                         data-testid="button-close-knowledge-base"
                       >
                         <X className="h-3 w-3" />
@@ -1202,7 +1218,8 @@ export function Composer({
         </div>
       </div>
 
-      <div className="text-center text-xs text-muted-foreground mt-3">
+      <div id="composer-hint" className="text-center text-xs text-muted-foreground mt-3">
+        <span className="sr-only">Press Enter to send, Shift+Enter for new line, or Cmd+Enter to send quickly. </span>
         MICHAT can make mistakes. Check important info.
       </div>
 

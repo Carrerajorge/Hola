@@ -46,6 +46,16 @@ import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { getFileTheme, getFileCategory } from "@/lib/fileTypeTheme";
 
+const formatMessageTime = (timestamp: Date | undefined): string => {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString('es-ES', { 
+    hour: '2-digit', 
+    minute: '2-digit',
+    hour12: false 
+  });
+};
+
 interface DocumentBlock {
   type: "word" | "excel" | "ppt";
   title: string;
@@ -325,27 +335,33 @@ const ActionToolbar = memo(function ActionToolbar({
   return (
     <TooltipProvider delayDuration={300}>
       <div
-        className="flex items-center gap-1 mt-2"
+        className="flex items-center gap-0.5"
         data-testid={`message-actions-${testIdSuffix}`}
       >
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              size="sm"
+              className="h-7 px-2 gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60"
               onClick={() => onCopy(content, messageId)}
               data-testid={`button-copy-${testIdSuffix}`}
             >
               {copiedMessageId === messageId ? (
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                  <span className="text-xs text-green-500">Copiado</span>
+                </>
               ) : (
-                <Copy className="h-4 w-4" />
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  <span className="text-xs">Copiar</span>
+                </>
               )}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p>Copiar</p>
+            <p>Copiar respuesta</p>
           </TooltipContent>
         </Tooltip>
 
@@ -561,29 +577,36 @@ const UserMessage = memo(function UserMessage({
               {message.content}
             </div>
           )}
-          <div className="flex items-center justify-end gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              onClick={() => onCopyMessage(message.content, message.id)}
-              data-testid={`button-copy-user-${message.id}`}
-            >
-              {copiedMessageId === message.id ? (
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
-              ) : (
-                <Copy className="h-4 w-4" />
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              onClick={() => onStartEdit(message)}
-              data-testid={`button-edit-user-${message.id}`}
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
+          <div className="flex items-center justify-end gap-1.5 mt-2">
+            {message.timestamp && (
+              <span className="text-[10px] text-muted-foreground/60 mr-1">
+                {formatMessageTime(message.timestamp)}
+              </span>
+            )}
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                onClick={() => onCopyMessage(message.content, message.id)}
+                data-testid={`button-copy-user-${message.id}`}
+              >
+                {copiedMessageId === message.id ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                onClick={() => onStartEdit(message)}
+                data-testid={`button-edit-user-${message.id}`}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -787,21 +810,28 @@ const AssistantMessage = memo(function AssistantMessage({
       )}
 
       {message.content && !message.isThinking && (
-        <ActionToolbar
-          messageId={message.id}
-          content={message.content}
-          msgIndex={msgIndex}
-          copiedMessageId={copiedMessageId}
-          messageFeedback={messageFeedback}
-          speakingMessageId={speakingMessageId}
-          aiState={aiState}
-          variant={variant}
-          onCopy={onCopyMessage}
-          onFeedback={onFeedback}
-          onRegenerate={onRegenerate}
-          onShare={onShare}
-          onReadAloud={onReadAloud}
-        />
+        <div className="flex items-center gap-3 mt-2">
+          {message.timestamp && (
+            <span className="text-[10px] text-muted-foreground/60">
+              {formatMessageTime(message.timestamp)}
+            </span>
+          )}
+          <ActionToolbar
+            messageId={message.id}
+            content={message.content}
+            msgIndex={msgIndex}
+            copiedMessageId={copiedMessageId}
+            messageFeedback={messageFeedback}
+            speakingMessageId={speakingMessageId}
+            aiState={aiState}
+            variant={variant}
+            onCopy={onCopyMessage}
+            onFeedback={onFeedback}
+            onRegenerate={onRegenerate}
+            onShare={onShare}
+            onReadAloud={onReadAloud}
+          />
+        </div>
       )}
 
       {message.figmaDiagram && (
@@ -974,22 +1004,46 @@ export function MessageList({
           animate={{ opacity: 1, y: 0 }}
           className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
         >
-          <div className="flex items-center gap-3 py-3 px-4 text-sm text-muted-foreground bg-muted/30 rounded-lg">
-            <div className="flex gap-1">
-              <span
-                className="w-2 h-2 bg-primary rounded-full animate-bounce"
-                style={{ animationDelay: "0ms" }}
+          <div className="flex items-center gap-3 py-3 px-5 text-sm text-muted-foreground bg-gradient-to-r from-muted/40 to-muted/20 rounded-2xl border border-border/30 shadow-sm">
+            <div className="flex gap-1.5">
+              <motion.span
+                className="w-2.5 h-2.5 bg-primary rounded-full"
+                animate={{ 
+                  scale: [1, 1.2, 1],
+                  opacity: [0.5, 1, 0.5] 
+                }}
+                transition={{ 
+                  duration: 1,
+                  repeat: Infinity,
+                  delay: 0 
+                }}
               />
-              <span
-                className="w-2 h-2 bg-primary rounded-full animate-bounce"
-                style={{ animationDelay: "150ms" }}
+              <motion.span
+                className="w-2.5 h-2.5 bg-primary rounded-full"
+                animate={{ 
+                  scale: [1, 1.2, 1],
+                  opacity: [0.5, 1, 0.5] 
+                }}
+                transition={{ 
+                  duration: 1,
+                  repeat: Infinity,
+                  delay: 0.2 
+                }}
               />
-              <span
-                className="w-2 h-2 bg-primary rounded-full animate-bounce"
-                style={{ animationDelay: "300ms" }}
+              <motion.span
+                className="w-2.5 h-2.5 bg-primary rounded-full"
+                animate={{ 
+                  scale: [1, 1.2, 1],
+                  opacity: [0.5, 1, 0.5] 
+                }}
+                transition={{ 
+                  duration: 1,
+                  repeat: Infinity,
+                  delay: 0.4 
+                }}
               />
             </div>
-            <span className="font-medium">
+            <span className="font-medium text-foreground/80">
               {aiState === "thinking" ? "Pensando..." : "Escribiendo..."}
             </span>
           </div>

@@ -793,13 +793,50 @@ export function ChatInterface({
   const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
   const speechRecognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
 
-  // Auto-scroll to bottom when AI is thinking or streaming
+  // Smart auto-scroll: only scroll if user is near bottom or AI is responding
+  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  };
+
+  // Check if user is near bottom of scroll
+  const isNearBottom = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return true;
+    const threshold = 150; // pixels from bottom
+    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+  };
+
+  // Handle scroll event to show/hide scroll button
+  const handleScroll = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    
+    const nearBottom = isNearBottom();
+    setShowScrollButton(!nearBottom);
+    setUserHasScrolledUp(!nearBottom);
+  };
+
+  // Auto-scroll to bottom when AI is thinking or streaming (only if user hasn't scrolled up)
   useEffect(() => {
-    if (aiState !== "idle" || streamingContent) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if ((aiState !== "idle" || streamingContent) && !userHasScrolledUp) {
+      scrollToBottom();
     }
-  }, [aiState, streamingContent, messages.length]);
+  }, [aiState, streamingContent, userHasScrolledUp]);
+
+  // Always scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Reset user scroll state when AI finishes responding
+      if (aiState === "idle" && !streamingContent) {
+        setUserHasScrolledUp(false);
+      }
+      scrollToBottom();
+    }
+  }, [messages.length]);
 
   useEffect(() => {
     return () => {
@@ -2714,7 +2751,9 @@ export function ChatInterface({
           {/* Messages Area - only show when there are messages */}
           {hasMessages && (
             <div 
-              className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6 overscroll-contain"
+              ref={messagesContainerRef}
+              onScroll={handleScroll}
+              className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6 overscroll-contain scroll-smooth"
               style={{ paddingBottom: 'var(--composer-height, 120px)' }}
             >
               <MessageList
@@ -2748,6 +2787,24 @@ export function ChatInterface({
               <div ref={messagesEndRef} />
 
             </div>
+          )}
+
+          {/* Scroll to bottom button */}
+          {hasMessages && showScrollButton && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 10 }}
+              onClick={() => {
+                setUserHasScrolledUp(false);
+                scrollToBottom();
+              }}
+              className="fixed bottom-32 right-8 z-40 flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105"
+              data-testid="button-scroll-to-bottom"
+            >
+              <ChevronDown className="h-4 w-4" />
+              <span className="text-sm font-medium">Ir al final</span>
+            </motion.button>
           )}
 
           {/* Processing indicators when AI is working (even without messages) */}

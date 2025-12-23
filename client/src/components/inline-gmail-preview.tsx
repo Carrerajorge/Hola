@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -25,11 +25,12 @@ const SourceBadge = ({ source, subject }: { source: SourceMetadata; subject: str
     href={source.permalink}
     target="_blank"
     rel="noopener noreferrer"
-    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-300 transition-colors cursor-pointer"
+    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-300 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+    aria-label={`Open in Gmail: ${subject}`}
     title={`Abrir en Gmail: ${subject}`}
     onClick={(e) => e.stopPropagation()}
   >
-    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none">
+    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6zm-2 0l-8 5-8-5h16zm0 12H4V8l8 5 8-5v10z" fill="currentColor"/>
     </svg>
     <span className="truncate max-w-[120px]">{subject}</span>
@@ -77,6 +78,8 @@ export function InlineGmailPreview({
   const [replyTo, setReplyTo] = useState("");
   const [replySubject, setReplySubject] = useState("");
   const [replyBody, setReplyBody] = useState("");
+  const [focusedEmailIndex, setFocusedEmailIndex] = useState<number>(-1);
+  const emailListRef = useRef<HTMLDivElement>(null);
 
   const { isConnected, email: connectionEmail, isLoading: isCheckingConnection } = useGmailConnection();
   
@@ -149,6 +152,39 @@ export function InlineGmailPreview({
       loadMore(nextPageToken);
     }
   };
+
+  const handleEmailListKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (emails.length === 0) return;
+
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        setFocusedEmailIndex(prev => Math.min(prev + 1, emails.length - 1));
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        setFocusedEmailIndex(prev => Math.max(prev - 1, 0));
+        break;
+      case "Home":
+        e.preventDefault();
+        setFocusedEmailIndex(0);
+        break;
+      case "End":
+        e.preventDefault();
+        setFocusedEmailIndex(emails.length - 1);
+        break;
+    }
+  }, [emails.length]);
+
+  useEffect(() => {
+    if (focusedEmailIndex >= 0 && emailListRef.current) {
+      const emailButtons = emailListRef.current.querySelectorAll('[data-email-item]');
+      const targetButton = emailButtons[focusedEmailIndex] as HTMLElement;
+      if (targetButton) {
+        targetButton.focus();
+      }
+    }
+  }, [focusedEmailIndex]);
 
   if (isCheckingConnection) {
     return (
@@ -226,8 +262,10 @@ export function InlineGmailPreview({
               variant="ghost" 
               size="sm" 
               onClick={() => { setViewMode("list"); setSelectedThreadId(null); }}
+              aria-label="Go back to email list"
+              className="focus-visible:ring-2 focus-visible:ring-red-500/50"
             >
-              <ChevronUp className="h-4 w-4 mr-1" />
+              <ChevronUp className="h-4 w-4 mr-1" aria-hidden="true" />
               Volver
             </Button>
           )}
@@ -244,20 +282,36 @@ export function InlineGmailPreview({
                 className="pl-9"
               />
             </div>
-            <Button type="submit" size="sm" disabled={isFetchingEmails} className="bg-red-600 hover:bg-red-700 text-white">
-              {isFetchingEmails ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            <Button 
+              type="submit" 
+              size="sm" 
+              disabled={isFetchingEmails} 
+              className="bg-red-600 hover:bg-red-700 text-white focus-visible:ring-2 focus-visible:ring-red-500/50"
+              aria-label="Search emails"
+            >
+              {isFetchingEmails ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
+              <span className="sr-only">{isFetchingEmails ? 'Searching...' : 'Search'}</span>
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => refetchEmails()} disabled={isFetchingEmails}>
-              <RefreshCw className={cn("h-4 w-4", isFetchingEmails && "animate-spin")} />
+            <Button 
+              type="button" 
+              variant="outline" 
+              size="sm" 
+              onClick={() => refetchEmails()} 
+              disabled={isFetchingEmails}
+              aria-label="Refresh emails"
+              className="focus-visible:ring-2 focus-visible:ring-red-500/50"
+            >
+              <RefreshCw className={cn("h-4 w-4", isFetchingEmails && "animate-spin")} aria-hidden="true" />
+              <span className="sr-only">{isFetchingEmails ? 'Refreshing...' : 'Refresh'}</span>
             </Button>
           </form>
         )}
       </div>
 
       {error && (
-        <div className="px-4 py-2 bg-red-100 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800">
+        <div className="px-4 py-2 bg-red-100 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800" role="alert" aria-live="assertive">
           <p className="text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" />
+            <AlertCircle className="h-4 w-4" aria-hidden="true" />
             {error}
           </p>
         </div>
@@ -273,22 +327,37 @@ export function InlineGmailPreview({
               exit={{ opacity: 0 }}
             >
               {isLoadingEmails && emails.length === 0 ? (
-                <EmailListSkeleton count={5} />
-              ) : emails.length === 0 ? (
-                <div className="p-8 text-center text-muted-foreground">
-                  <Inbox className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <div role="status" aria-live="polite" aria-label="Loading emails">
+                  <span className="sr-only">Loading emails...</span>
+                  <EmailListSkeleton count={5} />
+                </div>
+              ) : emails.length === 0 && !isLoadingEmails ? (
+                <div className="p-8 text-center text-muted-foreground" role="status">
+                  <Inbox className="h-8 w-8 mx-auto mb-2 opacity-50" aria-hidden="true" />
                   <p>No se encontraron correos</p>
                 </div>
               ) : (
-                <div className="divide-y divide-red-100 dark:divide-red-900/30">
-                  {emails.map((email) => (
+                <div 
+                  ref={emailListRef}
+                  className="divide-y divide-red-100 dark:divide-red-900/30"
+                  role="listbox"
+                  aria-label="Email list"
+                  onKeyDown={handleEmailListKeyDown}
+                >
+                  {emails.map((email, index) => (
                     <button
                       key={email.id}
                       onClick={() => handleSelectEmail(email)}
+                      onFocus={() => setFocusedEmailIndex(index)}
                       className={cn(
-                        "w-full p-3 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors",
-                        email.isUnread && "bg-red-50/50 dark:bg-red-900/10"
+                        "w-full p-3 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500/50",
+                        email.isUnread && "bg-red-50/50 dark:bg-red-900/10",
+                        focusedEmailIndex === index && "bg-red-50 dark:bg-red-900/20"
                       )}
+                      role="option"
+                      aria-selected={focusedEmailIndex === index}
+                      aria-label={`${email.isUnread ? 'Unread email' : 'Email'} from ${email.from}, subject: ${email.subject}, ${formatEmailDate(email.date)}`}
+                      data-email-item
                       data-testid={`email-item-${email.id}`}
                     >
                       <div className="flex items-start gap-3">
@@ -328,7 +397,7 @@ export function InlineGmailPreview({
                           )}
                         </div>
                         {email.isUnread && (
-                          <div className="w-2 h-2 rounded-full bg-red-600 flex-shrink-0 mt-2" />
+                          <div className="w-2 h-2 rounded-full bg-red-600 flex-shrink-0 mt-2" aria-hidden="true" />
                         )}
                       </div>
                     </button>
@@ -383,13 +452,15 @@ export function InlineGmailPreview({
               exit={{ opacity: 0, x: -20 }}
               className="p-4"
             >
-              <h3 className="font-semibold text-lg mb-4">{selectedThread.subject}</h3>
+              <h3 className="font-semibold text-lg mb-4" id="thread-subject">{selectedThread.subject}</h3>
               
-              <div className="space-y-4">
-                {selectedThread.messages.map((msg) => (
+              <div className="space-y-4" role="list" aria-label="Email thread messages">
+                {selectedThread.messages.map((msg, index) => (
                   <div 
                     key={msg.id}
                     className="p-3 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
+                    role="listitem"
+                    aria-label={`Message ${index + 1} from ${msg.from}`}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
@@ -425,25 +496,37 @@ export function InlineGmailPreview({
                     placeholder="Para:"
                     value={replyTo}
                     onChange={(e) => setReplyTo(e.target.value)}
-                    className="text-sm"
+                    className="text-sm focus-visible:ring-2 focus-visible:ring-red-500/50"
+                    aria-label="Reply to email address"
                   />
                   <Textarea
                     placeholder="Escribe tu respuesta..."
                     value={replyBody}
                     onChange={(e) => setReplyBody(e.target.value)}
                     rows={4}
-                    className="resize-none"
+                    className="resize-none focus-visible:ring-2 focus-visible:ring-red-500/50"
+                    aria-label="Reply message body"
+                    onKeyDown={(e) => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && replyBody.trim() && !isSending) {
+                        e.preventDefault();
+                        handleSendReply();
+                      }
+                    }}
                   />
-                  <div className="flex justify-end">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">
+                      <kbd className="px-1 py-0.5 bg-muted rounded text-[10px]">Cmd</kbd>+<kbd className="px-1 py-0.5 bg-muted rounded text-[10px]">Enter</kbd> to send
+                    </span>
                     <Button 
                       onClick={handleSendReply}
                       disabled={!replyBody.trim() || isSending}
-                      className="bg-red-600 hover:bg-red-700 text-white"
+                      className="bg-red-600 hover:bg-red-700 text-white focus-visible:ring-2 focus-visible:ring-red-500/50"
+                      aria-label={isSending ? "Sending reply..." : "Send reply"}
                     >
                       {isSending ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" />
                       ) : (
-                        <Send className="h-4 w-4 mr-2" />
+                        <Send className="h-4 w-4 mr-2" aria-hidden="true" />
                       )}
                       Enviar
                     </Button>
