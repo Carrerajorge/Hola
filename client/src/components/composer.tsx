@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Plus, 
   Upload, 
@@ -100,7 +100,6 @@ export interface ComposerProps {
   handleFigmaDisconnect?: () => void;
   onOpenGoogleForms?: () => void;
   onOpenApps?: () => void;
-  onFormSubmit?: (prompt: string, fileContext: Array<{ name: string; content: string; type: string }>) => void;
   isGoogleFormsActive?: boolean;
   setIsGoogleFormsActive?: (value: boolean) => void;
 }
@@ -164,7 +163,6 @@ export function Composer({
   handleFigmaDisconnect,
   onOpenGoogleForms,
   onOpenApps,
-  onFormSubmit,
   isGoogleFormsActive,
   setIsGoogleFormsActive,
 }: ComposerProps) {
@@ -185,6 +183,12 @@ export function Composer({
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
+
+  useEffect(() => {
+    if (isGoogleFormsActive !== undefined && knowledgeSources.googleForms !== isGoogleFormsActive) {
+      setKnowledgeSources(prev => ({ ...prev, googleForms: isGoogleFormsActive }));
+    }
+  }, [isGoogleFormsActive]);
 
   const connectedSources = [
     { 
