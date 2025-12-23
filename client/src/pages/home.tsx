@@ -201,6 +201,9 @@ export default function Home() {
         {isAppsDialogOpen ? (
           <AppsView 
             onClose={() => setIsAppsDialogOpen(false)}
+            onOpenGmail={() => {
+              setIsAppsDialogOpen(false);
+            }}
           />
         ) : (activeChat || isNewChatMode || chats.length === 0) && (
           <ChatInterface 

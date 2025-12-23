@@ -793,9 +793,10 @@ const apps: App[] = [
 interface AppsViewProps {
   onClose: () => void;
   onOpenGoogleForms?: () => void;
+  onOpenGmail?: () => void;
 }
 
-export function AppsView({ onClose, onOpenGoogleForms }: AppsViewProps) {
+export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("featured");
 
@@ -814,6 +815,9 @@ export function AppsView({ onClose, onOpenGoogleForms }: AppsViewProps) {
     if (appId === "google-forms" && onOpenGoogleForms) {
       onClose();
       onOpenGoogleForms();
+    } else if (appId === "gmail" && onOpenGmail) {
+      onClose();
+      onOpenGmail();
     }
   };
 
@@ -994,6 +998,30 @@ export function AppsView({ onClose, onOpenGoogleForms }: AppsViewProps) {
                   <p className="text-sm text-purple-600/70 dark:text-purple-400/70 truncate">Crea y gestiona formularios con IA</p>
                 </div>
                 <ChevronRight className="h-5 w-5 text-purple-400 group-hover:text-purple-600 transition-colors flex-shrink-0" />
+              </button>
+              
+              <button
+                className="flex items-center gap-4 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-200 dark:border-red-800 transition-colors text-left group"
+                onClick={() => {
+                  onClose();
+                  onOpenGmail?.();
+                }}
+                data-testid="app-item-gmail-connected"
+              >
+                <div className="w-10 h-10 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
+                    <path d="M2 6l10 7 10-7v12H2V6z" fill="#EA4335"/>
+                    <path d="M22 6l-10 7L2 6" stroke="#FBBC05" strokeWidth="2"/>
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-red-700 dark:text-red-300">Gmail</span>
+                    <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
+                  </div>
+                  <p className="text-sm text-red-600/70 dark:text-red-400/70 truncate">Busca, lee y responde correos</p>
+                </div>
+                <ChevronRight className="h-5 w-5 text-red-400 group-hover:text-red-600 transition-colors flex-shrink-0" />
               </button>
             </div>
           </div>
