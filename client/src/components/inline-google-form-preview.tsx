@@ -153,7 +153,10 @@ export function InlineGoogleFormPreview({
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.error || errData.details || "Error al crear el formulario");
+        const errorMessage = errData.details 
+          ? `${errData.error}: ${errData.details}`
+          : errData.error || "Error al crear el formulario";
+        throw new Error(errorMessage);
       }
 
       const data = await res.json();
