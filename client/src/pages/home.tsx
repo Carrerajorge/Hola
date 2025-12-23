@@ -4,7 +4,7 @@ import { ChatInterface } from "@/components/chat-interface";
 import { GptExplorer, Gpt } from "@/components/gpt-explorer";
 import { GptBuilder } from "@/components/gpt-builder";
 import { UserLibrary } from "@/components/user-library";
-import { AppsDialog } from "@/components/apps-dialog";
+import { AppsView } from "@/components/apps-view";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useLocation } from "wouter";
@@ -198,7 +198,11 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full w-full">
-        {(activeChat || isNewChatMode || chats.length === 0) && (
+        {isAppsDialogOpen ? (
+          <AppsView 
+            onClose={() => setIsAppsDialogOpen(false)}
+          />
+        ) : (activeChat || isNewChatMode || chats.length === 0) && (
           <ChatInterface 
             key={chatInterfaceKey} 
             messages={currentMessages}
@@ -239,12 +243,6 @@ export default function Home() {
       <UserLibrary
         open={isLibraryOpen}
         onOpenChange={setIsLibraryOpen}
-      />
-
-      {/* Apps Dialog */}
-      <AppsDialog
-        open={isAppsDialogOpen}
-        onOpenChange={setIsAppsDialogOpen}
       />
     </div>
   );
