@@ -183,6 +183,7 @@ export function Composer({
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
+  const [connectedAppsStatus, setConnectedAppsStatus] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (isGoogleFormsActive !== undefined && knowledgeSources.googleForms !== isGoogleFormsActive) {
@@ -190,7 +191,46 @@ export function Composer({
     }
   }, [isGoogleFormsActive]);
 
-  const connectedSources = [
+  useEffect(() => {
+    const checkConnectedApps = async () => {
+      const endpoints = [
+        { id: 'gmail', endpoint: '/api/integrations/google/gmail/status' },
+        { id: 'googleForms', endpoint: '/api/integrations/google/forms/status' },
+      ];
+      
+      const statuses: Record<string, boolean> = {};
+      await Promise.all(
+        endpoints.map(async ({ id, endpoint }) => {
+          try {
+            const res = await fetch(endpoint, { credentials: 'include' });
+            if (res.ok) {
+              const data = await res.json();
+              statuses[id] = data.connected === true;
+            }
+          } catch {
+            statuses[id] = false;
+          }
+        })
+      );
+      setConnectedAppsStatus(statuses);
+    };
+    
+    checkConnectedApps();
+  }, []);
+
+  const allSources = [
+    { 
+      id: 'gmail', 
+      name: 'Gmail', 
+      mention: '@Gmail',
+      icon: (
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
+          <path d="M2 6l10 7 10-7v12H2V6z" fill="#EA4335"/>
+          <path d="M22 6l-10 7L2 6" stroke="#FBBC05" strokeWidth="2"/>
+        </svg>
+      ),
+      action: () => {}
+    },
     { 
       id: 'googleForms', 
       name: 'Google Forms', 
@@ -205,6 +245,8 @@ export function Composer({
       action: () => onOpenGoogleForms?.()
     },
   ];
+
+  const connectedSources = allSources.filter(source => connectedAppsStatus[source.id]);
 
   const filteredSources = connectedSources.filter(source => 
     source.name.toLowerCase().includes(mentionSearch.toLowerCase()) ||
