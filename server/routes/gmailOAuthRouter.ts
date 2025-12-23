@@ -16,9 +16,23 @@ const GMAIL_SCOPES = [
 const pendingStates = new Map<string, { userId: string; expiresAt: number }>();
 
 function getOAuth2Client() {
-  const redirectUri = process.env.REPLIT_DEV_DOMAIN 
-    ? `https://${process.env.REPLIT_DEV_DOMAIN}/api/oauth/google/gmail/callback`
-    : `${process.env.BASE_URL || 'http://localhost:5000'}/api/oauth/google/gmail/callback`;
+  // Determine the correct domain for OAuth callback
+  let redirectUri: string;
+  
+  if (process.env.REPLIT_DEV_DOMAIN) {
+    // Development environment
+    redirectUri = `https://${process.env.REPLIT_DEV_DOMAIN}/api/oauth/google/gmail/callback`;
+  } else if (process.env.REPLIT_DOMAINS) {
+    // Production environment - use first domain from comma-separated list
+    const primaryDomain = process.env.REPLIT_DOMAINS.split(',')[0].trim();
+    redirectUri = `https://${primaryDomain}/api/oauth/google/gmail/callback`;
+  } else if (process.env.BASE_URL) {
+    redirectUri = `${process.env.BASE_URL}/api/oauth/google/gmail/callback`;
+  } else {
+    redirectUri = 'http://localhost:5000/api/oauth/google/gmail/callback';
+  }
+  
+  console.log('[Gmail OAuth] Using redirect URI:', redirectUri);
     
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
