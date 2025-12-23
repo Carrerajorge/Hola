@@ -121,12 +121,43 @@ router.get('/status', async (req: Request, res: Response) => {
       return;
     }
 
-    const gmail = google.gmail({ version: 'v1', auth: new google.auth.OAuth2() });
-    const oauth2Client = new google.auth.OAuth2();
+    const oauth2Client = getOAuth2Client();
     oauth2Client.setCredentials({
       access_token: token.accessToken,
-      refresh_token: token.refreshToken
+      refresh_token: token.refreshToken,
+      expiry_date: token.expiresAt.getTime()
     });
+    
+    // Check if token needs refresh (expires within 5 minutes)
+    const now = Date.now();
+    const expiryTime = token.expiresAt.getTime();
+    if (expiryTime - now < 5 * 60 * 1000 && token.refreshToken) {
+      try {
+        const { credentials } = await oauth2Client.refreshAccessToken();
+        
+        // Update stored token with new access token
+        await storage.saveGmailOAuthToken({
+          userId,
+          accountEmail: token.accountEmail,
+          accessToken: credentials.access_token!,
+          refreshToken: token.refreshToken,
+          expiresAt: new Date(credentials.expiry_date || Date.now() + 3600000),
+          scopes: token.scopes
+        });
+        
+        oauth2Client.setCredentials(credentials);
+        console.log('[Gmail OAuth] Token refreshed for user', userId);
+      } catch (refreshError) {
+        console.error('[Gmail OAuth] Token refresh failed:', refreshError);
+        // Token refresh failed, user needs to reconnect
+        res.json({ 
+          connected: false, 
+          error: 'Token expired and refresh failed. Please reconnect.',
+          useCustomOAuth: true 
+        });
+        return;
+      }
+    }
     
     const gmailClient = google.gmail({ version: 'v1', auth: oauth2Client });
     await gmailClient.users.labels.list({ userId: 'me' });
