@@ -21,7 +21,6 @@ import {
   Contact,
   Settings2
 } from "lucide-react";
-import { CompanyKnowledgeDialog } from "@/components/company-knowledge-dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -172,7 +171,6 @@ export function Composer({
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
   
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
-  const [showKnowledgeDialog, setShowKnowledgeDialog] = useState(false);
   const [knowledgeSources, setKnowledgeSources] = useState({
     github: false,
     teams: true,
@@ -1223,10 +1221,6 @@ export function Composer({
         MICHAT can make mistakes. Check important info.
       </div>
 
-      <CompanyKnowledgeDialog 
-        open={showKnowledgeDialog} 
-        onOpenChange={setShowKnowledgeDialog} 
-      />
     </div>
   );
 }

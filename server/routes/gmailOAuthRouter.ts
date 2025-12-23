@@ -180,7 +180,8 @@ router.post('/disconnect', async (req: Request, res: Response) => {
 
 setInterval(() => {
   const now = Date.now();
-  for (const [state, data] of pendingStates.entries()) {
+  const entries = Array.from(pendingStates.entries());
+  for (const [state, data] of entries) {
     if (data.expiresAt < now) {
       pendingStates.delete(state);
     }
