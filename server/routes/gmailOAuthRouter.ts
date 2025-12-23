@@ -31,6 +31,34 @@ router.get('/start', async (req: Request, res: Response) => {
   const userId = (req as any).userId;
   
   if (!userId) {
+    // Redirect to login page with return URL
+    res.redirect('/?auth_required=gmail');
+    return;
+  }
+
+  const state = crypto.randomBytes(32).toString('hex');
+  pendingStates.set(state, { 
+    userId, 
+    expiresAt: Date.now() + 10 * 60 * 1000
+  });
+
+  const oauth2Client = getOAuth2Client();
+  const authUrl = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: GMAIL_SCOPES,
+    state,
+    prompt: 'consent'
+  });
+
+  // Redirect directly to Google OAuth (for browser navigation)
+  res.redirect(authUrl);
+});
+
+// JSON endpoint for programmatic access (like React hooks)
+router.get('/start-json', async (req: Request, res: Response) => {
+  const userId = (req as any).userId;
+  
+  if (!userId) {
     res.status(401).json({ error: 'Authentication required' });
     return;
   }

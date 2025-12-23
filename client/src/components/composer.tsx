@@ -561,7 +561,7 @@ export function Composer({
               <Button 
                 variant="ghost" 
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                onClick={() => { setShowKnowledgeBase(true); setShowKnowledgeDialog(true); onCloseSidebar?.(); }}
+                onClick={() => { setShowKnowledgeBase(true); onCloseSidebar?.(); }}
                 data-testid="button-knowledge-base"
               >
                 <Users className="h-4 w-4" />
@@ -1106,22 +1106,12 @@ export function Composer({
                     <div className="liquid-badge flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-purple-700 dark:text-purple-300 text-sm" data-testid="knowledge-base-active">
                       <span className="liquid-blob" />
                       <Users className="h-3.5 w-3.5 relative z-[3]" />
-                      <button 
-                        onClick={() => setShowKnowledgeDialog(true)}
-                        className="max-w-[120px] truncate relative z-[3] hover:underline cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-400 rounded"
-                        aria-label="Open company knowledge settings"
-                        data-testid="button-open-knowledge-dialog"
+                      <span 
+                        className="max-w-[120px] truncate relative z-[3]"
+                        data-testid="knowledge-base-label"
                       >
                         Conocimientos de la e...
-                      </button>
-                      <button 
-                        onClick={() => setShowKnowledgeDialog(true)}
-                        className="hover:bg-purple-200/50 dark:hover:bg-purple-800/50 rounded-full p-0.5 transition-colors relative z-[3] focus:outline-none focus:ring-2 focus:ring-purple-400"
-                        aria-label="Knowledge settings"
-                        data-testid="button-settings-knowledge"
-                      >
-                        <Settings2 className="h-3 w-3" />
-                      </button>
+                      </span>
                       <button 
                         onClick={() => setShowKnowledgeBase(false)}
                         className="ml-0.5 hover:bg-purple-200/50 dark:hover:bg-purple-800/50 rounded-full p-0.5 transition-colors relative z-[3] focus:outline-none focus:ring-2 focus:ring-purple-400"

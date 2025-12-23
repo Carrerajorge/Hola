@@ -92,12 +92,16 @@ export function useGmailConnection() {
 
   const connectGmail = async () => {
     try {
-      const res = await fetch("/api/oauth/google/gmail/start");
+      const res = await fetch("/api/oauth/google/gmail/start-json");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to start Gmail connection");
+      }
       const data = await res.json();
       if (data.authUrl) {
         window.location.href = data.authUrl;
       } else {
-        throw new Error(data.error || "Failed to start Gmail connection");
+        throw new Error("No auth URL returned");
       }
     } catch (error: any) {
       console.error("[Gmail] Connect error:", error);
