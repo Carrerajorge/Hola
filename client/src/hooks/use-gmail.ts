@@ -113,7 +113,15 @@ export function useGmailEmails(
       const res = await fetch(url);
       
       if (!res.ok) {
-        throw new Error("Error al cargar correos");
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = errorData.error || "Error al cargar correos";
+        
+        // Handle specific permission errors
+        if (errorMessage.includes("Insufficient Permission") || res.status === 403) {
+          throw new Error("INSUFFICIENT_SCOPE: El conector de Gmail no tiene los permisos necesarios para leer correos. Es necesario reconectar con permisos completos.");
+        }
+        
+        throw new Error(errorMessage);
       }
       
       const data = await res.json();

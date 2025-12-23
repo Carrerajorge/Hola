@@ -309,11 +309,38 @@ export function InlineGmailPreview({
       </div>
 
       {error && (
-        <div className="px-4 py-2 bg-red-100 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800" role="alert" aria-live="assertive">
-          <p className="text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" aria-hidden="true" />
-            {error}
-          </p>
+        <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800" role="alert" aria-live="assertive">
+          {String(error).includes("INSUFFICIENT_SCOPE") ? (
+            <div className="space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                    Permisos insuficientes
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                    El conector de Gmail tiene permisos limitados. Para leer correos, necesitas permisos de lectura completos.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 pl-7">
+                <a
+                  href="https://mail.google.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-amber-100 dark:bg-amber-800/30 text-amber-700 dark:text-amber-300 rounded-md hover:bg-amber-200 dark:hover:bg-amber-800/50 transition-colors"
+                >
+                  <Mail className="h-3.5 w-3.5" aria-hidden="true" />
+                  Abrir Gmail directamente
+                </a>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
+              <AlertCircle className="h-4 w-4" aria-hidden="true" />
+              {String(error)}
+            </p>
+          )}
         </div>
       )}
 
