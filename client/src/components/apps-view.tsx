@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, ChevronRight, ExternalLink, X } from "lucide-react";
+import { Search, ChevronRight, ExternalLink, X, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AppDetailDialog, type AppMetadata } from "@/components/app-detail-dialog";
 
@@ -870,10 +870,22 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
   });
 
   const handleAppClick = (app: App) => {
-    if (app.statusEndpoint) {
+    if (connectedApps[app.id]) {
+      onClose();
+      if (app.id === "gmail" && onOpenGmail) {
+        onOpenGmail();
+      } else if (app.id === "google-forms" && onOpenGoogleForms) {
+        onOpenGoogleForms();
+      }
+    } else if (app.statusEndpoint) {
       setSelectedApp(app);
       setIsDetailDialogOpen(true);
     }
+  };
+
+  const handleAppSettings = (app: App) => {
+    setSelectedApp(app);
+    setIsDetailDialogOpen(true);
   };
 
   const handleConnectionChange = (appId: string, connected: boolean) => {
@@ -1016,29 +1028,46 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {filteredApps.map((app) => (
-              <button
+              <div
                 key={app.id}
-                className="flex items-center gap-4 p-3 rounded-xl hover:bg-accent transition-colors text-left group"
-                onClick={() => handleAppClick(app)}
-                data-testid={`app-item-${app.id}`}
+                className="flex items-center gap-4 p-3 rounded-xl hover:bg-accent transition-colors group"
               >
-                <div className="flex-shrink-0">{app.icon}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium">{app.name}</span>
-                    {connectedApps[app.id] && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
-                    )}
-                    {app.verified && (
-                      <svg className="w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
-                      </svg>
-                    )}
+                <button
+                  className="flex items-center gap-4 flex-1 min-w-0 text-left"
+                  onClick={() => handleAppClick(app)}
+                  data-testid={`app-item-${app.id}`}
+                >
+                  <div className="flex-shrink-0">{app.icon}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium">{app.name}</span>
+                      {connectedApps[app.id] && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
+                      )}
+                      {app.verified && (
+                        <svg className="w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+                        </svg>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground truncate">{app.description}</p>
                   </div>
-                  <p className="text-sm text-muted-foreground truncate">{app.description}</p>
-                </div>
+                </button>
+                {app.statusEndpoint && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAppSettings(app);
+                    }}
+                    className="p-1.5 rounded-md hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                    data-testid={`app-settings-${app.id}`}
+                    title="Configuración"
+                  >
+                    <Settings className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                )}
                 <ChevronRight className="h-5 w-5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-              </button>
+              </div>
             ))}
           </div>
 
@@ -1053,22 +1082,37 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
               <h3 className="text-sm font-medium text-muted-foreground mb-3">Tus aplicaciones conectadas</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {connectedAppsList.map((app) => (
-                  <button
+                  <div
                     key={`connected-${app.id}`}
-                    className="flex items-center gap-4 p-3 rounded-xl bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 border border-green-200 dark:border-green-800 transition-colors text-left group"
-                    onClick={() => handleAppClick(app)}
-                    data-testid={`app-item-${app.id}-connected`}
+                    className="flex items-center gap-4 p-3 rounded-xl bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 border border-green-200 dark:border-green-800 transition-colors group"
                   >
-                    <div className="flex-shrink-0">{app.icon}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium text-green-700 dark:text-green-300">{app.name}</span>
-                        <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
+                    <button
+                      className="flex items-center gap-4 flex-1 min-w-0 text-left"
+                      onClick={() => handleAppClick(app)}
+                      data-testid={`app-item-${app.id}-connected`}
+                    >
+                      <div className="flex-shrink-0">{app.icon}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium text-green-700 dark:text-green-300">{app.name}</span>
+                          <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
+                        </div>
+                        <p className="text-sm text-green-600/70 dark:text-green-400/70 truncate">{app.description}</p>
                       </div>
-                      <p className="text-sm text-green-600/70 dark:text-green-400/70 truncate">{app.description}</p>
-                    </div>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAppSettings(app);
+                      }}
+                      className="p-1.5 rounded-md hover:bg-green-200 dark:hover:bg-green-800 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      data-testid={`app-settings-${app.id}-connected`}
+                      title="Configuración"
+                    >
+                      <Settings className="h-4 w-4 text-green-600 dark:text-green-400" />
+                    </button>
                     <ChevronRight className="h-5 w-5 text-green-400 group-hover:text-green-600 transition-colors flex-shrink-0" />
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>
