@@ -115,12 +115,24 @@ export function createGmailRouter() {
     }
   });
 
-  router.get("/connect", (req: Request, res: Response) => {
-    const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-    if (hostname) {
-      res.redirect(`https://${hostname}/connectors/google-mail/connect`);
-    } else {
-      res.status(500).json({ error: "Connector not available" });
+  router.get("/connect", async (req: Request, res: Response) => {
+    try {
+      const status = await checkGmailConnection();
+      if (status.connected) {
+        const returnUrl = req.query.return_url || '/';
+        res.redirect(`${returnUrl}?gmail_connected=true`);
+      } else {
+        res.status(400).json({ 
+          error: "Gmail no está configurado",
+          message: "Gmail necesita ser conectado a través del panel de integraciones de Replit" 
+        });
+      }
+    } catch (error: any) {
+      res.status(400).json({ 
+        error: "Gmail no está conectado",
+        message: "Gmail necesita ser conectado a través del panel de integraciones de Replit",
+        details: error.message
+      });
     }
   });
 

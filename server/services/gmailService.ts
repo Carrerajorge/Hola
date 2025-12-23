@@ -97,12 +97,15 @@ export interface EmailMessage {
 export async function checkGmailConnection(): Promise<GmailConnectionStatus> {
   try {
     const gmail = await getGmailClient();
-    const profile = await gmail.users.getProfile({ userId: 'me' });
+    // Use labels.list instead of getProfile since we have gmail.labels scope
+    const labels = await gmail.users.labels.list({ userId: 'me' });
     
-    return {
-      connected: true,
-      email: profile.data.emailAddress || undefined
-    };
+    if (labels.data.labels && labels.data.labels.length > 0) {
+      return {
+        connected: true
+      };
+    }
+    return { connected: false };
   } catch (error: any) {
     console.log("[Gmail] Connection check failed:", error.message);
     return { connected: false };
