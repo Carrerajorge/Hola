@@ -175,9 +175,92 @@ export function Composer({
     googleContacts: false,
     googleForms: true,
   });
+  
+  const [showMentionPopover, setShowMentionPopover] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState("");
+  const [mentionIndex, setMentionIndex] = useState(0);
+
+  const connectedSources = [
+    { 
+      id: 'googleForms', 
+      name: 'Google Forms', 
+      mention: '@GoogleForms',
+      icon: (
+        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
+          <path d="M7.5 3C6.12 3 5 4.12 5 5.5v13C5 19.88 6.12 21 7.5 21h9c1.38 0 2.5-1.12 2.5-2.5v-13C19 4.12 17.88 3 16.5 3h-9z" fill="#673AB7"/>
+          <circle cx="9" cy="9" r="1.5" fill="white"/>
+          <rect x="12" y="8" width="5" height="2" rx="1" fill="white"/>
+        </svg>
+      ),
+      action: () => onOpenGoogleForms?.()
+    },
+  ];
+
+  const filteredSources = connectedSources.filter(source => 
+    source.name.toLowerCase().includes(mentionSearch.toLowerCase()) ||
+    source.mention.toLowerCase().includes(mentionSearch.toLowerCase())
+  );
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setInput(value);
+    
+    const cursorPos = e.target.selectionStart || 0;
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+    
+    if (atMatch) {
+      setShowMentionPopover(true);
+      setMentionSearch(atMatch[1]);
+      setMentionIndex(0);
+    } else {
+      setShowMentionPopover(false);
+      setMentionSearch("");
+    }
+  };
+
+  const insertMention = (source: typeof connectedSources[0]) => {
+    const cursorPos = textareaRef.current?.selectionStart || 0;
+    const textBeforeCursor = input.slice(0, cursorPos);
+    const textAfterCursor = input.slice(cursorPos);
+    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+    
+    if (atMatch) {
+      const newText = textBeforeCursor.slice(0, -atMatch[0].length) + source.mention + ' ' + textAfterCursor;
+      setInput(newText);
+    }
+    
+    setShowMentionPopover(false);
+    setMentionSearch("");
+    textareaRef.current?.focus();
+    
+    source.action();
+  };
+
+  const handleMentionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!showMentionPopover || filteredSources.length === 0) return;
+    
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setMentionIndex(prev => (prev + 1) % filteredSources.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setMentionIndex(prev => (prev - 1 + filteredSources.length) % filteredSources.length);
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      insertMention(filteredSources[mentionIndex]);
+    } else if (e.key === 'Escape') {
+      setShowMentionPopover(false);
+    }
+  };
 
   const toggleKnowledgeSource = (source: keyof typeof knowledgeSources) => {
-    setKnowledgeSources(prev => ({ ...prev, [source]: !prev[source] }));
+    const newValue = !knowledgeSources[source];
+    setKnowledgeSources(prev => ({ ...prev, [source]: newValue }));
+    
+    if (newValue && source === 'googleForms') {
+      onOpenGoogleForms?.();
+    }
   };
 
   const renderAttachmentPreview = () => {
@@ -886,12 +969,15 @@ export function Composer({
             </div>
           )}
           
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 relative">
             <Textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={handleInputChange}
               onKeyDown={(e) => {
+                handleMentionKeyDown(e);
+                if (showMentionPopover) return;
+                
                 const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
                 if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
                   e.preventDefault();
@@ -906,6 +992,38 @@ export function Composer({
               )}
               rows={1}
             />
+            
+            {showMentionPopover && filteredSources.length > 0 && (
+              <div 
+                className="absolute bottom-full left-0 mb-2 w-64 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden"
+                data-testid="mention-popover"
+              >
+                <div className="px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border">
+                  Fuentes conectadas
+                </div>
+                <div className="py-1">
+                  {filteredSources.map((source, index) => (
+                    <button
+                      key={source.id}
+                      onClick={() => insertMention(source)}
+                      className={cn(
+                        "w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-accent transition-colors text-left",
+                        index === mentionIndex && "bg-accent"
+                      )}
+                      data-testid={`mention-${source.id}`}
+                    >
+                      <div className="flex items-center justify-center w-6 h-6 rounded bg-purple-100 dark:bg-purple-900/30">
+                        {source.icon}
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{source.name}</span>
+                        <span className="text-xs text-muted-foreground">{source.mention}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
