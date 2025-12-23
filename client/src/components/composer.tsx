@@ -29,6 +29,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { cn } from "@/lib/utils";
 import { SourceListItem } from "@/components/ui/source-list-item";
 import { RecordingPanel } from "@/components/recording-panel";
+import { useConnectedSources } from "@/hooks/use-connected-sources";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { getFileTheme } from "@/lib/fileTypeTheme";
 import "@/components/ui/glass-effects.css";
@@ -171,85 +172,20 @@ export function Composer({
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
   
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
-  const [knowledgeSources, setKnowledgeSources] = useState({
-    github: false,
-    teams: true,
-    gmail: false,
-    box: false,
-    outlook: false,
-    googleContacts: false,
-    googleForms: isGoogleFormsActive ?? true,
-  });
   
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
-  const [connectedAppsStatus, setConnectedAppsStatus] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    if (isGoogleFormsActive !== undefined && knowledgeSources.googleForms !== isGoogleFormsActive) {
-      setKnowledgeSources(prev => ({ ...prev, googleForms: isGoogleFormsActive }));
-    }
-  }, [isGoogleFormsActive]);
+  const { connectedSources, getSourceActive, setSourceActive } = useConnectedSources();
 
-  useEffect(() => {
-    const checkConnectedApps = async () => {
-      const endpoints = [
-        { id: 'gmail', endpoint: '/api/integrations/google/gmail/status' },
-        { id: 'googleForms', endpoint: '/api/integrations/google/forms/status' },
-      ];
-      
-      const statuses: Record<string, boolean> = {};
-      await Promise.all(
-        endpoints.map(async ({ id, endpoint }) => {
-          try {
-            const res = await fetch(endpoint, { credentials: 'include' });
-            if (res.ok) {
-              const data = await res.json();
-              statuses[id] = data.connected === true;
-            }
-          } catch {
-            statuses[id] = false;
-          }
-        })
-      );
-      setConnectedAppsStatus(statuses);
-    };
-    
-    checkConnectedApps();
-  }, []);
+  const mentionSources = connectedSources.map(source => ({
+    ...source,
+    mention: source.id === 'gmail' ? '@Gmail' : source.id === 'googleForms' ? '@GoogleForms' : `@${source.name}`,
+    action: source.id === 'googleForms' ? () => onOpenGoogleForms?.() : () => {}
+  }));
 
-  const allSources = [
-    { 
-      id: 'gmail', 
-      name: 'Gmail', 
-      mention: '@Gmail',
-      icon: (
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
-          <path d="M2 6l10 7 10-7v12H2V6z" fill="#EA4335"/>
-          <path d="M22 6l-10 7L2 6" stroke="#FBBC05" strokeWidth="2"/>
-        </svg>
-      ),
-      action: () => {}
-    },
-    { 
-      id: 'googleForms', 
-      name: 'Google Forms', 
-      mention: '@GoogleForms',
-      icon: (
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
-          <path d="M7.5 3C6.12 3 5 4.12 5 5.5v13C5 19.88 6.12 21 7.5 21h9c1.38 0 2.5-1.12 2.5-2.5v-13C19 4.12 17.88 3 16.5 3h-9z" fill="#673AB7"/>
-          <circle cx="9" cy="9" r="1.5" fill="white"/>
-          <rect x="12" y="8" width="5" height="2" rx="1" fill="white"/>
-        </svg>
-      ),
-      action: () => onOpenGoogleForms?.()
-    },
-  ];
-
-  const connectedSources = allSources.filter(source => connectedAppsStatus[source.id]);
-
-  const filteredSources = connectedSources.filter(source => 
+  const filteredSources = mentionSources.filter(source => 
     source.name.toLowerCase().includes(mentionSearch.toLowerCase()) ||
     source.mention.toLowerCase().includes(mentionSearch.toLowerCase())
   );
@@ -272,7 +208,7 @@ export function Composer({
     }
   };
 
-  const insertMention = (source: typeof connectedSources[0]) => {
+  const insertMention = (source: typeof mentionSources[0]) => {
     const cursorPos = textareaRef.current?.selectionStart || 0;
     const textBeforeCursor = input.slice(0, cursorPos);
     const textAfterCursor = input.slice(cursorPos);
@@ -287,9 +223,9 @@ export function Composer({
     setMentionSearch("");
     textareaRef.current?.focus();
     
+    setSourceActive(source.id, true);
     if (source.id === 'googleForms') {
       setIsGoogleFormsActive?.(true);
-      setKnowledgeSources(prev => ({ ...prev, googleForms: true }));
     }
   };
 
@@ -310,12 +246,12 @@ export function Composer({
     }
   };
 
-  const toggleKnowledgeSource = (source: keyof typeof knowledgeSources) => {
-    const newValue = !knowledgeSources[source];
-    setKnowledgeSources(prev => ({ ...prev, [source]: newValue }));
+  const toggleKnowledgeSource = (sourceId: string) => {
+    const currentValue = getSourceActive(sourceId);
+    setSourceActive(sourceId, !currentValue);
     
-    if (source === 'googleForms') {
-      setIsGoogleFormsActive?.(newValue);
+    if (sourceId === 'googleForms') {
+      setIsGoogleFormsActive?.(!currentValue);
     }
   };
 
@@ -1139,24 +1075,23 @@ export function Composer({
                             Fuentes conectadas
                           </div>
                           
-                          <SourceListItem
-                            icon={
-                              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
-                                <path d="M7.5 3C6.12 3 5 4.12 5 5.5v13C5 19.88 6.12 21 7.5 21h9c1.38 0 2.5-1.12 2.5-2.5v-13C19 4.12 17.88 3 16.5 3h-9z" fill="#673AB7"/>
-                                <circle cx="9" cy="9" r="1.5" fill="white"/>
-                                <rect x="12" y="8" width="5" height="2" rx="1" fill="white"/>
-                                <circle cx="9" cy="13" r="1.5" fill="white"/>
-                                <rect x="12" y="12" width="5" height="2" rx="1" fill="white"/>
-                                <circle cx="9" cy="17" r="1.5" fill="white"/>
-                                <rect x="12" y="16" width="5" height="2" rx="1" fill="white"/>
-                              </svg>
-                            }
-                            label="Google Forms"
-                            variant="toggle"
-                            checked={knowledgeSources.googleForms}
-                            onCheckedChange={() => toggleKnowledgeSource('googleForms')}
-                            data-testid="source-google-forms"
-                          />
+                          {connectedSources.length === 0 ? (
+                            <div className="px-2 py-3 text-sm text-muted-foreground text-center">
+                              No hay fuentes conectadas
+                            </div>
+                          ) : (
+                            connectedSources.map(source => (
+                              <SourceListItem
+                                key={source.id}
+                                icon={source.icon}
+                                label={source.name}
+                                variant="toggle"
+                                checked={getSourceActive(source.id)}
+                                onCheckedChange={() => toggleKnowledgeSource(source.id)}
+                                data-testid={`source-${source.id}`}
+                              />
+                            ))
+                          )}
                           
                           <div className="border-t border-border mt-1 pt-1">
                             <SourceListItem

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { 
   Dialog, 
@@ -139,6 +140,7 @@ export function AppDetailDialog({
   onOpenChange,
   onConnectionChange 
 }: AppDetailDialogProps) {
+  const queryClient = useQueryClient();
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -159,6 +161,8 @@ export function AppDetailDialog({
         const data = await res.json();
         setIsConnected(data.connected === true);
         setConnectionEmail(data.email || "");
+        
+        queryClient.invalidateQueries({ queryKey: ["connected-sources"] });
         
         if (data.connected && retryCount > 0) {
           toast.success(`${app.name} conectado`, {
@@ -254,6 +258,8 @@ export function AppDetailDialog({
         setIsConnected(false);
         setConnectionEmail("");
         onConnectionChange?.(app.id, false);
+        
+        queryClient.invalidateQueries({ queryKey: ["connected-sources"] });
         
         toast.success(`${app.name} desconectado`, {
           description: 'La aplicación ha sido desconectada correctamente.'
