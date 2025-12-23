@@ -173,6 +173,7 @@ export function Composer({
     box: false,
     outlook: false,
     googleContacts: false,
+    googleForms: true,
   });
 
   const toggleKnowledgeSource = (source: keyof typeof knowledgeSources) => {
@@ -941,6 +942,10 @@ export function Composer({
                       </PopoverTrigger>
                       <PopoverContent align="start" className="w-64 p-2" data-testid="fuentes-popover">
                         <div className="grid gap-1">
+                          <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                            Fuentes conectadas
+                          </div>
+                          
                           <SourceListItem
                             icon={
                               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
@@ -953,87 +958,11 @@ export function Composer({
                                 <rect x="12" y="16" width="5" height="2" rx="1" fill="white"/>
                               </svg>
                             }
-                            label="Formularios"
-                            variant="connect"
-                            onConnect={() => onOpenGoogleForms?.()}
-                            data-testid="source-formularios"
-                          />
-                          
-                          <SourceListItem
-                            icon={
-                              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
-                                <path d="M20.625 4.5H3.375C2.96016 4.5 2.625 4.83516 2.625 5.25V18.75C2.625 19.1648 2.96016 19.5 3.375 19.5H20.625C21.0398 19.5 21.375 19.1648 21.375 18.75V5.25C21.375 4.83516 21.0398 4.5 20.625 4.5Z" fill="#5059C9"/>
-                                <path d="M12 10.5H21.375V17.625C21.375 18.6605 20.5355 19.5 19.5 19.5H12V10.5Z" fill="#7B83EB"/>
-                                <circle cx="16.5" cy="7.5" r="2.25" fill="#7B83EB"/>
-                                <circle cx="9" cy="9" r="3" fill="#5059C9"/>
-                                <path d="M13.5 12H4.5V18C4.5 18.8284 5.17157 19.5 6 19.5H12C12.8284 19.5 13.5 18.8284 13.5 18V12Z" fill="#7B83EB"/>
-                              </svg>
-                            }
-                            label="Teams"
+                            label="Google Forms"
                             variant="toggle"
-                            checked={knowledgeSources.teams}
-                            onCheckedChange={() => toggleKnowledgeSource('teams')}
-                            data-testid="source-teams"
-                          />
-                          
-                          <SourceListItem
-                            icon={
-                              <svg className="h-5 w-5" viewBox="0 0 24 18" fill="none">
-                                <path d="M1.5 5.25V15.75C1.5 16.1478 1.65804 16.5294 1.93934 16.8107C2.22064 17.092 2.60218 17.25 3 17.25H21C21.3978 17.25 21.7794 17.092 22.0607 16.8107C22.342 16.5294 22.5 16.1478 22.5 15.75V5.25L12 12L1.5 5.25Z" fill="#EA4335"/>
-                                <path d="M22.5 2.25V5.25L12 12L1.5 5.25V2.25C1.5 1.85218 1.65804 1.47064 1.93934 1.18934C2.22064 0.908035 2.60218 0.75 3 0.75H21C21.3978 0.75 21.7794 0.908035 22.0607 1.18934C22.342 1.47064 22.5 1.85218 22.5 2.25Z" fill="#FBBC05"/>
-                              </svg>
-                            }
-                            label="Gmail"
-                            variant="connect"
-                            onConnect={() => onOpenApps?.()}
-                            data-testid="source-gmail"
-                          />
-                          
-                          <SourceListItem
-                            icon={
-                              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
-                                <rect x="2" y="4" width="20" height="16" rx="2" fill="#0061D5"/>
-                                <text x="12" y="15" textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">box</text>
-                              </svg>
-                            }
-                            label="Box"
-                            variant="connect"
-                            onConnect={() => onOpenApps?.()}
-                            data-testid="source-box"
-                          />
-                          
-                          <SourceListItem
-                            icon={<Calendar className="h-5 w-5 text-blue-500" />}
-                            label="Calendario de Outlook"
-                            truncateLabel
-                            variant="connect"
-                            onConnect={() => onOpenApps?.()}
-                            data-testid="source-outlook"
-                          />
-                          
-                          <SourceListItem
-                            icon={<Contact className="h-5 w-5 text-blue-600" />}
-                            label="Contactos de Google"
-                            variant="connect"
-                            onConnect={() => onOpenApps?.()}
-                            data-testid="source-google-contacts"
-                          />
-                          
-                          <SourceListItem
-                            icon={
-                              <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
-                                <circle cx="4" cy="8" r="1.5" />
-                                <circle cx="8" cy="8" r="1.5" />
-                                <circle cx="12" cy="8" r="1.5" />
-                                <circle cx="4" cy="4" r="1.5" />
-                                <circle cx="8" cy="4" r="1.5" />
-                                <circle cx="12" cy="4" r="1.5" />
-                              </svg>
-                            }
-                            label="Conectar más"
-                            variant="connect"
-                            onConnect={() => onOpenApps?.()}
-                            data-testid="source-connect-more"
+                            checked={knowledgeSources.googleForms}
+                            onCheckedChange={() => toggleKnowledgeSource('googleForms')}
+                            data-testid="source-google-forms"
                           />
                         </div>
                       </PopoverContent>
