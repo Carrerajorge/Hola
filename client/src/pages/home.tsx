@@ -216,6 +216,7 @@ export default function Home() {
             aiProcessSteps={aiProcessSteps}
             setAiProcessSteps={setAiProcessSteps}
             chatId={activeChat?.id || null}
+            onOpenApps={handleOpenApps}
           />
         )}
       </main>

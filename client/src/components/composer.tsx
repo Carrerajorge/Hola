@@ -99,6 +99,7 @@ export interface ComposerProps {
   handleFigmaConnect?: () => void;
   handleFigmaDisconnect?: () => void;
   onOpenGoogleForms?: () => void;
+  onOpenApps?: () => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -159,6 +160,7 @@ export function Composer({
   handleFigmaConnect,
   handleFigmaDisconnect,
   onOpenGoogleForms,
+  onOpenApps,
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
@@ -983,7 +985,7 @@ export function Composer({
                             }
                             label="Gmail"
                             variant="connect"
-                            onConnect={() => {}}
+                            onConnect={() => onOpenApps?.()}
                             data-testid="source-gmail"
                           />
                           
@@ -996,7 +998,7 @@ export function Composer({
                             }
                             label="Box"
                             variant="connect"
-                            onConnect={() => {}}
+                            onConnect={() => onOpenApps?.()}
                             data-testid="source-box"
                           />
                           
@@ -1005,7 +1007,7 @@ export function Composer({
                             label="Calendario de Outlook"
                             truncateLabel
                             variant="connect"
-                            onConnect={() => {}}
+                            onConnect={() => onOpenApps?.()}
                             data-testid="source-outlook"
                           />
                           
@@ -1013,7 +1015,7 @@ export function Composer({
                             icon={<Contact className="h-5 w-5 text-blue-600" />}
                             label="Contactos de Google"
                             variant="connect"
-                            onConnect={() => {}}
+                            onConnect={() => onOpenApps?.()}
                             data-testid="source-google-contacts"
                           />
                           
@@ -1030,7 +1032,7 @@ export function Composer({
                             }
                             label="Conectar más"
                             variant="connect"
-                            onConnect={() => {}}
+                            onConnect={() => onOpenApps?.()}
                             data-testid="source-connect-more"
                           />
                         </div>

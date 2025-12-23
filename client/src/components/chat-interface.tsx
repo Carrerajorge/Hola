@@ -692,6 +692,7 @@ interface ChatInterfaceProps {
   aiProcessSteps: AiProcessStep[];
   setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
   chatId?: string | null;
+  onOpenApps?: () => void;
 }
 
 interface UploadedFile {
@@ -717,7 +718,8 @@ export function ChatInterface({
   setAiState,
   aiProcessSteps,
   setAiProcessSteps,
-  chatId
+  chatId,
+  onOpenApps
 }: ChatInterfaceProps) {
   const { user } = useAuth();
   const [input, setInput] = useState("");
@@ -2825,6 +2827,7 @@ export function ChatInterface({
             handleFigmaConnect={handleFigmaConnect}
             handleFigmaDisconnect={handleFigmaDisconnect}
             onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
+            onOpenApps={onOpenApps}
           />
         </div>
       )}
