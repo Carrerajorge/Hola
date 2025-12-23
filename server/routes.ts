@@ -22,6 +22,7 @@ import { createCodeRouter } from "./routes/codeRouter";
 import { createUserRouter } from "./routes/userRouter";
 import { createChatAiRouter } from "./routes/chatAiRouter";
 import { createGoogleFormsRouter } from "./routes/googleFormsRouter";
+import { createGmailRouter } from "./routes/gmailRouter";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
@@ -48,6 +49,7 @@ export async function registerRoutes(
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));
   app.use("/api/integrations/google/forms", createGoogleFormsRouter());
+  app.use("/api/integrations/google/gmail", createGmailRouter());
 
   const objectStorageService = new ObjectStorageService();
 
