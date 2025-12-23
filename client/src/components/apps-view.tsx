@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -6,14 +6,22 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Search, ChevronRight, ExternalLink, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AppDetailDialog, type AppMetadata } from "@/components/app-detail-dialog";
 
 interface App {
   id: string;
   name: string;
   description: string;
+  longDescription?: string;
   icon: React.ReactNode;
   category: "featured" | "productivity" | "lifestyle";
   verified?: boolean;
+  developer?: string;
+  websiteUrl?: string;
+  privacyUrl?: string;
+  connectionEndpoint?: string;
+  statusEndpoint?: string;
+  disconnectEndpoint?: string;
 }
 
 const apps: App[] = [
@@ -347,6 +355,7 @@ const apps: App[] = [
     id: "gmail",
     name: "Gmail",
     description: "Busca y consulta correos electrónicos en tu...",
+    longDescription: "Revisa tus conversaciones de Gmail para preparar respuestas, repasar intercambios recientes, recopilar temas de conversación para reuniones o destacar acciones pendientes. Puedes usar hilos anteriores con un colega o cliente para refrescarte rápidamente la memoria, entender en qué debes enfocarte y escribir respuestas más seguras y fundamentadas.",
     icon: (
       <div className="w-10 h-10 flex items-center justify-center">
         <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none">
@@ -356,6 +365,12 @@ const apps: App[] = [
       </div>
     ),
     category: "productivity",
+    developer: "Google",
+    websiteUrl: "https://mail.google.com",
+    privacyUrl: "https://policies.google.com/privacy",
+    statusEndpoint: "/api/integrations/google/gmail/status",
+    connectionEndpoint: "/api/integrations/google/gmail/connect",
+    disconnectEndpoint: "/api/integrations/google/gmail/disconnect",
   },
   {
     id: "google-calendar",
@@ -392,8 +407,9 @@ const apps: App[] = [
   },
   {
     id: "google-forms",
-    name: "Google Forms",
-    description: "Create and manage forms",
+    name: "Formularios de Google",
+    description: "Crea y gestiona formularios con IA",
+    longDescription: "Crea formularios profesionales con ayuda de inteligencia artificial. Genera encuestas, cuestionarios y formularios de feedback automáticamente basados en tus instrucciones. Ideal para recopilar datos de clientes, feedback de empleados o cualquier tipo de información estructurada.",
     icon: (
       <div className="w-10 h-10 rounded-lg bg-[#673AB7] flex items-center justify-center">
         <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
@@ -407,6 +423,12 @@ const apps: App[] = [
       </div>
     ),
     category: "productivity",
+    developer: "Google",
+    websiteUrl: "https://docs.google.com/forms",
+    privacyUrl: "https://policies.google.com/privacy",
+    statusEndpoint: "/api/integrations/google/forms/status",
+    connectionEndpoint: "/api/integrations/google/forms/connect",
+    disconnectEndpoint: "/api/integrations/google/forms/disconnect",
   },
   {
     id: "help-scout",
@@ -790,6 +812,8 @@ const apps: App[] = [
   },
 ];
 
+const CONNECTABLE_APP_IDS = ["gmail", "google-forms"];
+
 interface AppsViewProps {
   onClose: () => void;
   onOpenGoogleForms?: () => void;
@@ -799,6 +823,40 @@ interface AppsViewProps {
 export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("featured");
+  const [selectedApp, setSelectedApp] = useState<App | null>(null);
+  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
+  const [connectedApps, setConnectedApps] = useState<Record<string, boolean>>({});
+  const [isCheckingConnections, setIsCheckingConnections] = useState(true);
+
+  const checkAllConnectionStatus = useCallback(async () => {
+    setIsCheckingConnections(true);
+    const statuses: Record<string, boolean> = {};
+    
+    const connectableApps = apps.filter(app => app.statusEndpoint);
+    
+    await Promise.all(
+      connectableApps.map(async (app) => {
+        try {
+          const res = await fetch(app.statusEndpoint!, { credentials: "include" });
+          if (res.ok) {
+            const data = await res.json();
+            statuses[app.id] = data.connected === true;
+          } else {
+            statuses[app.id] = false;
+          }
+        } catch {
+          statuses[app.id] = false;
+        }
+      })
+    );
+    
+    setConnectedApps(statuses);
+    setIsCheckingConnections(false);
+  }, []);
+
+  useEffect(() => {
+    checkAllConnectionStatus();
+  }, [checkAllConnectionStatus]);
 
   const filteredApps = apps.filter((app) => {
     const matchesSearch =
@@ -811,15 +869,33 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
     return matchesSearch;
   });
 
-  const handleAppClick = (appId: string) => {
-    if (appId === "google-forms" && onOpenGoogleForms) {
-      onClose();
-      onOpenGoogleForms();
-    } else if (appId === "gmail" && onOpenGmail) {
-      onClose();
-      onOpenGmail();
+  const handleAppClick = (app: App) => {
+    if (app.statusEndpoint) {
+      setSelectedApp(app);
+      setIsDetailDialogOpen(true);
     }
   };
+
+  const handleConnectionChange = (appId: string, connected: boolean) => {
+    setConnectedApps(prev => ({ ...prev, [appId]: connected }));
+  };
+
+  const getAppMetadata = (app: App): AppMetadata => ({
+    id: app.id,
+    name: app.name,
+    shortDescription: app.description,
+    longDescription: app.longDescription,
+    icon: app.icon,
+    category: app.category === "productivity" ? "Productividad" : "Estilo de vida",
+    developer: app.developer,
+    websiteUrl: app.websiteUrl,
+    privacyUrl: app.privacyUrl,
+    connectionEndpoint: app.connectionEndpoint,
+    statusEndpoint: app.statusEndpoint,
+    disconnectEndpoint: app.disconnectEndpoint,
+  });
+
+  const connectedAppsList = apps.filter(app => connectedApps[app.id]);
 
   return (
     <div className="flex flex-col h-full bg-background" data-testid="apps-view">
@@ -943,13 +1019,16 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
               <button
                 key={app.id}
                 className="flex items-center gap-4 p-3 rounded-xl hover:bg-accent transition-colors text-left group"
-                onClick={() => handleAppClick(app.id)}
+                onClick={() => handleAppClick(app)}
                 data-testid={`app-item-${app.id}`}
               >
                 <div className="flex-shrink-0">{app.icon}</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium">{app.name}</span>
+                    {connectedApps[app.id] && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
+                    )}
                     {app.verified && (
                       <svg className="w-4 h-4 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
@@ -969,64 +1048,40 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
             </div>
           )}
 
-          <div className="mt-6 pt-6 border-t">
-            <h3 className="text-sm font-medium text-muted-foreground mb-3">Tus aplicaciones conectadas</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              <button
-                className="flex items-center gap-4 p-3 rounded-xl bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 border border-purple-200 dark:border-purple-800 transition-colors text-left group"
-                onClick={() => {
-                  onClose();
-                  onOpenGoogleForms?.();
-                }}
-                data-testid="app-item-google-forms-connected"
-              >
-                <div className="w-10 h-10 rounded-lg bg-[#673AB7] flex items-center justify-center flex-shrink-0">
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
-                    <circle cx="9" cy="9" r="1.5" fill="white"/>
-                    <rect x="12" y="8" width="5" height="2" rx="1" fill="white"/>
-                    <circle cx="9" cy="13" r="1.5" fill="white"/>
-                    <rect x="12" y="12" width="5" height="2" rx="1" fill="white"/>
-                    <circle cx="9" cy="17" r="1.5" fill="white"/>
-                    <rect x="12" y="16" width="5" height="2" rx="1" fill="white"/>
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-purple-700 dark:text-purple-300">Formularios de Google</span>
-                    <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
-                  </div>
-                  <p className="text-sm text-purple-600/70 dark:text-purple-400/70 truncate">Crea y gestiona formularios con IA</p>
-                </div>
-                <ChevronRight className="h-5 w-5 text-purple-400 group-hover:text-purple-600 transition-colors flex-shrink-0" />
-              </button>
-              
-              <button
-                className="flex items-center gap-4 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-200 dark:border-red-800 transition-colors text-left group"
-                onClick={() => {
-                  onClose();
-                  onOpenGmail?.();
-                }}
-                data-testid="app-item-gmail-connected"
-              >
-                <div className="w-10 h-10 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none">
-                    <path d="M2 6l10 7 10-7v12H2V6z" fill="#EA4335"/>
-                    <path d="M22 6l-10 7L2 6" stroke="#FBBC05" strokeWidth="2"/>
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-red-700 dark:text-red-300">Gmail</span>
-                    <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
-                  </div>
-                  <p className="text-sm text-red-600/70 dark:text-red-400/70 truncate">Busca, lee y responde correos</p>
-                </div>
-                <ChevronRight className="h-5 w-5 text-red-400 group-hover:text-red-600 transition-colors flex-shrink-0" />
-              </button>
+          {connectedAppsList.length > 0 && (
+            <div className="mt-6 pt-6 border-t">
+              <h3 className="text-sm font-medium text-muted-foreground mb-3">Tus aplicaciones conectadas</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {connectedAppsList.map((app) => (
+                  <button
+                    key={`connected-${app.id}`}
+                    className="flex items-center gap-4 p-3 rounded-xl bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 border border-green-200 dark:border-green-800 transition-colors text-left group"
+                    onClick={() => handleAppClick(app)}
+                    data-testid={`app-item-${app.id}-connected`}
+                  >
+                    <div className="flex-shrink-0">{app.icon}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-green-700 dark:text-green-300">{app.name}</span>
+                        <span className="px-1.5 py-0.5 text-[10px] font-medium bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded">CONECTADO</span>
+                      </div>
+                      <p className="text-sm text-green-600/70 dark:text-green-400/70 truncate">{app.description}</p>
+                    </div>
+                    <ChevronRight className="h-5 w-5 text-green-400 group-hover:text-green-600 transition-colors flex-shrink-0" />
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </ScrollArea>
+
+      <AppDetailDialog
+        app={selectedApp ? getAppMetadata(selectedApp) : null}
+        open={isDetailDialogOpen}
+        onOpenChange={setIsDetailDialogOpen}
+        onConnectionChange={handleConnectionChange}
+      />
     </div>
   );
 }
