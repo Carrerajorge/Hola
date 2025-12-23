@@ -12,6 +12,17 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { format, parseISO } from "date-fns";
 
+interface SourceMetadata {
+  provider: 'gmail';
+  accountId?: string;
+  accountEmail?: string;
+  mailbox: string;
+  messageId: string;
+  threadId: string;
+  labels: string[];
+  permalink: string;
+}
+
 interface EmailSummary {
   id: string;
   threadId: string;
@@ -23,6 +34,7 @@ interface EmailSummary {
   snippet: string;
   labels: string[];
   isUnread: boolean;
+  source?: SourceMetadata;
 }
 
 interface EmailMessage {
@@ -34,6 +46,7 @@ interface EmailMessage {
   subject: string;
   body: string;
   snippet: string;
+  source?: SourceMetadata;
 }
 
 interface EmailThread {
@@ -42,6 +55,22 @@ interface EmailThread {
   messages: EmailMessage[];
   labels: string[];
 }
+
+const SourceBadge = ({ source, subject }: { source: SourceMetadata; subject: string }) => (
+  <a
+    href={source.permalink}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-300 transition-colors cursor-pointer"
+    title={`Abrir en Gmail: ${subject}`}
+    onClick={(e) => e.stopPropagation()}
+  >
+    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none">
+      <path d="M22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6zm-2 0l-8 5-8-5h16zm0 12H4V8l8 5 8-5v10z" fill="currentColor"/>
+    </svg>
+    <span className="truncate max-w-[120px]">{subject}</span>
+  </a>
+);
 
 export interface InlineGmailPreviewProps {
   query?: string;
@@ -378,6 +407,11 @@ export function InlineGmailPreview({
                           <p className="text-xs text-muted-foreground truncate mt-0.5">
                             {email.snippet}
                           </p>
+                          {email.source && (
+                            <div className="mt-1.5">
+                              <SourceBadge source={email.source} subject={email.subject} />
+                            </div>
+                          )}
                         </div>
                         {email.isUnread && (
                           <div className="w-2 h-2 rounded-full bg-red-600 flex-shrink-0 mt-2" />
@@ -424,6 +458,11 @@ export function InlineGmailPreview({
                       {msg.body.slice(0, 1000)}
                       {msg.body.length > 1000 && "..."}
                     </div>
+                    {msg.source && (
+                      <div className="mt-2 pl-10">
+                        <SourceBadge source={msg.source} subject={msg.subject} />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

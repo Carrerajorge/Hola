@@ -62,6 +62,17 @@ export interface GmailConnectionStatus {
   displayName?: string;
 }
 
+export interface SourceMetadata {
+  provider: 'gmail';
+  accountId?: string;
+  accountEmail?: string;
+  mailbox: string;
+  messageId: string;
+  threadId: string;
+  labels: string[];
+  permalink: string;
+}
+
 export interface EmailSummary {
   id: string;
   threadId: string;
@@ -73,6 +84,7 @@ export interface EmailSummary {
   snippet: string;
   labels: string[];
   isUnread: boolean;
+  source: SourceMetadata;
 }
 
 export interface EmailThread {
@@ -92,6 +104,7 @@ export interface EmailMessage {
   body: string;
   bodyHtml?: string;
   snippet: string;
+  source: SourceMetadata;
 }
 
 export async function checkGmailConnection(): Promise<GmailConnectionStatus> {
@@ -191,9 +204,12 @@ export async function searchEmails(
       const fromParsed = parseEmailAddress(fromHeader);
       const labels = fullMsg.data.labelIds || [];
 
+      const messageId = msg.id!;
+      const threadId = msg.threadId || msg.id!;
+      
       emailSummaries.push({
-        id: msg.id!,
-        threadId: msg.threadId || msg.id!,
+        id: messageId,
+        threadId,
         subject: getHeader(headers, 'Subject') || '(Sin asunto)',
         from: fromParsed.name,
         fromEmail: fromParsed.email,
@@ -201,7 +217,15 @@ export async function searchEmails(
         date: getHeader(headers, 'Date'),
         snippet: fullMsg.data.snippet || '',
         labels,
-        isUnread: labels.includes('UNREAD')
+        isUnread: labels.includes('UNREAD'),
+        source: {
+          provider: 'gmail',
+          mailbox: 'INBOX',
+          messageId,
+          threadId,
+          labels,
+          permalink: `https://mail.google.com/mail/u/0/#inbox/${threadId}`
+        }
       });
     } catch (error) {
       console.error(`[Gmail] Error fetching message ${msg.id}:`, error);
@@ -237,8 +261,11 @@ export async function getEmailThread(threadId: string): Promise<EmailThread | nu
       
       const body = extractBody(msg.payload);
 
+      const messageId = msg.id!;
+      const msgLabels = msg.labelIds || [];
+      
       messages.push({
-        id: msg.id!,
+        id: messageId,
         from: fromParsed.name,
         fromEmail: fromParsed.email,
         to: getHeader(headers, 'To'),
@@ -246,7 +273,15 @@ export async function getEmailThread(threadId: string): Promise<EmailThread | nu
         subject,
         body: body.text || body.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(),
         bodyHtml: body.html || undefined,
-        snippet: msg.snippet || ''
+        snippet: msg.snippet || '',
+        source: {
+          provider: 'gmail',
+          mailbox: 'INBOX',
+          messageId,
+          threadId,
+          labels: msgLabels,
+          permalink: `https://mail.google.com/mail/u/0/#inbox/${threadId}`
+        }
       });
     }
 
