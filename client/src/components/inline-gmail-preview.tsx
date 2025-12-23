@@ -125,6 +125,8 @@ export function InlineGmailPreview({
   const [replySubject, setReplySubject] = useState("");
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const checkConnection = useCallback(async () => {
     try {
@@ -145,8 +147,12 @@ export function InlineGmailPreview({
     }
   }, []);
 
-  const loadEmails = useCallback(async (q?: string) => {
-    setIsSearching(true);
+  const loadEmails = useCallback(async (q?: string, append: boolean = false, pageToken?: string) => {
+    if (append) {
+      setIsLoadingMore(true);
+    } else {
+      setIsSearching(true);
+    }
     setError(null);
     
     try {
@@ -156,19 +162,36 @@ export function InlineGmailPreview({
         queryParam = "is:unread " + queryParam;
       }
       
-      const res = await fetch(`/api/integrations/google/gmail/search?q=${encodeURIComponent(queryParam)}&maxResults=20`);
+      let url = `/api/integrations/google/gmail/search?q=${encodeURIComponent(queryParam)}&maxResults=20`;
+      if (pageToken) {
+        url += `&pageToken=${encodeURIComponent(pageToken)}`;
+      }
+      
+      const res = await fetch(url);
       const data = await res.json();
       
       if (data.emails) {
-        setEmails(data.emails);
+        if (append) {
+          setEmails(prev => [...prev, ...data.emails]);
+        } else {
+          setEmails(data.emails);
+        }
+        setNextPageToken(data.nextPageToken || null);
       }
     } catch (err: any) {
       console.error("Error loading emails:", err);
       setError("Error al cargar correos");
     } finally {
       setIsSearching(false);
+      setIsLoadingMore(false);
     }
   }, [searchQuery, action]);
+
+  const loadMoreEmails = useCallback(() => {
+    if (nextPageToken && !isLoadingMore) {
+      loadEmails(searchQuery, true, nextPageToken);
+    }
+  }, [nextPageToken, isLoadingMore, loadEmails, searchQuery]);
 
   const loadThread = useCallback(async (threadId: string) => {
     setIsSearching(true);
@@ -198,6 +221,7 @@ export function InlineGmailPreview({
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setNextPageToken(null);
     loadEmails(searchQuery);
   };
 
@@ -419,6 +443,31 @@ export function InlineGmailPreview({
                       </div>
                     </button>
                   ))}
+                  
+                  {nextPageToken && (
+                    <div className="p-3 flex justify-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={loadMoreEmails}
+                        disabled={isLoadingMore}
+                        className="w-full"
+                        data-testid="button-load-more-emails"
+                      >
+                        {isLoadingMore ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            Cargando...
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="h-4 w-4 mr-2" />
+                            Cargar más correos
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>

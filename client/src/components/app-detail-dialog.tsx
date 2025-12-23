@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { 
   Dialog, 
@@ -6,8 +6,9 @@ import {
   DialogHeader,
   DialogTitle 
 } from "@/components/ui/dialog";
-import { ExternalLink, Loader2, ChevronLeft } from "lucide-react";
+import { ExternalLink, Loader2, ChevronLeft, AlertCircle, RefreshCw, XCircle, Clock, Ban, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export interface AppMetadata {
   id: string;
@@ -24,11 +25,110 @@ export interface AppMetadata {
   disconnectEndpoint?: string;
 }
 
+interface ConnectionError {
+  type: 'oauth_denied' | 'token_expired' | 'rate_limited' | 'network_error' | 'server_error' | 'not_configured' | 'permission_denied' | 'unknown';
+  message: string;
+  details?: string;
+  retryable: boolean;
+}
+
 interface AppDetailDialogProps {
   app: AppMetadata | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConnectionChange?: (appId: string, connected: boolean) => void;
+}
+
+function parseErrorResponse(error: any, responseData?: any): ConnectionError {
+  const errorMessage = error?.message || responseData?.message || responseData?.error || 'Error desconocido';
+  const errorDetails = responseData?.details || error?.details;
+  
+  if (errorMessage.includes('OAuth') || errorMessage.includes('oauth') || errorMessage.includes('denied') || errorMessage.includes('access_denied')) {
+    return {
+      type: 'oauth_denied',
+      message: 'Acceso denegado',
+      details: 'Se rechazó la autorización de acceso. Asegúrate de permitir los permisos solicitados.',
+      retryable: true
+    };
+  }
+  
+  if (errorMessage.includes('expired') || errorMessage.includes('token') || errorMessage.includes('invalid_grant')) {
+    return {
+      type: 'token_expired',
+      message: 'Sesión expirada',
+      details: 'Tu sesión ha expirado. Por favor, vuelve a conectar la aplicación.',
+      retryable: true
+    };
+  }
+  
+  if (errorMessage.includes('rate') || errorMessage.includes('limit') || errorMessage.includes('429') || errorMessage.includes('too many')) {
+    return {
+      type: 'rate_limited',
+      message: 'Límite de solicitudes alcanzado',
+      details: 'Has realizado demasiadas solicitudes. Por favor, espera unos minutos e intenta de nuevo.',
+      retryable: true
+    };
+  }
+  
+  if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('ECONNREFUSED') || error?.name === 'TypeError') {
+    return {
+      type: 'network_error',
+      message: 'Error de conexión',
+      details: 'No se pudo establecer conexión con el servidor. Verifica tu conexión a internet.',
+      retryable: true
+    };
+  }
+  
+  if (errorMessage.includes('not configured') || errorMessage.includes('no está configurado') || errorMessage.includes('integraciones')) {
+    return {
+      type: 'not_configured',
+      message: 'Integración no configurada',
+      details: 'Esta aplicación necesita ser configurada a través del panel de integraciones de Replit.',
+      retryable: false
+    };
+  }
+  
+  if (errorMessage.includes('permission') || errorMessage.includes('forbidden') || errorMessage.includes('403')) {
+    return {
+      type: 'permission_denied',
+      message: 'Permisos insuficientes',
+      details: 'No tienes los permisos necesarios para acceder a esta aplicación.',
+      retryable: false
+    };
+  }
+  
+  if (errorMessage.includes('500') || errorMessage.includes('server') || errorMessage.includes('internal')) {
+    return {
+      type: 'server_error',
+      message: 'Error del servidor',
+      details: 'El servidor encontró un error. Por favor, intenta de nuevo más tarde.',
+      retryable: true
+    };
+  }
+  
+  return {
+    type: 'unknown',
+    message: errorMessage || 'Error al conectar',
+    details: errorDetails || 'Ocurrió un error inesperado. Por favor, intenta de nuevo.',
+    retryable: true
+  };
+}
+
+function getErrorIcon(errorType: ConnectionError['type']) {
+  switch (errorType) {
+    case 'oauth_denied':
+      return <Ban className="h-5 w-5 text-red-500" />;
+    case 'token_expired':
+      return <Clock className="h-5 w-5 text-amber-500" />;
+    case 'rate_limited':
+      return <Clock className="h-5 w-5 text-amber-500" />;
+    case 'network_error':
+      return <WifiOff className="h-5 w-5 text-red-500" />;
+    case 'permission_denied':
+      return <Ban className="h-5 w-5 text-red-500" />;
+    default:
+      return <AlertCircle className="h-5 w-5 text-red-500" />;
+  }
 }
 
 export function AppDetailDialog({ 
@@ -41,6 +141,43 @@ export function AppDetailDialog({
   const [isLoading, setIsLoading] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionEmail, setConnectionEmail] = useState<string>("");
+  const [connectionError, setConnectionError] = useState<ConnectionError | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const checkConnectionStatus = useCallback(async () => {
+    if (!app?.statusEndpoint) return;
+    
+    setIsLoading(true);
+    setConnectionError(null);
+    
+    try {
+      const res = await fetch(app.statusEndpoint, { credentials: "include" });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setIsConnected(data.connected === true);
+        setConnectionEmail(data.email || "");
+        
+        if (data.connected && retryCount > 0) {
+          toast.success(`${app.name} conectado`, {
+            description: data.email ? `Conectado como ${data.email}` : 'Conexión establecida correctamente'
+          });
+        }
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        const error = parseErrorResponse(new Error(`HTTP ${res.status}`), errorData);
+        setConnectionError(error);
+        setIsConnected(false);
+      }
+    } catch (error: any) {
+      console.error("Error checking connection:", error);
+      const parsedError = parseErrorResponse(error);
+      setConnectionError(parsedError);
+      setIsConnected(false);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [app?.statusEndpoint, app?.name, retryCount]);
 
   useEffect(() => {
     if (open && app?.statusEndpoint) {
@@ -49,40 +186,35 @@ export function AppDetailDialog({
       setIsLoading(false);
       setIsConnected(false);
     }
-  }, [open, app?.id]);
-
-  const checkConnectionStatus = async () => {
-    if (!app?.statusEndpoint) return;
-    
-    setIsLoading(true);
-    try {
-      const res = await fetch(app.statusEndpoint, { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        setIsConnected(data.connected === true);
-        setConnectionEmail(data.email || "");
-      } else {
-        setIsConnected(false);
-      }
-    } catch (error) {
-      console.error("Error checking connection:", error);
-      setIsConnected(false);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  }, [open, app?.id, checkConnectionStatus]);
 
   const handleConnect = async () => {
-    if (!app?.connectionEndpoint) return;
+    if (!app?.connectionEndpoint) {
+      toast.error('Error de configuración', {
+        description: 'Esta aplicación no tiene un endpoint de conexión configurado.'
+      });
+      return;
+    }
     
     setIsConnecting(true);
+    setConnectionError(null);
+    
+    toast.loading(`Conectando con ${app.name}...`, { id: 'connect-toast' });
+    
     window.location.href = app.connectionEndpoint;
   };
 
   const handleDisconnect = async () => {
-    if (!app?.disconnectEndpoint) return;
+    if (!app?.disconnectEndpoint) {
+      toast.error('Error de configuración', {
+        description: 'Esta aplicación no tiene un endpoint de desconexión configurado.'
+      });
+      return;
+    }
     
     setIsConnecting(true);
+    setConnectionError(null);
+    
     try {
       const res = await fetch(app.disconnectEndpoint, {
         method: "POST",
@@ -90,15 +222,48 @@ export function AppDetailDialog({
       });
       
       if (res.ok) {
+        const data = await res.json();
+        
+        if (data.disconnectUrl) {
+          toast.info('Redirigiéndote para completar la desconexión...', {
+            duration: 3000
+          });
+          window.open(data.disconnectUrl, '_blank');
+        }
+        
         setIsConnected(false);
         setConnectionEmail("");
         onConnectionChange?.(app.id, false);
+        
+        toast.success(`${app.name} desconectado`, {
+          description: 'La aplicación ha sido desconectada correctamente.'
+        });
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        const error = parseErrorResponse(new Error(`HTTP ${res.status}`), errorData);
+        setConnectionError(error);
+        
+        toast.error('Error al desconectar', {
+          description: error.message
+        });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error disconnecting:", error);
+      const parsedError = parseErrorResponse(error);
+      setConnectionError(parsedError);
+      
+      toast.error('Error al desconectar', {
+        description: parsedError.message
+      });
     } finally {
       setIsConnecting(false);
     }
+  };
+
+  const handleRetry = () => {
+    setRetryCount(prev => prev + 1);
+    setConnectionError(null);
+    checkConnectionStatus();
   };
 
   if (!app) return null;
@@ -111,6 +276,7 @@ export function AppDetailDialog({
             <button 
               onClick={() => onOpenChange(false)}
               className="hover:text-foreground transition-colors flex items-center gap-1"
+              data-testid="button-back-apps"
             >
               <ChevronLeft className="h-4 w-4" />
               Aplicaciones
@@ -155,12 +321,88 @@ export function AppDetailDialog({
             </div>
           </div>
 
+          {connectionError && (
+            <div 
+              className={cn(
+                "mb-6 p-4 rounded-lg border",
+                connectionError.type === 'rate_limited' || connectionError.type === 'token_expired'
+                  ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
+                  : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
+              )}
+              data-testid={`error-container-${app.id}`}
+            >
+              <div className="flex items-start gap-3">
+                {getErrorIcon(connectionError.type)}
+                <div className="flex-1 min-w-0">
+                  <h4 className={cn(
+                    "text-sm font-medium",
+                    connectionError.type === 'rate_limited' || connectionError.type === 'token_expired'
+                      ? "text-amber-800 dark:text-amber-300"
+                      : "text-red-800 dark:text-red-300"
+                  )}>
+                    {connectionError.message}
+                  </h4>
+                  {connectionError.details && (
+                    <p className={cn(
+                      "text-sm mt-1",
+                      connectionError.type === 'rate_limited' || connectionError.type === 'token_expired'
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-red-700 dark:text-red-400"
+                    )}>
+                      {connectionError.details}
+                    </p>
+                  )}
+                  {connectionError.retryable && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRetry}
+                      className={cn(
+                        "mt-3",
+                        connectionError.type === 'rate_limited' || connectionError.type === 'token_expired'
+                          ? "border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/40"
+                          : "border-red-300 text-red-700 hover:bg-red-100 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/40"
+                      )}
+                      data-testid={`button-retry-${app.id}`}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Reintentar
+                    </Button>
+                  )}
+                </div>
+                <button
+                  onClick={() => setConnectionError(null)}
+                  className={cn(
+                    "p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-colors",
+                    connectionError.type === 'rate_limited' || connectionError.type === 'token_expired'
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-red-600 dark:text-red-400"
+                  )}
+                  data-testid={`button-dismiss-error-${app.id}`}
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {isConnected && connectionEmail && (
             <div className="mb-6 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-green-500"></div>
                 <span className="text-sm text-green-700 dark:text-green-400">
                   Conectado como <strong>{connectionEmail}</strong>
+                </span>
+              </div>
+            </div>
+          )}
+
+          {isConnected && !connectionEmail && (
+            <div className="mb-6 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                <span className="text-sm text-green-700 dark:text-green-400">
+                  Conectado correctamente
                 </span>
               </div>
             </div>
@@ -193,6 +435,7 @@ export function AppDetailDialog({
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-primary hover:underline flex items-center gap-1"
+                    data-testid={`link-website-${app.id}`}
                   >
                     <ExternalLink className="h-3 w-3" />
                   </a>
@@ -207,11 +450,28 @@ export function AppDetailDialog({
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-primary hover:underline flex items-center gap-1"
+                    data-testid={`link-privacy-${app.id}`}
                   >
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 </div>
               )}
+
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Estado</span>
+                <span className={cn(
+                  "font-medium",
+                  isLoading ? "text-muted-foreground" :
+                  isConnected ? "text-green-600 dark:text-green-400" : 
+                  connectionError ? "text-red-600 dark:text-red-400" : 
+                  "text-muted-foreground"
+                )}>
+                  {isLoading ? "Verificando..." : 
+                   isConnected ? "Conectado" : 
+                   connectionError ? "Error" : 
+                   "No conectado"}
+                </span>
+              </div>
             </div>
           </div>
         </div>

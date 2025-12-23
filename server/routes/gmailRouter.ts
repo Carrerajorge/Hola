@@ -25,14 +25,15 @@ export function createGmailRouter() {
 
   router.get("/search", async (req: Request, res: Response) => {
     try {
-      const { q, maxResults, labelIds } = req.query;
+      const { q, maxResults, labelIds, pageToken } = req.query;
       
       const query = typeof q === 'string' ? q : '';
       const max = typeof maxResults === 'string' ? parseInt(maxResults, 10) : 20;
       const labels = typeof labelIds === 'string' ? labelIds.split(',') : undefined;
+      const token = typeof pageToken === 'string' ? pageToken : undefined;
 
-      const emails = await searchEmails(query, max, labels);
-      res.json({ emails });
+      const result = await searchEmails(query, max, labels, token);
+      res.json({ emails: result.emails, nextPageToken: result.nextPageToken });
     } catch (error: any) {
       console.error("[Gmail] Search error:", error);
       res.status(500).json({ error: error.message });

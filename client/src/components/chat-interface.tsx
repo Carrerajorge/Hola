@@ -60,7 +60,7 @@ import { VirtualComputer } from "@/components/virtual-computer";
 import { DocumentEditor } from "@/components/document-editor";
 import { EnhancedDocumentEditor } from "@/components/ribbon";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
-import { PPTEditorShell } from "@/components/ppt";
+import { PPTEditorShellLazy } from "@/lib/lazyComponents";
 import { usePptStreaming } from "@/hooks/usePptStreaming";
 import { PPT_STREAMING_SYSTEM_PROMPT } from "@/lib/pptPrompts";
 import { ETLDialog } from "@/components/etl-dialog";
@@ -2659,7 +2659,7 @@ export function ChatInterface({
           <Panel defaultSize={activeDocEditor ? 75 : 50} minSize={25}>
             <div className="h-full animate-in slide-in-from-right duration-300">
               {(activeDocEditor?.type === "ppt") ? (
-                <PPTEditorShell
+                <PPTEditorShellLazy
                   onClose={closeDocEditor}
                   onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
                 />

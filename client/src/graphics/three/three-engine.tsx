@@ -2,15 +2,14 @@ import React, { Suspense, lazy, useMemo } from 'react';
 import { detectCapabilities, type WebGLConfig, type Canvas2DConfig } from '@shared/schemas/graphics';
 import { CanvasEngine, type CanvasEngineRef } from '../canvas';
 import type { ThreeEngineRef } from './three-engine-impl';
-import * as THREE from 'three';
 
 const ThreeEngineImpl = lazy(() => import('./three-engine-impl'));
 
 interface ThreeEngineProps {
   config: WebGLConfig;
   className?: string;
-  onReady?: (scene: THREE.Scene, camera: THREE.Camera, renderer: THREE.WebGLRenderer) => void;
-  onFrame?: (scene: THREE.Scene, camera: THREE.Camera, deltaTime: number) => void;
+  onReady?: (scene: any, camera: any, renderer: any) => void;
+  onFrame?: (scene: any, camera: any, deltaTime: number) => void;
   ref?: React.Ref<ThreeEngineRef | CanvasEngineRef>;
 }
 

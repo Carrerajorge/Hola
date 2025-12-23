@@ -171,22 +171,30 @@ function extractBody(payload: gmail_v1.Schema$MessagePart | undefined): { text: 
   return { text, html };
 }
 
+export interface SearchEmailsResult {
+  emails: EmailSummary[];
+  nextPageToken?: string;
+}
+
 export async function searchEmails(
   query: string = '',
   maxResults: number = 20,
-  labelIds?: string[]
-): Promise<EmailSummary[]> {
+  labelIds?: string[],
+  pageToken?: string
+): Promise<SearchEmailsResult> {
   const gmail = await getGmailClient();
   
   const listParams: gmail_v1.Params$Resource$Users$Messages$List = {
     userId: 'me',
     maxResults,
     q: query || undefined,
-    labelIds: labelIds
+    labelIds: labelIds,
+    pageToken: pageToken || undefined
   };
 
   const response = await gmail.users.messages.list(listParams);
   const messages = response.data.messages || [];
+  const nextPageToken = response.data.nextPageToken || undefined;
 
   const emailSummaries: EmailSummary[] = [];
 
@@ -232,7 +240,7 @@ export async function searchEmails(
     }
   }
 
-  return emailSummaries;
+  return { emails: emailSummaries, nextPageToken };
 }
 
 export async function getEmailThread(threadId: string): Promise<EmailThread | null> {

@@ -7,7 +7,7 @@ export { CanvasEngine, type CanvasEngineRef } from './canvas';
 export { exportCanvasAsPNG, exportCanvasAsJPEG, downloadCanvas, clearCanvas, setupHiDPICanvas, getDevicePixelRatio, createOffscreenCanvas } from './canvas';
 
 export { ThreeEngine } from './three';
-export { ThreeEngineImpl, type ThreeEngineRef } from './three';
+export type { ThreeEngineRef } from './three';
 
 export type {
   RenderMode,
