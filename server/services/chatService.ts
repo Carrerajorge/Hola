@@ -256,11 +256,13 @@ export async function handleChatRequest(
   
   // Fetch user settings for feature flags and preferences
   let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
+  let companyKnowledge: Awaited<ReturnType<typeof storage.getActiveCompanyKnowledge>> = [];
   if (userId) {
     try {
       userSettings = await storage.getUserSettings(userId);
+      companyKnowledge = await storage.getActiveCompanyKnowledge(userId);
     } catch (error) {
-      console.error("Error fetching user settings:", error);
+      console.error("Error fetching user settings or company knowledge:", error);
     }
   }
   
@@ -703,7 +705,14 @@ Si el usuario dice "dame un resumen" o "analiza esto", responde en texto, NO com
       }`
     : '';
 
-  const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.${userProfileContext}${customInstructionsSection}${responseStyleModifier}
+  // Build company knowledge context if available
+  const companyKnowledgeSection = companyKnowledge && companyKnowledge.length > 0
+    ? `\n\n**CONOCIMIENTOS DE LA EMPRESA (usa esta información para responder):**\n${
+        companyKnowledge.map(k => `### ${k.title} [${k.category}]\n${k.content}`).join('\n\n')
+      }`
+    : '';
+
+  const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.${userProfileContext}${customInstructionsSection}${responseStyleModifier}${companyKnowledgeSection}
 ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
 
   // Use document mode prompt when in document editing mode

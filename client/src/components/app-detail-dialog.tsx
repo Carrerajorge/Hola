@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle 
 } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ExternalLink, Loader2, ChevronLeft, AlertCircle, RefreshCw, XCircle, Clock, Ban, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -457,20 +458,22 @@ export function AppDetailDialog({
                 </div>
               )}
 
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Estado</span>
-                <span className={cn(
-                  "font-medium",
-                  isLoading ? "text-muted-foreground" :
-                  isConnected ? "text-green-600 dark:text-green-400" : 
-                  connectionError ? "text-red-600 dark:text-red-400" : 
-                  "text-muted-foreground"
-                )}>
-                  {isLoading ? "Verificando..." : 
-                   isConnected ? "Conectado" : 
-                   connectionError ? "Error" : 
-                   "No conectado"}
-                </span>
+                {isLoading ? (
+                  <Skeleton className="h-4 w-20" />
+                ) : (
+                  <span className={cn(
+                    "font-medium",
+                    isConnected ? "text-green-600 dark:text-green-400" : 
+                    connectionError ? "text-red-600 dark:text-red-400" : 
+                    "text-muted-foreground"
+                  )}>
+                    {isConnected ? "Conectado" : 
+                     connectionError ? "Error" : 
+                     "No conectado"}
+                  </span>
+                )}
               </div>
             </div>
           </div>

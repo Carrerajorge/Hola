@@ -751,8 +751,12 @@ const AssistantMessage = memo(function AssistantMessage({
 
       {showSkeleton && (
         <div className="mt-3">
-          <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <div className="w-64 h-64 rounded-lg animate-pulse bg-gradient-to-br from-muted/80 via-muted to-muted/80 flex flex-col items-center justify-center gap-3">
+            <div className="w-12 h-12 rounded-lg bg-muted-foreground/10 animate-pulse" />
+            <div className="space-y-2 text-center">
+              <div className="h-3 w-32 bg-muted-foreground/10 rounded animate-pulse mx-auto" />
+              <div className="h-2 w-24 bg-muted-foreground/10 rounded animate-pulse mx-auto" />
+            </div>
           </div>
         </div>
       )}

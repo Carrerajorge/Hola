@@ -29,12 +29,13 @@ import {
   type IntegrationPolicy, type InsertIntegrationPolicy,
   type ToolCallLog, type InsertToolCallLog,
   type ConsentLog, type SharedLink, type InsertSharedLink,
+  type CompanyKnowledge, type InsertCompanyKnowledge,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   gpts, gptCategories, gptVersions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
   notificationEventTypes, notificationPreferences, userSettings,
   integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs,
-  consentLogs, sharedLinks
+  consentLogs, sharedLinks, companyKnowledge
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
@@ -191,6 +192,12 @@ export interface IStorage {
   getDeletedChats(userId: string): Promise<Chat[]>;
   restoreDeletedChat(chatId: string): Promise<void>;
   permanentlyDeleteChat(chatId: string): Promise<void>;
+  // Company Knowledge
+  getCompanyKnowledge(userId: string): Promise<CompanyKnowledge[]>;
+  getActiveCompanyKnowledge(userId: string): Promise<CompanyKnowledge[]>;
+  createCompanyKnowledge(knowledge: InsertCompanyKnowledge): Promise<CompanyKnowledge>;
+  updateCompanyKnowledge(id: string, updates: Partial<InsertCompanyKnowledge>): Promise<CompanyKnowledge | null>;
+  deleteCompanyKnowledge(id: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -1111,6 +1118,36 @@ export class MemStorage implements IStorage {
 
   async permanentlyDeleteChat(chatId: string): Promise<void> {
     await db.delete(chats).where(eq(chats.id, chatId));
+  }
+
+  // Company Knowledge
+  async getCompanyKnowledge(userId: string): Promise<CompanyKnowledge[]> {
+    return db.select().from(companyKnowledge)
+      .where(eq(companyKnowledge.userId, userId))
+      .orderBy(desc(companyKnowledge.createdAt));
+  }
+
+  async getActiveCompanyKnowledge(userId: string): Promise<CompanyKnowledge[]> {
+    return db.select().from(companyKnowledge)
+      .where(and(eq(companyKnowledge.userId, userId), eq(companyKnowledge.isActive, 'true')))
+      .orderBy(desc(companyKnowledge.createdAt));
+  }
+
+  async createCompanyKnowledge(knowledge: InsertCompanyKnowledge): Promise<CompanyKnowledge> {
+    const [result] = await db.insert(companyKnowledge).values(knowledge).returning();
+    return result;
+  }
+
+  async updateCompanyKnowledge(id: string, updates: Partial<InsertCompanyKnowledge>): Promise<CompanyKnowledge | null> {
+    const [result] = await db.update(companyKnowledge)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(companyKnowledge.id, id))
+      .returning();
+    return result || null;
+  }
+
+  async deleteCompanyKnowledge(id: string): Promise<void> {
+    await db.delete(companyKnowledge).where(eq(companyKnowledge.id, id));
   }
 }
 

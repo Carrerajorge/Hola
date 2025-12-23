@@ -725,5 +725,90 @@ export function createUserRouter() {
     }
   });
 
+  router.get("/api/users/:id/company-knowledge", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const knowledge = await storage.getCompanyKnowledge(id);
+      res.json(knowledge);
+    } catch (error: any) {
+      console.error("Error getting company knowledge:", error);
+      res.status(500).json({ error: "Failed to get company knowledge" });
+    }
+  });
+
+  router.post("/api/users/:id/company-knowledge", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const { title, content, category } = req.body;
+      if (!title || !content) {
+        return res.status(400).json({ error: "Title and content are required" });
+      }
+      
+      const knowledge = await storage.createCompanyKnowledge({
+        userId: id,
+        title,
+        content,
+        category: category || "general",
+        isActive: "true"
+      });
+      res.json(knowledge);
+    } catch (error: any) {
+      console.error("Error creating company knowledge:", error);
+      res.status(500).json({ error: "Failed to create company knowledge" });
+    }
+  });
+
+  router.put("/api/users/:id/company-knowledge/:knowledgeId", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id, knowledgeId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      const { title, content, category, isActive } = req.body;
+      const knowledge = await storage.updateCompanyKnowledge(knowledgeId, {
+        ...(title !== undefined && { title }),
+        ...(content !== undefined && { content }),
+        ...(category !== undefined && { category }),
+        ...(isActive !== undefined && { isActive: isActive ? "true" : "false" })
+      });
+      
+      if (!knowledge) {
+        return res.status(404).json({ error: "Knowledge entry not found" });
+      }
+      res.json(knowledge);
+    } catch (error: any) {
+      console.error("Error updating company knowledge:", error);
+      res.status(500).json({ error: "Failed to update company knowledge" });
+    }
+  });
+
+  router.delete("/api/users/:id/company-knowledge/:knowledgeId", async (req, res) => {
+    try {
+      const authUserId = (req as any).user?.claims?.sub;
+      if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const { id, knowledgeId } = req.params;
+      if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
+      
+      await storage.deleteCompanyKnowledge(knowledgeId);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting company knowledge:", error);
+      res.status(500).json({ error: "Failed to delete company knowledge" });
+    }
+  });
+
   return router;
 }

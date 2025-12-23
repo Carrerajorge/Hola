@@ -3,58 +3,22 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { EmailListSkeleton, ThreadSkeleton, Skeleton } from "@/components/ui/skeleton";
 import { 
   Loader2, Mail, Search, RefreshCw, Send, ChevronDown, ChevronUp,
-  Inbox, Star, Archive, Trash2, MailOpen, MailWarning, Clock,
-  User, AlertCircle, Check, ExternalLink
+  Inbox, AlertCircle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { format, parseISO } from "date-fns";
-
-interface SourceMetadata {
-  provider: 'gmail';
-  accountId?: string;
-  accountEmail?: string;
-  mailbox: string;
-  messageId: string;
-  threadId: string;
-  labels: string[];
-  permalink: string;
-}
-
-interface EmailSummary {
-  id: string;
-  threadId: string;
-  subject: string;
-  from: string;
-  fromEmail: string;
-  to: string;
-  date: string;
-  snippet: string;
-  labels: string[];
-  isUnread: boolean;
-  source?: SourceMetadata;
-}
-
-interface EmailMessage {
-  id: string;
-  from: string;
-  fromEmail: string;
-  to: string;
-  date: string;
-  subject: string;
-  body: string;
-  snippet: string;
-  source?: SourceMetadata;
-}
-
-interface EmailThread {
-  id: string;
-  subject: string;
-  messages: EmailMessage[];
-  labels: string[];
-}
+import { format } from "date-fns";
+import {
+  useGmailConnection,
+  useGmailEmails,
+  useGmailThread,
+  useGmailReply,
+  type SourceMetadata,
+  type EmailSummary
+} from "@/hooks/use-gmail";
 
 const SourceBadge = ({ source, subject }: { source: SourceMetadata; subject: string }) => (
   <a
@@ -79,14 +43,7 @@ export interface InlineGmailPreviewProps {
   onComplete?: (message: string) => void;
 }
 
-type Status = "loading" | "connected" | "not_connected" | "error";
 type ViewMode = "list" | "thread" | "compose";
-
-const GmailLogo = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" className={className} fill="none">
-    <path d="M22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6zm-2 0l-8 5-8-5h16zm0 12H4V8l8 5 8-5v10z" fill="currentColor"/>
-  </svg>
-);
 
 function formatEmailDate(dateStr: string): string {
   try {
@@ -112,183 +69,114 @@ export function InlineGmailPreview({
   threadId: initialThreadId,
   onComplete
 }: InlineGmailPreviewProps) {
-  const [status, setStatus] = useState<Status>("loading");
   const [viewMode, setViewMode] = useState<ViewMode>(initialThreadId ? "thread" : "list");
-  const [emails, setEmails] = useState<EmailSummary[]>([]);
-  const [selectedThread, setSelectedThread] = useState<EmailThread | null>(null);
   const [searchQuery, setSearchQuery] = useState(initialQuery);
-  const [isSearching, setIsSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [connectionEmail, setConnectionEmail] = useState<string>("");
+  const [activeSearchQuery, setActiveSearchQuery] = useState(initialQuery);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(initialThreadId || null);
   
   const [replyTo, setReplyTo] = useState("");
   const [replySubject, setReplySubject] = useState("");
   const [replyBody, setReplyBody] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  const checkConnection = useCallback(async () => {
-    try {
-      const res = await fetch("/api/integrations/google/gmail/status");
-      const data = await res.json();
-      
-      if (data.connected) {
-        setStatus("connected");
-        setConnectionEmail(data.email || "");
-        loadEmails();
-      } else {
-        setStatus("not_connected");
-      }
-    } catch (err) {
-      console.error("Error checking Gmail connection:", err);
-      setStatus("error");
-      setError("No se pudo verificar la conexión");
-    }
-  }, []);
+  const { isConnected, email: connectionEmail, isLoading: isCheckingConnection } = useGmailConnection();
+  
+  const {
+    emails,
+    nextPageToken,
+    isLoading: isLoadingEmails,
+    isFetching: isFetchingEmails,
+    error: emailsError,
+    refetch: refetchEmails,
+    loadMore,
+    isLoadingMore
+  } = useGmailEmails(activeSearchQuery, { action, enabled: isConnected });
 
-  const loadEmails = useCallback(async (q?: string, append: boolean = false, pageToken?: string) => {
-    if (append) {
-      setIsLoadingMore(true);
-    } else {
-      setIsSearching(true);
-    }
-    setError(null);
-    
-    try {
-      let queryParam = q || searchQuery;
-      
-      if (action === "unread") {
-        queryParam = "is:unread " + queryParam;
-      }
-      
-      let url = `/api/integrations/google/gmail/search?q=${encodeURIComponent(queryParam)}&maxResults=20`;
-      if (pageToken) {
-        url += `&pageToken=${encodeURIComponent(pageToken)}`;
-      }
-      
-      const res = await fetch(url);
-      const data = await res.json();
-      
-      if (data.emails) {
-        if (append) {
-          setEmails(prev => [...prev, ...data.emails]);
-        } else {
-          setEmails(data.emails);
-        }
-        setNextPageToken(data.nextPageToken || null);
-      }
-    } catch (err: any) {
-      console.error("Error loading emails:", err);
-      setError("Error al cargar correos");
-    } finally {
-      setIsSearching(false);
-      setIsLoadingMore(false);
-    }
-  }, [searchQuery, action]);
+  const {
+    thread: selectedThread,
+    isLoading: isLoadingThread,
+    error: threadError
+  } = useGmailThread(selectedThreadId);
 
-  const loadMoreEmails = useCallback(() => {
-    if (nextPageToken && !isLoadingMore) {
-      loadEmails(searchQuery, true, nextPageToken);
-    }
-  }, [nextPageToken, isLoadingMore, loadEmails, searchQuery]);
+  const {
+    sendReply,
+    isSending,
+    error: replyError,
+    isSuccess: replySuccess,
+    reset: resetReply
+  } = useGmailReply();
 
-  const loadThread = useCallback(async (threadId: string) => {
-    setIsSearching(true);
-    setError(null);
-    
-    try {
-      const res = await fetch(`/api/integrations/google/gmail/threads/${threadId}`);
-      const data = await res.json();
-      
-      if (data.id) {
-        setSelectedThread(data);
-        setViewMode("thread");
-        
-        if (data.messages?.length > 0) {
-          const lastMessage = data.messages[data.messages.length - 1];
-          setReplyTo(lastMessage.fromEmail);
-          setReplySubject(data.subject);
-        }
-      }
-    } catch (err: any) {
-      console.error("Error loading thread:", err);
-      setError("Error al cargar la conversación");
-    } finally {
-      setIsSearching(false);
+  const error = emailsError || threadError || replyError;
+
+  useEffect(() => {
+    if (selectedThread?.messages?.length) {
+      const lastMessage = selectedThread.messages[selectedThread.messages.length - 1];
+      setReplyTo(lastMessage.fromEmail);
+      setReplySubject(selectedThread.subject);
     }
-  }, []);
+  }, [selectedThread]);
+
+  useEffect(() => {
+    if (replySuccess && selectedThread) {
+      setReplyBody("");
+      onComplete?.(`Respuesta enviada a ${replyTo}`);
+      resetReply();
+    }
+  }, [replySuccess, selectedThread, replyTo, onComplete, resetReply]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setNextPageToken(null);
-    loadEmails(searchQuery);
+    setActiveSearchQuery(searchQuery);
   };
 
   const handleSelectEmail = (email: EmailSummary) => {
-    loadThread(email.threadId);
+    setSelectedThreadId(email.threadId);
+    setViewMode("thread");
   };
 
-  const handleSendReply = async () => {
+  const handleSendReply = () => {
     if (!selectedThread || !replyBody.trim()) return;
     
-    setIsSending(true);
-    setError(null);
-    
-    try {
-      const res = await fetch("/api/integrations/google/gmail/reply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          threadId: selectedThread.id,
-          to: replyTo,
-          subject: replySubject,
-          body: replyBody
-        })
-      });
-      
-      const data = await res.json();
-      
-      if (data.success) {
-        setReplyBody("");
-        onComplete?.(`Respuesta enviada a ${replyTo}`);
-        loadThread(selectedThread.id);
-      } else {
-        setError(data.error || "Error al enviar respuesta");
-      }
-    } catch (err: any) {
-      setError("Error al enviar respuesta");
-    } finally {
-      setIsSending(false);
+    sendReply({
+      threadId: selectedThread.id,
+      to: replyTo,
+      subject: replySubject,
+      body: replyBody
+    });
+  };
+
+  const handleLoadMore = () => {
+    if (nextPageToken) {
+      loadMore(nextPageToken);
     }
   };
 
-  useEffect(() => {
-    checkConnection();
-  }, [checkConnection]);
-
-  useEffect(() => {
-    if (initialThreadId && status === "connected") {
-      loadThread(initialThreadId);
-    }
-  }, [initialThreadId, status, loadThread]);
-
-  if (status === "loading") {
+  if (isCheckingConnection) {
     return (
       <motion.div 
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="rounded-xl border border-red-200 dark:border-red-800 bg-gradient-to-br from-red-50 to-white dark:from-red-900/20 dark:to-gray-900 p-6"
+        className="rounded-xl border border-red-200 dark:border-red-800 bg-gradient-to-br from-red-50 to-white dark:from-red-900/20 dark:to-gray-900 overflow-hidden"
       >
-        <div className="flex items-center justify-center gap-3">
-          <Loader2 className="h-5 w-5 animate-spin text-red-600" />
-          <span className="text-sm text-muted-foreground">Conectando con Gmail...</span>
+        <div className="p-4 border-b border-red-200 dark:border-red-800">
+          <div className="flex items-center gap-3">
+            <Skeleton className="w-10 h-10 rounded-lg" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <Skeleton className="h-9 flex-1 rounded-md" />
+            <Skeleton className="h-9 w-9 rounded-md" />
+            <Skeleton className="h-9 w-9 rounded-md" />
+          </div>
         </div>
+        <EmailListSkeleton count={4} />
       </motion.div>
     );
   }
 
-  if (status === "not_connected") {
+  if (!isConnected) {
     return (
       <motion.div 
         initial={{ opacity: 0, y: 10 }}
@@ -337,7 +225,7 @@ export function InlineGmailPreview({
             <Button 
               variant="ghost" 
               size="sm" 
-              onClick={() => { setViewMode("list"); setSelectedThread(null); }}
+              onClick={() => { setViewMode("list"); setSelectedThreadId(null); }}
             >
               <ChevronUp className="h-4 w-4 mr-1" />
               Volver
@@ -356,11 +244,11 @@ export function InlineGmailPreview({
                 className="pl-9"
               />
             </div>
-            <Button type="submit" size="sm" disabled={isSearching} className="bg-red-600 hover:bg-red-700 text-white">
-              {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            <Button type="submit" size="sm" disabled={isFetchingEmails} className="bg-red-600 hover:bg-red-700 text-white">
+              {isFetchingEmails ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => loadEmails()} disabled={isSearching}>
-              <RefreshCw className={cn("h-4 w-4", isSearching && "animate-spin")} />
+            <Button type="button" variant="outline" size="sm" onClick={() => refetchEmails()} disabled={isFetchingEmails}>
+              <RefreshCw className={cn("h-4 w-4", isFetchingEmails && "animate-spin")} />
             </Button>
           </form>
         )}
@@ -384,7 +272,9 @@ export function InlineGmailPreview({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
-              {emails.length === 0 ? (
+              {isLoadingEmails && emails.length === 0 ? (
+                <EmailListSkeleton count={5} />
+              ) : emails.length === 0 ? (
                 <div className="p-8 text-center text-muted-foreground">
                   <Inbox className="h-8 w-8 mx-auto mb-2 opacity-50" />
                   <p>No se encontraron correos</p>
@@ -449,7 +339,7 @@ export function InlineGmailPreview({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={loadMoreEmails}
+                        onClick={handleLoadMore}
                         disabled={isLoadingMore}
                         className="w-full"
                         data-testid="button-load-more-emails"
@@ -473,6 +363,18 @@ export function InlineGmailPreview({
             </motion.div>
           )}
 
+          {viewMode === "thread" && isLoadingThread && !selectedThread && (
+            <motion.div
+              key="thread-loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="p-4"
+            >
+              <ThreadSkeleton messageCount={2} />
+            </motion.div>
+          )}
+
           {viewMode === "thread" && selectedThread && (
             <motion.div
               key="thread"
@@ -484,7 +386,7 @@ export function InlineGmailPreview({
               <h3 className="font-semibold text-lg mb-4">{selectedThread.subject}</h3>
               
               <div className="space-y-4">
-                {selectedThread.messages.map((msg, idx) => (
+                {selectedThread.messages.map((msg) => (
                   <div 
                     key={msg.id}
                     className="p-3 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700"

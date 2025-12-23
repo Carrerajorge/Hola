@@ -946,3 +946,30 @@ export const insertCodeInterpreterArtifactSchema = createInsertSchema(codeInterp
 
 export type InsertCodeInterpreterArtifact = z.infer<typeof insertCodeInterpreterArtifactSchema>;
 export type CodeInterpreterArtifact = typeof codeInterpreterArtifacts.$inferSelect;
+
+// ========================================
+// Company Knowledge System
+// ========================================
+
+export const companyKnowledge = pgTable("company_knowledge", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  category: text("category").default("general"),
+  isActive: text("is_active").default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("company_knowledge_user_idx").on(table.userId),
+  index("company_knowledge_category_idx").on(table.category),
+]);
+
+export const insertCompanyKnowledgeSchema = createInsertSchema(companyKnowledge).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCompanyKnowledge = z.infer<typeof insertCompanyKnowledgeSchema>;
+export type CompanyKnowledge = typeof companyKnowledge.$inferSelect;
