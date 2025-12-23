@@ -201,6 +201,24 @@ export function AppDetailDialog({
     setIsConnecting(true);
     setConnectionError(null);
     
+    // First check if user is authenticated
+    try {
+      const authRes = await fetch('/api/auth/user');
+      if (!authRes.ok) {
+        setIsConnecting(false);
+        toast.dismiss('connect-toast');
+        setConnectionError({
+          type: 'oauth_denied',
+          message: 'Inicia sesión primero',
+          details: 'Para conectar esta aplicación, primero debes iniciar sesión con tu cuenta de Replit usando el botón "Iniciar sesión" en la esquina superior derecha.',
+          retryable: false
+        });
+        return;
+      }
+    } catch (e) {
+      // Network error, try to connect anyway
+    }
+    
     toast.loading(`Conectando con ${app.name}...`, { id: 'connect-toast' });
     
     window.location.href = app.connectionEndpoint;
