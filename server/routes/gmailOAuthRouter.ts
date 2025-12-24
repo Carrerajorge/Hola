@@ -42,7 +42,11 @@ function getOAuth2Client() {
 }
 
 router.get('/start', async (req: Request, res: Response) => {
-  const userId = (req as any).userId;
+  // Get userId from Passport session (req.user.claims.sub)
+  const user = (req as any).user;
+  const userId = user?.claims?.sub;
+  
+  console.log('[Gmail OAuth] Start - user:', user ? 'present' : 'missing', 'userId:', userId);
   
   if (!userId) {
     // Redirect to login page with return URL
@@ -70,7 +74,8 @@ router.get('/start', async (req: Request, res: Response) => {
 
 // JSON endpoint for programmatic access (like React hooks)
 router.get('/start-json', async (req: Request, res: Response) => {
-  const userId = (req as any).userId;
+  const user = (req as any).user;
+  const userId = user?.claims?.sub;
   
   if (!userId) {
     res.status(401).json({ error: 'Authentication required' });
@@ -148,7 +153,8 @@ router.get('/callback', async (req: Request, res: Response) => {
 });
 
 router.get('/status', async (req: Request, res: Response) => {
-  const userId = (req as any).userId;
+  const user = (req as any).user;
+  const userId = user?.claims?.sub;
   
   if (!userId) {
     res.json({ connected: false, useCustomOAuth: true });
@@ -222,7 +228,8 @@ router.get('/status', async (req: Request, res: Response) => {
 });
 
 router.post('/disconnect', async (req: Request, res: Response) => {
-  const userId = (req as any).userId;
+  const user = (req as any).user;
+  const userId = user?.claims?.sub;
   
   if (!userId) {
     res.status(401).json({ error: 'Authentication required' });
