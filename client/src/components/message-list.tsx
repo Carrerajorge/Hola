@@ -1,4 +1,4 @@
-import React, { memo } from "react";
+import React, { memo, useState, useCallback, useRef } from "react";
 import {
   CheckCircle2,
   Loader2,
@@ -19,7 +19,10 @@ import {
   FileText,
   FileSpreadsheet,
   FileIcon,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Check,
+  Maximize2,
+  Minimize2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -86,14 +89,107 @@ const isNumericValue = (text: string): boolean => {
   );
 };
 
-const CleanDataTableComponents = {
-  table: ({ children }: { children?: React.ReactNode }) => (
-    <div className="my-4 overflow-x-auto">
-      <table className="min-w-full border-collapse border border-border text-sm">
-        {children}
-      </table>
+const CleanDataTableWrapper = ({ children }: { children?: React.ReactNode }) => {
+  const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  const handleCopy = useCallback(async () => {
+    if (!tableRef.current) return;
+    const table = tableRef.current.querySelector('table');
+    if (!table) return;
+    
+    const rows = table.querySelectorAll('tr');
+    const text = Array.from(rows).map(row => {
+      const cells = row.querySelectorAll('th, td');
+      return Array.from(cells).map(cell => cell.textContent?.trim() || '').join('\t');
+    }).join('\n');
+    
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy table:', err);
+    }
+  }, []);
+
+  const handleDownload = useCallback(() => {
+    if (!tableRef.current) return;
+    const table = tableRef.current.querySelector('table');
+    if (!table) return;
+    
+    const rows = table.querySelectorAll('tr');
+    const csv = Array.from(rows).map(row => {
+      const cells = row.querySelectorAll('th, td');
+      return Array.from(cells).map(cell => {
+        const text = cell.textContent?.trim() || '';
+        return text.includes(',') ? `"${text}"` : text;
+      }).join(',');
+    }).join('\n');
+    
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'tabla.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  return (
+    <div 
+      ref={tableRef}
+      className={cn(
+        "relative group my-4",
+        isExpanded && "fixed inset-4 z-50 bg-background rounded-lg border shadow-2xl overflow-auto p-4"
+      )}
+    >
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <button
+          onClick={handleCopy}
+          className="p-1.5 rounded-md bg-muted/80 hover:bg-muted border border-border/50"
+          title={copied ? "Copiado" : "Copiar tabla"}
+          data-testid="button-copy-table"
+        >
+          {copied ? (
+            <Check className="h-4 w-4 text-green-500" />
+          ) : (
+            <Copy className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+        <button
+          onClick={handleDownload}
+          className="p-1.5 rounded-md bg-muted/80 hover:bg-muted border border-border/50"
+          title="Descargar CSV"
+          data-testid="button-download-table"
+        >
+          <Download className="h-4 w-4 text-muted-foreground" />
+        </button>
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="p-1.5 rounded-md bg-muted/80 hover:bg-muted border border-border/50"
+          title={isExpanded ? "Minimizar" : "Expandir"}
+          data-testid="button-expand-table"
+        >
+          {isExpanded ? (
+            <Minimize2 className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <Maximize2 className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-collapse border border-border text-sm">
+          {children}
+        </table>
+      </div>
     </div>
-  ),
+  );
+};
+
+const CleanDataTableComponents = {
+  table: CleanDataTableWrapper,
   thead: ({ children }: { children?: React.ReactNode }) => (
     <thead className="bg-muted/50">{children}</thead>
   ),
