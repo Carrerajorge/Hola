@@ -473,8 +473,8 @@ INSTRUCCIONES:
 5. Si el usuario quiere preparar una respuesta, ayúdale a redactarla
 6. Usa formato markdown para organizar la información
 7. Sé conciso pero completo
-8. AL FINAL de cada correo que menciones, SIEMPRE incluye un enlace a Gmail con este formato exacto:
-   [![Gmail](/gmail-logo.webp)](ENLACE_GMAIL) [Ver en Gmail](ENLACE_GMAIL)
+8. AL FINAL de cada correo que menciones, SIEMPRE incluye un enlace a Gmail con este formato exacto en una línea separada:
+   <a href="ENLACE_GMAIL" target="_blank"><img src="/gmail-logo.webp" alt="Gmail" style="width:16px;height:16px;vertical-align:middle;margin-right:4px">Ver en Gmail</a>
    Donde ENLACE_GMAIL es el enlace proporcionado en "Enlace Gmail" de cada correo.
 
 CONTEXTO DE CORREOS (${emailCount} correos encontrados):
