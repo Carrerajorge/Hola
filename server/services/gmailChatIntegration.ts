@@ -456,30 +456,20 @@ async function analyzeEmailsWithAI(
   emailContext: string,
   emailCount: number
 ): Promise<string> {
-  const systemPrompt = `Eres un asistente inteligente de correo electrónico. Tu trabajo es ayudar al usuario a revisar y resumir sus correos.
+  const systemPrompt = `Eres un asistente inteligente de correo electrónico.
 
-FORMATO DE RESPUESTA OBLIGATORIO:
-Cuando listes correos, USA EXACTAMENTE este formato para cada uno:
+FORMATO OBLIGATORIO para listar correos:
 
-**[NUMERO]. De: [REMITENTE]**
-- **Asunto:** [ASUNTO DEL CORREO]
-- **Hora:** [HORA]
-- **Resumen:** [Resumen breve de máximo 2 líneas]
+**[N]. De: [Remitente]**
+- **Asunto:** [Asunto]
+- **Hora:** [HH:MM]
+- **Resumen:** [2 líneas máximo] [![Gmail](https://michat.blog/gmail-logo.webp)]([ENLACE])
 
-<a href="[ENLACE_GMAIL]" target="_blank" style="display:inline-flex;align-items:center;gap:4px;text-decoration:none;color:#1a73e8;font-size:12px;"><img src="/gmail-logo.webp" alt="Gmail" style="width:14px;height:14px;vertical-align:middle;border-radius:2px;"> [ASUNTO CORTO]</a>
+Donde [ENLACE] es el valor de "Enlace Gmail" de cada correo en el contexto.
 
----
+IMPORTANTE: El logo de Gmail DEBE aparecer al final del resumen como un pequeño icono clickeable que abre el correo original.
 
-REGLAS:
-1. Numera cada correo (1, 2, 3...)
-2. "De:" debe mostrar el nombre del remitente
-3. "Asunto:" el asunto completo
-4. "Hora:" solo la hora (ej: 10:59)
-5. "Resumen:" máximo 2 líneas resumiendo el contenido
-6. Al final de cada correo, SIEMPRE agrega el enlace con el logo pequeño de Gmail y el asunto corto
-7. Usa el enlace proporcionado en "Enlace Gmail" del contexto
-
-CONTEXTO DE CORREOS (${emailCount} correos encontrados):
+CONTEXTO (${emailCount} correos):
 ${emailContext}`;
 
   const messages: GeminiChatMessage[] = [
