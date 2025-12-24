@@ -51,7 +51,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
 
-import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, generateRequestId } from "@/hooks/use-chats";
+import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, generateRequestId, generateClientRequestId, getActiveRun, updateActiveRunStatus, clearActiveRun, hasActiveRun } from "@/hooks/use-chats";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
@@ -1912,6 +1912,7 @@ export function ChatInterface({
     // Generate unique IDs for idempotency
     const userMsgId = Date.now().toString();
     const userRequestId = generateRequestId(); // Unique ID for user message
+    const clientRequestId = generateClientRequestId(); // For run-based idempotency
     // Note: Each assistant message generates its own unique requestId inline
     // Idempotency is handled in addMessage via markRequestProcessing
     
@@ -1921,6 +1922,7 @@ export function ChatInterface({
       content: userInput,
       timestamp: new Date(),
       requestId: userRequestId,
+      clientRequestId, // For run-based idempotency - creates atomic user message + run
       status: 'pending',
       attachments: attachments.length > 0 ? attachments : undefined,
     };

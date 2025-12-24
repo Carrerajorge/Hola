@@ -36,7 +36,9 @@ export interface Message {
   content: string;
   timestamp: Date;
   requestId?: string; // Unique ID for idempotency - prevents duplicate processing
+  clientRequestId?: string; // For run-based idempotency - creates atomic user message + run
   userMessageId?: string; // For assistant messages: links to the user message it responds to
+  runId?: string; // ID of the run this message belongs to
   status?: 'pending' | 'processing' | 'done' | 'failed'; // Processing status for idempotency
   isThinking?: boolean;
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
@@ -68,9 +70,62 @@ const chatCreationInProgress = new Set<string>();
 const processingRequestIds = new Set<string>();
 const savedRequestIds = new Set<string>();
 
+// Run-based idempotency: Track active runs to prevent duplicate AI calls
+export interface ChatRun {
+  id: string;
+  chatId: string;
+  clientRequestId: string;
+  userMessageId: string;
+  status: 'pending' | 'processing' | 'done' | 'failed';
+  assistantMessageId?: string;
+  lastSeq?: number;
+  error?: string;
+}
+const activeRuns = new Map<string, ChatRun>(); // chatId -> active run
+
 // Generate a unique request ID for idempotency
 export function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Generate a unique client request ID for run-based idempotency
+export function generateClientRequestId(): string {
+  return `cri_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Check if a chat has an active run (pending or processing)
+export function hasActiveRun(chatId: string): boolean {
+  const run = activeRuns.get(chatId);
+  return run ? (run.status === 'pending' || run.status === 'processing') : false;
+}
+
+// Get active run for a chat
+export function getActiveRun(chatId: string): ChatRun | undefined {
+  return activeRuns.get(chatId);
+}
+
+// Set active run for a chat
+export function setActiveRun(chatId: string, run: ChatRun): void {
+  activeRuns.set(chatId, run);
+}
+
+// Clear active run for a chat
+export function clearActiveRun(chatId: string): void {
+  activeRuns.delete(chatId);
+}
+
+// Update active run status
+export function updateActiveRunStatus(chatId: string, status: 'pending' | 'processing' | 'done' | 'failed', assistantMessageId?: string): void {
+  const run = activeRuns.get(chatId);
+  if (run) {
+    run.status = status;
+    if (assistantMessageId) {
+      run.assistantMessageId = assistantMessageId;
+    }
+    if (status === 'done' || status === 'failed') {
+      // Keep in map but marked as complete for reference
+    }
+  }
 }
 
 // Check if a request is already being processed
@@ -404,6 +459,9 @@ export function useChats() {
       pendingMessageQueue.set(queueKey, queue);
     } else {
       try {
+        // For user messages, use run-based idempotency with clientRequestId
+        const clientRequestId = message.role === 'user' ? (message as any).clientRequestId || generateClientRequestId() : undefined;
+        
         const res = await fetch(`/api/chats/${resolvedChatId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -411,6 +469,7 @@ export function useChats() {
             role: message.role,
             content: message.content,
             requestId: message.requestId,
+            clientRequestId, // For run-based idempotency
             userMessageId: message.userMessageId,
             attachments: message.attachments,
             sources: message.sources,
@@ -421,14 +480,37 @@ export function useChats() {
           })
         });
         
-        // Mark request as complete on successful save or 409 conflict (already exists)
-        if (message.requestId) {
-          if (res.ok || res.status === 409) {
-            // 409 means the record already exists, so mark as saved to prevent UI duplicates
+        // Handle run-based response for user messages
+        if (res.ok) {
+          const data = await res.json();
+          
+          // If response includes a run, track it for AI streaming
+          if (data.run) {
+            const run: ChatRun = {
+              id: data.run.id,
+              chatId: resolvedChatId,
+              clientRequestId: data.run.clientRequestId,
+              userMessageId: data.run.userMessageId,
+              status: data.run.status,
+              assistantMessageId: data.run.assistantMessageId,
+              lastSeq: data.run.lastSeq
+            };
+            setActiveRun(resolvedChatId, run);
+            console.log(`[Run] Created run ${run.id} for chat ${resolvedChatId}`);
+          }
+          
+          if (message.requestId) {
             markRequestComplete(message.requestId);
-          } else {
-            // Other non-OK responses: Remove from processing so retry is possible
-            console.error(`Server returned ${res.status} for message save`);
+          }
+        } else if (res.status === 409) {
+          // Already exists - mark as complete
+          if (message.requestId) {
+            markRequestComplete(message.requestId);
+          }
+        } else {
+          // Other non-OK responses: Remove from processing so retry is possible
+          console.error(`Server returned ${res.status} for message save`);
+          if (message.requestId) {
             processingRequestIds.delete(message.requestId);
           }
         }
