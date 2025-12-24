@@ -6,6 +6,41 @@ Sira GPT is an AI-powered chat application offering an intelligent assistant for
 ## User Preferences
 Preferred communication style: Simple, everyday language.
 
+## Recent Changes (December 2024)
+
+### Gmail Integration (STABLE - DO NOT MODIFY)
+- **Custom OAuth Flow**: Gmail OAuth with custom credentials via `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
+- **Files**:
+  - `server/services/gmailChatIntegration.ts`: Main Gmail chat integration with AI-powered email analysis
+  - `server/services/gmailService.ts`: Gmail API wrapper for fetching and parsing emails
+  - `client/src/lib/gmailIntentDetector.ts`: Detects Gmail-related intents in user messages
+  - `server/routes/chatAiRouter.ts`: Chat AI router with Gmail context injection
+- **Features**:
+  - Spanish date parsing: "hoy", "ayer", "23 de diciembre" → Gmail date queries (YYYY/MM/DD format)
+  - Email summaries with sender, subject, time, 2-line summary
+  - Gmail logo at end of each email summary (1.4em, inline, eager loading)
+  - Sender pattern extraction excluding date keywords
+
+### Table & Chart Hover Buttons (STABLE - DO NOT MODIFY)
+- **Tables** (Markdown and SmartTable):
+  - Copy button (copies as tab-separated text)
+  - Download CSV button
+  - Expand/Minimize button (fullscreen overlay)
+- **Charts** (Recharts and ECharts):
+  - Download PNG button
+  - Download SVG button
+  - Zoom reset button (if enabled)
+- **Files**:
+  - `client/src/components/markdown-renderer.tsx`: TableWrapper component with hover buttons
+  - `client/src/components/message-list.tsx`: CleanDataTableWrapper with hover buttons
+  - `client/src/components/charts/recharts-chart.tsx`: Hover export buttons
+  - `client/src/components/charts/echarts-chart-impl.tsx`: Hover export buttons
+  - `client/src/components/charts/smart-table.tsx`: Copy, download, expand buttons
+- **Styling**: `opacity-0 group-hover:opacity-100` pattern, `z-10` for visibility
+
+### UI Cleanup (STABLE)
+- Removed "Conectores" button from composer UI (`client/src/components/composer.tsx`)
+
 ## System Architecture
 ### Frontend
 - **Framework**: React with TypeScript, Vite.
