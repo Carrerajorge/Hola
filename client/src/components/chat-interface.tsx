@@ -1957,23 +1957,65 @@ export function ChatInterface({
     const gmailIntent = detectGmailIntent(cleanPrompt, isGmailActive, hasGmailMention);
     
     if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== 'low') {
-      const gmailPreviewMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: "Buscando en tu correo electrónico...",
-        timestamp: new Date(),
-        gmailPreview: {
-          query: gmailIntent.searchQuery || cleanPrompt,
-          action: gmailIntent.suggestedAction === 'search' || gmailIntent.suggestedAction === 'list' 
-            ? 'search' 
-            : gmailIntent.suggestedAction === 'read' 
-              ? 'recent' 
-              : 'recent',
-          filters: gmailIntent.filters
-        }
-      };
+      setAiState("thinking");
+      setAiProcessSteps([
+        { step: "Buscando en tu correo electrónico", status: "active" },
+        { step: "Analizando correos encontrados", status: "pending" },
+        { step: "Generando respuesta inteligente", status: "pending" }
+      ]);
       
-      onSendMessage(gmailPreviewMsg);
+      try {
+        const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
+        fullMessages.push({ role: "user", content: cleanPrompt });
+        
+        const chatResponse = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            messages: fullMessages,
+            conversationId: chatId,
+            useRag: true
+          })
+        });
+        
+        setAiProcessSteps(prev => prev.map((s, i) => 
+          i === 0 ? { ...s, status: "done" as const } : 
+          i === 1 ? { ...s, status: "active" as const } : s
+        ));
+        
+        if (chatResponse.ok) {
+          const data = await chatResponse.json();
+          
+          setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
+          
+          const gmailResponseMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: data.content || "No se pudo obtener una respuesta.",
+            timestamp: new Date()
+          };
+          onSendMessage(gmailResponseMsg);
+        } else {
+          const gmailErrorMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: "❌ Error al analizar tus correos. Por favor, verifica que Gmail esté conectado e intenta de nuevo.",
+            timestamp: new Date()
+          };
+          onSendMessage(gmailErrorMsg);
+        }
+      } catch (error) {
+        console.error("Gmail chat error:", error);
+        const gmailErrorMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: "❌ Error al procesar tu solicitud de correos. Por favor, intenta de nuevo.",
+          timestamp: new Date()
+        };
+        onSendMessage(gmailErrorMsg);
+      }
+      
       setAiState("idle");
       setAiProcessSteps([]);
       return;
