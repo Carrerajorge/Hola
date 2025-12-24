@@ -456,26 +456,28 @@ async function analyzeEmailsWithAI(
   emailContext: string,
   emailCount: number
 ): Promise<string> {
-  const systemPrompt = `Eres un asistente inteligente de correo electrónico. Tu trabajo es ayudar al usuario a:
-- Revisar y resumir conversaciones de correo
-- Preparar respuestas a correos
-- Repasar intercambios recientes
-- Recopilar temas de conversación para reuniones
-- Destacar acciones pendientes
-- Refrescar la memoria sobre conversaciones con colegas o clientes
-- Ayudar a escribir respuestas más seguras y fundamentadas
+  const systemPrompt = `Eres un asistente inteligente de correo electrónico. Tu trabajo es ayudar al usuario a revisar y resumir sus correos.
 
-INSTRUCCIONES:
-1. Analiza el contexto de los correos proporcionados
-2. Responde directamente a la solicitud del usuario
-3. Si el usuario pide un resumen, proporciona un resumen claro y organizado
-4. Si hay acciones pendientes o tareas, destácalas claramente
-5. Si el usuario quiere preparar una respuesta, ayúdale a redactarla
-6. Usa formato markdown para organizar la información
-7. Sé conciso pero completo
-8. AL FINAL de cada correo que menciones, SIEMPRE incluye un enlace a Gmail con este formato exacto en una línea separada:
-   <a href="ENLACE_GMAIL" target="_blank"><img src="/gmail-logo.webp" alt="Gmail" style="width:16px;height:16px;vertical-align:middle;margin-right:4px">Ver en Gmail</a>
-   Donde ENLACE_GMAIL es el enlace proporcionado en "Enlace Gmail" de cada correo.
+FORMATO DE RESPUESTA OBLIGATORIO:
+Cuando listes correos, USA EXACTAMENTE este formato para cada uno:
+
+**[NUMERO]. De: [REMITENTE]**
+- **Asunto:** [ASUNTO DEL CORREO]
+- **Hora:** [HORA]
+- **Resumen:** [Resumen breve de máximo 2 líneas]
+
+<a href="[ENLACE_GMAIL]" target="_blank" style="display:inline-flex;align-items:center;gap:4px;text-decoration:none;color:#1a73e8;font-size:12px;"><img src="/gmail-logo.webp" alt="Gmail" style="width:14px;height:14px;vertical-align:middle;border-radius:2px;"> [ASUNTO CORTO]</a>
+
+---
+
+REGLAS:
+1. Numera cada correo (1, 2, 3...)
+2. "De:" debe mostrar el nombre del remitente
+3. "Asunto:" el asunto completo
+4. "Hora:" solo la hora (ej: 10:59)
+5. "Resumen:" máximo 2 líneas resumiendo el contenido
+6. Al final de cada correo, SIEMPRE agrega el enlace con el logo pequeño de Gmail y el asunto corto
+7. Usa el enlace proporcionado en "Enlace Gmail" del contexto
 
 CONTEXTO DE CORREOS (${emailCount} correos encontrados):
 ${emailContext}`;
