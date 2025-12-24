@@ -20,6 +20,51 @@ import {
   type EmailSummary
 } from "@/hooks/use-gmail";
 
+// Get favicon URL for a domain
+function getFavicon(email: string): string {
+  try {
+    const domain = email.split('@')[1];
+    if (domain) {
+      return `https://www.google.com/s2/favicons?sz=32&domain=${domain}`;
+    }
+  } catch {}
+  return '';
+}
+
+// Parse sender name and email from "Name <email@domain.com>" format
+function parseSender(from: string): { name: string; email: string } {
+  const match = from.match(/^(.+?)\s*<(.+)>$/);
+  if (match) {
+    return { name: match[1].trim().replace(/"/g, ''), email: match[2] };
+  }
+  // Check if it's just an email
+  if (from.includes('@')) {
+    return { name: from.split('@')[0], email: from };
+  }
+  return { name: from, email: '' };
+}
+
+// Format labels for display
+function formatLabel(label: string): string {
+  // Simplify common Gmail labels
+  const labelMap: Record<string, string> = {
+    'UNREAD': 'No leído',
+    'INBOX': 'Bandeja',
+    'CATEGORY_UPDATES': 'Actualizaciones',
+    'CATEGORY_PROMOTIONS': 'Promociones',
+    'CATEGORY_SOCIAL': 'Social',
+    'CATEGORY_PERSONAL': 'Personal',
+    'CATEGORY_FORUMS': 'Foros',
+    'IMPORTANT': 'Importante',
+    'STARRED': 'Destacado',
+    'SENT': 'Enviado',
+    'DRAFT': 'Borrador',
+    'SPAM': 'Spam',
+    'TRASH': 'Papelera'
+  };
+  return labelMap[label] || label;
+}
+
 const SourceBadge = ({ source, subject }: { source: SourceMetadata; subject: string }) => (
   <a
     href={source.permalink}
@@ -36,6 +81,32 @@ const SourceBadge = ({ source, subject }: { source: SourceMetadata; subject: str
     <span className="truncate max-w-[120px]">{subject}</span>
   </a>
 );
+
+// Email chip component with favicon
+const EmailChip = ({ email, snippet }: { email: string; snippet: string }) => {
+  const faviconUrl = getFavicon(email);
+  const [faviconError, setFaviconError] = useState(false);
+  const domain = email.split('@')[1] || '';
+  
+  return (
+    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs mt-1.5">
+      <Mail className="h-3 w-3 text-red-500 flex-shrink-0" />
+      {faviconUrl && !faviconError ? (
+        <img 
+          src={faviconUrl} 
+          alt="" 
+          className="w-4 h-4 flex-shrink-0"
+          onError={() => setFaviconError(true)}
+        />
+      ) : (
+        <span className="w-4 h-4 rounded bg-gray-300 dark:bg-gray-600 flex items-center justify-center text-[10px] font-medium flex-shrink-0">
+          {domain.charAt(0).toUpperCase()}
+        </span>
+      )}
+      <span className="truncate max-w-[180px] text-muted-foreground">{snippet}</span>
+    </div>
+  );
+};
 
 export interface InlineGmailPreviewProps {
   query?: string;
@@ -371,64 +442,83 @@ export function InlineGmailPreview({
                   aria-label="Email list"
                   onKeyDown={handleEmailListKeyDown}
                 >
-                  {emails.map((email, index) => (
-                    <button
-                      key={email.id}
-                      onClick={() => handleSelectEmail(email)}
-                      onFocus={() => setFocusedEmailIndex(index)}
-                      className={cn(
-                        "w-full p-3 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500/50",
-                        email.isUnread && "bg-red-50/50 dark:bg-red-900/10",
-                        focusedEmailIndex === index && "bg-red-50 dark:bg-red-900/20"
-                      )}
-                      role="option"
-                      aria-selected={focusedEmailIndex === index}
-                      aria-label={`${email.isUnread ? 'Unread email' : 'Email'} from ${email.from}, subject: ${email.subject}, ${formatEmailDate(email.date)}`}
-                      data-email-item
-                      data-testid={`email-item-${email.id}`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className={cn(
-                          "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-medium",
-                          email.isUnread 
-                            ? "bg-red-600 text-white" 
-                            : "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
-                        )}>
-                          {email.from.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className={cn(
-                              "text-sm truncate",
-                              email.isUnread && "font-semibold"
-                            )}>
-                              {email.from}
-                            </span>
-                            <span className="text-xs text-muted-foreground flex-shrink-0">
-                              {formatEmailDate(email.date)}
+                  {emails.map((email, index) => {
+                    const sender = parseSender(email.from);
+                    const faviconUrl = sender.email ? getFavicon(sender.email) : '';
+                    
+                    return (
+                      <button
+                        key={email.id}
+                        onClick={() => handleSelectEmail(email)}
+                        onFocus={() => setFocusedEmailIndex(index)}
+                        className={cn(
+                          "w-full p-4 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-500/50",
+                          email.isUnread && "bg-red-50/50 dark:bg-red-900/10",
+                          focusedEmailIndex === index && "bg-red-50 dark:bg-red-900/20"
+                        )}
+                        role="option"
+                        aria-selected={focusedEmailIndex === index}
+                        aria-label={`${email.isUnread ? 'Unread email' : 'Email'} from ${email.from}, subject: ${email.subject}, ${formatEmailDate(email.date)}`}
+                        data-email-item
+                        data-testid={`email-item-${email.id}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={cn(
+                            "w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-medium overflow-hidden",
+                            email.isUnread 
+                              ? "bg-red-600 text-white" 
+                              : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300"
+                          )}>
+                            {faviconUrl ? (
+                              <img 
+                                src={faviconUrl} 
+                                alt="" 
+                                className="w-5 h-5"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  target.style.display = 'none';
+                                  target.nextElementSibling?.classList.remove('hidden');
+                                }}
+                              />
+                            ) : null}
+                            <span className={faviconUrl ? 'hidden' : ''}>
+                              {sender.name.charAt(0).toUpperCase()}
                             </span>
                           </div>
-                          <p className={cn(
-                            "text-sm truncate",
-                            email.isUnread ? "font-medium" : "text-muted-foreground"
-                          )}>
-                            {email.subject}
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate mt-0.5">
-                            {email.snippet}
-                          </p>
-                          {email.source && (
-                            <div className="mt-1.5">
-                              <SourceBadge source={email.source} subject={email.subject} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className={cn(
+                                  "text-sm font-semibold truncate",
+                                  !email.isUnread && "font-medium"
+                                )}>
+                                  {sender.name}
+                                </span>
+                                {email.isUnread && (
+                                  <div className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" aria-hidden="true" />
+                                )}
+                              </div>
+                              <span className="text-xs text-muted-foreground flex-shrink-0">
+                                {formatEmailDate(email.date)}
+                              </span>
                             </div>
-                          )}
+                            <p className={cn(
+                              "text-sm truncate mb-1",
+                              email.isUnread ? "font-medium text-foreground" : "text-muted-foreground"
+                            )}>
+                              {email.subject}
+                            </p>
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                              {email.snippet}
+                            </p>
+                            <div className="mt-2">
+                              <EmailChip email={sender.email || email.from} snippet={email.subject} />
+                            </div>
+                          </div>
                         </div>
-                        {email.isUnread && (
-                          <div className="w-2 h-2 rounded-full bg-red-600 flex-shrink-0 mt-2" aria-hidden="true" />
-                        )}
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                   
                   {nextPageToken && (
                     <div className="p-3 flex justify-center">
