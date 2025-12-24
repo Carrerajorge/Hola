@@ -19,7 +19,8 @@ import {
   Users,
   Calendar,
   Contact,
-  Settings2
+  Settings2,
+  Wand2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -72,7 +73,7 @@ export interface ComposerProps {
   selectedDocTool: "word" | "excel" | "ppt" | "figma" | null;
   setSelectedDocTool: (tool: "word" | "excel" | "ppt" | "figma" | null) => void;
   closeDocEditor: () => void;
-  openBlankDocEditor: (type: "word" | "excel" | "ppt") => void;
+  openBlankDocEditor: (type: "word" | "excel" | "ppt", options?: { showInstructions?: boolean }) => void;
   aiState: "idle" | "thinking" | "responding";
   isRecording: boolean;
   isPaused: boolean;
@@ -558,11 +559,23 @@ export function Composer({
                       variant="ghost" 
                       className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => openBlankDocEditor("ppt")}
+                      data-testid="button-create-ppt"
                     >
                       <div className="flex items-center justify-center w-5 h-5 rounded bg-orange-500">
                         <span className="text-white text-xs font-bold">P</span>
                       </div>
                       Presentación PPT
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
+                      onClick={() => openBlankDocEditor("ppt", { showInstructions: true })}
+                      data-testid="button-create-ppt-instructions"
+                    >
+                      <div className="flex items-center justify-center w-5 h-5 rounded bg-gradient-to-br from-orange-400 to-purple-500">
+                        <Wand2 className="h-3 w-3 text-white" />
+                      </div>
+                      Instrucciones PPT
                     </Button>
                     <Button 
                       variant="ghost" 

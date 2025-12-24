@@ -745,7 +745,7 @@ export function ChatInterface({
   const [selectedDocText, setSelectedDocText] = useState<string>("");
   const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
-  const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
+  const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -785,7 +785,7 @@ export function ChatInterface({
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
   const dragCounterRef = useRef(0);
-  const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string } | null>(null);
+  const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
   
   // PPT streaming integration
   const pptStreaming = usePptStreaming();
@@ -928,7 +928,7 @@ export function ChatInterface({
   };
   
   // Function to open blank document editor - preserves existing messages
-  const openBlankDocEditor = (type: "word" | "excel" | "ppt") => {
+  const openBlankDocEditor = (type: "word" | "excel" | "ppt", options?: { showInstructions?: boolean }) => {
     const titles = {
       word: "Nuevo Documento Word",
       excel: "Nueva Hoja de Cálculo",
@@ -945,7 +945,8 @@ export function ChatInterface({
     setActiveDocEditor({
       type,
       title: titles[type],
-      content: templates[type]
+      content: templates[type],
+      showInstructions: options?.showInstructions
     });
     setEditedDocumentContent(templates[type]);
     
@@ -2879,6 +2880,7 @@ export function ChatInterface({
                 <PPTEditorShellLazy
                   onClose={closeDocEditor}
                   onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                  initialShowInstructions={activeDocEditor?.showInstructions}
                 />
               ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
                 <SpreadsheetEditor

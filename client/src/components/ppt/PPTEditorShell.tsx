@@ -28,9 +28,10 @@ import { PPT_STREAMING_SYSTEM_PROMPT } from '@/lib/pptPrompts';
 interface PPTEditorShellProps {
   onClose: () => void;
   onInsertContent?: (insertFn: (content: string) => void) => void;
+  initialShowInstructions?: boolean;
 }
 
-export function PPTEditorShell({ onClose, onInsertContent }: PPTEditorShellProps) {
+export function PPTEditorShell({ onClose, onInsertContent, initialShowInstructions = false }: PPTEditorShellProps) {
   const deck = useDeckStore(selectDeck);
   const activeSlideId = useDeckStore((s) => s.activeSlideId);
   const zoom = useDeckStore((s) => s.zoom);
@@ -38,7 +39,7 @@ export function PPTEditorShell({ onClose, onInsertContent }: PPTEditorShellProps
   const setTitle = useDeckStore((s) => s.setTitle);
 
   const [showNotes, setShowNotes] = useState(true);
-  const [showInstructions, setShowInstructions] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(initialShowInstructions);
   const [isGenerating, setIsGenerating] = useState(false);
 
   const titleRef = useRef<HTMLInputElement>(null);
