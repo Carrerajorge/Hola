@@ -748,6 +748,7 @@ export function ChatInterface({
   const [selectedDocTool, setSelectedDocTool] = useState<"word" | "excel" | "ppt" | "figma" | null>(null);
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
+  const [minimizedDocument, setMinimizedDocument] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -1087,8 +1088,39 @@ export function ChatInterface({
       content: doc.content
     });
     setEditedDocumentContent(doc.content);
+    setMinimizedDocument(null);
     onCloseSidebar?.();
   };
+  
+  const minimizeDocEditor = () => {
+    if (!activeDocEditor) return;
+    
+    const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
+    
+    setMinimizedDocument({
+      type: activeDocEditor.type,
+      title: activeDocEditor.title,
+      content: editedDocumentContent || activeDocEditor.content,
+      messageId: lastAssistantMessage?.id
+    });
+    setActiveDocEditor(null);
+    setSelectedDocTool(null);
+  };
+  
+  const restoreDocEditor = () => {
+    if (!minimizedDocument) return;
+    
+    setActiveDocEditor({
+      type: minimizedDocument.type,
+      title: minimizedDocument.title,
+      content: minimizedDocument.content
+    });
+    setSelectedDocTool(minimizedDocument.type);
+    setEditedDocumentContent(minimizedDocument.content);
+    setMinimizedDocument(null);
+    onCloseSidebar?.();
+  };
+  
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2933,6 +2965,8 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
                 handleDownloadImage={handleDownloadImage}
                 setLightboxImage={setLightboxImage}
                 handleReopenDocument={handleReopenDocument}
+                minimizedDocument={minimizedDocument}
+                onRestoreDocument={restoreDocEditor}
               />
 
               {/* Agent Observer - Show when agent is running */}
@@ -3118,7 +3152,7 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
                   title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
                   content={editedDocumentContent}
                   onChange={setEditedDocumentContent}
-                  onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
+                  onClose={activeDocEditor ? minimizeDocEditor : handleCloseDocumentPreview}
                   onDownload={() => {
                     if (activeDocEditor) {
                       handleDownloadDocument({
@@ -3175,6 +3209,8 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
                 handleDownloadImage={handleDownloadImage}
                 setLightboxImage={setLightboxImage}
                 handleReopenDocument={handleReopenDocument}
+                minimizedDocument={minimizedDocument}
+                onRestoreDocument={restoreDocEditor}
               />
               
               <div ref={messagesEndRef} />
