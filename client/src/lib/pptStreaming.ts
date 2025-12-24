@@ -8,6 +8,8 @@ interface StreamState {
   currentType: StreamElementType | null;
   buffer: string;
   yOffset: number;
+  isFirstSlide: boolean;
+  editMode: boolean;
 }
 
 const ELEMENT_POSITIONS: Record<StreamElementType, { x: number; y: number; fontSize: number; bold?: boolean }> = {
@@ -26,28 +28,61 @@ const MARKERS = {
   end: '::end'
 } as const;
 
-export function createPptStreamParser() {
+export interface PptStreamParserOptions {
+  editInPlace?: boolean;
+}
+
+export function createPptStreamParser(options: PptStreamParserOptions = {}) {
+  const editInPlace = options.editInPlace ?? true;
+  
   let state: StreamState = {
     currentSlideId: null,
     currentElementId: null,
     currentType: null,
     buffer: '',
-    yOffset: 0
+    yOffset: 0,
+    isFirstSlide: true,
+    editMode: editInPlace
   };
 
   const store = useDeckStore.getState;
 
-  function createSlide(): string {
+  function getOrCreateSlide(): string {
+    if (state.editMode && state.isFirstSlide) {
+      const currentSlideId = store().activeSlideId;
+      state.currentSlideId = currentSlideId;
+      state.isFirstSlide = false;
+      state.yOffset = 0;
+      return currentSlideId;
+    }
+    
     store().addSlide();
     const newSlideId = store().activeSlideId;
     state.currentSlideId = newSlideId;
     state.yOffset = 0;
+    state.isFirstSlide = false;
     return newSlideId;
+  }
+
+  function findOrCreateTitleElement(): string {
+    if (!state.currentSlideId) {
+      getOrCreateSlide();
+    }
+    
+    if (state.editMode) {
+      const existingTitleId = store().findTitleElement(state.currentSlideId!);
+      if (existingTitleId) {
+        store().clearElementText(existingTitleId);
+        return existingTitleId;
+      }
+    }
+    
+    return createTextElement('title');
   }
 
   function createTextElement(type: StreamElementType, initialText: string = ''): string {
     if (!state.currentSlideId) {
-      createSlide();
+      getOrCreateSlide();
     }
     
     const pos = ELEMENT_POSITIONS[type];
@@ -84,7 +119,7 @@ export function createPptStreamParser() {
 
   function createChartElement(jsonSpec: string): void {
     if (!state.currentSlideId) {
-      createSlide();
+      getOrCreateSlide();
     }
     
     try {
@@ -103,14 +138,14 @@ export function createPptStreamParser() {
       if (state.currentType === null) {
         if (buffer.startsWith(MARKERS.slide)) {
           buffer = buffer.slice(MARKERS.slide.length);
-          createSlide();
+          getOrCreateSlide();
           continue;
         }
 
         if (buffer.startsWith(MARKERS.title)) {
           buffer = buffer.slice(MARKERS.title.length);
           state.currentType = 'title';
-          state.currentElementId = createTextElement('title');
+          state.currentElementId = findOrCreateTitleElement();
           continue;
         }
 
@@ -206,7 +241,9 @@ export function createPptStreamParser() {
         currentElementId: null,
         currentType: null,
         buffer: '',
-        yOffset: 0
+        yOffset: 0,
+        isFirstSlide: true,
+        editMode: editInPlace
       };
     },
 
@@ -220,6 +257,10 @@ export function createPptStreamParser() {
 
     getState(): Readonly<StreamState> {
       return { ...state };
+    },
+    
+    setEditMode(enabled: boolean): void {
+      state.editMode = enabled;
     }
   };
 }

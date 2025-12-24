@@ -109,6 +109,11 @@ type DeckState = {
   addChartElement(spec: any): void;
 
   setStreaming(active: boolean, requestId?: string): void;
+  
+  findTitleElement(slideId?: string): string | null;
+  findOrCreateContentElement(slideId: string, yOffset: number): string;
+  replaceElementText(elementId: string, newText: string): void;
+  clearElementText(elementId: string): void;
 };
 
 export const selectDeck = (state: DeckState): Deck => state.history.present;
@@ -483,6 +488,65 @@ export const useDeckStore = create<DeckState>((set, get) => {
 
     setStreaming(active, requestId) {
       set({ streaming: { active, requestId } });
+    },
+
+    findTitleElement(slideId) {
+      const deck = get().history.present;
+      const targetSlideId = slideId || get().activeSlideId;
+      const slide = deck.slides.find(s => s.id === targetSlideId);
+      if (!slide) return null;
+      
+      const titleElement = slide.elements.find(el => {
+        if (el.type !== 'text') return false;
+        const textEl = el as TextElement;
+        return textEl.y < 150 && textEl.defaultTextStyle.fontSize >= 32;
+      });
+      
+      return titleElement?.id || null;
+    },
+
+    findOrCreateContentElement(slideId, yOffset) {
+      const deck = get().history.present;
+      const slide = deck.slides.find(s => s.id === slideId);
+      if (!slide) {
+        return get().createStreamingTextElement(slideId, 80, 200 + yOffset);
+      }
+      
+      const existingContent = slide.elements.find(el => {
+        if (el.type !== 'text') return false;
+        const textEl = el as TextElement;
+        return textEl.y >= 150 && Math.abs(textEl.y - (200 + yOffset)) < 80;
+      });
+      
+      if (existingContent) {
+        return existingContent.id;
+      }
+      
+      return get().createStreamingTextElement(slideId, 80, 200 + yOffset);
+    },
+
+    replaceElementText(elementId, newText) {
+      const deck = deepCloneDeck(get().history.present);
+      for (const slide of deck.slides) {
+        const element = slide.elements.find(e => e.id === elementId);
+        if (element && element.type === 'text') {
+          (element as TextElement).delta = { ops: [{ insert: newText + '\n' }] };
+          break;
+        }
+      }
+      set({ history: { ...get().history, present: deck } });
+    },
+
+    clearElementText(elementId) {
+      const deck = deepCloneDeck(get().history.present);
+      for (const slide of deck.slides) {
+        const element = slide.elements.find(e => e.id === elementId);
+        if (element && element.type === 'text') {
+          (element as TextElement).delta = { ops: [{ insert: '\n' }] };
+          break;
+        }
+      }
+      set({ history: { ...get().history, present: deck } });
     }
   };
 });
