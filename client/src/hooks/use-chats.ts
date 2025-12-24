@@ -626,6 +626,28 @@ export function useChats() {
     }
   }, [chats]);
 
+  const updateMessageAttachments = useCallback((chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => {
+    setChats(prev => prev.map(chat => {
+      if (chat.id === chatId) {
+        const messageExists = chat.messages.some(msg => msg.id === messageId);
+        if (messageExists) {
+          return {
+            ...chat,
+            messages: chat.messages.map(msg =>
+              msg.id === messageId ? { ...msg, attachments } : msg
+            )
+          };
+        } else if (newMessage) {
+          return {
+            ...chat,
+            messages: [...chat.messages, newMessage]
+          };
+        }
+      }
+      return chat;
+    }));
+  }, []);
+
   const activeChat = chats.find(c => c.id === activeChatId) || null;
   const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp);
   const visibleChats = sortedChats.filter(c => !c.hidden);
@@ -656,6 +678,7 @@ export function useChats() {
     editChatTitle,
     archiveChat,
     hideChat,
+    updateMessageAttachments,
     getChatDateLabel
   };
 }

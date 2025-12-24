@@ -697,6 +697,7 @@ interface ChatInterfaceProps {
   setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
   chatId?: string | null;
   onOpenApps?: () => void;
+  onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
 }
 
 interface UploadedFile {
@@ -723,7 +724,8 @@ export function ChatInterface({
   aiProcessSteps,
   setAiProcessSteps,
   chatId,
-  onOpenApps
+  onOpenApps,
+  onUpdateMessageAttachments
 }: ChatInterfaceProps) {
   const { user } = useAuth();
   const [input, setInput] = useState("");
@@ -1019,7 +1021,19 @@ export function ChatInterface({
             content: currentContent
           })
         });
-        if (!response.ok) {
+        if (response.ok) {
+          const updatedMessage = await response.json();
+          if (updatedMessage && updatedMessage.id && updatedMessage.attachments && onUpdateMessageAttachments) {
+            const newMessage: Message = {
+              id: updatedMessage.id,
+              role: updatedMessage.role || "system",
+              content: updatedMessage.content || "",
+              timestamp: new Date(updatedMessage.createdAt || Date.now()),
+              attachments: updatedMessage.attachments
+            };
+            onUpdateMessageAttachments(chatId, updatedMessage.id, updatedMessage.attachments, newMessage);
+          }
+        } else {
           console.error("Error saving document: server returned", response.status);
         }
       } catch (err) {
