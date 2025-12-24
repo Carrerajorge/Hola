@@ -1,10 +1,13 @@
 import { 
   searchEmailsForUser, 
   checkGmailConnectionForUser,
-  type EmailSummary 
+  getEmailThreadForUser,
+  type EmailSummary,
+  type EmailThread
 } from './gmailService';
 import { format, parseISO, isToday, isYesterday, isThisWeek, isThisMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { geminiChat, GEMINI_MODELS, type GeminiChatMessage } from '../lib/gemini';
 
 export interface GmailSearchRequest {
   query: string;
@@ -289,6 +292,136 @@ export async function searchAndFormatEmails(
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs))
+  ]);
+}
+
+async function fetchEmailContentsForContext(
+  userId: string,
+  emails: EmailSummary[],
+  maxEmails: number = 10
+): Promise<{ context: string; warnings: string[] }> {
+  const emailsToFetch = emails.slice(0, maxEmails);
+  const warnings: string[] = [];
+  let timeoutCount = 0;
+  
+  const fetchPromises = emailsToFetch.map(async (email) => {
+    const fallbackContent = `
+---
+**De:** ${email.from}
+**Fecha:** ${email.date}
+**Asunto:** ${email.subject}
+**Estado:** ${email.isUnread ? 'No leído' : 'Leído'}
+
+**Vista previa:** ${email.snippet}
+---`;
+    
+    const fetchWithTimeout = withTimeout(
+      (async () => {
+        try {
+          const thread = await getEmailThreadForUser(userId, email.threadId);
+          if (thread && thread.messages.length > 0) {
+            const lastMessage = thread.messages[thread.messages.length - 1];
+            const bodyPreview = lastMessage.body.slice(0, 1000) + (lastMessage.body.length > 1000 ? '...' : '');
+            
+            const senderInfo = email.fromEmail ? `${email.from} <${email.fromEmail}>` : email.from;
+            
+            return {
+              content: `
+---
+**De:** ${senderInfo}
+**Para:** ${email.to || 'N/A'}
+**Fecha:** ${email.date}
+**Asunto:** ${email.subject}
+**Estado:** ${email.isUnread ? 'No leído' : 'Leído'}
+**Etiquetas:** ${email.labels.join(', ') || 'Ninguna'}
+
+**Contenido:**
+${bodyPreview}
+---`,
+              timedOut: false
+            };
+          }
+          return { content: fallbackContent, timedOut: false };
+        } catch (error) {
+          console.error(`[Gmail Chat] Error fetching thread ${email.threadId}:`, error);
+          return { content: fallbackContent + '\n*(Error al cargar contenido)*', timedOut: false };
+        }
+      })(),
+      5000,
+      { content: fallbackContent + '\n*(Tiempo de espera agotado)*', timedOut: true }
+    );
+    
+    return fetchWithTimeout;
+  });
+  
+  const results = await Promise.all(fetchPromises);
+  
+  const emailContents: string[] = [];
+  results.forEach((result) => {
+    emailContents.push(result.content);
+    if (result.timedOut) {
+      timeoutCount++;
+    }
+  });
+  
+  if (timeoutCount > 0) {
+    warnings.push(`${timeoutCount} correo(s) usaron vista previa por tiempo de espera`);
+  }
+  
+  return {
+    context: emailContents.join('\n\n'),
+    warnings
+  };
+}
+
+async function analyzeEmailsWithAI(
+  userMessage: string,
+  emailContext: string,
+  emailCount: number
+): Promise<string> {
+  const systemPrompt = `Eres un asistente inteligente de correo electrónico. Tu trabajo es ayudar al usuario a:
+- Revisar y resumir conversaciones de correo
+- Preparar respuestas a correos
+- Repasar intercambios recientes
+- Recopilar temas de conversación para reuniones
+- Destacar acciones pendientes
+- Refrescar la memoria sobre conversaciones con colegas o clientes
+- Ayudar a escribir respuestas más seguras y fundamentadas
+
+INSTRUCCIONES:
+1. Analiza el contexto de los correos proporcionados
+2. Responde directamente a la solicitud del usuario
+3. Si el usuario pide un resumen, proporciona un resumen claro y organizado
+4. Si hay acciones pendientes o tareas, destácalas claramente
+5. Si el usuario quiere preparar una respuesta, ayúdale a redactarla
+6. Usa formato markdown para organizar la información
+7. Sé conciso pero completo
+
+CONTEXTO DE CORREOS (${emailCount} correos encontrados):
+${emailContext}`;
+
+  const messages: GeminiChatMessage[] = [
+    { role: 'user', parts: [{ text: userMessage }] }
+  ];
+  
+  try {
+    const response = await geminiChat(messages, {
+      model: GEMINI_MODELS.FLASH,
+      temperature: 0.7,
+      systemInstruction: systemPrompt
+    });
+    
+    return response.content;
+  } catch (error) {
+    console.error('[Gmail Chat] AI analysis error:', error);
+    return `❌ Error al analizar los correos. Por favor, intenta de nuevo.`;
+  }
+}
+
 export async function handleEmailChatRequest(
   userId: string,
   userMessage: string
@@ -297,17 +430,60 @@ export async function handleEmailChatRequest(
     return { handled: false };
   }
   
-  const result = await searchAndFormatEmails(userId, userMessage);
-  
-  if (!result) {
+  const connection = await checkGmailConnectionForUser(userId);
+  if (!connection.connected) {
     return { 
       handled: true, 
-      response: '📧 Para buscar tus correos, primero necesitas conectar tu cuenta de Gmail. Ve a la sección de integraciones para configurarlo.' 
+      response: '📧 Para acceder a tus correos, primero necesitas conectar tu cuenta de Gmail. Ve a la sección de integraciones para configurarlo.' 
     };
   }
   
-  return {
-    handled: true,
-    response: result.markdown
-  };
+  console.log(`[Gmail Chat] Processing email request for user ${userId}: "${userMessage}"`);
+  
+  const gmailQuery = extractGmailQuery(userMessage);
+  console.log(`[Gmail Chat] Gmail query: "${gmailQuery}"`);
+  
+  try {
+    const searchResult = await searchEmailsForUser(userId, gmailQuery, 20);
+    
+    if (searchResult.emails.length === 0) {
+      return {
+        handled: true,
+        response: `📭 No encontré correos que coincidan con tu búsqueda.\n\nPuedes intentar con:\n- "Mis correos de hoy"\n- "Correos de [nombre o email]"\n- "Correos no leídos"\n- "Correos importantes"`
+      };
+    }
+    
+    const { context: emailContext, warnings } = await fetchEmailContentsForContext(userId, searchResult.emails, 10);
+    
+    const aiResponse = await analyzeEmailsWithAI(
+      userMessage,
+      emailContext,
+      searchResult.emails.length
+    );
+    
+    let finalResponse = aiResponse;
+    if (warnings.length > 0) {
+      finalResponse += `\n\n⚠️ *Nota: ${warnings.join('. ')}*`;
+    }
+    
+    return {
+      handled: true,
+      response: finalResponse
+    };
+    
+  } catch (error: any) {
+    console.error('[Gmail Chat] Error:', error);
+    
+    if (error.message?.includes('token expired') || error.message?.includes('reconnect')) {
+      return {
+        handled: true,
+        response: '⚠️ Tu sesión de Gmail ha expirado. Por favor, reconecta tu cuenta de Gmail desde la configuración.'
+      };
+    }
+    
+    return {
+      handled: true,
+      response: `❌ Error al procesar tu solicitud de correos: ${error.message}`
+    };
+  }
 }
