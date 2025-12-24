@@ -100,9 +100,16 @@ const LazyImage = memo(function LazyImage({
         src={src}
         alt={alt || "Gmail"}
         title={title || "Ver en Gmail"}
-        loading="lazy"
+        loading="eager"
+        decoding="async"
         className="inline-block align-middle"
-        style={{ width: '2em', height: '2em', marginLeft: '4px', verticalAlign: 'middle' }}
+        style={{ 
+          width: '1.4em', 
+          height: '1.4em', 
+          marginLeft: '6px', 
+          verticalAlign: 'text-bottom',
+          display: 'inline'
+        }}
         data-testid="img-gmail-logo"
       />
     );
