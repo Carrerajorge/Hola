@@ -33,7 +33,7 @@ interface EnhancedDocumentEditorProps {
   onDownload: () => void;
   onTextSelect?: (text: string, applyRewrite: (newText: string) => void) => void;
   onTextDeselect?: () => void;
-  onInsertContent?: (insertFn: (content: string, replaceMode?: boolean) => void) => void;
+  onInsertContent?: (insertFn: (content: string, replaceMode?: boolean | 'html') => void) => void;
 }
 
 export function EnhancedDocumentEditor({
@@ -118,10 +118,18 @@ export function EnhancedDocumentEditor({
   useEffect(() => {
     if (!editor || !onInsertContent) return;
     
-    const insertFn = (text: string, replaceMode = false) => {
-      if (replaceMode) {
+    // insertFn modes:
+    // - replaceMode = true: Replace with markdown content (converted to TipTap)
+    // - replaceMode = false: Append markdown to end of document
+    // - replaceMode = 'html': Replace with raw HTML content (for cumulative mode - HTML + separator + converted markdown)
+    const insertFn = (text: string, replaceMode: boolean | 'html' = false) => {
+      if (replaceMode === true) {
         editor.commands.setContent(markdownToTipTap(text));
+      } else if (replaceMode === 'html') {
+        // Set raw HTML content directly (used for cumulative mode)
+        editor.commands.setContent(text);
       } else {
+        // Append mode for streaming - just add content at cursor
         editor.chain().focus().insertContent(markdownToTipTap(text)).run();
       }
     };

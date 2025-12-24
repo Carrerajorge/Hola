@@ -73,6 +73,7 @@ import { DocumentGeneratorDialog } from "@/components/document-generator-dialog"
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
 import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDetector";
+import { markdownToTipTap } from "@/lib/markdownToHtml";
 import { detectGmailIntent } from "@/lib/gmailIntentDetector";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
@@ -837,7 +838,7 @@ export function ChatInterface({
   // PPT streaming integration
   const pptStreaming = usePptStreaming();
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
-  const docInsertContentRef = useRef<((content: string, replaceMode?: boolean) => void) | null>(null);
+  const docInsertContentRef = useRef<((content: string, replaceMode?: boolean | 'html') => void) | null>(null);
   const speechRecognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -2342,29 +2343,28 @@ export function ChatInterface({
       const placeholderPhrases = [
         "comienza a escribir tu documento aquí",
         "comienza a escribir",
-        "escribe aquí",
-        ""
+        "escribe aquí"
       ];
       const isPlaceholder = placeholderPhrases.some(p => 
-        plainTextContent.toLowerCase().includes(p) || plainTextContent.length < 20
+        plainTextContent.toLowerCase().includes(p)
       );
-      const hasExistingContent = isWordMode && !isPlaceholder && plainTextContent.length > 20;
+      // Any non-empty, non-placeholder content should be preserved
+      const hasExistingContent = isWordMode && !isPlaceholder && plainTextContent.length > 0;
       
-      // Build system prompt for Word document mode
+      // Build system prompt for Word document mode (cumulative - each response adds to document)
       let wordSystemPrompt = "";
       if (isWordMode) {
         if (hasExistingContent) {
-          wordSystemPrompt = `Eres un asistente de edición de documentos. El usuario tiene un documento existente y quiere mejorarlo según sus instrucciones.
+          wordSystemPrompt = `Eres un asistente de edición de documentos. El usuario tiene un documento con contenido previo y quiere AÑADIR más contenido.
 
-DOCUMENTO ACTUAL:
-${plainTextContent}
+CONTEXTO DEL DOCUMENTO EXISTENTE (para referencia):
+${plainTextContent.slice(0, 500)}${plainTextContent.length > 500 ? '...' : ''}
 
 INSTRUCCIONES IMPORTANTES:
-1. NO reemplaces todo el documento - MEJÓRALO según las instrucciones del usuario
-2. Mantén el contenido existente y solo modifica o añade lo que el usuario solicite
-3. Si el usuario pide agregar algo, añádelo al documento existente
-4. Si el usuario pide corregir algo, corrige solo esa parte
-5. Responde SOLO con el documento mejorado en formato Markdown, sin explicaciones adicionales`;
+1. Genera SOLO el nuevo contenido que el usuario solicita
+2. NO repitas ni incluyas el contenido existente del documento
+3. Tu respuesta se AÑADIRÁ automáticamente al final del documento existente
+4. Responde SOLO con el nuevo contenido en formato Markdown, sin explicaciones adicionales`;
         } else {
           wordSystemPrompt = `Eres un asistente de creación de documentos. Genera el contenido del documento según las instrucciones del usuario.
 Responde SOLO con el contenido del documento en formato Markdown, sin explicaciones adicionales.`;
@@ -2381,6 +2381,11 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
       
       // Capture document mode state NOW using ref (avoids closure issues)
       const shouldWriteToDoc = !!activeDocEditorRef.current;
+      
+      // Capture existing document HTML for cumulative mode (shared between SSE and legacy)
+      // Note: currentDocContent is HTML from the editor
+      const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
+      const separatorHTML = existingDocHTML ? '<hr class="my-4" />' : "";
 
       // Use SSE streaming if we have run info, otherwise fall back to legacy fetch
       if (runInfo && chatId) {
@@ -2515,9 +2520,12 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
                     pptStreaming.processChunk(data.content);
                   } else if (shouldWriteToDoc && docInsertContentRef.current) {
                     try {
-                      docInsertContentRef.current(fullContent, true);
-                      // Update state so subsequent instructions have the current content
-                      setEditedDocumentContent(fullContent);
+                      // Cumulative mode: combine existing HTML + separator + converted new markdown
+                      const newContentHTML = markdownToTipTap(fullContent);
+                      const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                      docInsertContentRef.current(cumulativeHTML, 'html');
+                      // Update state so subsequent instructions have the current cumulative content
+                      setEditedDocumentContent(cumulativeHTML);
                     } catch (err) {
                       console.error('[ChatInterface] Error streaming to document:', err);
                     }
@@ -2569,9 +2577,12 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
           await onSendMessage(confirmMsg);
         } else if (shouldWriteToDoc && docInsertContentRef.current) {
           try {
-            docInsertContentRef.current(fullContent, true);
-            // Update state so subsequent instructions have the current content
-            setEditedDocumentContent(fullContent);
+            // Cumulative mode: combine existing HTML + separator + converted new markdown
+            const newContentHTML = markdownToTipTap(fullContent);
+            const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+            docInsertContentRef.current(cumulativeHTML, 'html');
+            // Update state so subsequent instructions have the current cumulative content
+            setEditedDocumentContent(cumulativeHTML);
           } catch (err) {
             console.error('[ChatInterface] Error finalizing document:', err);
           }
@@ -2704,12 +2715,14 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
             const chunkSize = Math.floor(Math.random() * 3) + 1;
             const newContent = fullContent.slice(0, currentIndex + chunkSize);
             
-            // Write to document if in document mode
+            // Write to document if in document mode (cumulative)
             if (shouldWriteToDocLegacy && docInsertContentRef.current) {
               try {
-                docInsertContentRef.current(newContent, true);
+                const newContentHTML = markdownToTipTap(newContent);
+                const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                docInsertContentRef.current(cumulativeHTML, 'html');
                 // Update state so subsequent instructions have the current content
-                setEditedDocumentContent(newContent);
+                setEditedDocumentContent(cumulativeHTML);
               } catch (err) {
                 console.error('[ChatInterface] Error streaming to document (legacy):', err);
               }
@@ -2724,12 +2737,14 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
               streamIntervalRef.current = null;
             }
             
-            // Finalize document or create message
+            // Finalize document or create message (cumulative)
             if (shouldWriteToDocLegacy && docInsertContentRef.current) {
               try {
-                docInsertContentRef.current(fullContent, true);
+                const newContentHTML = markdownToTipTap(fullContent);
+                const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                docInsertContentRef.current(cumulativeHTML, 'html');
                 // Update state so subsequent instructions have the current content
-                setEditedDocumentContent(fullContent);
+                setEditedDocumentContent(cumulativeHTML);
               } catch (err) {
                 console.error('[ChatInterface] Error finalizing document (legacy):', err);
               }
