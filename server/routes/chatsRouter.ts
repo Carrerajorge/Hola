@@ -171,12 +171,56 @@ export function createChatsRouter() {
         return res.status(403).json({ error: "Access denied" });
       }
       
-      const { role, content, requestId, userMessageId, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage } = req.body;
+      const { role, content, requestId, clientRequestId, userMessageId, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage } = req.body;
       if (!role || !content) {
         return res.status(400).json({ error: "role and content are required" });
       }
       
-      // Idempotency check: If requestId provided, check if message already exists
+      // Run-based idempotency for user messages
+      if (role === 'user' && clientRequestId) {
+        // Check if a run with this clientRequestId already exists
+        const existingRun = await storage.getChatRunByClientRequestId(req.params.id, clientRequestId);
+        if (existingRun) {
+          console.log(`[Dedup] Run with clientRequestId ${clientRequestId} already exists, returning existing`);
+          // Fetch the user message that was created with this run
+          const messages = await storage.getChatMessages(req.params.id);
+          const existingMessage = messages.find(m => m.id === existingRun.userMessageId);
+          return res.json({ 
+            message: existingMessage, 
+            run: existingRun,
+            deduplicated: true 
+          });
+        }
+        
+        // Create user message and run atomically
+        const { message, run } = await storage.createUserMessageAndRun(
+          req.params.id,
+          {
+            chatId: req.params.id,
+            role: 'user',
+            content,
+            status: 'done',
+            requestId: requestId || null,
+            userMessageId: null,
+            attachments: attachments || null,
+            sources: sources || null,
+            figmaDiagram: figmaDiagram || null,
+            googleFormPreview: googleFormPreview || null,
+            gmailPreview: gmailPreview || null,
+            generatedImage: generatedImage || null
+          },
+          clientRequestId
+        );
+        
+        if (chat.title === "New Chat") {
+          const newTitle = content.slice(0, 30) + (content.length > 30 ? "..." : "");
+          await storage.updateChat(req.params.id, { title: newTitle });
+        }
+        
+        return res.json({ message, run, deduplicated: false });
+      }
+      
+      // Legacy flow for assistant messages or messages without clientRequestId
       if (requestId) {
         const existingMessage = await storage.findMessageByRequestId(requestId);
         if (existingMessage) {
@@ -189,7 +233,7 @@ export function createChatsRouter() {
         chatId: req.params.id,
         role,
         content,
-        status: 'done', // Messages are considered done when saved
+        status: 'done',
         requestId: requestId || null,
         userMessageId: userMessageId || null,
         attachments: attachments || null,
@@ -207,10 +251,18 @@ export function createChatsRouter() {
       
       res.json(message);
     } catch (error: any) {
-      // Handle unique constraint violation gracefully (duplicate requestId)
-      if (error.code === '23505' && error.constraint?.includes('request')) {
-        console.log(`[Dedup] Duplicate requestId constraint hit, fetching existing message`);
-        const { requestId } = req.body;
+      // Handle unique constraint violation gracefully (duplicate clientRequestId or requestId)
+      if (error.code === '23505') {
+        console.log(`[Dedup] Duplicate constraint hit, fetching existing`);
+        const { clientRequestId, requestId } = req.body;
+        if (clientRequestId) {
+          const existingRun = await storage.getChatRunByClientRequestId(req.params.id, clientRequestId);
+          if (existingRun) {
+            const messages = await storage.getChatMessages(req.params.id);
+            const existingMessage = messages.find(m => m.id === existingRun.userMessageId);
+            return res.json({ message: existingMessage, run: existingRun, deduplicated: true });
+          }
+        }
         if (requestId) {
           const existingMessage = await storage.findMessageByRequestId(requestId);
           if (existingMessage) {

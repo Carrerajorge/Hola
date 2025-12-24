@@ -84,6 +84,7 @@ export interface IStorage {
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessages(chatId: string): Promise<ChatMessage[]>;
+  updateChatMessageContent(id: string, content: string, status: string): Promise<ChatMessage | undefined>;
   // Chat Run operations (for idempotent message processing)
   createChatRun(run: InsertChatRun): Promise<ChatRun>;
   getChatRun(id: string): Promise<ChatRun | undefined>;
@@ -452,6 +453,14 @@ export class MemStorage implements IStorage {
 
   async getChatMessages(chatId: string): Promise<ChatMessage[]> {
     return db.select().from(chatMessages).where(eq(chatMessages.chatId, chatId)).orderBy(chatMessages.createdAt);
+  }
+
+  async updateChatMessageContent(id: string, content: string, status: string): Promise<ChatMessage | undefined> {
+    const [result] = await db.update(chatMessages)
+      .set({ content, status })
+      .where(eq(chatMessages.id, id))
+      .returning();
+    return result;
   }
 
   // Chat Run operations (for idempotent message processing)

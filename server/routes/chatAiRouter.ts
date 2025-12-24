@@ -201,22 +201,72 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     }
   });
 
+  // Get run status - for polling
+  router.get("/chat/runs/:runId", async (req, res) => {
+    try {
+      const run = await storage.getChatRun(req.params.runId);
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+      res.json(run);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   router.post("/chat/stream", async (req, res) => {
     const requestId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     let heartbeatInterval: NodeJS.Timeout | null = null;
     let isConnectionClosed = false;
+    let claimedRun: any = null;
 
     try {
-      const { messages, conversationId } = req.body;
+      const { messages, conversationId, runId, chatId } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
+      }
+
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+
+      // If runId provided, claim the pending run (idempotent processing)
+      if (runId && chatId) {
+        const existingRun = await storage.getChatRun(runId);
+        if (!existingRun) {
+          return res.status(404).json({ error: "Run not found" });
+        }
+        
+        // If run is already processing or done, don't re-process
+        if (existingRun.status === 'processing') {
+          console.log(`[Run] Run ${runId} is already being processed, returning status`);
+          return res.json({ status: 'already_processing', run: existingRun });
+        }
+        if (existingRun.status === 'done') {
+          console.log(`[Run] Run ${runId} already completed`);
+          return res.json({ status: 'already_done', run: existingRun });
+        }
+        if (existingRun.status === 'failed') {
+          console.log(`[Run] Run ${runId} previously failed`);
+          // Allow retry for failed runs by claiming again
+        }
+        
+        // Atomically claim the pending run
+        claimedRun = await storage.claimPendingRun(chatId);
+        if (!claimedRun || claimedRun.id !== runId) {
+          console.log(`[Run] Failed to claim run ${runId} - may have been claimed by another request`);
+          return res.json({ status: 'claim_failed', message: 'Run already claimed or not pending' });
+        }
+        console.log(`[Run] Successfully claimed run ${runId}`);
       }
 
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
       res.setHeader("X-Request-Id", requestId);
+      if (claimedRun) {
+        res.setHeader("X-Run-Id", claimedRun.id);
+      }
       res.flushHeaders();
 
       req.on("close", () => {
@@ -243,10 +293,27 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         content: `Eres MICHAT, un asistente de IA avanzado. Responde de manera útil y profesional en el idioma del usuario.`
       };
 
-      const user = (req as any).user;
-      const userId = user?.claims?.sub;
+      // If we have a run, create an assistant message placeholder at the start
+      let assistantMessageId: string | null = null;
+      if (claimedRun && chatId) {
+        const assistantMessage = await storage.createChatMessage({
+          chatId,
+          role: 'assistant',
+          content: '', // Will be updated during streaming
+          status: 'pending',
+          runId: claimedRun.id,
+          userMessageId: claimedRun.userMessageId,
+        });
+        assistantMessageId = assistantMessage.id;
+        await storage.updateChatRunAssistantMessage(claimedRun.id, assistantMessageId);
+      }
 
-      res.write(`event: start\ndata: ${JSON.stringify({ requestId, timestamp: Date.now() })}\n\n`);
+      res.write(`event: start\ndata: ${JSON.stringify({ 
+        requestId, 
+        runId: claimedRun?.id,
+        assistantMessageId,
+        timestamp: Date.now() 
+      })}\n\n`);
 
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
@@ -265,10 +332,16 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         fullContent += chunk.content;
         lastAckSequence = chunk.sequenceId;
 
+        // Update run's lastSeq for deduplication on reconnect
+        if (claimedRun && chunk.sequenceId > (claimedRun.lastSeq || 0)) {
+          await storage.updateChatRunLastSeq(claimedRun.id, chunk.sequenceId);
+        }
+
         if (chunk.done) {
           res.write(`event: done\ndata: ${JSON.stringify({
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
+            runId: claimedRun?.id,
             timestamp: Date.now(),
           })}\n\n`);
         } else {
@@ -276,14 +349,23 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             content: chunk.content,
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
+            runId: claimedRun?.id,
             timestamp: Date.now(),
           })}\n\n`);
         }
       }
 
+      // Update assistant message with full content and mark run as done
+      if (claimedRun && assistantMessageId) {
+        await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done');
+        await storage.updateChatRunStatus(claimedRun.id, 'done');
+      }
+
       if (!isConnectionClosed) {
         res.write(`event: complete\ndata: ${JSON.stringify({ 
           requestId, 
+          runId: claimedRun?.id,
+          assistantMessageId,
           totalSequences: lastAckSequence + 1,
           contentLength: fullContent.length,
           timestamp: Date.now() 
@@ -300,6 +382,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
             details: { 
               messageCount: messages.length,
               requestId,
+              runId: claimedRun?.id,
               streaming: true
             }
           });
@@ -310,11 +393,22 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
     } catch (error: any) {
       console.error(`[SSE] Stream error ${requestId}:`, error);
+      
+      // Mark run as failed if we claimed one
+      if (claimedRun) {
+        try {
+          await storage.updateChatRunStatus(claimedRun.id, 'failed', error.message);
+        } catch (updateError) {
+          console.error(`[SSE] Failed to update run status:`, updateError);
+        }
+      }
+      
       if (!isConnectionClosed) {
         try {
           res.write(`event: error\ndata: ${JSON.stringify({ 
             error: error.message, 
             requestId,
+            runId: claimedRun?.id,
             timestamp: Date.now() 
           })}\n\n`);
         } catch (writeError) {
