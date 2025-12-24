@@ -220,7 +220,7 @@ export default function Home() {
             setAiState={setAiState}
             aiProcessSteps={aiProcessSteps}
             setAiProcessSteps={setAiProcessSteps}
-            chatId={activeChat?.id || null}
+            chatId={activeChat?.id || pendingChatIdRef.current || null}
             onOpenApps={handleOpenApps}
             onUpdateMessageAttachments={updateMessageAttachments}
           />
