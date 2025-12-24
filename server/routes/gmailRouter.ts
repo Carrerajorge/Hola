@@ -17,12 +17,18 @@ import {
   markEmailAsUnreadForUser
 } from "../services/gmailService";
 
+// Helper to extract userId from Passport session
+function getUserId(req: Request): string | undefined {
+  const user = (req as any).user;
+  return user?.claims?.sub;
+}
+
 export function createGmailRouter() {
   const router = Router();
 
   router.get("/status", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = getUserId(req);
       
       if (userId) {
         const status = await checkGmailConnectionForUser(userId);
@@ -39,7 +45,7 @@ export function createGmailRouter() {
 
   router.get("/search", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = getUserId(req);
       const { q, maxResults, labelIds, pageToken } = req.query;
       
       const query = typeof q === 'string' ? q : '';
@@ -60,7 +66,7 @@ export function createGmailRouter() {
 
   router.get("/threads/:threadId", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = getUserId(req);
       const { threadId } = req.params;
       
       if (!threadId) {
@@ -84,7 +90,7 @@ export function createGmailRouter() {
 
   router.post("/reply", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = getUserId(req);
       const { threadId, to, subject, body } = req.body;
       
       if (!threadId || !to || !body) {
@@ -110,7 +116,7 @@ export function createGmailRouter() {
 
   router.post("/send", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = getUserId(req);
       const { to, subject, body, threadId } = req.body;
       
       if (!to || !body) {
@@ -138,7 +144,7 @@ export function createGmailRouter() {
 
   router.get("/labels", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = getUserId(req);
       const labels = userId 
         ? await getLabelsForUser(userId)
         : await getLabels();
@@ -151,7 +157,7 @@ export function createGmailRouter() {
 
   router.post("/messages/:messageId/read", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = getUserId(req);
       const { messageId } = req.params;
       const success = userId
         ? await markEmailAsReadForUser(userId, messageId)
@@ -165,7 +171,7 @@ export function createGmailRouter() {
 
   router.post("/messages/:messageId/unread", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = getUserId(req);
       const { messageId } = req.params;
       const success = userId
         ? await markEmailAsUnreadForUser(userId, messageId)
@@ -179,7 +185,7 @@ export function createGmailRouter() {
 
   router.get("/connect", async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).userId;
+      const userId = getUserId(req);
       
       if (userId) {
         const status = await checkGmailConnectionForUser(userId);
@@ -211,7 +217,7 @@ export function createGmailRouter() {
   });
 
   router.post("/disconnect", async (req: Request, res: Response) => {
-    const userId = (req as any).userId;
+    const userId = getUserId(req);
     
     if (userId) {
       res.redirect(307, '/api/oauth/google/gmail/disconnect');
