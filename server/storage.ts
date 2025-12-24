@@ -464,22 +464,49 @@ export class MemStorage implements IStorage {
   }
 
   async saveDocumentToChat(chatId: string, document: { type: string; title: string; content: string }): Promise<ChatMessage> {
-    const [result] = await db.insert(chatMessages).values({
-      chatId,
-      role: "system",
-      content: `Documento guardado: ${document.title}`,
-      attachments: [{
-        type: "document",
-        name: document.title,
-        documentType: document.type,
-        title: document.title,
-        content: document.content,
-        savedAt: new Date().toISOString()
-      }],
-      status: "done"
-    }).returning();
-    await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
-    return result;
+    // Find the last "Documento generado correctamente" message to attach the document to
+    const messages = await db.select().from(chatMessages)
+      .where(and(
+        eq(chatMessages.chatId, chatId),
+        eq(chatMessages.role, "assistant")
+      ))
+      .orderBy(desc(chatMessages.createdAt));
+    
+    const docGenMessage = messages.find(m => 
+      m.content?.includes("Documento generado correctamente") || 
+      m.content?.includes("Presentación generada correctamente")
+    );
+    
+    const attachment = {
+      type: "document",
+      name: document.title,
+      documentType: document.type,
+      title: document.title,
+      content: document.content,
+      savedAt: new Date().toISOString()
+    };
+    
+    if (docGenMessage) {
+      // Update existing message with the document attachment
+      const existingAttachments = Array.isArray(docGenMessage.attachments) ? docGenMessage.attachments : [];
+      const [result] = await db.update(chatMessages)
+        .set({ attachments: [...existingAttachments, attachment] })
+        .where(eq(chatMessages.id, docGenMessage.id))
+        .returning();
+      await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
+      return result;
+    } else {
+      // Fallback: create new system message if no "Documento generado" message found
+      const [result] = await db.insert(chatMessages).values({
+        chatId,
+        role: "system",
+        content: `Documento guardado: ${document.title}`,
+        attachments: [attachment],
+        status: "done"
+      }).returning();
+      await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
+      return result;
+    }
   }
 
   // Chat Run operations (for idempotent message processing)

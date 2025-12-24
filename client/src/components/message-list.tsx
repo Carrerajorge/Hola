@@ -769,6 +769,7 @@ interface AssistantMessageProps {
   onOpenDocumentPreview: (doc: DocumentBlock) => void;
   onDownloadImage: (imageData: string) => void;
   onOpenLightbox: (imageData: string) => void;
+  onReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
 }
 
 const AssistantMessage = memo(function AssistantMessage({
@@ -790,7 +791,8 @@ const AssistantMessage = memo(function AssistantMessage({
   onReadAloud,
   onOpenDocumentPreview,
   onDownloadImage,
-  onOpenLightbox
+  onOpenLightbox,
+  onReopenDocument
 }: AssistantMessageProps) {
   if (variant === "compact") {
     return (
@@ -994,6 +996,16 @@ const AssistantMessage = memo(function AssistantMessage({
           />
         </div>
       )}
+
+      {message.attachments && message.attachments.some(a => a.type === "document") && (
+        <div className="mt-3">
+          <AttachmentList
+            attachments={message.attachments}
+            variant={variant}
+            onReopenDocument={onReopenDocument}
+          />
+        </div>
+      )}
     </div>
   );
 });
@@ -1124,6 +1136,7 @@ export function MessageList({
                 onOpenDocumentPreview={handleOpenDocumentPreview}
                 onDownloadImage={handleDownloadImage}
                 onOpenLightbox={setLightboxImage}
+                onReopenDocument={handleReopenDocument}
               />
             )}
           </div>

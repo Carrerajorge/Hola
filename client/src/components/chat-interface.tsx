@@ -786,6 +786,47 @@ export function ChatInterface({
   const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
   const dragCounterRef = useRef(0);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
+  const editedDocumentContentRef = useRef<string>("");
+  const chatIdRef = useRef<string | null>(null);
+  
+  // Keep refs in sync with state for cleanup function access
+  useEffect(() => {
+    editedDocumentContentRef.current = editedDocumentContent;
+  }, [editedDocumentContent]);
+  
+  useEffect(() => {
+    chatIdRef.current = chatId || null;
+  }, [chatId]);
+  
+  // Auto-save document when component unmounts (chat switch, new chat, etc.)
+  useEffect(() => {
+    return () => {
+      const currentDoc = activeDocEditorRef.current;
+      const currentContent = editedDocumentContentRef.current;
+      const currentChatId = chatIdRef.current;
+      
+      if (!currentDoc || !currentContent || !currentChatId) return;
+      
+      const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+      const plainText = stripHtml(currentContent);
+      const placeholderPhrases = [
+        "comienza a escribir tu documento aquí",
+        "título de la presentación",
+        "haz clic para agregar"
+      ];
+      const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
+      
+      if (!isPlaceholder && plainText.length > 20) {
+        // Use sendBeacon for reliable save on unmount
+        const data = JSON.stringify({
+          type: currentDoc.type,
+          title: currentDoc.title,
+          content: currentContent
+        });
+        navigator.sendBeacon(`/api/chats/${currentChatId}/documents`, new Blob([data], { type: 'application/json' }));
+      }
+    };
+  }, []);
   
   // PPT streaming integration
   const pptStreaming = usePptStreaming();
@@ -2397,6 +2438,8 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
                   } else if (shouldWriteToDoc && docInsertContentRef.current) {
                     try {
                       docInsertContentRef.current(fullContent, true);
+                      // Update state so subsequent instructions have the current content
+                      setEditedDocumentContent(fullContent);
                     } catch (err) {
                       console.error('[ChatInterface] Error streaming to document:', err);
                     }
@@ -2449,6 +2492,8 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
         } else if (shouldWriteToDoc && docInsertContentRef.current) {
           try {
             docInsertContentRef.current(fullContent, true);
+            // Update state so subsequent instructions have the current content
+            setEditedDocumentContent(fullContent);
           } catch (err) {
             console.error('[ChatInterface] Error finalizing document:', err);
           }
@@ -2585,6 +2630,8 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
             if (shouldWriteToDocLegacy && docInsertContentRef.current) {
               try {
                 docInsertContentRef.current(newContent, true);
+                // Update state so subsequent instructions have the current content
+                setEditedDocumentContent(newContent);
               } catch (err) {
                 console.error('[ChatInterface] Error streaming to document (legacy):', err);
               }
@@ -2603,6 +2650,8 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
             if (shouldWriteToDocLegacy && docInsertContentRef.current) {
               try {
                 docInsertContentRef.current(fullContent, true);
+                // Update state so subsequent instructions have the current content
+                setEditedDocumentContent(fullContent);
               } catch (err) {
                 console.error('[ChatInterface] Error finalizing document (legacy):', err);
               }
