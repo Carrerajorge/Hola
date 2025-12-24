@@ -251,8 +251,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           // Allow retry for failed runs by claiming again
         }
         
-        // Atomically claim the pending run
-        claimedRun = await storage.claimPendingRun(chatId);
+        // Atomically claim the pending run using clientRequestId for specificity
+        claimedRun = await storage.claimPendingRun(chatId, existingRun.clientRequestId);
         if (!claimedRun || claimedRun.id !== runId) {
           console.log(`[Run] Failed to claim run ${runId} - may have been claimed by another request`);
           return res.json({ status: 'claim_failed', message: 'Run already claimed or not pending' });

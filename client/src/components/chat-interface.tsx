@@ -686,7 +686,7 @@ type AiProcessStep = { step: string; status: "pending" | "active" | "done" };
 
 interface ChatInterfaceProps {
   messages: Message[];
-  onSendMessage: (message: Message) => void;
+  onSendMessage: (message: Message) => Promise<{ run?: { id: string; chatId: string; userMessageId: string; status: string }; deduplicated?: boolean } | undefined>;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   onCloseSidebar?: () => void;
@@ -1927,7 +1927,9 @@ export function ChatInterface({
       attachments: attachments.length > 0 ? attachments : undefined,
     };
 
-    onSendMessage(userMsg);
+    // Send user message and get run info for SSE streaming
+    const messageResult = await onSendMessage(userMsg);
+    const runInfo = messageResult?.run;
 
     // Check for Google Forms intent
     const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
@@ -2175,211 +2177,316 @@ export function ChatInterface({
         ? [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory]
         : chatHistory;
       
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          messages: finalChatHistory,
-          images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
-          documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
-          figmaMode: isFigmaMode,
-          pptMode: isPptMode,
-          provider: selectedProvider,
-          model: selectedModel,
-          gptConfig: activeGpt ? {
-            id: activeGpt.id,
-            systemPrompt: activeGpt.systemPrompt,
-            temperature: parseFloat(activeGpt.temperature || "0.7"),
-            topP: parseFloat(activeGpt.topP || "1")
-          } : undefined
-        }),
-        signal: abortControllerRef.current?.signal
-      });
-
-      // Update steps: mark processing done, searching active
-      setAiProcessSteps(prev => prev.map((s, i) => {
-        if (s.step.includes("Analizando")) return { ...s, status: "done" };
-        if (s.step.includes("Procesando")) return { ...s, status: "done" };
-        if (s.step.includes("Buscando")) return { ...s, status: "active" };
-        return s;
-      }));
-      
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to get response");
-      }
-      
-      // Update steps: mark searching done, generating active
-      setAiProcessSteps(prev => prev.map(s => {
-        if (s.step.includes("Buscando")) return { ...s, status: "done" };
-        if (s.step.includes("Generando")) return { ...s, status: "active" };
-        return { ...s, status: s.status === "pending" ? "pending" : "done" };
-      }));
-
-      // Note: Not subscribing to agent/browser updates to keep simple thinking → streaming flow
-
       // Capture document mode state NOW using ref (avoids closure issues)
       const shouldWriteToDoc = !!activeDocEditorRef.current;
-      
-      const fullContent = data.content;
-      const responseSources = data.sources || [];
-      const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
-      
-      // If Figma diagram was generated, add it to chat immediately
-      if (figmaDiagram) {
+
+      // Use SSE streaming if we have run info, otherwise fall back to legacy fetch
+      if (runInfo && chatId) {
+        // SSE streaming mode - real-time streaming from server
         setAiState("responding");
         
-        // Quick streaming effect for the text part
-        let currentIndex = 0;
-        streamIntervalRef.current = setInterval(() => {
-          if (currentIndex < fullContent.length) {
-            const chunkSize = Math.floor(Math.random() * 5) + 3;
-            currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
-            streamingContentRef.current = fullContent.slice(0, currentIndex);
-            setStreamingContent(fullContent.slice(0, currentIndex));
-          } else {
-            if (streamIntervalRef.current) {
-              clearInterval(streamIntervalRef.current);
-              streamIntervalRef.current = null;
+        // Update steps: mark processing done, searching active
+        setAiProcessSteps(prev => prev.map((s, i) => {
+          if (s.step.includes("Analizando")) return { ...s, status: "done" };
+          if (s.step.includes("Procesando")) return { ...s, status: "done" };
+          if (s.step.includes("Buscando")) return { ...s, status: "active" };
+          return s;
+        }));
+
+        let fullContent = "";
+        let sseError: Error | null = null;
+
+        try {
+          const response = await fetch("/api/chat/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: finalChatHistory,
+              conversationId: chatId,
+              runId: runInfo.id,
+              chatId: chatId
+            }),
+            signal: abortControllerRef.current?.signal
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
+            throw new Error(errorData.error || `SSE streaming failed: ${response.status}`);
+          }
+
+          // Check if response indicates already processed (not SSE)
+          const contentType = response.headers.get("Content-Type") || "";
+          if (contentType.includes("application/json")) {
+            const jsonData = await response.json();
+            if (jsonData.status === "already_done" || jsonData.status === "already_processing") {
+              // Run was already processed, skip streaming
+              console.log("[SSE] Run already processed, skipping streaming");
+              setAiState("idle");
+              setAiProcessSteps([]);
+              agent.complete();
+              abortControllerRef.current = null;
+              return;
             }
+          }
+
+          // Update steps: mark searching done, generating active
+          setAiProcessSteps(prev => prev.map(s => {
+            if (s.step.includes("Buscando")) return { ...s, status: "done" };
+            if (s.step.includes("Generando")) return { ...s, status: "active" };
+            return { ...s, status: s.status === "pending" ? "pending" : "done" };
+          }));
+
+          // Start PPT streaming if in PPT mode
+          if (isPptMode && shouldWriteToDoc) {
+            pptStreaming.startStreaming();
+            streamingContentRef.current = "";
+            setStreamingContent("");
+          }
+
+          // Process SSE stream
+          const reader = response.body?.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let lastSeq = -1; // Track last processed sequence for ordering
+          let currentEventType = "chunk"; // Track current event type
+          let streamComplete = false;
+
+          if (!reader) {
+            throw new Error("No response body for SSE streaming");
+          }
+
+          while (!streamComplete) {
+            const { done, value } = await reader.read();
             
-            const aiMsg: Message = {
-              id: (Date.now() + 1).toString(),
-              role: "assistant",
-              content: fullContent,
-              timestamp: new Date(),
-              requestId: generateRequestId(),
-              userMessageId: userMsgId,
-              figmaDiagram,
-            };
-            onSendMessage(aiMsg);
+            if (done) break;
             
+            buffer += decoder.decode(value, { stream: true });
+            
+            // Parse SSE events from buffer
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || ""; // Keep incomplete line in buffer
+            
+            for (const line of lines) {
+              // Track event type for the next data line
+              if (line.startsWith("event: ")) {
+                currentEventType = line.slice(7).trim();
+                continue;
+              }
+              
+              if (line.startsWith("data: ")) {
+                let data: any;
+                try {
+                  data = JSON.parse(line.slice(6));
+                } catch (parseErr) {
+                  // Ignore parse errors for heartbeat or malformed data
+                  console.debug('[SSE] Parse error, skipping line:', line);
+                  continue;
+                }
+                
+                // Skip out-of-order sequences for deduplication
+                if (typeof data.sequenceId === 'number') {
+                  if (data.sequenceId <= lastSeq) {
+                    console.debug(`[SSE] Skipping out-of-order seq ${data.sequenceId} (lastSeq: ${lastSeq})`);
+                    continue;
+                  }
+                  lastSeq = data.sequenceId;
+                }
+                
+                // Handle completion events (done or complete)
+                if (currentEventType === 'complete' || currentEventType === 'done' || data.done === true) {
+                  console.debug('[SSE] Stream complete event received');
+                  streamComplete = true;
+                  break;
+                }
+                
+                // Handle error events
+                if (currentEventType === 'error') {
+                  throw new Error(data.error || 'SSE stream error');
+                }
+                
+                // Handle chunk events with content
+                if (currentEventType === 'chunk' && data.content) {
+                  fullContent += data.content;
+                  
+                  // Update UI based on mode
+                  if (isPptMode && shouldWriteToDoc) {
+                    pptStreaming.processChunk(data.content);
+                  } else if (shouldWriteToDoc && docInsertContentRef.current) {
+                    try {
+                      docInsertContentRef.current(fullContent, true);
+                    } catch (err) {
+                      console.error('[ChatInterface] Error streaming to document:', err);
+                    }
+                  } else {
+                    // Normal chat mode - update streaming content
+                    streamingContentRef.current = fullContent;
+                    setStreamingContent(fullContent);
+                  }
+                }
+                
+                // Reset event type after processing data
+                currentEventType = "chunk";
+              }
+            }
+          }
+        } catch (err: any) {
+          if (err.name === "AbortError") {
+            // User cancelled - clean up and return
+            if (isPptMode && pptStreaming.isStreaming) {
+              pptStreaming.stopStreaming();
+            }
             streamingContentRef.current = "";
             setStreamingContent("");
             setAiState("idle");
             setAiProcessSteps([]);
-            setSelectedDocTool(null); // Reset tool selection
-            agent.complete();
             abortControllerRef.current = null;
+            return;
           }
-        }, 10);
-        return;
-      }
-      
-      // If PPT mode is active: Stream to PPT editor using special parser
-      if (isPptMode && shouldWriteToDoc) {
-        setAiState("responding");
-        
-        // Clear chat streaming - we write to PPT canvas
+          sseError = err;
+        }
+
+        // Handle completion
+        if (sseError) {
+          throw sseError;
+        }
+
+        // Finalize based on mode
+        if (isPptMode && shouldWriteToDoc) {
+          pptStreaming.stopStreaming();
+          
+          const confirmMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: "✓ Presentación generada correctamente",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          };
+          await onSendMessage(confirmMsg);
+        } else if (shouldWriteToDoc && docInsertContentRef.current) {
+          try {
+            docInsertContentRef.current(fullContent, true);
+          } catch (err) {
+            console.error('[ChatInterface] Error finalizing document:', err);
+          }
+          
+          const confirmMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: "✓ Documento generado correctamente",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          };
+          await onSendMessage(confirmMsg);
+        } else {
+          // Normal chat mode - create final assistant message
+          const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: fullContent,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          };
+          await onSendMessage(aiMsg);
+        }
+
         streamingContentRef.current = "";
         setStreamingContent("");
-        
-        // Start PPT streaming
-        pptStreaming.startStreaming();
-        
-        // Stream content progressively through PPT parser
-        let currentIndex = 0;
-        
-        streamIntervalRef.current = setInterval(() => {
-          if (currentIndex < fullContent.length) {
-            // Get progressive chunk
-            const chunkSize = Math.floor(Math.random() * 8) + 4;
-            const newChunk = fullContent.slice(currentIndex, currentIndex + chunkSize);
-            currentIndex += chunkSize;
-            
-            // Route chunk through PPT stream parser
-            pptStreaming.processChunk(newChunk);
-          } else {
-            if (streamIntervalRef.current) {
-              clearInterval(streamIntervalRef.current);
-              streamIntervalRef.current = null;
-            }
-            
-            // Finalize PPT streaming
-            pptStreaming.stopStreaming();
-            
-            // Add confirmation message in chat
-            const confirmMsg: Message = {
-              id: (Date.now() + 1).toString(),
-              role: "assistant",
-              content: "✓ Presentación generada correctamente",
-              timestamp: new Date(),
-              requestId: generateRequestId(),
-              userMessageId: userMsgId,
-            };
-            onSendMessage(confirmMsg);
-            
-            setAiState("idle");
-            setAiProcessSteps([]);
-            agent.complete();
-            abortControllerRef.current = null;
-          }
-        }, 20);
-        return;
-      }
-      
-      // If document mode is active: Stream DIRECTLY to document editor in real-time
-      if (shouldWriteToDoc && docInsertContentRef.current) {
-        setAiState("responding");
-        
-        // Clear chat streaming - we write directly to document
-        streamingContentRef.current = "";
-        setStreamingContent("");
-        
-        // Stream content progressively to document editor
-        let currentIndex = 0;
-        
-        streamIntervalRef.current = setInterval(() => {
-          if (currentIndex < fullContent.length) {
-            // Get progressive chunk - larger chunks for smoother document typing
-            const chunkSize = Math.floor(Math.random() * 15) + 8;
-            currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
-            const contentSoFar = fullContent.slice(0, currentIndex);
-            
-            // Replace entire document content with progressively more content
-            // This ensures markdown renders correctly at each step
-            try {
-              if (docInsertContentRef.current) {
-                docInsertContentRef.current(contentSoFar, true); // replaceMode = true
-              }
-            } catch (err) {
-              console.error('[ChatInterface] Error streaming to document:', err);
-            }
-          } else {
-            if (streamIntervalRef.current) {
-              clearInterval(streamIntervalRef.current);
-              streamIntervalRef.current = null;
-            }
-            
-            // Final write with complete content to ensure nothing is missed
-            try {
-              if (docInsertContentRef.current) {
-                docInsertContentRef.current(fullContent, true);
-              }
-            } catch (err) {
-              console.error('[ChatInterface] Error finalizing document:', err);
-            }
-            
-            // Add confirmation message in chat
-            const confirmMsg: Message = {
-              id: (Date.now() + 1).toString(),
-              role: "assistant",
-              content: "✓ Documento generado correctamente",
-              timestamp: new Date(),
-              requestId: generateRequestId(),
-              userMessageId: userMsgId,
-            };
-            onSendMessage(confirmMsg);
-            
-            setAiState("idle");
-            setAiProcessSteps([]);
-            agent.complete();
-            abortControllerRef.current = null;
-          }
-        }, 25);
+        setAiState("idle");
+        setAiProcessSteps([]);
+        agent.complete();
+        abortControllerRef.current = null;
       } else {
-        // Normal chat mode - stream to chat interface
+        // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            messages: finalChatHistory,
+            images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+            documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
+            figmaMode: isFigmaMode,
+            pptMode: isPptMode,
+            provider: selectedProvider,
+            model: selectedModel,
+            gptConfig: activeGpt ? {
+              id: activeGpt.id,
+              systemPrompt: activeGpt.systemPrompt,
+              temperature: parseFloat(activeGpt.temperature || "0.7"),
+              topP: parseFloat(activeGpt.topP || "1")
+            } : undefined
+          }),
+          signal: abortControllerRef.current?.signal
+        });
+
+        // Update steps: mark processing done, searching active
+        setAiProcessSteps(prev => prev.map((s, i) => {
+          if (s.step.includes("Analizando")) return { ...s, status: "done" };
+          if (s.step.includes("Procesando")) return { ...s, status: "done" };
+          if (s.step.includes("Buscando")) return { ...s, status: "active" };
+          return s;
+        }));
+        
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to get response");
+        }
+        
+        // Update steps: mark searching done, generating active
+        setAiProcessSteps(prev => prev.map(s => {
+          if (s.step.includes("Buscando")) return { ...s, status: "done" };
+          if (s.step.includes("Generando")) return { ...s, status: "active" };
+          return { ...s, status: s.status === "pending" ? "pending" : "done" };
+        }));
+
+        const fullContent = data.content;
+        const responseSources = data.sources || [];
+        const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
+        
+        // If Figma diagram was generated, add it to chat with simulated streaming
+        if (figmaDiagram) {
+          setAiState("responding");
+          
+          let currentIndex = 0;
+          streamIntervalRef.current = setInterval(() => {
+            if (currentIndex < fullContent.length) {
+              const chunkSize = Math.floor(Math.random() * 5) + 3;
+              currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
+              streamingContentRef.current = fullContent.slice(0, currentIndex);
+              setStreamingContent(fullContent.slice(0, currentIndex));
+            } else {
+              if (streamIntervalRef.current) {
+                clearInterval(streamIntervalRef.current);
+                streamIntervalRef.current = null;
+              }
+              
+              const aiMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: fullContent,
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+                figmaDiagram,
+              };
+              onSendMessage(aiMsg);
+              
+              streamingContentRef.current = "";
+              setStreamingContent("");
+              setAiState("idle");
+              setAiProcessSteps([]);
+              setSelectedDocTool(null);
+              agent.complete();
+              abortControllerRef.current = null;
+            }
+          }, 10);
+          return;
+        }
+        
+        // Legacy simulated streaming for other cases
         setAiState("responding");
         let currentIndex = 0;
         

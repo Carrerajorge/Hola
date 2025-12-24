@@ -77,13 +77,14 @@ export default function Home() {
   }, [createChat, addMessage]);
   
   // Stable message sender that uses the correct chat ID
-  const handleSendMessage = useCallback((message: Message) => {
+  const handleSendMessage = useCallback(async (message: Message) => {
     const targetChatId = activeChat?.id || pendingChatIdRef.current;
     if (targetChatId) {
-      addMessage(targetChatId, message);
+      return await addMessage(targetChatId, message);
     } else {
       // Fallback: create new chat
       handleSendNewChatMessage(message);
+      return undefined;
     }
   }, [activeChat?.id, addMessage, handleSendNewChatMessage]);
 
