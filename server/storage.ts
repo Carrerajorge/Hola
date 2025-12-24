@@ -204,6 +204,12 @@ export interface IStorage {
   saveGmailOAuthToken(token: InsertGmailOAuthToken): Promise<GmailOAuthToken>;
   updateGmailOAuthToken(userId: string, updates: Partial<InsertGmailOAuthToken>): Promise<GmailOAuthToken | null>;
   deleteGmailOAuthToken(userId: string): Promise<void>;
+  // Message Idempotency operations
+  findMessageByRequestId(requestId: string): Promise<ChatMessage | null>;
+  claimPendingMessage(messageId: string): Promise<ChatMessage | null>;
+  updateMessageStatus(messageId: string, status: 'pending' | 'processing' | 'done' | 'failed'): Promise<ChatMessage | null>;
+  updateMessageContent(messageId: string, content: string, additionalData?: Partial<InsertChatMessage>): Promise<ChatMessage | null>;
+  findAssistantResponseForUserMessage(userMessageId: string): Promise<ChatMessage | null>;
 }
 
 export class MemStorage implements IStorage {
@@ -1186,6 +1192,49 @@ export class MemStorage implements IStorage {
 
   async deleteGmailOAuthToken(userId: string): Promise<void> {
     await db.delete(gmailOAuthTokens).where(eq(gmailOAuthTokens.userId, userId));
+  }
+
+  // Message Idempotency operations
+  async findMessageByRequestId(requestId: string): Promise<ChatMessage | null> {
+    const [message] = await db.select().from(chatMessages)
+      .where(eq(chatMessages.requestId, requestId));
+    return message || null;
+  }
+
+  async claimPendingMessage(messageId: string): Promise<ChatMessage | null> {
+    const [result] = await db.update(chatMessages)
+      .set({ status: 'processing' })
+      .where(and(
+        eq(chatMessages.id, messageId),
+        eq(chatMessages.status, 'pending')
+      ))
+      .returning();
+    return result || null;
+  }
+
+  async updateMessageStatus(messageId: string, status: 'pending' | 'processing' | 'done' | 'failed'): Promise<ChatMessage | null> {
+    const [result] = await db.update(chatMessages)
+      .set({ status })
+      .where(eq(chatMessages.id, messageId))
+      .returning();
+    return result || null;
+  }
+
+  async updateMessageContent(messageId: string, content: string, additionalData?: Partial<InsertChatMessage>): Promise<ChatMessage | null> {
+    const [result] = await db.update(chatMessages)
+      .set({ content, ...additionalData })
+      .where(eq(chatMessages.id, messageId))
+      .returning();
+    return result || null;
+  }
+
+  async findAssistantResponseForUserMessage(userMessageId: string): Promise<ChatMessage | null> {
+    const [message] = await db.select().from(chatMessages)
+      .where(and(
+        eq(chatMessages.userMessageId, userMessageId),
+        eq(chatMessages.role, 'assistant')
+      ));
+    return message || null;
   }
 }
 
