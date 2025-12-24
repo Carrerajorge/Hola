@@ -495,6 +495,9 @@ export const chatMessages = pgTable("chat_messages", {
   chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
   role: text("role").notNull(), // "user" or "assistant"
   content: text("content").notNull(),
+  status: text("status").default("done"), // pending, processing, done, failed - for idempotency
+  requestId: varchar("request_id"), // UUID for idempotency - prevents duplicate processing
+  userMessageId: varchar("user_message_id"), // For assistant messages: links to the user message it responds to
   attachments: jsonb("attachments"), // array of attachments
   sources: jsonb("sources"), // array of sources
   figmaDiagram: jsonb("figma_diagram"), // Figma diagram data
@@ -505,6 +508,9 @@ export const chatMessages = pgTable("chat_messages", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("chat_messages_chat_idx").on(table.chatId),
+  index("chat_messages_request_idx").on(table.requestId),
+  index("chat_messages_status_idx").on(table.status),
+  uniqueIndex("chat_messages_request_unique").on(table.requestId),
 ]);
 
 export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({
