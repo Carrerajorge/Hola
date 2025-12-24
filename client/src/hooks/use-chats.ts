@@ -352,7 +352,7 @@ export function useChats() {
     pendingMessageQueue.delete(pendingId);
   };
 
-  const addMessage = useCallback(async (chatId: string, message: Message) => {
+  const addMessage = useCallback(async (chatId: string, message: Message): Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined> => {
     const resolvedChatId = pendingToRealIdMap.get(chatId) || chatId;
     const isPending = resolvedChatId.startsWith(PENDING_CHAT_PREFIX);
     const isCreatingChat = chatCreationInProgress.has(chatId) || chatCreationInProgress.has(resolvedChatId);
@@ -361,7 +361,12 @@ export function useChats() {
     // Returns false if already processing or saved - skip duplicate calls
     if (message.requestId && !markRequestProcessing(message.requestId)) {
       console.log(`[Dedup] Skipping already processed/processing requestId: ${message.requestId}`);
-      return;
+      // Check if there's an existing active run for this chat that can be returned
+      const existingRun = getActiveRun(resolvedChatId);
+      if (existingRun) {
+        return { run: existingRun, deduplicated: true };
+      }
+      return undefined;
     }
     
     const title = message.role === "user" && message.content
@@ -400,7 +405,12 @@ export function useChats() {
     
     // If message wasn't added (duplicate), don't proceed with persistence
     if (!messageAdded) {
-      return;
+      // Return existing run if available
+      const existingRun = getActiveRun(resolvedChatId);
+      if (existingRun) {
+        return { run: existingRun, deduplicated: true };
+      }
+      return undefined;
     }
 
     if (isPending && message.role === "user" && !isCreatingChat) {
@@ -496,23 +506,37 @@ export function useChats() {
               lastSeq: data.run.lastSeq
             };
             setActiveRun(resolvedChatId, run);
-            console.log(`[Run] Created run ${run.id} for chat ${resolvedChatId}`);
+            console.log(`[Run] ${data.deduplicated ? 'Resumed' : 'Created'} run ${run.id} for chat ${resolvedChatId}`);
+            
+            if (message.requestId) {
+              markRequestComplete(message.requestId);
+            }
+            
+            return { run, deduplicated: !!data.deduplicated };
           }
           
           if (message.requestId) {
             markRequestComplete(message.requestId);
           }
+          return undefined;
         } else if (res.status === 409) {
           // Already exists - mark as complete
           if (message.requestId) {
             markRequestComplete(message.requestId);
           }
+          // Check for existing run
+          const existingRun = getActiveRun(resolvedChatId);
+          if (existingRun) {
+            return { run: existingRun, deduplicated: true };
+          }
+          return undefined;
         } else {
           // Other non-OK responses: Remove from processing so retry is possible
           console.error(`Server returned ${res.status} for message save`);
           if (message.requestId) {
             processingRequestIds.delete(message.requestId);
           }
+          return undefined;
         }
       } catch (error) {
         console.error("Error saving message to server:", error);
@@ -520,8 +544,10 @@ export function useChats() {
         if (message.requestId) {
           processingRequestIds.delete(message.requestId);
         }
+        return undefined;
       }
     }
+    return undefined;
   }, []);
 
   const deleteChat = useCallback(async (chatId: string, e?: React.MouseEvent) => {

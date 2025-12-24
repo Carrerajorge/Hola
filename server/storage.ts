@@ -89,7 +89,7 @@ export interface IStorage {
   createChatRun(run: InsertChatRun): Promise<ChatRun>;
   getChatRun(id: string): Promise<ChatRun | undefined>;
   getChatRunByClientRequestId(chatId: string, clientRequestId: string): Promise<ChatRun | undefined>;
-  claimPendingRun(chatId: string): Promise<ChatRun | undefined>;
+  claimPendingRun(chatId: string, clientRequestId?: string): Promise<ChatRun | undefined>;
   updateChatRunStatus(id: string, status: string, error?: string): Promise<ChatRun | undefined>;
   updateChatRunAssistantMessage(id: string, assistantMessageId: string): Promise<ChatRun | undefined>;
   updateChatRunLastSeq(id: string, lastSeq: number): Promise<ChatRun | undefined>;
@@ -481,7 +481,20 @@ export class MemStorage implements IStorage {
     return result;
   }
 
-  async claimPendingRun(chatId: string): Promise<ChatRun | undefined> {
+  async claimPendingRun(chatId: string, clientRequestId?: string): Promise<ChatRun | undefined> {
+    // If clientRequestId is provided, claim that specific run
+    if (clientRequestId) {
+      const [result] = await db.update(chatRuns)
+        .set({ status: 'processing', startedAt: new Date() })
+        .where(and(
+          eq(chatRuns.chatId, chatId),
+          eq(chatRuns.clientRequestId, clientRequestId),
+          eq(chatRuns.status, 'pending')
+        ))
+        .returning();
+      return result;
+    }
+    // Otherwise claim any pending run for the chat
     const [result] = await db.update(chatRuns)
       .set({ status: 'processing', startedAt: new Date() })
       .where(and(eq(chatRuns.chatId, chatId), eq(chatRuns.status, 'pending')))
