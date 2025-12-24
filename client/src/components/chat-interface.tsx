@@ -2172,11 +2172,51 @@ export function ChatInterface({
       const documentType = activeDocEditorRef.current?.type || null;
       const isFigmaMode = selectedDocTool === "figma";
       const isPptMode = documentType === "ppt";
+      const isWordMode = documentType === "word";
       
-      // Build chat history with PPT system prompt if in PPT mode
-      const finalChatHistory = isPptMode 
-        ? [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory]
-        : chatHistory;
+      // Check if document has existing content (not just placeholder)
+      const currentDocContent = editedDocumentContent || "";
+      const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+      const plainTextContent = stripHtml(currentDocContent);
+      const placeholderPhrases = [
+        "comienza a escribir tu documento aquí",
+        "comienza a escribir",
+        "escribe aquí",
+        ""
+      ];
+      const isPlaceholder = placeholderPhrases.some(p => 
+        plainTextContent.toLowerCase().includes(p) || plainTextContent.length < 20
+      );
+      const hasExistingContent = isWordMode && !isPlaceholder && plainTextContent.length > 20;
+      
+      // Build system prompt for Word document mode
+      let wordSystemPrompt = "";
+      if (isWordMode) {
+        if (hasExistingContent) {
+          wordSystemPrompt = `Eres un asistente de edición de documentos. El usuario tiene un documento existente y quiere mejorarlo según sus instrucciones.
+
+DOCUMENTO ACTUAL:
+${plainTextContent}
+
+INSTRUCCIONES IMPORTANTES:
+1. NO reemplaces todo el documento - MEJÓRALO según las instrucciones del usuario
+2. Mantén el contenido existente y solo modifica o añade lo que el usuario solicite
+3. Si el usuario pide agregar algo, añádelo al documento existente
+4. Si el usuario pide corregir algo, corrige solo esa parte
+5. Responde SOLO con el documento mejorado en formato Markdown, sin explicaciones adicionales`;
+        } else {
+          wordSystemPrompt = `Eres un asistente de creación de documentos. Genera el contenido del documento según las instrucciones del usuario.
+Responde SOLO con el contenido del documento en formato Markdown, sin explicaciones adicionales.`;
+        }
+      }
+      
+      // Build chat history with appropriate system prompt
+      let finalChatHistory: Array<{role: string; content: string}> = chatHistory;
+      if (isPptMode) {
+        finalChatHistory = [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory];
+      } else if (isWordMode) {
+        finalChatHistory = [{ role: "system", content: wordSystemPrompt }, ...chatHistory];
+      }
       
       // Capture document mode state NOW using ref (avoids closure issues)
       const shouldWriteToDoc = !!activeDocEditorRef.current;
