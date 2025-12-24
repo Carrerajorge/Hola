@@ -87,12 +87,18 @@ export function markRequestProcessing(requestId: string): boolean {
   return true;
 }
 
-// Mark a request as completed
+// Mark a request as completed (persisted - no TTL for long-lived idempotency)
 export function markRequestComplete(requestId: string): void {
   processingRequestIds.delete(requestId);
   savedRequestIds.add(requestId);
-  // Cleanup old savedRequestIds after 5 minutes to prevent memory leak
-  setTimeout(() => savedRequestIds.delete(requestId), 5 * 60 * 1000);
+  // No TTL - requestIds stay in savedRequestIds for the session to ensure idempotency
+  // Memory is managed by page reload which clears and re-hydrates from server
+}
+
+// Mark a request as persisted (hydrated from server/localStorage - no TTL)
+export function markRequestPersisted(requestId: string): void {
+  savedRequestIds.add(requestId);
+  // No TTL - persisted requestIds stay in memory for the session
 }
 
 // Separate in-memory store for generated images (not persisted to localStorage)
@@ -128,18 +134,26 @@ export function useChats() {
             timestamp: new Date(chat.updatedAt).getTime(),
             archived: chat.archived === "true",
             hidden: chat.hidden === "true",
-            messages: (fullChat.messages || []).map((msg: any) => ({
-              id: msg.id,
-              role: msg.role,
-              content: msg.content,
-              timestamp: new Date(msg.createdAt),
-              attachments: msg.attachments,
-              sources: msg.sources,
-              figmaDiagram: msg.figmaDiagram,
-              googleFormPreview: msg.googleFormPreview,
-              gmailPreview: msg.gmailPreview,
-              generatedImage: msg.generatedImage,
-            })),
+            messages: (fullChat.messages || []).map((msg: any) => {
+              // Hydrate savedRequestIds from server data
+              if (msg.requestId) {
+                markRequestPersisted(msg.requestId);
+              }
+              return {
+                id: msg.id,
+                role: msg.role,
+                content: msg.content,
+                timestamp: new Date(msg.createdAt),
+                requestId: msg.requestId,
+                userMessageId: msg.userMessageId,
+                attachments: msg.attachments,
+                sources: msg.sources,
+                figmaDiagram: msg.figmaDiagram,
+                googleFormPreview: msg.googleFormPreview,
+                gmailPreview: msg.gmailPreview,
+                generatedImage: msg.generatedImage,
+              };
+            }),
           };
         })
       );
@@ -176,10 +190,16 @@ export function useChats() {
             const restored = parsed.map((chat: any) => ({
               ...chat,
               stableKey: chat.stableKey || `stable-${chat.id}`, // Ensure stableKey exists
-              messages: chat.messages.map((msg: any) => ({
-                ...msg,
-                timestamp: new Date(msg.timestamp)
-              }))
+              messages: chat.messages.map((msg: any) => {
+                // Hydrate savedRequestIds from localStorage data
+                if (msg.requestId) {
+                  markRequestPersisted(msg.requestId);
+                }
+                return {
+                  ...msg,
+                  timestamp: new Date(msg.timestamp)
+                };
+              })
             }));
             setChats(restored);
             if (!activeChatId && restored.length > 0) {
@@ -240,12 +260,14 @@ export function useChats() {
       
       for (const msg of queuedMessages) {
         try {
-          await fetch(`/api/chats/${realChatId}/messages`, {
+          const res = await fetch(`/api/chats/${realChatId}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               role: msg.role,
               content: msg.content,
+              requestId: msg.requestId,
+              userMessageId: msg.userMessageId,
               attachments: msg.attachments,
               sources: msg.sources,
               figmaDiagram: msg.figmaDiagram,
@@ -254,8 +276,21 @@ export function useChats() {
               generatedImage: msg.generatedImage
             })
           });
+          
+          // Mark request as complete on successful save or 409 conflict (already exists)
+          if (msg.requestId) {
+            if (res.ok || res.status === 409) {
+              markRequestComplete(msg.requestId);
+            } else {
+              processingRequestIds.delete(msg.requestId);
+            }
+          }
         } catch (error) {
           console.error("Error flushing queued message:", error);
+          // Remove from processing on error so retry is possible
+          if (msg.requestId) {
+            processingRequestIds.delete(msg.requestId);
+          }
         }
       }
     }
@@ -267,24 +302,21 @@ export function useChats() {
     const isPending = resolvedChatId.startsWith(PENDING_CHAT_PREFIX);
     const isCreatingChat = chatCreationInProgress.has(chatId) || chatCreationInProgress.has(resolvedChatId);
     
-    // Idempotency check: If message has a requestId and it's already been processed, skip
-    if (message.requestId) {
-      if (savedRequestIds.has(message.requestId)) {
-        console.log(`[Dedup] Skipping duplicate message with requestId: ${message.requestId}`);
-        return;
-      }
-      // Mark as processing if not already
-      if (!markRequestProcessing(message.requestId)) {
-        console.log(`[Dedup] Message already being processed: ${message.requestId}`);
-        return;
-      }
+    // Idempotency guard: Use markRequestProcessing to claim the requestId
+    // Returns false if already processing or saved - skip duplicate calls
+    if (message.requestId && !markRequestProcessing(message.requestId)) {
+      console.log(`[Dedup] Skipping already processed/processing requestId: ${message.requestId}`);
+      return;
     }
     
     const title = message.role === "user" && message.content
       ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
       : "Nuevo Chat";
 
-    // Check if message already exists in chat (by ID)
+    // Track whether message was actually added (for requestId cleanup)
+    let messageAdded = false;
+    
+    // Check if message already exists in chat (by ID) and add if not
     setChats(prev => prev.map(chat => {
       const matchId = chat.id === chatId || chat.id === resolvedChatId;
       if (matchId) {
@@ -292,9 +324,14 @@ export function useChats() {
         const messageExists = chat.messages.some(m => m.id === message.id);
         if (messageExists) {
           console.log(`[Dedup] Message with same ID already exists: ${message.id}`);
+          // Mark as complete (not just delete from processing) to prevent future re-claims
+          if (message.requestId) {
+            markRequestComplete(message.requestId);
+          }
           return chat;
         }
         
+        messageAdded = true;
         const isFirstMessage = chat.messages.length === 0;
         return {
           ...chat,
@@ -305,6 +342,11 @@ export function useChats() {
       }
       return chat;
     }));
+    
+    // If message wasn't added (duplicate), don't proceed with persistence
+    if (!messageAdded) {
+      return;
+    }
 
     if (isPending && message.role === "user" && !isCreatingChat) {
       chatCreationInProgress.add(chatId);
@@ -335,13 +377,22 @@ export function useChats() {
 
           await flushPendingMessages(chatId, realChatId);
         } else {
-          // If server creation fails (e.g., 401), keep using local-only chat
-          // Clear the pending queue to prevent messages from being lost
+          // Server creation failed - keep messages in local-only mode (visible in UI)
+          // Mark requestIds as complete to prevent re-processing but keep messages visible
+          const queuedMsgs = pendingMessageQueue.get(chatId) || [];
+          queuedMsgs.forEach(msg => {
+            if (msg.requestId) markRequestComplete(msg.requestId);
+          });
           pendingMessageQueue.delete(chatId);
+          console.warn("Chat creation failed, operating in local-only mode");
         }
       } catch (error) {
         console.error("Error creating chat on first message:", error);
-        // Clear the pending queue on error to prevent messages from being lost
+        // Keep messages in local-only mode on error
+        const queuedMsgs = pendingMessageQueue.get(chatId) || [];
+        queuedMsgs.forEach(msg => {
+          if (msg.requestId) markRequestComplete(msg.requestId);
+        });
         pendingMessageQueue.delete(chatId);
       } finally {
         chatCreationInProgress.delete(chatId);
@@ -370,9 +421,16 @@ export function useChats() {
           })
         });
         
-        // Mark request as complete on successful save
-        if (res.ok && message.requestId) {
-          markRequestComplete(message.requestId);
+        // Mark request as complete on successful save or 409 conflict (already exists)
+        if (message.requestId) {
+          if (res.ok || res.status === 409) {
+            // 409 means the record already exists, so mark as saved to prevent UI duplicates
+            markRequestComplete(message.requestId);
+          } else {
+            // Other non-OK responses: Remove from processing so retry is possible
+            console.error(`Server returned ${res.status} for message save`);
+            processingRequestIds.delete(message.requestId);
+          }
         }
       } catch (error) {
         console.error("Error saving message to server:", error);

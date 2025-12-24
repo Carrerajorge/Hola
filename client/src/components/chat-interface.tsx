@@ -51,7 +51,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
 
-import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage } from "@/hooks/use-chats";
+import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, generateRequestId } from "@/hooks/use-chats";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
@@ -1909,11 +1909,19 @@ export function ChatInterface({
     setInput("");
     setUploadedFiles([]);
 
+    // Generate unique IDs for idempotency
+    const userMsgId = Date.now().toString();
+    const userRequestId = generateRequestId(); // Unique ID for user message
+    // Note: Each assistant message generates its own unique requestId inline
+    // Idempotency is handled in addMessage via markRequestProcessing
+    
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: userMsgId,
       role: "user",
       content: userInput,
       timestamp: new Date(),
+      requestId: userRequestId,
+      status: 'pending',
       attachments: attachments.length > 0 ? attachments : undefined,
     };
 
@@ -1939,6 +1947,8 @@ export function ChatInterface({
         role: "assistant",
         content: "Creando formulario en base a tu solicitud...",
         timestamp: new Date(),
+        requestId: generateRequestId(),
+        userMessageId: userMsgId,
         googleFormPreview: {
           prompt: cleanPrompt,
           fileContext: fileContext.length > 0 ? fileContext : undefined,
@@ -1947,6 +1957,7 @@ export function ChatInterface({
       };
       
       onSendMessage(formPreviewMsg);
+      // Note: markRequestComplete is called inside addMessage after persistence
       setAiState("idle");
       setAiProcessSteps([]);
       return;
@@ -1993,7 +2004,9 @@ export function ChatInterface({
             id: (Date.now() + 1).toString(),
             role: "assistant",
             content: data.content || "No se pudo obtener una respuesta.",
-            timestamp: new Date()
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId
           };
           onSendMessage(gmailResponseMsg);
         } else {
@@ -2001,7 +2014,9 @@ export function ChatInterface({
             id: (Date.now() + 1).toString(),
             role: "assistant",
             content: "❌ Error al analizar tus correos. Por favor, verifica que Gmail esté conectado e intenta de nuevo.",
-            timestamp: new Date()
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId
           };
           onSendMessage(gmailErrorMsg);
         }
@@ -2011,7 +2026,9 @@ export function ChatInterface({
           id: (Date.now() + 1).toString(),
           role: "assistant",
           content: "❌ Error al procesar tu solicitud de correos. Por favor, intenta de nuevo.",
-          timestamp: new Date()
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: userMsgId
         };
         onSendMessage(gmailErrorMsg);
       }
@@ -2099,6 +2116,8 @@ export function ChatInterface({
               content: "Aquí está la imagen que generé basada en tu descripción:",
               generatedImage: imageData.imageData,
               timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
             };
             onSendMessage(aiMsg);
             
@@ -2228,6 +2247,8 @@ export function ChatInterface({
               role: "assistant",
               content: fullContent,
               timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
               figmaDiagram,
             };
             onSendMessage(aiMsg);
@@ -2282,6 +2303,8 @@ export function ChatInterface({
               role: "assistant",
               content: "✓ Presentación generada correctamente",
               timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
             };
             onSendMessage(confirmMsg);
             
@@ -2342,6 +2365,8 @@ export function ChatInterface({
               role: "assistant",
               content: "✓ Documento generado correctamente",
               timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
             };
             onSendMessage(confirmMsg);
             
@@ -2374,6 +2399,8 @@ export function ChatInterface({
               role: "assistant",
               content: fullContent,
               timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
               sources: responseSources.length > 0 ? responseSources : undefined,
             };
             onSendMessage(aiMsg);
@@ -2403,6 +2430,8 @@ export function ChatInterface({
         role: "assistant",
         content: `Lo siento, hubo un error al procesar tu mensaje. Por favor intenta de nuevo.`,
         timestamp: new Date(),
+        requestId: generateRequestId(),
+        userMessageId: userMsgId,
       };
       onSendMessage(errorMsg);
       setAiState("idle");
