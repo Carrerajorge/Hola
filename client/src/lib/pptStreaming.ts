@@ -80,6 +80,26 @@ export function createPptStreamParser(options: PptStreamParserOptions = {}) {
     return createTextElement('title');
   }
 
+  function findOrCreateContentElement(type: StreamElementType, initialText: string = ''): string {
+    if (!state.currentSlideId) {
+      getOrCreateSlide();
+    }
+    
+    if (state.editMode) {
+      const existingId = store().findOrCreateContentElement(state.currentSlideId!, state.yOffset);
+      if (existingId) {
+        store().clearElementText(existingId);
+        if (initialText) {
+          store().appendTextDelta(existingId, initialText);
+        }
+        state.yOffset += 60;
+        return existingId;
+      }
+    }
+    
+    return createTextElement(type, initialText);
+  }
+
   function createTextElement(type: StreamElementType, initialText: string = ''): string {
     if (!state.currentSlideId) {
       getOrCreateSlide();
@@ -152,14 +172,14 @@ export function createPptStreamParser(options: PptStreamParserOptions = {}) {
         if (buffer.startsWith(MARKERS.bullet)) {
           buffer = buffer.slice(MARKERS.bullet.length);
           state.currentType = 'bullet';
-          state.currentElementId = createTextElement('bullet', '• ');
+          state.currentElementId = findOrCreateContentElement('bullet', '• ');
           continue;
         }
 
         if (buffer.startsWith(MARKERS.text)) {
           buffer = buffer.slice(MARKERS.text.length);
           state.currentType = 'text';
-          state.currentElementId = createTextElement('text');
+          state.currentElementId = findOrCreateContentElement('text');
           continue;
         }
 
