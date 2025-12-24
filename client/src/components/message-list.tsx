@@ -327,12 +327,14 @@ interface AttachmentListProps {
   attachments: Message["attachments"];
   variant: "compact" | "default";
   onOpenPreview?: (attachment: NonNullable<Message["attachments"]>[0]) => void;
+  onReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
 }
 
 const AttachmentList = memo(function AttachmentList({
   attachments,
   variant,
-  onOpenPreview
+  onOpenPreview,
+  onReopenDocument
 }: AttachmentListProps) {
   if (!attachments || attachments.length === 0) return null;
 
@@ -344,7 +346,41 @@ const AttachmentList = memo(function AttachmentList({
       )}
     >
       {attachments.map((att, i) =>
-        att.type === "image" && att.imageUrl ? (
+        att.type === "document" && att.documentType ? (
+          <div
+            key={i}
+            className={cn(
+              "flex items-center gap-2 px-3 py-2 rounded-xl text-sm border bg-card border-border cursor-pointer hover:bg-accent transition-colors"
+            )}
+            onClick={() => onReopenDocument?.({ 
+              type: att.documentType as "word" | "excel" | "ppt", 
+              title: att.title || att.name, 
+              content: att.content || "" 
+            })}
+            data-testid={`attachment-document-${i}`}
+          >
+            <div
+              className={cn(
+                "flex items-center justify-center w-8 h-8 rounded-lg",
+                att.documentType === "word" && "bg-blue-600",
+                att.documentType === "excel" && "bg-green-600",
+                att.documentType === "ppt" && "bg-orange-500"
+              )}
+            >
+              <span className="text-white text-xs font-bold">
+                {att.documentType === "word" ? "W" : att.documentType === "excel" ? "E" : "P"}
+              </span>
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="max-w-[200px] truncate font-medium">
+                {att.title || att.name}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Documento guardado - Clic para abrir
+              </span>
+            </div>
+          </div>
+        ) : att.type === "image" && att.imageUrl ? (
           <div
             key={i}
             className={cn(
@@ -604,6 +640,7 @@ interface UserMessageProps {
   onCopyMessage: (content: string, id: string) => void;
   onStartEdit: (msg: Message) => void;
   onOpenPreview?: (attachment: NonNullable<Message["attachments"]>[0]) => void;
+  onReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
 }
 
 const UserMessage = memo(function UserMessage({
@@ -617,7 +654,8 @@ const UserMessage = memo(function UserMessage({
   onSendEdit,
   onCopyMessage,
   onStartEdit,
-  onOpenPreview
+  onOpenPreview,
+  onReopenDocument
 }: UserMessageProps) {
   if (variant === "compact") {
     return (
@@ -667,6 +705,7 @@ const UserMessage = memo(function UserMessage({
             attachments={message.attachments}
             variant={variant}
             onOpenPreview={onOpenPreview}
+            onReopenDocument={onReopenDocument}
           />
           {message.content && (
             <div className="liquid-message-user px-4 py-2.5 text-sm break-words leading-relaxed">
@@ -985,6 +1024,7 @@ export interface MessageListProps {
   handleOpenFileAttachmentPreview: (attachment: NonNullable<Message["attachments"]>[0]) => void;
   handleDownloadImage: (imageData: string) => void;
   setLightboxImage: (imageData: string | null) => void;
+  handleReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
 }
 
 export function MessageList({
@@ -1012,7 +1052,8 @@ export function MessageList({
   handleOpenDocumentPreview,
   handleOpenFileAttachmentPreview,
   handleDownloadImage,
-  setLightboxImage
+  setLightboxImage,
+  handleReopenDocument
 }: MessageListProps) {
   return (
     <>
@@ -1052,7 +1093,16 @@ export function MessageList({
                 onCopyMessage={handleCopyMessage}
                 onStartEdit={handleStartEdit}
                 onOpenPreview={handleOpenFileAttachmentPreview}
+                onReopenDocument={handleReopenDocument}
               />
+            ) : msg.role === "system" && msg.attachments?.some(a => a.type === "document") ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <AttachmentList
+                  attachments={msg.attachments}
+                  variant={variant}
+                  onReopenDocument={handleReopenDocument}
+                />
+              </div>
             ) : (
               <AssistantMessage
                 message={msg}

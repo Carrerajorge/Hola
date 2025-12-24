@@ -954,11 +954,53 @@ export function ChatInterface({
     onCloseSidebar?.();
   };
   
-  const closeDocEditor = () => {
+  const closeDocEditor = async () => {
+    const currentDoc = activeDocEditor;
+    const currentContent = editedDocumentContent;
+    
+    const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
+    const plainText = stripHtml(currentContent);
+    const placeholderPhrases = [
+      "comienza a escribir tu documento aquí",
+      "título de la presentación",
+      "haz clic para agregar"
+    ];
+    const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
+    
+    if (chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20) {
+      try {
+        const response = await fetch(`/api/chats/${chatId}/documents`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: currentDoc.type,
+            title: currentDoc.title,
+            content: currentContent
+          })
+        });
+        if (!response.ok) {
+          console.error("Error saving document: server returned", response.status);
+        }
+      } catch (err) {
+        console.error("Error saving document:", err);
+      }
+    }
+    
     setActiveDocEditor(null);
     setSelectedDocTool(null);
     setEditedDocumentContent("");
     docInsertContentRef.current = null;
+  };
+  
+  const handleReopenDocument = (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => {
+    setSelectedDocTool(doc.type);
+    setActiveDocEditor({
+      type: doc.type,
+      title: doc.title,
+      content: doc.content
+    });
+    setEditedDocumentContent(doc.content);
+    onCloseSidebar?.();
   };
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -2795,6 +2837,7 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
                 handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
                 handleDownloadImage={handleDownloadImage}
                 setLightboxImage={setLightboxImage}
+                handleReopenDocument={handleReopenDocument}
               />
 
               {/* Agent Observer - Show when agent is running */}
@@ -3036,6 +3079,7 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
                 handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
                 handleDownloadImage={handleDownloadImage}
                 setLightboxImage={setLightboxImage}
+                handleReopenDocument={handleReopenDocument}
               />
               
               <div ref={messagesEndRef} />

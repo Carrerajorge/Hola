@@ -116,6 +116,31 @@ export function createChatsRouter() {
     }
   });
 
+  router.post("/chats/:id/documents", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      const chat = await storage.getChat(req.params.id);
+      if (!chat) {
+        return res.status(404).json({ error: "Chat not found" });
+      }
+      if (!chat.userId || chat.userId !== userId) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      
+      const { type, title, content } = req.body;
+      if (!type || !title || !content) {
+        return res.status(400).json({ error: "type, title and content are required" });
+      }
+      
+      const message = await storage.saveDocumentToChat(req.params.id, { type, title, content });
+      res.json(message);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   router.post("/chats/archive-all", async (req, res) => {
     try {
       const user = (req as any).user;

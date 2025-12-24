@@ -463,6 +463,25 @@ export class MemStorage implements IStorage {
     return result;
   }
 
+  async saveDocumentToChat(chatId: string, document: { type: string; title: string; content: string }): Promise<ChatMessage> {
+    const [result] = await db.insert(chatMessages).values({
+      chatId,
+      role: "system",
+      content: `Documento guardado: ${document.title}`,
+      attachments: [{
+        type: "document",
+        name: document.title,
+        documentType: document.type,
+        title: document.title,
+        content: document.content,
+        savedAt: new Date().toISOString()
+      }],
+      status: "done"
+    }).returning();
+    await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
+    return result;
+  }
+
   // Chat Run operations (for idempotent message processing)
   async createChatRun(run: InsertChatRun): Promise<ChatRun> {
     const [result] = await db.insert(chatRuns).values(run).returning();

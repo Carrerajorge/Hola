@@ -32,7 +32,7 @@ export interface GmailPreview {
 
 export interface Message {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
   timestamp: Date;
   requestId?: string; // Unique ID for idempotency - prevents duplicate processing
@@ -42,7 +42,7 @@ export interface Message {
   status?: 'pending' | 'processing' | 'done' | 'failed'; // Processing status for idempotency
   isThinking?: boolean;
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
-  attachments?: { type: "word" | "excel" | "ppt" | "image" | "pdf" | "text" | "code" | "archive" | "unknown"; name: string; mimeType?: string; imageUrl?: string; storagePath?: string; fileId?: string }[];
+  attachments?: { type: "word" | "excel" | "ppt" | "image" | "pdf" | "text" | "code" | "archive" | "document" | "unknown"; name: string; mimeType?: string; imageUrl?: string; storagePath?: string; fileId?: string; documentType?: "word" | "excel" | "ppt"; content?: string; title?: string; savedAt?: string }[];
   sources?: { fileName: string; content: string }[];
   figmaDiagram?: FigmaDiagram;
   generatedImage?: string;
