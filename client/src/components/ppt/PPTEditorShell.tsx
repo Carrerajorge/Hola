@@ -1,7 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useDeckStore, selectDeck, selectCanUndo, selectCanRedo } from './store/deckStore';
 import { CanvasStage } from './canvas/CanvasStage';
-import { SlidesPanel } from './panels';
+import { SlidesPanel, InstructionsPanel } from './panels';
 import { PPTRibbon } from './ribbon/PPTRibbon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,10 +17,13 @@ import {
   ZoomIn,
   ZoomOut,
   Check,
-  ChevronDown
+  ChevronDown,
+  Wand2
 } from 'lucide-react';
 import { exportDeckToPptx, downloadBlob } from '@/lib/pptExport';
 import { cn } from '@/lib/utils';
+import { createPptStreamParser } from '@/lib/pptStreaming';
+import { PPT_STREAMING_SYSTEM_PROMPT } from '@/lib/pptPrompts';
 
 interface PPTEditorShellProps {
   onClose: () => void;
@@ -35,6 +38,8 @@ export function PPTEditorShell({ onClose, onInsertContent }: PPTEditorShellProps
   const setTitle = useDeckStore((s) => s.setTitle);
 
   const [showNotes, setShowNotes] = useState(true);
+  const [showInstructions, setShowInstructions] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const titleRef = useRef<HTMLInputElement>(null);
 
@@ -54,6 +59,98 @@ export function PPTEditorShell({ onClose, onInsertContent }: PPTEditorShellProps
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setTitle(e.target.value);
   };
+
+  const handleGenerateFromInstructions = useCallback(async (instructions: {
+    topic: string;
+    requirements: string;
+    slideCount: number;
+    style: 'professional' | 'creative' | 'minimal';
+  }) => {
+    setIsGenerating(true);
+    
+    try {
+      const styleDescriptions = {
+        professional: 'profesional y corporativo',
+        creative: 'creativo y visualmente atractivo',
+        minimal: 'minimalista y limpio'
+      };
+      
+      const userPrompt = `Crea una presentación con ${instructions.slideCount} diapositivas sobre: ${instructions.topic}
+
+Estilo: ${styleDescriptions[instructions.style]}
+${instructions.requirements ? `\nRequisitos adicionales: ${instructions.requirements}` : ''}
+
+Usa el formato de marcado especificado para generar el contenido.`;
+
+      const parser = createPptStreamParser();
+      
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: 'user', content: userPrompt }
+          ],
+          systemPrompt: PPT_STREAMING_SYSTEM_PROMPT,
+          stream: true,
+          mode: 'ppt'
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body reader available');
+      }
+
+      const decoder = new TextDecoder();
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices?.[0]?.delta?.content || 
+                             parsed.content || 
+                             parsed.text || 
+                             '';
+              if (content) {
+                parser.processChunk(content);
+              }
+            } catch {
+              if (data && data !== '[DONE]') {
+                parser.processChunk(data);
+              }
+            }
+          } else if (line.trim() && !line.startsWith(':')) {
+            parser.processChunk(line);
+          }
+        }
+      }
+      
+      parser.flush();
+      
+      setShowInstructions(false);
+    } catch (error) {
+      console.error('Error generating presentation:', error);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, []);
 
   return (
     <div className="h-full flex flex-col bg-white" data-testid="ppt-editor-shell">
@@ -79,6 +176,27 @@ export function PPTEditorShell({ onClose, onInsertContent }: PPTEditorShellProps
             </div>
           )}
         </div>
+
+        {showInstructions && (
+          <div className="w-[320px] border-l border-gray-200 bg-white flex flex-col">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-gray-50">
+              <span className="text-xs font-medium text-gray-600">Generador IA</span>
+              <button 
+                onClick={() => setShowInstructions(false)}
+                className="p-1 hover:bg-gray-200 rounded"
+                data-testid="button-close-instructions"
+              >
+                <X className="h-3.5 w-3.5 text-gray-500" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <InstructionsPanel 
+                onGenerate={handleGenerateFromInstructions}
+                isGenerating={isGenerating}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       <footer className="h-[24px] flex items-center justify-between px-2 bg-[#f3f3f3] border-t border-gray-300 text-[11px] text-gray-600">
@@ -97,6 +215,20 @@ export function PPTEditorShell({ onClose, onInsertContent }: PPTEditorShellProps
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            className={cn(
+              "flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-gray-200",
+              showInstructions && "bg-blue-100 text-blue-700"
+            )}
+            onClick={() => setShowInstructions(!showInstructions)}
+            data-testid="button-toggle-instructions"
+          >
+            <Wand2 className="h-3 w-3" />
+            <span>Instrucciones</span>
+          </button>
+
+          <div className="w-px h-3 bg-gray-300" />
+
           <button 
             className={cn(
               "flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-gray-200",
