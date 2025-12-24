@@ -770,6 +770,8 @@ interface AssistantMessageProps {
   onDownloadImage: (imageData: string) => void;
   onOpenLightbox: (imageData: string) => void;
   onReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
+  minimizedDocument?: { type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null;
+  onRestoreDocument?: () => void;
 }
 
 const AssistantMessage = memo(function AssistantMessage({
@@ -792,7 +794,9 @@ const AssistantMessage = memo(function AssistantMessage({
   onOpenDocumentPreview,
   onDownloadImage,
   onOpenLightbox,
-  onReopenDocument
+  onReopenDocument,
+  minimizedDocument,
+  onRestoreDocument
 }: AssistantMessageProps) {
   if (variant === "compact") {
     return (
@@ -1006,6 +1010,32 @@ const AssistantMessage = memo(function AssistantMessage({
           />
         </div>
       )}
+
+      {minimizedDocument && minimizedDocument.messageId === message.id && onRestoreDocument && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8, y: -20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 300, damping: 25 }}
+          className="mt-3 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors group"
+          onClick={onRestoreDocument}
+          data-testid={`thumbnail-document-${message.id}`}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
+              <FileText className="h-5 w-5 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-100 truncate">
+                {minimizedDocument.title}
+              </p>
+              <p className="text-xs text-blue-600 dark:text-blue-400">
+                Clic para restaurar documento
+              </p>
+            </div>
+            <Maximize2 className="h-4 w-4 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 });
@@ -1141,33 +1171,9 @@ export function MessageList({
                 onDownloadImage={handleDownloadImage}
                 onOpenLightbox={setLightboxImage}
                 onReopenDocument={handleReopenDocument}
+                minimizedDocument={minimizedDocument}
+                onRestoreDocument={onRestoreDocument}
               />
-            )}
-            
-            {minimizedDocument && minimizedDocument.messageId === msg.id && onRestoreDocument && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8, y: -20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                className="mt-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors group"
-                onClick={onRestoreDocument}
-                data-testid={`thumbnail-document-${msg.id}`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
-                    <FileText className="h-5 w-5 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-blue-900 dark:text-blue-100 truncate">
-                      {minimizedDocument.title}
-                    </p>
-                    <p className="text-xs text-blue-600 dark:text-blue-400">
-                      Clic para restaurar documento
-                    </p>
-                  </div>
-                  <Maximize2 className="h-4 w-4 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </motion.div>
             )}
           </div>
         </div>
