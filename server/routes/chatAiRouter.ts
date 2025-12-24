@@ -20,6 +20,9 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         return res.status(400).json({ error: "Messages array is required" });
       }
 
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
@@ -28,6 +31,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       const response = await handleChatRequest(formattedMessages, {
         useRag,
         conversationId,
+        userId,
         images,
         gptConfig,
         documentMode,
@@ -37,8 +41,6 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update)
       });
       
-      const user = (req as any).user;
-      const userId = user?.claims?.sub;
       if (userId) {
         try {
           await storage.createAuditLog({
