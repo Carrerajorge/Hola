@@ -93,6 +93,17 @@ export function generateClientRequestId(): string {
   return `cri_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+// Resolve pending chat ID to real ID if available
+export function resolveRealChatId(chatId: string): string {
+  return pendingToRealIdMap.get(chatId) || chatId;
+}
+
+// Check if a chat ID is pending (not yet created on server)
+export function isPendingChat(chatId: string): boolean {
+  const resolved = resolveRealChatId(chatId);
+  return resolved.startsWith(PENDING_CHAT_PREFIX);
+}
+
 // Check if a chat has an active run (pending or processing)
 export function hasActiveRun(chatId: string): boolean {
   const run = activeRuns.get(chatId);

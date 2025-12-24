@@ -51,7 +51,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
 
-import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, generateRequestId, generateClientRequestId, getActiveRun, updateActiveRunStatus, clearActiveRun, hasActiveRun } from "@/hooks/use-chats";
+import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, generateRequestId, generateClientRequestId, getActiveRun, updateActiveRunStatus, clearActiveRun, hasActiveRun, resolveRealChatId, isPendingChat } from "@/hooks/use-chats";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
@@ -809,6 +809,9 @@ export function ChatInterface({
       
       if (!currentDoc || !currentContent || !currentChatId) return;
       
+      const realChatId = resolveRealChatId(currentChatId);
+      if (realChatId.startsWith("pending-")) return;
+      
       const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
       const plainText = stripHtml(currentContent);
       const placeholderPhrases = [
@@ -825,7 +828,7 @@ export function ChatInterface({
           title: currentDoc.title,
           content: currentContent
         });
-        navigator.sendBeacon(`/api/chats/${currentChatId}/documents`, new Blob([data], { type: 'application/json' }));
+        navigator.sendBeacon(`/api/chats/${realChatId}/documents`, new Blob([data], { type: 'application/json' }));
       }
     };
   }, []);
@@ -1011,33 +1014,49 @@ export function ChatInterface({
     const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
     
     if (chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20) {
-      try {
-        const response = await fetch(`/api/chats/${chatId}/documents`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: currentDoc.type,
-            title: currentDoc.title,
-            content: currentContent
-          })
-        });
-        if (response.ok) {
-          const updatedMessage = await response.json();
-          if (updatedMessage && updatedMessage.id && updatedMessage.attachments && onUpdateMessageAttachments) {
-            const newMessage: Message = {
-              id: updatedMessage.id,
-              role: updatedMessage.role || "system",
-              content: updatedMessage.content || "",
-              timestamp: new Date(updatedMessage.createdAt || Date.now()),
-              attachments: updatedMessage.attachments
-            };
-            onUpdateMessageAttachments(chatId, updatedMessage.id, updatedMessage.attachments, newMessage);
-          }
-        } else {
-          console.error("Error saving document: server returned", response.status);
+      let realChatId = resolveRealChatId(chatId);
+      
+      if (isPendingChat(chatId)) {
+        let attempts = 0;
+        const maxAttempts = 10;
+        while (isPendingChat(chatId) && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          realChatId = resolveRealChatId(chatId);
+          attempts++;
         }
-      } catch (err) {
-        console.error("Error saving document:", err);
+      }
+      
+      if (!isPendingChat(chatId) && !realChatId.startsWith("pending-")) {
+        try {
+          const response = await fetch(`/api/chats/${realChatId}/documents`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: currentDoc.type,
+              title: currentDoc.title,
+              content: currentContent
+            })
+          });
+          if (response.ok) {
+            const updatedMessage = await response.json();
+            if (updatedMessage && updatedMessage.id && updatedMessage.attachments && onUpdateMessageAttachments) {
+              const newMessage: Message = {
+                id: updatedMessage.id,
+                role: updatedMessage.role || "system",
+                content: updatedMessage.content || "",
+                timestamp: new Date(updatedMessage.createdAt || Date.now()),
+                attachments: updatedMessage.attachments
+              };
+              onUpdateMessageAttachments(realChatId, updatedMessage.id, updatedMessage.attachments, newMessage);
+            }
+          } else {
+            console.error("Error saving document: server returned", response.status);
+          }
+        } catch (err) {
+          console.error("Error saving document:", err);
+        }
+      } else {
+        console.log("Chat creation timed out, document not saved");
       }
     }
     
