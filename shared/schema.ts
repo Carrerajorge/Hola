@@ -493,11 +493,13 @@ export type Chat = typeof chats.$inferSelect;
 export const chatMessages = pgTable("chat_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  runId: varchar("run_id"), // FK to the run this message belongs to (for run-based idempotency)
   role: text("role").notNull(), // "user" or "assistant"
   content: text("content").notNull(),
   status: text("status").default("done"), // pending, processing, done, failed - for idempotency
-  requestId: varchar("request_id"), // UUID for idempotency - prevents duplicate processing
+  requestId: varchar("request_id"), // UUID for idempotency - prevents duplicate processing (legacy)
   userMessageId: varchar("user_message_id"), // For assistant messages: links to the user message it responds to
+  sequence: integer("sequence"), // Sequence number within the run (for streaming dedup)
   attachments: jsonb("attachments"), // array of attachments
   sources: jsonb("sources"), // array of sources
   figmaDiagram: jsonb("figma_diagram"), // Figma diagram data
@@ -520,6 +522,63 @@ export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({
 
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+
+// Chat Runs - Each user submission creates an idempotent "run"
+// A run tracks: user_message creation -> AI processing -> assistant_message response
+export const chatRuns = pgTable("chat_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  clientRequestId: varchar("client_request_id").notNull(), // UUID from frontend - idempotency key
+  userMessageId: varchar("user_message_id"), // FK to the user message that triggered this run
+  assistantMessageId: varchar("assistant_message_id"), // FK to the assistant response message
+  status: text("status").notNull().default("pending"), // pending, processing, done, failed, cancelled
+  lastSeq: integer("last_seq").default(0), // Last sequence number processed (for streaming dedup)
+  error: text("error"), // Error message if failed
+  metadata: jsonb("metadata"), // Additional run metadata
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  startedAt: timestamp("started_at"), // When processing started
+  completedAt: timestamp("completed_at"), // When processing completed
+}, (table) => [
+  index("chat_runs_chat_idx").on(table.chatId),
+  index("chat_runs_status_idx").on(table.status),
+  uniqueIndex("chat_runs_client_request_unique").on(table.chatId, table.clientRequestId),
+]);
+
+export const insertChatRunSchema = createInsertSchema(chatRuns).omit({
+  id: true,
+  createdAt: true,
+  startedAt: true,
+  completedAt: true,
+});
+
+export type InsertChatRun = z.infer<typeof insertChatRunSchema>;
+export type ChatRun = typeof chatRuns.$inferSelect;
+
+// Tool Invocations - Track tool calls within a run for idempotency
+export const toolInvocations = pgTable("tool_invocations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => chatRuns.id, { onDelete: "cascade" }),
+  toolCallId: varchar("tool_call_id").notNull(), // Tool call ID from the model
+  toolName: text("tool_name").notNull(),
+  input: jsonb("input"), // Tool input parameters
+  output: jsonb("output"), // Tool output/result
+  status: text("status").notNull().default("pending"), // pending, running, done, failed
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+}, (table) => [
+  index("tool_invocations_run_idx").on(table.runId),
+  uniqueIndex("tool_invocations_unique").on(table.runId, table.toolCallId),
+]);
+
+export const insertToolInvocationSchema = createInsertSchema(toolInvocations).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+});
+
+export type InsertToolInvocation = z.infer<typeof insertToolInvocationSchema>;
+export type ToolInvocation = typeof toolInvocations.$inferSelect;
 
 // Chat sharing - participantes con acceso a chats específicos
 export const chatShares = pgTable("chat_shares", {
