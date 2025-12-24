@@ -49,11 +49,22 @@ const TIME_FILTERS: Record<string, string> = {
   'semana pasada': 'older_than:7d newer_than:14d'
 };
 
+// Words that should NOT be matched as sender names
+const EXCLUDED_FROM_SENDER = [
+  'hoy', 'ayer', 'mañana', 'semana', 'mes', 'año',
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+  'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo',
+  'esta', 'este', 'pasada', 'pasado', 'última', 'último', 'próxima', 'próximo',
+  'día', 'dias', 'días', 'fecha', 'el', 'la', 'los', 'las'
+];
+
 const SENDER_PATTERNS = [
-  /de\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
-  /de\s+["']?([^"'\s,]+(?:\s+[^"'\s,]+)?)["']?/i,
-  /from\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
-  /from\s+["']?([^"'\s,]+)["']?/i
+  // Email address pattern - highest priority
+  /(?:de|from)\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i,
+  // Quoted name pattern
+  /(?:correos?\s+)?de\s+["']([^"']+)["']/i,
+  /from\s+["']([^"']+)["']/i
 ];
 
 export function detectEmailIntent(message: string): boolean {
@@ -68,22 +79,75 @@ export function detectEmailIntent(message: string): boolean {
   return EMAIL_ACTION_PATTERNS.some(pattern => pattern.test(message));
 }
 
+function parseSpecificDate(message: string): string | null {
+  const lowerMessage = message.toLowerCase();
+  
+  const months: Record<string, number> = {
+    'enero': 0, 'febrero': 1, 'marzo': 2, 'abril': 3, 'mayo': 4, 'junio': 5,
+    'julio': 6, 'agosto': 7, 'septiembre': 8, 'octubre': 9, 'noviembre': 10, 'diciembre': 11
+  };
+  
+  // Pattern: "23 de diciembre", "día 23 de diciembre", "el 23 de diciembre"
+  const datePattern = /(?:d[ií]a\s+)?(?:el\s+)?(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/i;
+  const match = lowerMessage.match(datePattern);
+  
+  if (match) {
+    const day = parseInt(match[1], 10);
+    const monthName = match[2].toLowerCase();
+    const month = months[monthName];
+    
+    if (month !== undefined && day >= 1 && day <= 31) {
+      const currentYear = new Date().getFullYear();
+      // Format: YYYY/MM/DD
+      const monthFormatted = String(month + 1).padStart(2, '0');
+      const dayFormatted = String(day).padStart(2, '0');
+      
+      // Create date range for that specific day
+      const startDate = `${currentYear}/${monthFormatted}/${dayFormatted}`;
+      const nextDay = day + 1;
+      const nextDayFormatted = String(nextDay).padStart(2, '0');
+      const endDate = `${currentYear}/${monthFormatted}/${nextDayFormatted}`;
+      
+      return `after:${startDate} before:${endDate}`;
+    }
+  }
+  
+  return null;
+}
+
 export function extractGmailQuery(message: string): string {
   const lowerMessage = message.toLowerCase();
   let query = '';
   
-  for (const [phrase, gmailFilter] of Object.entries(TIME_FILTERS)) {
-    if (lowerMessage.includes(phrase)) {
-      query += ` ${gmailFilter}`;
-      break;
+  // First try to parse specific date like "23 de diciembre"
+  const specificDate = parseSpecificDate(message);
+  if (specificDate) {
+    query += ` ${specificDate}`;
+  } else {
+    // Fall back to relative time filters
+    for (const [phrase, gmailFilter] of Object.entries(TIME_FILTERS)) {
+      if (lowerMessage.includes(phrase)) {
+        query += ` ${gmailFilter}`;
+        break;
+      }
     }
   }
   
+  // Check for sender patterns - only email addresses or quoted names
   for (const pattern of SENDER_PATTERNS) {
     const match = message.match(pattern);
     if (match && match[1]) {
-      query += ` from:${match[1]}`;
-      break;
+      const potentialSender = match[1].trim().toLowerCase();
+      
+      // Skip if it's a date-related word
+      const isExcluded = EXCLUDED_FROM_SENDER.some(word => 
+        potentialSender === word || potentialSender.startsWith(word + ' ')
+      );
+      
+      if (!isExcluded && potentialSender.length > 2) {
+        query += ` from:${match[1]}`;
+        break;
+      }
     }
   }
   
