@@ -8,6 +8,7 @@ import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from ".
 import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, multiIntentManager, multiIntentPipeline } from "../agent";
 import type { PipelineResponse } from "../../shared/schemas/multiIntent";
 import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
+import { detectEmailIntent, handleEmailChatRequest } from "./gmailChatIntegration";
 
 export type LLMProvider = "xai" | "gemini";
 
@@ -336,6 +337,22 @@ export async function handleChatRequest(
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
   
   if (lastUserMessage) {
+    // GMAIL INTEGRATION: Detectar y manejar solicitudes de correo electrónico
+    if (!documentMode && !figmaMode && userId && detectEmailIntent(lastUserMessage.content)) {
+      try {
+        const emailResult = await handleEmailChatRequest(userId, lastUserMessage.content);
+        if (emailResult.handled && emailResult.response) {
+          console.log(`[Gmail Chat] Handled email query for user ${userId}`);
+          return {
+            content: emailResult.response,
+            role: "assistant"
+          };
+        }
+      } catch (error) {
+        console.error("[Gmail Chat] Error handling email request:", error);
+      }
+    }
+    
     // PRIMERO: Detectar multi-intent ANTES de routeMessage para evitar que el agent pipeline
     // capture prompts con múltiples tareas y solo procese la última
     if (!documentMode && !figmaMode && !hasImages) {
