@@ -433,50 +433,48 @@ export function RechartsChart({ config, className, onDataClick }: RechartsChartP
   const chartHeight = typeof height === 'number' ? height : parseInt(height as string, 10) || 400;
 
   return (
-    <div className={cn('w-full', className)} data-testid="recharts-chart">
-      {(title || subtitle || enableExport || enableZoom) && (
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            {title && <h3 className="text-lg font-semibold text-foreground" data-testid="chart-title">{title}</h3>}
-            {subtitle && <p className="text-sm text-muted-foreground" data-testid="chart-subtitle">{subtitle}</p>}
-          </div>
-          <div className="flex items-center gap-1">
-            {enableZoom && (zoomState.left !== 'dataMin' || zoomState.right !== 'dataMax') && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleZoomReset}
-                className="h-8 w-8 p-0"
-                data-testid="button-zoom-reset"
-              >
-                <RotateCcw className="h-4 w-4" />
-              </Button>
-            )}
-            {enableExport && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleExportPNG}
-                  className="h-8 w-8 p-0"
-                  data-testid="button-export-png"
-                >
-                  <Image className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleExportSVG}
-                  className="h-8 w-8 p-0"
-                  data-testid="button-export-svg"
-                >
-                  <FileCode className="h-4 w-4" />
-                </Button>
-              </>
-            )}
-          </div>
+    <div className={cn('w-full relative group', className)} data-testid="recharts-chart">
+      {(title || subtitle) && (
+        <div className="mb-4">
+          {title && <h3 className="text-lg font-semibold text-foreground" data-testid="chart-title">{title}</h3>}
+          {subtitle && <p className="text-sm text-muted-foreground" data-testid="chart-subtitle">{subtitle}</p>}
         </div>
       )}
+      
+      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        {enableZoom && (zoomState.left !== 'dataMin' || zoomState.right !== 'dataMax') && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleZoomReset}
+            className="h-8 w-8 p-0 bg-muted/80 hover:bg-muted border border-border/50"
+            title="Restablecer zoom"
+            data-testid="button-zoom-reset"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleExportPNG}
+          className="h-8 w-8 p-0 bg-muted/80 hover:bg-muted border border-border/50"
+          title="Descargar PNG"
+          data-testid="button-export-png"
+        >
+          <Image className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleExportSVG}
+          className="h-8 w-8 p-0 bg-muted/80 hover:bg-muted border border-border/50"
+          title="Descargar SVG"
+          data-testid="button-export-svg"
+        >
+          <FileCode className="h-4 w-4" />
+        </Button>
+      </div>
       
       <div ref={chartRef} className="w-full" style={{ height: chartHeight }} data-testid="chart-container">
         <ResponsiveContainer width="100%" height="100%">

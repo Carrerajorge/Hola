@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState, useCallback } from "react";
+import React, { memo, useMemo, useState, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -6,7 +6,7 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { cn } from "@/lib/utils";
-import { Check, Copy, Loader2 } from "lucide-react";
+import { Check, Copy, Loader2, Download, Maximize2, Minimize2 } from "lucide-react";
 import { preprocessMathInMarkdown } from "@/lib/mathParser";
 import { CodeBlockShell } from "./code-block-shell";
 import { isLanguageRunnable } from "@/lib/sandboxApi";
@@ -205,6 +205,109 @@ const CodeBlock = memo(function CodeBlock({ inline, className, children }: CodeB
   );
 });
 
+interface TableWrapperProps {
+  children?: React.ReactNode;
+}
+
+const TableWrapper = memo(function TableWrapper({ children }: TableWrapperProps) {
+  const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  const handleCopy = useCallback(async () => {
+    if (!tableRef.current) return;
+    const table = tableRef.current.querySelector('table');
+    if (!table) return;
+    
+    const rows = table.querySelectorAll('tr');
+    const text = Array.from(rows).map(row => {
+      const cells = row.querySelectorAll('th, td');
+      return Array.from(cells).map(cell => cell.textContent?.trim() || '').join('\t');
+    }).join('\n');
+    
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy table:', err);
+    }
+  }, []);
+
+  const handleDownload = useCallback(() => {
+    if (!tableRef.current) return;
+    const table = tableRef.current.querySelector('table');
+    if (!table) return;
+    
+    const rows = table.querySelectorAll('tr');
+    const csv = Array.from(rows).map(row => {
+      const cells = row.querySelectorAll('th, td');
+      return Array.from(cells).map(cell => {
+        const text = cell.textContent?.trim() || '';
+        return text.includes(',') ? `"${text}"` : text;
+      }).join(',');
+    }).join('\n');
+    
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'tabla.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  return (
+    <div 
+      ref={tableRef}
+      className={cn(
+        "relative group my-4",
+        isExpanded && "fixed inset-4 z-50 bg-background rounded-lg border shadow-2xl overflow-auto p-4"
+      )}
+    >
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <button
+          onClick={handleCopy}
+          className="p-1.5 rounded-md bg-muted/80 hover:bg-muted border border-border/50"
+          title={copied ? "Copiado" : "Copiar tabla"}
+          data-testid="button-copy-table"
+        >
+          {copied ? (
+            <Check className="h-4 w-4 text-green-500" />
+          ) : (
+            <Copy className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+        <button
+          onClick={handleDownload}
+          className="p-1.5 rounded-md bg-muted/80 hover:bg-muted border border-border/50"
+          title="Descargar CSV"
+          data-testid="button-download-table"
+        >
+          <Download className="h-4 w-4 text-muted-foreground" />
+        </button>
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="p-1.5 rounded-md bg-muted/80 hover:bg-muted border border-border/50"
+          title={isExpanded ? "Minimizar" : "Expandir"}
+          data-testid="button-expand-table"
+        >
+          {isExpanded ? (
+            <Minimize2 className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <Maximize2 className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-collapse border border-border rounded-lg" data-testid="table-markdown">
+          {children}
+        </table>
+      </div>
+    </div>
+  );
+});
+
 interface TableComponents {
   table: React.ComponentType<{ children?: React.ReactNode }>;
   thead: React.ComponentType<{ children?: React.ReactNode }>;
@@ -215,13 +318,7 @@ interface TableComponents {
 }
 
 const tableComponents: TableComponents = {
-  table: ({ children }) => (
-    <div className="overflow-x-auto my-4">
-      <table className="min-w-full border-collapse border border-border rounded-lg" data-testid="table-markdown">
-        {children}
-      </table>
-    </div>
-  ),
+  table: TableWrapper,
   thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
   tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
   tr: ({ children }) => <tr className="hover:bg-muted/30 transition-colors">{children}</tr>,

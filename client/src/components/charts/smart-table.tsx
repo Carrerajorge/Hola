@@ -35,6 +35,11 @@ import {
   ChevronsRight,
   Search,
   X,
+  Copy,
+  Download,
+  Check,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 
 export interface SmartTableProps {
@@ -218,8 +223,54 @@ export function SmartTable({ config, className, onRowClick }: SmartTableProps) {
   const [globalFilter, setGlobalFilter] = useState('');
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const parentRef = useRef<HTMLDivElement>(null);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleCopyTable = useCallback(async () => {
+    if (!tableContainerRef.current) return;
+    const tableEl = tableContainerRef.current.querySelector('table');
+    if (!tableEl) return;
+    
+    const rows = tableEl.querySelectorAll('tr');
+    const text = Array.from(rows).map(row => {
+      const cells = row.querySelectorAll('th, td');
+      return Array.from(cells).map(cell => cell.textContent?.trim() || '').join('\t');
+    }).join('\n');
+    
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy table:', err);
+    }
+  }, []);
+
+  const handleDownloadCSV = useCallback(() => {
+    if (!tableContainerRef.current) return;
+    const tableEl = tableContainerRef.current.querySelector('table');
+    if (!tableEl) return;
+    
+    const rows = tableEl.querySelectorAll('tr');
+    const csv = Array.from(rows).map(row => {
+      const cells = row.querySelectorAll('th, td');
+      return Array.from(cells).map(cell => {
+        const text = cell.textContent?.trim() || '';
+        return text.includes(',') ? `"${text}"` : text;
+      }).join(',');
+    }).join('\n');
+    
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'tabla.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -352,7 +403,56 @@ export function SmartTable({ config, className, onRowClick }: SmartTableProps) {
   const totalSize = virtualizer.getTotalSize();
 
   return (
-    <div className={cn('w-full space-y-4', className)} data-testid="smart-table">
+    <div 
+      ref={tableContainerRef}
+      className={cn(
+        'w-full space-y-4 relative group',
+        className,
+        isExpanded && 'fixed inset-4 z-50 bg-background rounded-lg border shadow-2xl overflow-auto p-4'
+      )} 
+      data-testid="smart-table"
+    >
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleCopyTable}
+          className="h-8 w-8 p-0 bg-muted/80 hover:bg-muted border border-border/50"
+          title={copied ? "Copiado" : "Copiar tabla"}
+          data-testid="button-copy-smart-table"
+        >
+          {copied ? (
+            <Check className="h-4 w-4 text-green-500" />
+          ) : (
+            <Copy className="h-4 w-4" />
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleDownloadCSV}
+          className="h-8 w-8 p-0 bg-muted/80 hover:bg-muted border border-border/50"
+          title="Descargar CSV"
+          data-testid="button-download-smart-table"
+        >
+          <Download className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="h-8 w-8 p-0 bg-muted/80 hover:bg-muted border border-border/50"
+          title={isExpanded ? "Minimizar" : "Expandir"}
+          data-testid="button-expand-smart-table"
+        >
+          {isExpanded ? (
+            <Minimize2 className="h-4 w-4" />
+          ) : (
+            <Maximize2 className="h-4 w-4" />
+          )}
+        </Button>
+      </div>
+
       {enableGlobalSearch && (
         <div className="relative" data-testid="global-search">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

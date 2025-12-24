@@ -286,37 +286,36 @@ function EChartsChartImpl({ config, className, onDataClick }: EChartsChartProps)
   }), [handleDataClick]);
 
   return (
-    <div className={cn('w-full', className)} data-testid="echarts-chart">
-      {(title || subtitle || enableExport) && (
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            {title && <h3 className="text-lg font-semibold text-foreground" data-testid="chart-title">{title}</h3>}
-            {subtitle && <p className="text-sm text-muted-foreground" data-testid="chart-subtitle">{subtitle}</p>}
-          </div>
-          {enableExport && (
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleExportPNG}
-                className="h-8 w-8 p-0"
-                data-testid="button-export-png"
-              >
-                <Image className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleExportSVG}
-                className="h-8 w-8 p-0"
-                data-testid="button-export-svg"
-              >
-                <FileCode className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
+    <div className={cn('w-full relative group', className)} data-testid="echarts-chart">
+      {(title || subtitle) && (
+        <div className="mb-4">
+          {title && <h3 className="text-lg font-semibold text-foreground" data-testid="chart-title">{title}</h3>}
+          {subtitle && <p className="text-sm text-muted-foreground" data-testid="chart-subtitle">{subtitle}</p>}
         </div>
       )}
+      
+      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleExportPNG}
+          className="h-8 w-8 p-0 bg-muted/80 hover:bg-muted border border-border/50"
+          title="Descargar PNG"
+          data-testid="button-export-png"
+        >
+          <Image className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleExportSVG}
+          className="h-8 w-8 p-0 bg-muted/80 hover:bg-muted border border-border/50"
+          title="Descargar SVG"
+          data-testid="button-export-svg"
+        >
+          <FileCode className="h-4 w-4" />
+        </Button>
+      </div>
 
       <div className="w-full" style={{ height: chartHeight }} data-testid="chart-container">
         <ReactEChartsCore
