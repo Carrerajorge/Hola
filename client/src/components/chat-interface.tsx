@@ -2491,12 +2491,25 @@ export function ChatInterface({
         setAiState("responding");
         let currentIndex = 0;
         
+        // Check if we should write to document (Word mode)
+        const shouldWriteToDocLegacy = !!activeDocEditorRef.current && activeDocEditorRef.current.type === "word";
+        
         streamIntervalRef.current = setInterval(() => {
           if (currentIndex < fullContent.length) {
             const chunkSize = Math.floor(Math.random() * 3) + 1;
             const newContent = fullContent.slice(0, currentIndex + chunkSize);
-            streamingContentRef.current = newContent;
-            setStreamingContent(newContent);
+            
+            // Write to document if in document mode
+            if (shouldWriteToDocLegacy && docInsertContentRef.current) {
+              try {
+                docInsertContentRef.current(newContent, true);
+              } catch (err) {
+                console.error('[ChatInterface] Error streaming to document (legacy):', err);
+              }
+            } else {
+              streamingContentRef.current = newContent;
+              setStreamingContent(newContent);
+            }
             currentIndex += chunkSize;
           } else {
             if (streamIntervalRef.current) {
@@ -2504,16 +2517,35 @@ export function ChatInterface({
               streamIntervalRef.current = null;
             }
             
-            const aiMsg: Message = {
-              id: (Date.now() + 1).toString(),
-              role: "assistant",
-              content: fullContent,
-              timestamp: new Date(),
-              requestId: generateRequestId(),
-              userMessageId: userMsgId,
-              sources: responseSources.length > 0 ? responseSources : undefined,
-            };
-            onSendMessage(aiMsg);
+            // Finalize document or create message
+            if (shouldWriteToDocLegacy && docInsertContentRef.current) {
+              try {
+                docInsertContentRef.current(fullContent, true);
+              } catch (err) {
+                console.error('[ChatInterface] Error finalizing document (legacy):', err);
+              }
+              
+              const confirmMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: "✓ Documento generado correctamente",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+              };
+              onSendMessage(confirmMsg);
+            } else {
+              const aiMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: fullContent,
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+                sources: responseSources.length > 0 ? responseSources : undefined,
+              };
+              onSendMessage(aiMsg);
+            }
             
             streamingContentRef.current = "";
             setStreamingContent("");
