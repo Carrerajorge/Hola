@@ -35,6 +35,9 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  requestId?: string; // Unique ID for idempotency - prevents duplicate processing
+  userMessageId?: string; // For assistant messages: links to the user message it responds to
+  status?: 'pending' | 'processing' | 'done' | 'failed'; // Processing status for idempotency
   isThinking?: boolean;
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
   attachments?: { type: "word" | "excel" | "ppt" | "image" | "pdf" | "text" | "code" | "archive" | "unknown"; name: string; mimeType?: string; imageUrl?: string; storagePath?: string; fileId?: string }[];
@@ -60,6 +63,37 @@ const PENDING_CHAT_PREFIX = "pending-";
 const pendingToRealIdMap = new Map<string, string>();
 const pendingMessageQueue = new Map<string, Message[]>();
 const chatCreationInProgress = new Set<string>();
+
+// Idempotency: Track messages being processed to prevent duplicates
+const processingRequestIds = new Set<string>();
+const savedRequestIds = new Set<string>();
+
+// Generate a unique request ID for idempotency
+export function generateRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Check if a request is already being processed
+export function isRequestProcessing(requestId: string): boolean {
+  return processingRequestIds.has(requestId);
+}
+
+// Mark a request as being processed
+export function markRequestProcessing(requestId: string): boolean {
+  if (processingRequestIds.has(requestId) || savedRequestIds.has(requestId)) {
+    return false; // Already processing or saved
+  }
+  processingRequestIds.add(requestId);
+  return true;
+}
+
+// Mark a request as completed
+export function markRequestComplete(requestId: string): void {
+  processingRequestIds.delete(requestId);
+  savedRequestIds.add(requestId);
+  // Cleanup old savedRequestIds after 5 minutes to prevent memory leak
+  setTimeout(() => savedRequestIds.delete(requestId), 5 * 60 * 1000);
+}
 
 // Separate in-memory store for generated images (not persisted to localStorage)
 const generatedImagesStore = new Map<string, string>();
@@ -233,13 +267,34 @@ export function useChats() {
     const isPending = resolvedChatId.startsWith(PENDING_CHAT_PREFIX);
     const isCreatingChat = chatCreationInProgress.has(chatId) || chatCreationInProgress.has(resolvedChatId);
     
+    // Idempotency check: If message has a requestId and it's already been processed, skip
+    if (message.requestId) {
+      if (savedRequestIds.has(message.requestId)) {
+        console.log(`[Dedup] Skipping duplicate message with requestId: ${message.requestId}`);
+        return;
+      }
+      // Mark as processing if not already
+      if (!markRequestProcessing(message.requestId)) {
+        console.log(`[Dedup] Message already being processed: ${message.requestId}`);
+        return;
+      }
+    }
+    
     const title = message.role === "user" && message.content
       ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
       : "Nuevo Chat";
 
+    // Check if message already exists in chat (by ID)
     setChats(prev => prev.map(chat => {
       const matchId = chat.id === chatId || chat.id === resolvedChatId;
       if (matchId) {
+        // Prevent duplicate message by checking if same ID exists
+        const messageExists = chat.messages.some(m => m.id === message.id);
+        if (messageExists) {
+          console.log(`[Dedup] Message with same ID already exists: ${message.id}`);
+          return chat;
+        }
+        
         const isFirstMessage = chat.messages.length === 0;
         return {
           ...chat,
@@ -298,12 +353,14 @@ export function useChats() {
       pendingMessageQueue.set(queueKey, queue);
     } else {
       try {
-        await fetch(`/api/chats/${resolvedChatId}/messages`, {
+        const res = await fetch(`/api/chats/${resolvedChatId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             role: message.role,
             content: message.content,
+            requestId: message.requestId,
+            userMessageId: message.userMessageId,
             attachments: message.attachments,
             sources: message.sources,
             figmaDiagram: message.figmaDiagram,
@@ -312,8 +369,17 @@ export function useChats() {
             generatedImage: message.generatedImage
           })
         });
+        
+        // Mark request as complete on successful save
+        if (res.ok && message.requestId) {
+          markRequestComplete(message.requestId);
+        }
       } catch (error) {
         console.error("Error saving message to server:", error);
+        // Remove from processing on error so retry is possible
+        if (message.requestId) {
+          processingRequestIds.delete(message.requestId);
+        }
       }
     }
   }, []);

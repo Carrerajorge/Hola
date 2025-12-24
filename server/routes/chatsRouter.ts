@@ -171,14 +171,27 @@ export function createChatsRouter() {
         return res.status(403).json({ error: "Access denied" });
       }
       
-      const { role, content, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage } = req.body;
+      const { role, content, requestId, userMessageId, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage } = req.body;
       if (!role || !content) {
         return res.status(400).json({ error: "role and content are required" });
       }
+      
+      // Idempotency check: If requestId provided, check if message already exists
+      if (requestId) {
+        const existingMessage = await storage.findMessageByRequestId(requestId);
+        if (existingMessage) {
+          console.log(`[Dedup] Message with requestId ${requestId} already exists, returning existing`);
+          return res.json(existingMessage);
+        }
+      }
+      
       const message = await storage.createChatMessage({
         chatId: req.params.id,
         role,
         content,
+        status: 'done', // Messages are considered done when saved
+        requestId: requestId || null,
+        userMessageId: userMessageId || null,
         attachments: attachments || null,
         sources: sources || null,
         figmaDiagram: figmaDiagram || null,
@@ -194,6 +207,17 @@ export function createChatsRouter() {
       
       res.json(message);
     } catch (error: any) {
+      // Handle unique constraint violation gracefully (duplicate requestId)
+      if (error.code === '23505' && error.constraint?.includes('request')) {
+        console.log(`[Dedup] Duplicate requestId constraint hit, fetching existing message`);
+        const { requestId } = req.body;
+        if (requestId) {
+          const existingMessage = await storage.findMessageByRequestId(requestId);
+          if (existingMessage) {
+            return res.json(existingMessage);
+          }
+        }
+      }
       res.status(500).json({ error: error.message });
     }
   });
