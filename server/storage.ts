@@ -10,6 +10,8 @@ import {
   type Chat, type InsertChat,
   type ChatMessage, type InsertChatMessage,
   type ChatShare, type InsertChatShare,
+  type ChatRun, type InsertChatRun,
+  type ToolInvocation, type InsertToolInvocation,
   type Gpt, type InsertGpt,
   type GptCategory, type InsertGptCategory,
   type GptVersion, type InsertGptVersion,
@@ -32,6 +34,7 @@ import {
   type CompanyKnowledge, type InsertCompanyKnowledge,
   type GmailOAuthToken, type InsertGmailOAuthToken,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
+  chatRuns, toolInvocations,
   gpts, gptCategories, gptVersions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
   notificationEventTypes, notificationPreferences, userSettings,
@@ -81,6 +84,19 @@ export interface IStorage {
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessages(chatId: string): Promise<ChatMessage[]>;
+  // Chat Run operations (for idempotent message processing)
+  createChatRun(run: InsertChatRun): Promise<ChatRun>;
+  getChatRun(id: string): Promise<ChatRun | undefined>;
+  getChatRunByClientRequestId(chatId: string, clientRequestId: string): Promise<ChatRun | undefined>;
+  claimPendingRun(chatId: string): Promise<ChatRun | undefined>;
+  updateChatRunStatus(id: string, status: string, error?: string): Promise<ChatRun | undefined>;
+  updateChatRunAssistantMessage(id: string, assistantMessageId: string): Promise<ChatRun | undefined>;
+  updateChatRunLastSeq(id: string, lastSeq: number): Promise<ChatRun | undefined>;
+  createUserMessageAndRun(chatId: string, message: InsertChatMessage, clientRequestId: string): Promise<{ message: ChatMessage; run: ChatRun }>;
+  // Tool Invocation operations (for idempotent tool calls)
+  createToolInvocation(invocation: InsertToolInvocation): Promise<ToolInvocation>;
+  getToolInvocation(runId: string, toolCallId: string): Promise<ToolInvocation | undefined>;
+  updateToolInvocationResult(id: string, output: any, status: string, error?: string): Promise<ToolInvocation | undefined>;
   // Chat Share operations
   createChatShare(share: InsertChatShare): Promise<ChatShare>;
   getChatShares(chatId: string): Promise<ChatShare[]>;
@@ -436,6 +452,100 @@ export class MemStorage implements IStorage {
 
   async getChatMessages(chatId: string): Promise<ChatMessage[]> {
     return db.select().from(chatMessages).where(eq(chatMessages.chatId, chatId)).orderBy(chatMessages.createdAt);
+  }
+
+  // Chat Run operations (for idempotent message processing)
+  async createChatRun(run: InsertChatRun): Promise<ChatRun> {
+    const [result] = await db.insert(chatRuns).values(run).returning();
+    return result;
+  }
+
+  async getChatRun(id: string): Promise<ChatRun | undefined> {
+    const [result] = await db.select().from(chatRuns).where(eq(chatRuns.id, id));
+    return result;
+  }
+
+  async getChatRunByClientRequestId(chatId: string, clientRequestId: string): Promise<ChatRun | undefined> {
+    const [result] = await db.select().from(chatRuns).where(
+      and(eq(chatRuns.chatId, chatId), eq(chatRuns.clientRequestId, clientRequestId))
+    );
+    return result;
+  }
+
+  async claimPendingRun(chatId: string): Promise<ChatRun | undefined> {
+    const [result] = await db.update(chatRuns)
+      .set({ status: 'processing', startedAt: new Date() })
+      .where(and(eq(chatRuns.chatId, chatId), eq(chatRuns.status, 'pending')))
+      .returning();
+    return result;
+  }
+
+  async updateChatRunStatus(id: string, status: string, error?: string): Promise<ChatRun | undefined> {
+    const updates: any = { status };
+    if (status === 'done' || status === 'failed') {
+      updates.completedAt = new Date();
+    }
+    if (error) {
+      updates.error = error;
+    }
+    const [result] = await db.update(chatRuns).set(updates).where(eq(chatRuns.id, id)).returning();
+    return result;
+  }
+
+  async updateChatRunAssistantMessage(id: string, assistantMessageId: string): Promise<ChatRun | undefined> {
+    const [result] = await db.update(chatRuns)
+      .set({ assistantMessageId })
+      .where(eq(chatRuns.id, id))
+      .returning();
+    return result;
+  }
+
+  async updateChatRunLastSeq(id: string, lastSeq: number): Promise<ChatRun | undefined> {
+    const [result] = await db.update(chatRuns)
+      .set({ lastSeq })
+      .where(eq(chatRuns.id, id))
+      .returning();
+    return result;
+  }
+
+  async createUserMessageAndRun(chatId: string, message: InsertChatMessage, clientRequestId: string): Promise<{ message: ChatMessage; run: ChatRun }> {
+    return await db.transaction(async (tx) => {
+      const [savedMessage] = await tx.insert(chatMessages).values(message).returning();
+      const [run] = await tx.insert(chatRuns).values({
+        chatId,
+        clientRequestId,
+        userMessageId: savedMessage.id,
+        status: 'pending',
+      }).returning();
+      await tx.update(chatMessages).set({ runId: run.id }).where(eq(chatMessages.id, savedMessage.id));
+      await tx.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
+      return { message: { ...savedMessage, runId: run.id }, run };
+    });
+  }
+
+  // Tool Invocation operations
+  async createToolInvocation(invocation: InsertToolInvocation): Promise<ToolInvocation> {
+    const [result] = await db.insert(toolInvocations).values(invocation).returning();
+    return result;
+  }
+
+  async getToolInvocation(runId: string, toolCallId: string): Promise<ToolInvocation | undefined> {
+    const [result] = await db.select().from(toolInvocations).where(
+      and(eq(toolInvocations.runId, runId), eq(toolInvocations.toolCallId, toolCallId))
+    );
+    return result;
+  }
+
+  async updateToolInvocationResult(id: string, output: any, status: string, error?: string): Promise<ToolInvocation | undefined> {
+    const updates: any = { output, status };
+    if (status === 'done' || status === 'failed') {
+      updates.completedAt = new Date();
+    }
+    if (error) {
+      updates.error = error;
+    }
+    const [result] = await db.update(toolInvocations).set(updates).where(eq(toolInvocations.id, id)).returning();
+    return result;
   }
 
   // Chat Share operations
