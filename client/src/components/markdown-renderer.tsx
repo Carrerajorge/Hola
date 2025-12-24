@@ -90,6 +90,24 @@ const LazyImage = memo(function LazyImage({
   const handleError = useCallback(() => setError(true), []);
 
   if (!src) return null;
+  
+  // Check if this is a Gmail logo - render inline and small
+  const isGmailLogo = src.includes('gmail-logo') || (alt?.toLowerCase() === 'gmail');
+  
+  if (isGmailLogo) {
+    return (
+      <img
+        src={src}
+        alt={alt || "Gmail"}
+        title={title || "Ver en Gmail"}
+        loading="lazy"
+        className="inline-block align-middle"
+        style={{ width: '1em', height: '1em', marginLeft: '4px', verticalAlign: 'middle' }}
+        data-testid="img-gmail-logo"
+      />
+    );
+  }
+  
   if (error) {
     return (
       <div className="flex items-center justify-center bg-muted rounded-lg p-4 my-3 text-muted-foreground text-sm">
