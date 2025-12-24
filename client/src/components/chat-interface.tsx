@@ -1004,6 +1004,13 @@ export function ChatInterface({
     const currentDoc = activeDocEditor;
     const currentContent = editedDocumentContent;
     
+    console.log("[closeDocEditor] Starting save process", {
+      hasChatId: !!chatId,
+      chatId,
+      hasDoc: !!currentDoc,
+      contentLength: currentContent?.length || 0
+    });
+    
     const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
     const plainText = stripHtml(currentContent);
     const placeholderPhrases = [
@@ -1012,6 +1019,12 @@ export function ChatInterface({
       "haz clic para agregar"
     ];
     const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
+    
+    console.log("[closeDocEditor] Validation", {
+      plainTextLength: plainText.length,
+      isPlaceholder,
+      willSave: !!(chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20)
+    });
     
     if (chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20) {
       let realChatId = resolveRealChatId(chatId);
