@@ -1993,7 +1993,12 @@ export function ChatInterface({
     const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) return;
     
-    if (!input.trim() && uploadedFiles.length === 0) return;
+    // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
+    const hasInput = input.trim().length > 0;
+    const hasFiles = uploadedFiles.length > 0;
+    const hasSelectionWithInstruction = selectedDocText && input.trim();
+    
+    if (!hasInput && !hasFiles && !hasSelectionWithInstruction) return;
 
     // If there's selected text from document, rewrite it
     if (selectedDocText && applyRewriteRef.current && input.trim()) {
@@ -2060,12 +2065,12 @@ export function ChatInterface({
     const currentFiles = [...uploadedFiles];
     
     // Initialize process steps based on context
-    const hasFiles = currentFiles.length > 0;
+    const hasAttachedFiles = currentFiles.length > 0;
     const initialSteps: {step: string; status: "pending" | "active" | "done"}[] = [];
-    if (hasFiles) {
+    if (hasAttachedFiles) {
       initialSteps.push({ step: "Analizando archivos adjuntos", status: "active" });
     }
-    initialSteps.push({ step: "Procesando tu mensaje", status: hasFiles ? "pending" : "active" });
+    initialSteps.push({ step: "Procesando tu mensaje", status: hasAttachedFiles ? "pending" : "active" });
     initialSteps.push({ step: "Buscando información relevante", status: "pending" });
     initialSteps.push({ step: "Generando respuesta", status: "pending" });
     setAiProcessSteps(initialSteps);
