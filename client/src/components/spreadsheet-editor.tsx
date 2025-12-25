@@ -312,6 +312,7 @@ export function SpreadsheetEditor({
   const [chartType, setChartType] = useState<'bar' | 'line' | 'pie'>('bar');
   const [useVirtualized, setUseVirtualized] = useState(true);
   const [sparseGrid, setSparseGrid] = useState<SparseGrid>(() => new SparseGrid());
+  const [gridVersion, setGridVersion] = useState(0);
   const [virtualSelectedCell, setVirtualSelectedCell] = useState<{ row: number; col: number } | null>(null);
   const [virtualEditingCell, setVirtualEditingCell] = useState<{ row: number; col: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -330,13 +331,7 @@ export function SpreadsheetEditor({
       const grid = convertToSparseGrid(activeSheet.data);
       setSparseGrid(grid);
     }
-  }, [workbook.activeSheetId, activeSheet?.data]);
-
-  const handleSparseGridChange = useCallback((newGrid: SparseGrid) => {
-    setSparseGrid(newGrid);
-    const newData = convertFromSparseGrid(newGrid);
-    setData(() => newData);
-  }, []);
+  }, [workbook.activeSheetId]);
 
   // Extract chart data from spreadsheet
   const chartData = useMemo(() => {
@@ -390,6 +385,20 @@ export function SpreadsheetEditor({
       sheets: prev.sheets.map(sheet => 
         sheet.id === prev.activeSheetId 
           ? { ...sheet, data: updater(sheet.data) }
+          : sheet
+      )
+    }));
+  }, []);
+
+  const handleSparseGridChange = useCallback((updatedGrid: SparseGrid) => {
+    setGridVersion(v => v + 1);
+    setSparseGrid(updatedGrid);
+    const newData = convertFromSparseGrid(updatedGrid);
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: prev.sheets.map(sheet => 
+        sheet.id === prev.activeSheetId 
+          ? { ...sheet, data: newData }
           : sheet
       )
     }));
@@ -1161,6 +1170,7 @@ export function SpreadsheetEditor({
             onSelectCell={setVirtualSelectedCell}
             editingCell={virtualEditingCell}
             onEditCell={setVirtualEditingCell}
+            version={gridVersion}
           />
         </div>
       ) : (

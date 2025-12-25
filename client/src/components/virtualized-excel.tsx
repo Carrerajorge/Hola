@@ -24,6 +24,7 @@ interface VirtualizedExcelProps {
   editingCell: { row: number; col: number } | null;
   onEditCell: (cell: { row: number; col: number } | null) => void;
   className?: string;
+  version?: number;
 }
 
 const VirtualCell = memo(function VirtualCell({
@@ -146,7 +147,9 @@ export function VirtualizedExcel({
   editingCell,
   onEditCell,
   className,
+  version = 0,
 }: VirtualizedExcelProps) {
+  void version;
   const [scrollPos, setScrollPos] = useState({ top: 0, left: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
   const scrollRAF = useRef<number | null>(null);
@@ -172,16 +175,14 @@ export function VirtualizedExcel({
   }, []);
 
   const updateCell = useCallback((row: number, col: number, value: string) => {
-    const newGrid = grid.clone();
-    
     if (value.startsWith('=')) {
       const evaluated = formulaEngine.current.evaluate(value);
-      newGrid.setCell(row, col, { value: evaluated, formula: value });
+      grid.setCell(row, col, { value: evaluated, formula: value });
     } else {
-      newGrid.setCell(row, col, { value, formula: undefined });
+      grid.setCell(row, col, { value, formula: undefined });
     }
     
-    onGridChange(newGrid);
+    onGridChange(grid);
   }, [grid, onGridChange]);
 
   const handleCellSelect = useCallback((row: number, col: number) => {
@@ -251,9 +252,8 @@ export function VirtualizedExcel({
       default:
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
           onEditCell({ row, col });
-          const newGrid = grid.clone();
-          newGrid.setCell(row, col, { value: e.key });
-          onGridChange(newGrid);
+          grid.setCell(row, col, { value: e.key });
+          onGridChange(grid);
           e.preventDefault();
         }
         return;
