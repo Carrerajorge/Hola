@@ -104,11 +104,16 @@ export function EnhancedDocumentEditor({
     const handleSelectionChange = () => {
       const selection = window.getSelection();
       if (selection && selection.toString().trim().length > 0) {
-        savedRangeRef.current = selection.getRangeAt(0).cloneRange();
-        onTextSelect?.(selection.toString(), applyRewrite);
-      } else {
-        onTextDeselect?.();
+        // Check if selection is within the editor
+        const editorElement = editor.view.dom;
+        const selectionNode = selection.anchorNode;
+        if (selectionNode && editorElement.contains(selectionNode)) {
+          savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+          onTextSelect?.(selection.toString(), applyRewrite);
+        }
       }
+      // DON'T call onTextDeselect here - the chip should persist
+      // until user explicitly removes it or sends the message
     };
 
     document.addEventListener('selectionchange', handleSelectionChange);
