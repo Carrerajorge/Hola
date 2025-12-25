@@ -14,8 +14,13 @@ import {
   BarChart3,
   LineChart,
   PieChart,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart as RechartsLineChart, Line, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
+import { VirtualizedExcel, GRID_CONFIG } from './virtualized-excel';
+import { SparseGrid, getColumnName as getSparseColumnName, formatCellRef, CellData as SparseCellData } from '@/lib/sparseGrid';
+import { FormulaEngine } from '@/lib/formulaEngine';
 
 interface SpreadsheetEditorProps {
   title: string;
@@ -251,6 +256,46 @@ const parseContent = (content: string): WorkbookData => {
   };
 };
 
+const convertToSparseGrid = (data: SpreadsheetData): SparseGrid => {
+  const grid = new SparseGrid();
+  Object.entries(data.cells).forEach(([key, cellData]) => {
+    const [row, col] = key.split('-').map(Number);
+    grid.setCell(row, col, {
+      value: cellData.value,
+      formula: cellData.formula,
+      bold: cellData.bold,
+      italic: cellData.italic,
+      align: cellData.align,
+    });
+  });
+  return grid;
+};
+
+const convertFromSparseGrid = (grid: SparseGrid): SpreadsheetData => {
+  const cells: { [key: string]: CellData } = {};
+  const allCells = grid.getAllCells();
+  let maxRow = 0;
+  let maxCol = 0;
+  
+  allCells.forEach(({ row, col, data }) => {
+    cells[getCellKey(row, col)] = {
+      value: data.value,
+      formula: data.formula,
+      bold: data.bold,
+      italic: data.italic,
+      align: data.align,
+    };
+    maxRow = Math.max(maxRow, row);
+    maxCol = Math.max(maxCol, col);
+  });
+  
+  return {
+    cells,
+    rowCount: Math.max(maxRow + 1, 20),
+    colCount: Math.max(maxCol + 1, 10),
+  };
+};
+
 export function SpreadsheetEditor({
   title,
   content,
@@ -265,6 +310,10 @@ export function SpreadsheetEditor({
   const [selectionRange, setSelectionRange] = useState<{start: string; end: string} | null>(null);
   const [showChart, setShowChart] = useState(false);
   const [chartType, setChartType] = useState<'bar' | 'line' | 'pie'>('bar');
+  const [useVirtualized, setUseVirtualized] = useState(true);
+  const [sparseGrid, setSparseGrid] = useState<SparseGrid>(() => new SparseGrid());
+  const [virtualSelectedCell, setVirtualSelectedCell] = useState<{ row: number; col: number } | null>(null);
+  const [virtualEditingCell, setVirtualEditingCell] = useState<{ row: number; col: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const initialContentRef = useRef(content);
@@ -275,6 +324,19 @@ export function SpreadsheetEditor({
   // Get active sheet data
   const activeSheet = workbook.sheets.find(s => s.id === workbook.activeSheetId) || workbook.sheets[0];
   const data = activeSheet?.data || { cells: {}, rowCount: 20, colCount: 10 };
+
+  useEffect(() => {
+    if (activeSheet?.data) {
+      const grid = convertToSparseGrid(activeSheet.data);
+      setSparseGrid(grid);
+    }
+  }, [workbook.activeSheetId, activeSheet?.data]);
+
+  const handleSparseGridChange = useCallback((newGrid: SparseGrid) => {
+    setSparseGrid(newGrid);
+    const newData = convertFromSparseGrid(newGrid);
+    setData(() => newData);
+  }, []);
 
   // Extract chart data from spreadsheet
   const chartData = useMemo(() => {
@@ -985,6 +1047,20 @@ export function SpreadsheetEditor({
             Ocultar
           </Button>
         )}
+
+        <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
+
+        <Button
+          variant={useVirtualized ? 'default' : 'ghost'}
+          size="sm"
+          className="gap-1 text-xs"
+          onClick={() => setUseVirtualized(!useVirtualized)}
+          title={useVirtualized ? 'Modo empresarial: 10,000 × 10,000 celdas' : 'Cambiar a modo empresarial'}
+          data-testid="btn-toggle-virtualized"
+        >
+          <Maximize2 className="h-3 w-3" />
+          {useVirtualized ? '10K×10K' : 'Modo Pro'}
+        </Button>
       </div>
 
       {/* Chart Panel */}
@@ -1076,68 +1152,77 @@ export function SpreadsheetEditor({
       )}
 
       {/* Spreadsheet Grid */}
-      <div className="flex-1 overflow-auto">
-        <table className="spreadsheet-table border-collapse w-full">
-          <thead className="sticky top-0 z-10">
-            <tr>
-              {/* Corner cell */}
-              <th className="spreadsheet-corner-cell" />
-              {/* Column headers */}
-              {Array.from({ length: data.colCount }, (_, i) => (
-                <th key={i} className="spreadsheet-col-header">
-                  {getColumnLabel(i)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: data.rowCount }, (_, rowIndex) => (
-              <tr key={rowIndex}>
-                {/* Row header */}
-                <td className="spreadsheet-row-header">
-                  {rowIndex + 1}
-                </td>
-                {/* Data cells */}
-                {Array.from({ length: data.colCount }, (_, colIndex) => {
-                  const key = getCellKey(rowIndex, colIndex);
-                  const cell = data.cells[key] || { value: '' };
-                  const isSelected = selectedCell === key;
-                  const isEditing = editingCell === key;
-
-                  return (
-                    <td
-                      key={colIndex}
-                      className={cn(
-                        'spreadsheet-cell',
-                        isSelected && 'spreadsheet-cell-selected',
-                        cell.bold && 'font-bold',
-                        cell.italic && 'italic'
-                      )}
-                      style={{ textAlign: cell.align || 'left' }}
-                      onClick={() => handleCellClick(key)}
-                      onDoubleClick={() => handleCellDoubleClick(key)}
-                    >
-                      {isEditing ? (
-                        <input
-                          ref={inputRef}
-                          type="text"
-                          className="spreadsheet-cell-input"
-                          value={cell.value}
-                          onChange={(e) => handleCellChange(key, e.target.value)}
-                          onBlur={handleCellBlur}
-                          onKeyDown={(e) => handleKeyDown(e, key)}
-                        />
-                      ) : (
-                        <span className="spreadsheet-cell-content">{cell.value}</span>
-                      )}
-                    </td>
-                  );
-                })}
+      {useVirtualized ? (
+        <div className="flex-1 overflow-hidden">
+          <VirtualizedExcel
+            grid={sparseGrid}
+            onGridChange={handleSparseGridChange}
+            selectedCell={virtualSelectedCell}
+            onSelectCell={setVirtualSelectedCell}
+            editingCell={virtualEditingCell}
+            onEditCell={setVirtualEditingCell}
+          />
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto">
+          <table className="spreadsheet-table border-collapse w-full">
+            <thead className="sticky top-0 z-10">
+              <tr>
+                <th className="spreadsheet-corner-cell" />
+                {Array.from({ length: data.colCount }, (_, i) => (
+                  <th key={i} className="spreadsheet-col-header">
+                    {getColumnLabel(i)}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {Array.from({ length: data.rowCount }, (_, rowIndex) => (
+                <tr key={rowIndex}>
+                  <td className="spreadsheet-row-header">
+                    {rowIndex + 1}
+                  </td>
+                  {Array.from({ length: data.colCount }, (_, colIndex) => {
+                    const key = getCellKey(rowIndex, colIndex);
+                    const cell = data.cells[key] || { value: '' };
+                    const isSelected = selectedCell === key;
+                    const isEditing = editingCell === key;
+
+                    return (
+                      <td
+                        key={colIndex}
+                        className={cn(
+                          'spreadsheet-cell',
+                          isSelected && 'spreadsheet-cell-selected',
+                          cell.bold && 'font-bold',
+                          cell.italic && 'italic'
+                        )}
+                        style={{ textAlign: cell.align || 'left' }}
+                        onClick={() => handleCellClick(key)}
+                        onDoubleClick={() => handleCellDoubleClick(key)}
+                      >
+                        {isEditing ? (
+                          <input
+                            ref={inputRef}
+                            type="text"
+                            className="spreadsheet-cell-input"
+                            value={cell.value}
+                            onChange={(e) => handleCellChange(key, e.target.value)}
+                            onBlur={handleCellBlur}
+                            onKeyDown={(e) => handleKeyDown(e, key)}
+                          />
+                        ) : (
+                          <span className="spreadsheet-cell-content">{cell.value}</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Sheet Tabs */}
       <div className="flex items-center border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
