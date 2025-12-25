@@ -883,6 +883,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 <MarkdownRenderer
                   content={block.content}
                   customComponents={{ ...CleanDataTableComponents }}
+                  onOpenDocument={onOpenDocumentPreview}
                 />
               </div>
             ) : null

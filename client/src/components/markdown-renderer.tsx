@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState, useCallback, useRef } from "react";
+import React, { memo, useMemo, useState, useCallback, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -6,11 +6,156 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { cn } from "@/lib/utils";
-import { Check, Copy, Loader2, Download, Maximize2, Minimize2 } from "lucide-react";
+import { Check, Copy, Loader2, Download, Maximize2, Minimize2, FileText, FileSpreadsheet, Presentation, ChevronRight } from "lucide-react";
 import { preprocessMathInMarkdown } from "@/lib/mathParser";
 import { CodeBlockShell } from "./code-block-shell";
 import { isLanguageRunnable } from "@/lib/sandboxApi";
 import { useSandboxExecution } from "@/hooks/useSandboxExecution";
+
+type GenerationState = 'analyzing' | 'structuring' | 'generating' | 'completing' | 'done';
+
+const STATE_MESSAGES: Record<GenerationState, { text: string; progress: number }> = {
+  analyzing: { text: 'Analizando solicitud...', progress: 20 },
+  structuring: { text: 'Estructurando contenido...', progress: 45 },
+  generating: { text: 'Generando documento...', progress: 70 },
+  completing: { text: 'Finalizando...', progress: 90 },
+  done: { text: 'Documento listo', progress: 100 }
+};
+
+interface DocumentGenerationLoaderProps {
+  documentType: 'word' | 'excel' | 'ppt';
+  title?: string;
+  isComplete: boolean;
+  onOpen?: () => void;
+}
+
+const DocumentGenerationLoader = memo(function DocumentGenerationLoader({ 
+  documentType, 
+  title, 
+  isComplete,
+  onOpen 
+}: DocumentGenerationLoaderProps) {
+  const [state, setState] = useState<GenerationState>('analyzing');
+  
+  useEffect(() => {
+    if (isComplete) {
+      setState('done');
+      return;
+    }
+    
+    const progression: GenerationState[] = ['analyzing', 'structuring', 'generating', 'completing'];
+    let currentIndex = 0;
+    
+    const interval = setInterval(() => {
+      currentIndex = Math.min(currentIndex + 1, progression.length - 1);
+      setState(progression[currentIndex]);
+    }, 1200);
+    
+    return () => clearInterval(interval);
+  }, [isComplete]);
+  
+  const currentState = STATE_MESSAGES[state];
+  
+  const DocIcon = documentType === 'word' ? FileText : documentType === 'excel' ? FileSpreadsheet : Presentation;
+  const iconBgColor = documentType === 'word' ? 'bg-[#2B579A]' : documentType === 'excel' ? 'bg-[#217346]' : 'bg-[#D04423]';
+  
+  if (isComplete) {
+    return (
+      <div 
+        className="flex items-center gap-3.5 p-4 bg-gradient-to-r from-sky-50 to-blue-50 dark:from-sky-950/30 dark:to-blue-950/30 border border-sky-200 dark:border-sky-800 rounded-2xl cursor-pointer transition-all duration-300 hover:shadow-lg hover:shadow-sky-200/50 dark:hover:shadow-sky-900/30 hover:-translate-y-0.5 max-w-[340px] group"
+        onClick={onOpen}
+        data-testid="document-ready-card"
+      >
+        <div className="relative flex-shrink-0">
+          <div className={cn("w-11 h-11 rounded-xl flex items-center justify-center", iconBgColor)}>
+            <DocIcon className="w-5 h-5 text-white" />
+          </div>
+          <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-900">
+            <Check className="w-3 h-3 text-white" />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="font-semibold text-sm text-gray-900 dark:text-gray-100 truncate block">
+            {title || 'Documento Word'}
+          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            Documento listo • Click para abrir
+          </span>
+        </div>
+        <ChevronRight className="w-5 h-5 text-sky-500 transition-transform group-hover:translate-x-1" />
+      </div>
+    );
+  }
+  
+  return (
+    <div className="bg-gradient-to-br from-slate-50 to-gray-100 dark:from-slate-900 dark:to-gray-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 max-w-[340px] shadow-sm" data-testid="document-generation-loader">
+      <div className="flex items-center gap-3.5 mb-4">
+        <div className="relative flex-shrink-0">
+          <div className="absolute inset-0 w-11 h-11 rounded-full bg-sky-400/20 dark:bg-sky-500/20 animate-ping" style={{ animationDuration: '2s' }} />
+          <div className={cn("relative w-11 h-11 rounded-xl flex items-center justify-center", iconBgColor)}>
+            <DocIcon className="w-5 h-5 text-white" />
+          </div>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-sm text-gray-900 dark:text-gray-100">
+            Creando documento
+          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400 animate-pulse">
+            {currentState.text}
+          </span>
+        </div>
+      </div>
+      
+      <div className="flex items-center gap-2.5">
+        <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-gradient-to-r from-sky-500 to-blue-500 rounded-full transition-all duration-500 ease-out"
+            style={{ width: `${currentState.progress}%` }}
+          />
+        </div>
+        <span className="text-[11px] text-gray-400 dark:text-gray-500 tabular-nums min-w-[32px] text-right">
+          {currentState.progress}%
+        </span>
+      </div>
+      
+      <div className="flex justify-center gap-1.5 mt-4">
+        {[0, 1, 2].map((i) => (
+          <span 
+            key={i}
+            className="w-1.5 h-1.5 bg-slate-300 dark:bg-slate-600 rounded-full animate-bounce"
+            style={{ animationDelay: `${i * 0.15}s`, animationDuration: '1s' }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+});
+
+function detectDocumentJSON(content: string): { isDocument: boolean; type?: 'word' | 'excel' | 'ppt'; title?: string; isComplete: boolean } {
+  const trimmed = content.trim();
+  
+  const typeMatch = trimmed.match(/"type"\s*:\s*"(word|excel|ppt)"/);
+  if (!typeMatch) {
+    const partialTypeMatch = trimmed.match(/\{\s*"type"\s*:\s*"?/);
+    if (partialTypeMatch || trimmed.startsWith('{')) {
+      const looksLikeDocStart = /^\s*\{\s*(?:"type"|"title"|"content")/.test(trimmed);
+      if (looksLikeDocStart) {
+        return { isDocument: true, isComplete: false };
+      }
+    }
+    return { isDocument: false, isComplete: false };
+  }
+  
+  const docType = typeMatch[1] as 'word' | 'excel' | 'ppt';
+  const titleMatch = trimmed.match(/"title"\s*:\s*"([^"]+)"/);
+  const title = titleMatch?.[1];
+  
+  const hasContent = /"content"\s*:\s*"/.test(trimmed);
+  const endsWithClosingBrace = trimmed.endsWith('}');
+  const isComplete = hasContent && endsWithClosingBrace;
+  
+  return { isDocument: true, type: docType, title, isComplete };
+}
 
 const sanitizeSchema = {
   ...defaultSchema,
@@ -153,9 +298,10 @@ interface CodeBlockProps {
   inline?: boolean;
   className?: string;
   children?: React.ReactNode;
+  onOpenDocument?: (doc: { type: 'word' | 'excel' | 'ppt'; title: string; content: string }) => void;
 }
 
-const CodeBlock = memo(function CodeBlock({ inline, className, children }: CodeBlockProps) {
+const CodeBlock = memo(function CodeBlock({ inline, className, children, onOpenDocument }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const match = /language-(\w+)/.exec(className || "");
   const language = match?.[1] || "";
@@ -176,6 +322,43 @@ const CodeBlock = memo(function CodeBlock({ inline, className, children }: CodeB
       <code className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">
         {children}
       </code>
+    );
+  }
+
+  const docDetection = detectDocumentJSON(codeContent);
+  const isDocumentLanguage = language === 'document' || language === 'json';
+  
+  if (docDetection.isDocument && (isDocumentLanguage || !language)) {
+    const handleOpenDocument = () => {
+      if (!docDetection.isComplete || !docDetection.type) return;
+      
+      try {
+        const parsed = JSON.parse(codeContent);
+        if (parsed.type && parsed.title && parsed.content) {
+          let docContent = parsed.content;
+          if (typeof docContent === 'string') {
+            docContent = docContent.replace(/\\n/g, '\n').replace(/\\\\n/g, '\n');
+          }
+          onOpenDocument?.({ 
+            type: parsed.type, 
+            title: parsed.title, 
+            content: docContent 
+          });
+        }
+      } catch (e) {
+        console.error('Failed to parse document JSON:', e);
+      }
+    };
+    
+    return (
+      <div className="my-4">
+        <DocumentGenerationLoader
+          documentType={docDetection.type || 'word'}
+          title={docDetection.title}
+          isComplete={docDetection.isComplete}
+          onOpen={handleOpenDocument}
+        />
+      </div>
     );
   }
 
@@ -437,6 +620,7 @@ export interface MarkdownRendererProps {
   enableInteractiveCode?: boolean;
   interactiveCodeEditable?: boolean;
   onCodeEdit?: (code: string) => void;
+  onOpenDocument?: (doc: { type: 'word' | 'excel' | 'ppt'; title: string; content: string }) => void;
   customComponents?: Record<string, React.ComponentType<any>>;
 }
 
@@ -451,6 +635,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   enableInteractiveCode = false,
   interactiveCodeEditable = false,
   onCodeEdit,
+  onOpenDocument,
   customComponents = {},
 }: MarkdownRendererProps) {
   const processedContent = useMemo(() => {
@@ -483,8 +668,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         />
       );
     }
-    return CodeBlock;
-  }, [enableInteractiveCode, interactiveCodeEditable, onCodeEdit]);
+    return (props: any) => <CodeBlock {...props} onOpenDocument={onOpenDocument} />;
+  }, [enableInteractiveCode, interactiveCodeEditable, onCodeEdit, onOpenDocument]);
 
   const components = useMemo(() => ({
     code: CodeComponent,
