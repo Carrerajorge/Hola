@@ -791,6 +791,7 @@ export function ChatInterface({
   const dragCounterRef = useRef(0);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
   const previewDocumentRef = useRef<DocumentBlock | null>(null);
+  const orchestratorRef = useRef<{ runOrchestrator: (prompt: string) => Promise<void> } | null>(null);
   const editedDocumentContentRef = useRef<string>("");
   const chatIdRef = useRef<string | null>(null);
   
@@ -935,6 +936,10 @@ export function ChatInterface({
   useEffect(() => {
     previewDocumentRef.current = previewDocument;
   }, [previewDocument]);
+  
+  const isComplexExcelPrompt = (prompt: string): boolean => {
+    return /completo|análisis|análisis completo|4 hojas|gráficos?|charts?|dashboard|resumen ejecutivo|fórmulas múltiples|ventas.*gráfico|workbook/i.test(prompt.toLowerCase());
+  };
   
   // Document editor is now only opened manually by the user clicking the buttons
   // Removed auto-open behavior to prevent unwanted document creation
@@ -2215,6 +2220,48 @@ export function ChatInterface({
       return;
     }
 
+    // Check if Excel is open and prompt is complex - route through orchestrator
+    const isExcelEditorOpen = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
+    if (isExcelEditorOpen && isComplexExcelPrompt(cleanPrompt) && orchestratorRef.current) {
+      setAiState("thinking");
+      setAiProcessSteps([
+        { step: "Analizando estructura del workbook", status: "active" },
+        { step: "Creando hojas y datos", status: "pending" },
+        { step: "Aplicando fórmulas y gráficos", status: "pending" }
+      ]);
+      
+      try {
+        await orchestratorRef.current.runOrchestrator(cleanPrompt);
+        
+        setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
+        
+        const orchestratorMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: "✅ Workbook generado exitosamente con múltiples hojas, datos, fórmulas y gráficos. Revisa el editor de Excel para ver los resultados.",
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: userMsgId
+        };
+        onSendMessage(orchestratorMsg);
+      } catch (err) {
+        console.error("[Orchestrator] Error:", err);
+        const errorMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: "❌ Error al generar el workbook. Por favor, intenta de nuevo.",
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: userMsgId
+        };
+        onSendMessage(errorMsg);
+      }
+      
+      setAiState("idle");
+      setAiProcessSteps([]);
+      return;
+    }
+
     try {
       abortControllerRef.current = new AbortController();
       
@@ -3265,6 +3312,7 @@ IMPORTANTE:
                     }
                   }}
                   onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                  onOrchestratorReady={(orch) => { orchestratorRef.current = orch; }}
                 />
               ) : (
                 <EnhancedDocumentEditor

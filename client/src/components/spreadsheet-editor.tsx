@@ -33,6 +33,7 @@ interface SpreadsheetEditorProps {
   onClose: () => void;
   onDownload: () => void;
   onInsertContent?: (insertFn: (content: string) => Promise<void>) => void;
+  onOrchestratorReady?: (orchestrator: { runOrchestrator: (prompt: string) => Promise<void> }) => void;
 }
 
 interface CellData {
@@ -312,6 +313,7 @@ export function SpreadsheetEditor({
   onClose,
   onDownload,
   onInsertContent,
+  onOrchestratorReady,
 }: SpreadsheetEditorProps) {
   const [workbook, setWorkbook] = useState<WorkbookData>(() => parseContent(content));
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
@@ -549,6 +551,79 @@ export function SpreadsheetEditor({
     }
     setAIPrompt('');
   }, [aiPrompt, virtualSelectedCell, streaming, workbook]);
+
+  const runOrchestrator = useCallback(async (prompt: string) => {
+    const streamingHook = {
+      queueCell: (row: number, col: number, value: string, delay?: number) => {
+        streaming.queueCell(row, col, String(value), delay);
+      },
+      processStreamQueue: () => streaming.processStreamQueue()
+    };
+    
+    const orchestratorWorkbook = {
+      sheets: workbook.sheets.map(sheet => ({
+        id: sheet.id,
+        name: sheet.name,
+        grid: convertToSparseGrid(sheet.data),
+        charts: sheet.charts || [],
+        conditionalFormats: sheet.conditionalFormats || []
+      })),
+      activeSheetId: workbook.activeSheetId
+    } as unknown as OrchestratorWorkbook;
+    
+    const orchestrator = new ExcelOrchestrator(
+      orchestratorWorkbook,
+      (updater) => {
+        setWorkbook(prev => {
+          const updated = updater({
+            sheets: prev.sheets.map(sheet => ({
+              id: sheet.id,
+              name: sheet.name,
+              grid: convertToSparseGrid(sheet.data),
+              charts: sheet.charts || [],
+              conditionalFormats: sheet.conditionalFormats || []
+            })),
+            activeSheetId: prev.activeSheetId
+          } as unknown as OrchestratorWorkbook);
+          
+          return {
+            ...prev,
+            sheets: updated.sheets.map(sheet => ({
+              ...sheet,
+              data: convertFromSparseGrid(sheet.grid),
+              charts: sheet.charts,
+              conditionalFormats: sheet.conditionalFormats
+            }))
+          };
+        });
+      },
+      streamingHook
+    );
+    
+    try {
+      console.log('[Orchestrator] Analyzing prompt:', prompt);
+      await orchestrator.analyzeAndPlan(prompt);
+      await orchestrator.executePlan((progress) => {
+        setOrchestratorProgress({
+          current: progress.current,
+          total: progress.total,
+          task: progress.task
+        });
+      });
+      setOrchestratorProgress(null);
+      setGridVersion(v => v + 1);
+      console.log('[Orchestrator] Complete');
+    } catch (err) {
+      console.error('[Orchestrator] Error:', err);
+      setOrchestratorProgress(null);
+    }
+  }, [streaming, workbook]);
+
+  useEffect(() => {
+    if (onOrchestratorReady) {
+      onOrchestratorReady({ runOrchestrator });
+    }
+  }, [onOrchestratorReady, runOrchestrator]);
 
   // Sheet management functions
   const addSheet = useCallback(() => {
