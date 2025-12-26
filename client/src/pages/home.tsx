@@ -11,10 +11,12 @@ import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog"
 import { ExportChatDialog } from "@/components/export-chat-dialog";
 import { FavoritesDialog } from "@/components/favorites-dialog";
 import { PromptTemplatesDialog } from "@/components/prompt-templates-dialog";
+import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useFavorites } from "@/hooks/use-favorites";
 import { usePromptTemplates } from "@/hooks/use-prompt-templates";
 import { useNotifications } from "@/hooks/use-notifications";
+import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useLocation } from "wouter";
 import { Menu } from "lucide-react";
@@ -57,6 +59,7 @@ export default function Home() {
   const { favorites, addFavorite, removeFavorite, isFavorite } = useFavorites();
   const { templates, addTemplate, removeTemplate, updateTemplate, incrementUsage, categories } = usePromptTemplates();
   const { notifyTaskComplete, requestPermission } = useNotifications();
+  const { isOnline } = useOnlineStatus();
   
   const { 
     chats, 
@@ -295,6 +298,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
+      <OfflineBanner />
       <div className="liquid-blob liquid-blob-1 opacity-30"></div>
       <div className="liquid-blob liquid-blob-2 opacity-20"></div>
       <div className="liquid-blob liquid-blob-3 opacity-25"></div>
