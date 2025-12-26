@@ -31,7 +31,7 @@ interface SpreadsheetEditorProps {
   onChange: (content: string) => void;
   onClose: () => void;
   onDownload: () => void;
-  onInsertContent?: (insertFn: (content: string) => void) => void;
+  onInsertContent?: (insertFn: (content: string) => Promise<void>) => void;
 }
 
 interface CellData {

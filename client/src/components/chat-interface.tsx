@@ -838,7 +838,7 @@ export function ChatInterface({
   // PPT streaming integration
   const pptStreaming = usePptStreaming();
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
-  const docInsertContentRef = useRef<((content: string, replaceMode?: boolean | 'html') => void) | null>(null);
+  const docInsertContentRef = useRef<((content: string, replaceMode?: boolean | 'html') => Promise<void> | void) | null>(null);
   const speechRecognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
