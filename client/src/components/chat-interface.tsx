@@ -2605,6 +2605,7 @@ IMPORTANTE:
         }
 
         // Finalize based on mode
+        console.log('[ChatInterface] Finalize check:', { isPptMode, isExcelMode, isWordMode, shouldWriteToDoc, hasInsertFn: !!docInsertContentRef.current, fullContentLength: fullContent.length });
         if (isPptMode && shouldWriteToDoc) {
           pptStreaming.stopStreaming();
           
@@ -2768,10 +2769,51 @@ IMPORTANTE:
         
         // Legacy simulated streaming for other cases
         setAiState("responding");
-        let currentIndex = 0;
         
-        // Check if we should write to document (Word mode)
-        const shouldWriteToDocLegacy = !!activeDocEditorRef.current && activeDocEditorRef.current.type === "word";
+        // Check document modes
+        const isExcelModeLegacy = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
+        const isWordModeLegacy = activeDocEditorRef.current?.type === "word";
+        const shouldWriteToDocLegacy = !!activeDocEditorRef.current && isWordModeLegacy;
+        
+        console.log('[ChatInterface] Legacy mode:', { isExcelModeLegacy, isWordModeLegacy, hasInsertFn: !!docInsertContentRef.current });
+        
+        // Excel mode: send data directly to Excel at the end (no progressive streaming in chat)
+        if (isExcelModeLegacy && docInsertContentRef.current) {
+          console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
+          try {
+            await docInsertContentRef.current(fullContent);
+            const confirmMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: "✓ Datos generados en la hoja de cálculo",
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
+            };
+            onSendMessage(confirmMsg);
+          } catch (err) {
+            console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
+            const aiMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: fullContent,
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
+            };
+            onSendMessage(aiMsg);
+          }
+          streamingContentRef.current = "";
+          setStreamingContent("");
+          setAiState("idle");
+          setAiProcessSteps([]);
+          agent.complete();
+          abortControllerRef.current = null;
+          return;
+        }
+        
+        // Word mode or normal chat: use progressive streaming
+        let currentIndex = 0;
         
         streamIntervalRef.current = setInterval(() => {
           if (currentIndex < fullContent.length) {
