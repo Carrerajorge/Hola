@@ -263,19 +263,10 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
           className="max-w-none w-screen h-screen max-h-screen p-0 rounded-none border-0 gap-0"
           data-testid="user-library-dialog"
         >
-          <DialogHeader className="flex flex-row items-center justify-between px-6 py-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <DialogHeader className="px-6 py-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <DialogTitle className="text-xl font-semibold" data-testid="library-title">
               Tu Biblioteca de Medios
             </DialogTitle>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => onOpenChange(false)}
-              className="h-9 w-9 rounded-full"
-              data-testid="library-close-button"
-            >
-              <X className="h-5 w-5" />
-            </Button>
           </DialogHeader>
 
           <Tabs
