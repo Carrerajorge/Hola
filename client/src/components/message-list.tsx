@@ -499,21 +499,15 @@ const ActionToolbar = memo(function ActionToolbar({
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 px-2 gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/60"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
               onClick={() => onCopy(content, messageId)}
               data-testid={`button-copy-${testIdSuffix}`}
             >
               {copiedMessageId === messageId ? (
-                <>
-                  <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                  <span className="text-xs text-green-500">Copiado</span>
-                </>
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
               ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5" />
-                  <span className="text-xs">Copiar</span>
-                </>
+                <Copy className="h-4 w-4" />
               )}
             </Button>
           </TooltipTrigger>
