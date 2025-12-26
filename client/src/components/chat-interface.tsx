@@ -76,7 +76,7 @@ import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview
 import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDetector";
 import { markdownToTipTap } from "@/lib/markdownToHtml";
 import { detectGmailIntent } from "@/lib/gmailIntentDetector";
-import { emitChatStreamingStarted, emitChatStreamingCompleted } from "@/lib/chatStreamingEvents";
+import { useStreamingStore } from "@/stores/streamingStore";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { RecordingPanel } from "@/components/recording-panel";
@@ -819,6 +819,9 @@ export function ChatInterface({
   const streamingChatIdRef = useRef<string | null>(null);
   const prevAiStateRef = useRef<AiState>("idle");
   
+  // Access streaming store actions
+  const { startRun, updateStatus, completeRun, failRun, abortRun } = useStreamingStore();
+  
   // Keep refs in sync with state for cleanup function access
   useEffect(() => {
     editedDocumentContentRef.current = editedDocumentContent;
@@ -828,29 +831,38 @@ export function ChatInterface({
     chatIdRef.current = chatId || null;
   }, [chatId]);
   
-  // Emit streaming events when aiState changes
-  // This allows home.tsx to track which chats are processing even after component unmounts
+  // Update streaming store when aiState changes
+  // This allows tracking of chats processing in background after component unmounts
   useEffect(() => {
     const prevState = prevAiStateRef.current;
     prevAiStateRef.current = aiState;
+    const currentChatId = chatId || null;
     
-    // Capture chatId when streaming starts
+    // Start run when streaming begins
     if (prevState === "idle" && (aiState === "thinking" || aiState === "responding")) {
-      streamingChatIdRef.current = chatId || null;
-      if (streamingChatIdRef.current) {
-        emitChatStreamingStarted(streamingChatIdRef.current);
+      streamingChatIdRef.current = currentChatId;
+      if (currentChatId) {
+        startRun(currentChatId);
       }
     }
     
-    // Emit completion when streaming ends
+    // Update to streaming status
+    if (prevState === "thinking" && aiState === "responding") {
+      if (streamingChatIdRef.current) {
+        updateStatus(streamingChatIdRef.current, 'streaming');
+      }
+    }
+    
+    // Complete run when streaming ends
     if ((prevState === "thinking" || prevState === "responding") && aiState === "idle") {
       const completedChatId = streamingChatIdRef.current;
       if (completedChatId) {
-        emitChatStreamingCompleted(completedChatId, true);
+        // Get the active chat ID from the current prop (may have changed if user switched chats)
+        completeRun(completedChatId, currentChatId);
         streamingChatIdRef.current = null;
       }
     }
-  }, [aiState, chatId]);
+  }, [aiState, chatId, startRun, updateStatus, completeRun]);
   
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat

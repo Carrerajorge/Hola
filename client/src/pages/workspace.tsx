@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Menu, FileText, X, GripVertical } from "lucide-react";
 import { toast } from "sonner";
-import { subscribeToChatStreamingStarted, subscribeToChatStreamingCompleted } from "@/lib/chatStreamingEvents";
+import { useStreamingStore, useProcessingChatIds, usePendingBadges } from "@/stores/streamingStore";
 
 const PANEL_SIZES_KEY = "workspace-panel-sizes";
 
@@ -71,22 +71,13 @@ function WorkspaceContent() {
 
   const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
   const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
-  const [processingChatIds, setProcessingChatIds] = useState<string[]>([]);
-  const [pendingResponseCounts, setPendingResponseCounts] = useState<Record<string, number>>({});
+  
+  // Use global streaming store for tracking processing chats and pending badges
+  const processingChatIds = useProcessingChatIds();
+  const pendingResponseCounts = usePendingBadges();
+  const { clearBadge } = useStreamingStore();
 
   const pendingChatIdRef = useRef<string | null>(null);
-  
-  // Use refs to access latest values in event callbacks without re-subscribing
-  const activeChatIdRef = useRef<string | null>(activeChat?.id || null);
-  const chatsRef = useRef(chats);
-  
-  useEffect(() => {
-    activeChatIdRef.current = activeChat?.id || null;
-  }, [activeChat?.id]);
-  
-  useEffect(() => {
-    chatsRef.current = chats;
-  }, [chats]);
 
   const [panelSizes, setPanelSizes] = useState<StoredPanelSizes>(() => {
     try {
@@ -140,44 +131,9 @@ function WorkspaceContent() {
     }
   }, [moveChatToFolder, removeChatFromFolder]);
 
-  // Listen for streaming events from ChatInterface
-  // This works even when ChatInterface is unmounted (user switched chats)
-  useEffect(() => {
-    const unsubStart = subscribeToChatStreamingStarted((event) => {
-      setProcessingChatIds(prev => 
-        prev.includes(event.chatId) ? prev : [...prev, event.chatId]
-      );
-    });
-    
-    const unsubComplete = subscribeToChatStreamingCompleted((event) => {
-      const finishedChatId = event.chatId;
-      const currentActiveChatId = activeChatIdRef.current;
-      
-      // Remove from processing
-      setProcessingChatIds(prev => prev.filter(id => id !== finishedChatId));
-      
-      // If this chat is not the currently active one, increment pending count
-      if (finishedChatId !== currentActiveChatId) {
-        setPendingResponseCounts(prev => ({
-          ...prev,
-          [finishedChatId]: (prev[finishedChatId] || 0) + 1
-        }));
-      }
-    });
-    
-    return () => {
-      unsubStart();
-      unsubComplete();
-    };
-  }, []);
-
   const handleClearPendingCount = useCallback((chatId: string) => {
-    setPendingResponseCounts((prev) => {
-      const next = { ...prev };
-      delete next[chatId];
-      return next;
-    });
-  }, []);
+    clearBadge(chatId);
+  }, [clearBadge]);
 
   const handleSelectChatWithClear = useCallback((id: string) => {
     // Keep processing state for background chats - don't clear processingChatIds
