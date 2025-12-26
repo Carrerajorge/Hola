@@ -5,6 +5,7 @@ import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } f
 import crypto from "crypto";
 import { analyzeResponseQuality, calculateQualityScore } from "../services/responseQuality";
 import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityStats } from "./qualityMetrics";
+import { recordConnectorUsage } from "./connectorMetrics";
 
 // ===== Types =====
 interface CircuitBreakerState {
@@ -675,6 +676,9 @@ class LLMGateway {
 
       console.log(`[LLMGateway] ${options.requestId} xai completed in ${latencyMs}ms, tokens: ${usage?.total_tokens || 0}`);
 
+      // Record connector usage for xai
+      recordConnectorUsage("xai", latencyMs, true);
+
       // Analyze response quality and record metrics
       const qualityAnalysis = analyzeResponseQuality(content);
       const qualityScore = calculateQualityScore(content, usage?.total_tokens || 0, latencyMs);
@@ -706,6 +710,9 @@ class LLMGateway {
       };
     } catch (error: any) {
       clearTimeout(timeoutId);
+      const latencyMs = Date.now() - startTime;
+      // Record connector failure for xai
+      recordConnectorUsage("xai", latencyMs, false);
       if (error.name === "AbortError") {
         throw new Error(`Request timeout after ${options.timeout}ms`);
       }
@@ -721,13 +728,21 @@ class LLMGateway {
   ): Promise<LLMResponse> {
     const { messages: geminiMessages, systemInstruction } = this.convertToGeminiMessages(messages);
 
-    const response = await geminiChat(geminiMessages, {
-      model: model as any,
-      systemInstruction,
-      temperature: options.temperature ?? 0.7,
-      topP: options.topP ?? 1,
-      maxOutputTokens: options.maxTokens,
-    });
+    let response;
+    try {
+      response = await geminiChat(geminiMessages, {
+        model: model as any,
+        systemInstruction,
+        temperature: options.temperature ?? 0.7,
+        topP: options.topP ?? 1,
+        maxOutputTokens: options.maxTokens,
+      });
+    } catch (error: any) {
+      const latencyMs = Date.now() - startTime;
+      // Record connector failure for gemini
+      recordConnectorUsage("gemini", latencyMs, false);
+      throw error;
+    }
 
     const latencyMs = Date.now() - startTime;
     
@@ -753,6 +768,9 @@ class LLMGateway {
     this.recordTokenUsage(usageRecord);
 
     console.log(`[LLMGateway] ${options.requestId} gemini completed in ${latencyMs}ms, est. tokens: ${estimatedTokens}`);
+
+    // Record connector usage for gemini
+    recordConnectorUsage("gemini", latencyMs, true);
 
     // Analyze response quality and record metrics
     const qualityAnalysis = analyzeResponseQuality(response.content);

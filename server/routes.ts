@@ -32,6 +32,8 @@ import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
+import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
+import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -171,6 +173,9 @@ export async function registerRoutes(
   
   // Initialize health monitoring
   initializeHealthMonitoring();
+  
+  // Start periodic connector health checks
+  startPeriodicHealthCheck(60000);
 
   // GET /api/observability/logs - Query logs with filters
   app.get("/api/observability/logs", (req: Request, res: Response) => {
@@ -316,6 +321,97 @@ export async function registerRoutes(
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get stats",
+      });
+    }
+  });
+
+  // ===== Connector Stats Endpoints =====
+  
+  // GET /api/connectors/stats - Get all connector statistics
+  app.get("/api/connectors/stats", (_req: Request, res: Response) => {
+    try {
+      const stats = getAllConnectorStats();
+      const healthSummary = getHealthSummary();
+      
+      res.json({
+        success: true,
+        data: {
+          connectors: stats,
+          health: healthSummary,
+        },
+      });
+    } catch (error: any) {
+      console.error("[Connectors] Error getting stats:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get connector stats",
+      });
+    }
+  });
+
+  // GET /api/connectors/:name/stats - Get single connector statistics
+  app.get("/api/connectors/:name/stats", (req: Request, res: Response) => {
+    try {
+      const { name } = req.params;
+      
+      if (!isValidConnector(name)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid connector name: ${name}. Valid connectors: gmail, gemini, xai, database, forms`,
+        });
+      }
+      
+      const stats = getConnectorStats(name as ConnectorName);
+      const health = checkConnectorHealth(name as ConnectorName);
+      
+      res.json({
+        success: true,
+        data: {
+          stats,
+          health,
+        },
+      });
+    } catch (error: any) {
+      console.error("[Connectors] Error getting connector stats:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get connector stats",
+      });
+    }
+  });
+
+  // POST /api/connectors/:name/reset - Reset stats for connector (admin only)
+  app.post("/api/connectors/:name/reset", (req: Request, res: Response) => {
+    try {
+      const { name } = req.params;
+      const user = (req as any).user;
+      
+      // Check admin role
+      if (!user?.roles?.includes("admin")) {
+        return res.status(403).json({
+          success: false,
+          error: "Admin access required",
+        });
+      }
+      
+      if (!isValidConnector(name)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid connector name: ${name}. Valid connectors: gmail, gemini, xai, database, forms`,
+        });
+      }
+      
+      resetConnectorStats(name as ConnectorName);
+      
+      res.json({
+        success: true,
+        message: `Stats reset for connector: ${name}`,
+      });
+    } catch (error: any) {
+      console.error("[Connectors] Error resetting stats:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to reset connector stats",
       });
     }
   });

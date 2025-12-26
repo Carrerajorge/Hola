@@ -4,6 +4,7 @@
 import { google, gmail_v1 } from 'googleapis';
 import { storage } from '../storage';
 import type { GmailOAuthToken } from '@shared/schema';
+import { recordConnectorUsage } from '../lib/connectorMetrics';
 
 let connectionSettings: any;
 
@@ -258,6 +259,7 @@ async function searchEmailsInternal(
   labelIds?: string[],
   pageToken?: string
 ): Promise<SearchEmailsResult> {
+  const startTime = Date.now();
   const listParams: gmail_v1.Params$Resource$Users$Messages$List = {
     userId: 'me',
     maxResults,
@@ -266,7 +268,14 @@ async function searchEmailsInternal(
     pageToken: pageToken || undefined
   };
 
-  const response = await gmail.users.messages.list(listParams);
+  let response;
+  try {
+    response = await gmail.users.messages.list(listParams);
+    recordConnectorUsage("gmail", Date.now() - startTime, true);
+  } catch (error) {
+    recordConnectorUsage("gmail", Date.now() - startTime, false);
+    throw error;
+  }
   const messages = response.data.messages || [];
   const nextPageToken = response.data.nextPageToken || undefined;
 
@@ -342,12 +351,14 @@ export async function searchEmailsForUser(
 }
 
 async function getEmailThreadInternal(gmail: gmail_v1.Gmail, threadId: string): Promise<EmailThread | null> {
+  const startTime = Date.now();
   try {
     const thread = await gmail.users.threads.get({
       userId: 'me',
       id: threadId,
       format: 'full'
     });
+    recordConnectorUsage("gmail", Date.now() - startTime, true);
 
     const messages: EmailMessage[] = [];
     let threadSubject = '';
@@ -396,6 +407,7 @@ async function getEmailThreadInternal(gmail: gmail_v1.Gmail, threadId: string): 
       labels: Array.from(threadLabels)
     };
   } catch (error: any) {
+    recordConnectorUsage("gmail", Date.now() - startTime, false);
     console.error(`[Gmail] Error fetching thread ${threadId}:`, error);
     return null;
   }
@@ -421,6 +433,7 @@ async function sendEmailInternal(
   body: string,
   threadId?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const startTime = Date.now();
   try {
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const from = profile.data.emailAddress;
@@ -450,8 +463,10 @@ async function sendEmailInternal(
       }
     });
 
+    recordConnectorUsage("gmail", Date.now() - startTime, true);
     return { success: true, messageId: response.data.id || undefined };
   } catch (error: any) {
+    recordConnectorUsage("gmail", Date.now() - startTime, false);
     console.error('[Gmail] Error sending email:', error);
     return { success: false, error: error.message };
   }
@@ -482,8 +497,10 @@ export async function sendEmailForUser(
 }
 
 async function getLabelsInternal(gmail: gmail_v1.Gmail): Promise<Array<{ id: string; name: string; type: string }>> {
+  const startTime = Date.now();
   try {
     const response = await gmail.users.labels.list({ userId: 'me' });
+    recordConnectorUsage("gmail", Date.now() - startTime, true);
     
     return (response.data.labels || []).map(label => ({
       id: label.id!,
@@ -491,6 +508,7 @@ async function getLabelsInternal(gmail: gmail_v1.Gmail): Promise<Array<{ id: str
       type: label.type || 'user'
     }));
   } catch (error: any) {
+    recordConnectorUsage("gmail", Date.now() - startTime, false);
     console.error('[Gmail] Error fetching labels:', error);
     return [];
   }
