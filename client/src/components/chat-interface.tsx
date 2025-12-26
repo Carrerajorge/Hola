@@ -1686,17 +1686,113 @@ export function ChatInterface({
     setEditContent("");
   };
 
-  const handleSendEdit = (msgId: string) => {
+  const handleSendEdit = async (msgId: string) => {
     if (!editContent.trim()) return;
-    const editedMsg: Message = {
-      id: msgId,
-      role: "user",
-      content: editContent,
-      timestamp: new Date(),
-    };
-    onSendMessage(editedMsg);
+    
+    const msgIndex = messages.findIndex(m => m.id === msgId);
+    if (msgIndex === -1) return;
+    
+    const editedContent = editContent.trim();
     setEditingMessageId(null);
     setEditContent("");
+    
+    setAiState("thinking");
+    streamingContentRef.current = "";
+    setStreamingContent("");
+    
+    const userMsgId = Date.now().toString();
+    const userRequestId = generateRequestId();
+    
+    abortControllerRef.current = new AbortController();
+    
+    try {
+      const historyUpToEdit = messages.slice(0, msgIndex).map(m => ({
+        role: m.role as "user" | "assistant",
+        content: m.content
+      }));
+      historyUpToEdit.push({ role: "user", content: editedContent });
+      
+      const response = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: historyUpToEdit,
+          provider: selectedProvider,
+          model: selectedModel
+        }),
+        signal: abortControllerRef.current.signal
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error: ${response.status}`);
+      }
+      
+      setAiState("responding");
+      
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No reader available");
+      
+      const decoder = new TextDecoder();
+      let fullContent = "";
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6);
+            if (data === "[DONE]") continue;
+            
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.content) {
+                fullContent += parsed.content;
+                streamingContentRef.current = fullContent;
+                setStreamingContent(fullContent);
+              }
+            } catch {}
+          }
+        }
+      }
+      
+      if (fullContent) {
+        const aiMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: fullContent,
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: userMsgId,
+        };
+        onSendMessage(aiMsg);
+      }
+      
+      streamingContentRef.current = "";
+      setStreamingContent("");
+      setAiState("idle");
+      abortControllerRef.current = null;
+      
+    } catch (error: any) {
+      if (error.name === "AbortError") {
+        setAiState("idle");
+        return;
+      }
+      console.error("Edit regenerate error:", error);
+      
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "Lo siento, hubo un error al procesar tu mensaje editado. Por favor intenta de nuevo.",
+        timestamp: new Date(),
+      };
+      onSendMessage(errorMsg);
+      setAiState("idle");
+      abortControllerRef.current = null;
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
