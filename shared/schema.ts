@@ -358,6 +358,8 @@ export const fileChunks = pgTable("file_chunks", {
 
 export const insertFileChunkSchema = createInsertSchema(fileChunks).omit({
   id: true,
+}).extend({
+  embedding: z.array(z.number()).nullish(),
 });
 
 export type InsertFileChunk = z.infer<typeof insertFileChunkSchema>;
