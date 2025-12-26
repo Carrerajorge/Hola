@@ -1,0 +1,27 @@
+{
+  "name": "Sira GPT",
+  "short_name": "Sira",
+  "description": "AI Assistant for autonomous tasks and document creation",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#3b82f6",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "shortcuts": [
+    {
+      "name": "Nuevo Chat",
+      "short_name": "Nuevo",
+      "description": "Iniciar una nueva conversación",
+      "url": "/?action=new"
+    }
+  ]
+}

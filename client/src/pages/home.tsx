@@ -5,7 +5,16 @@ import { GptExplorer, Gpt } from "@/components/gpt-explorer";
 import { GptBuilder } from "@/components/gpt-builder";
 import { UserLibrary } from "@/components/user-library";
 import { AppsView } from "@/components/apps-view";
+import { SearchModal } from "@/components/search-modal";
+import { SettingsDialog } from "@/components/settings-dialog";
+import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
+import { ExportChatDialog } from "@/components/export-chat-dialog";
+import { FavoritesDialog } from "@/components/favorites-dialog";
+import { PromptTemplatesDialog } from "@/components/prompt-templates-dialog";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useFavorites } from "@/hooks/use-favorites";
+import { usePromptTemplates } from "@/hooks/use-prompt-templates";
+import { useNotifications } from "@/hooks/use-notifications";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useLocation } from "wouter";
 import { Menu } from "lucide-react";
@@ -14,6 +23,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useChats, Message } from "@/hooks/use-chats";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 
 export default function Home() {
   const isMobile = useIsMobile();
@@ -33,8 +43,19 @@ export default function Home() {
   const [isGptBuilderOpen, setIsGptBuilderOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isFavoritesOpen, setIsFavoritesOpen] = useState(false);
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [editingGpt, setEditingGpt] = useState<Gpt | null>(null);
   const [activeGpt, setActiveGpt] = useState<Gpt | null>(null);
+  
+  const { favorites, addFavorite, removeFavorite, isFavorite } = useFavorites();
+  const { templates, addTemplate, removeTemplate, updateTemplate, incrementUsage, categories } = usePromptTemplates();
+  const { notifyTaskComplete, requestPermission } = useNotifications();
   
   const { 
     chats, 
@@ -81,19 +102,24 @@ export default function Home() {
       }
     } else if (aiState === "idle" && processingChatIdRef.current) {
       const finishedChatId = processingChatIdRef.current;
+      const finishedChat = chats.find(c => c.id === finishedChatId);
       // Remove from processing
       setProcessingChatIds(prev => prev.filter(id => id !== finishedChatId));
       
-      // If this chat is not the currently active one, increment pending count
+      // If this chat is not the currently active one, increment pending count and notify
       if (finishedChatId !== activeChat?.id) {
         setPendingResponseCounts(prev => ({
           ...prev,
           [finishedChatId]: (prev[finishedChatId] || 0) + 1
         }));
+        // Send browser notification
+        if (finishedChat) {
+          notifyTaskComplete(finishedChat.title);
+        }
       }
       processingChatIdRef.current = null;
     }
-  }, [aiState, activeChat?.id]);
+  }, [aiState, activeChat?.id, chats, notifyTaskComplete]);
   
   const handleClearPendingCount = useCallback((chatId: string) => {
     setPendingResponseCounts(prev => {
@@ -185,6 +211,71 @@ export default function Home() {
     setEditingGpt(null);
     setIsGptBuilderOpen(true);
   };
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts([
+    {
+      key: "n",
+      ctrl: true,
+      description: "Nuevo chat",
+      action: () => handleNewChat(),
+    },
+    {
+      key: "k",
+      ctrl: true,
+      description: "Búsqueda rápida",
+      action: () => setIsSearchOpen(true),
+    },
+    {
+      key: ",",
+      ctrl: true,
+      description: "Configuración",
+      action: () => setIsSettingsOpen(true),
+    },
+    {
+      key: "e",
+      ctrl: true,
+      description: "Exportar chat",
+      action: () => {
+        if (activeChat || currentMessages.length > 0) {
+          setIsExportOpen(true);
+        }
+      },
+    },
+    {
+      key: "/",
+      ctrl: true,
+      description: "Mostrar atajos",
+      action: () => setIsShortcutsOpen(true),
+    },
+    {
+      key: "t",
+      ctrl: true,
+      description: "Plantillas de prompts",
+      action: () => setIsTemplatesOpen(true),
+    },
+    {
+      key: "f",
+      ctrl: true,
+      shift: true,
+      description: "Favoritos",
+      action: () => setIsFavoritesOpen(true),
+    },
+    {
+      key: "Escape",
+      description: "Cerrar diálogo",
+      action: () => {
+        setIsSearchOpen(false);
+        setIsSettingsOpen(false);
+        setIsShortcutsOpen(false);
+        setIsExportOpen(false);
+        setIsGptExplorerOpen(false);
+        setIsLibraryOpen(false);
+        setIsFavoritesOpen(false);
+        setIsTemplatesOpen(false);
+      },
+    },
+  ]);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
@@ -308,6 +399,56 @@ export default function Home() {
       <UserLibrary
         open={isLibraryOpen}
         onOpenChange={setIsLibraryOpen}
+      />
+
+      {/* Search Modal */}
+      <SearchModal
+        open={isSearchOpen}
+        onOpenChange={setIsSearchOpen}
+        chats={chats}
+        onSelectChat={handleSelectChatWithClear}
+      />
+
+      {/* Settings Dialog */}
+      <SettingsDialog
+        open={isSettingsOpen}
+        onOpenChange={setIsSettingsOpen}
+      />
+
+      {/* Keyboard Shortcuts Dialog */}
+      <KeyboardShortcutsDialog
+        open={isShortcutsOpen}
+        onOpenChange={setIsShortcutsOpen}
+      />
+
+      {/* Export Chat Dialog */}
+      <ExportChatDialog
+        open={isExportOpen}
+        onOpenChange={setIsExportOpen}
+        chatTitle={activeChat?.title || "Conversación"}
+        messages={currentMessages}
+      />
+
+      {/* Favorites Dialog */}
+      <FavoritesDialog
+        open={isFavoritesOpen}
+        onOpenChange={setIsFavoritesOpen}
+        favorites={favorites}
+        onRemove={removeFavorite}
+        onSelect={handleSelectChatWithClear}
+      />
+
+      {/* Prompt Templates Dialog */}
+      <PromptTemplatesDialog
+        open={isTemplatesOpen}
+        onOpenChange={setIsTemplatesOpen}
+        templates={templates}
+        categories={categories}
+        onAdd={addTemplate}
+        onRemove={removeTemplate}
+        onUpdate={updateTemplate}
+        onSelect={setPendingPrompt}
+        onIncrementUsage={incrementUsage}
       />
     </div>
   );
