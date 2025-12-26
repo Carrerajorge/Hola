@@ -590,7 +590,7 @@ export class ExcelOrchestrator {
       }
     }
 
-    this.setWorkbook(prev => ({ ...prev }));
+    this.setWorkbook(() => ({ ...this.workbook }));
     console.log('✅ Plan ejecutado completamente');
     
     return this.executionLog;
