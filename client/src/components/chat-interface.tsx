@@ -76,6 +76,7 @@ import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview
 import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDetector";
 import { markdownToTipTap } from "@/lib/markdownToHtml";
 import { detectGmailIntent } from "@/lib/gmailIntentDetector";
+import { emitChatStreamingStarted, emitChatStreamingCompleted } from "@/lib/chatStreamingEvents";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { RecordingPanel } from "@/components/recording-panel";
@@ -815,6 +816,8 @@ export function ChatInterface({
   const orchestratorRef = useRef<{ runOrchestrator: (prompt: string) => Promise<void> } | null>(null);
   const editedDocumentContentRef = useRef<string>("");
   const chatIdRef = useRef<string | null>(null);
+  const streamingChatIdRef = useRef<string | null>(null);
+  const prevAiStateRef = useRef<AiState>("idle");
   
   // Keep refs in sync with state for cleanup function access
   useEffect(() => {
@@ -824,6 +827,30 @@ export function ChatInterface({
   useEffect(() => {
     chatIdRef.current = chatId || null;
   }, [chatId]);
+  
+  // Emit streaming events when aiState changes
+  // This allows home.tsx to track which chats are processing even after component unmounts
+  useEffect(() => {
+    const prevState = prevAiStateRef.current;
+    prevAiStateRef.current = aiState;
+    
+    // Capture chatId when streaming starts
+    if (prevState === "idle" && (aiState === "thinking" || aiState === "responding")) {
+      streamingChatIdRef.current = chatId || null;
+      if (streamingChatIdRef.current) {
+        emitChatStreamingStarted(streamingChatIdRef.current);
+      }
+    }
+    
+    // Emit completion when streaming ends
+    if ((prevState === "thinking" || prevState === "responding") && aiState === "idle") {
+      const completedChatId = streamingChatIdRef.current;
+      if (completedChatId) {
+        emitChatStreamingCompleted(completedChatId, true);
+        streamingChatIdRef.current = null;
+      }
+    }
+  }, [aiState, chatId]);
   
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat
