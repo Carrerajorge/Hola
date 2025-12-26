@@ -196,7 +196,8 @@ function VirtualizedGrid({
   onDelete, 
   onDownload,
   selectable,
-  containerWidth 
+  containerWidth,
+  containerHeight
 }: {
   items: MediaItem[];
   selectedId: string | null;
@@ -205,6 +206,7 @@ function VirtualizedGrid({
   onDownload: (item: MediaItem) => void;
   selectable?: boolean;
   containerWidth: number;
+  containerHeight: number;
 }) {
   const columnCount = Math.max(1, Math.floor(containerWidth / ITEM_SIZE));
   const rowCount = Math.ceil(items.length / columnCount);
@@ -226,11 +228,11 @@ function VirtualizedGrid({
       cellProps={cellProps}
       columnCount={columnCount}
       columnWidth={itemWidth}
-      defaultHeight={400}
+      defaultHeight={containerHeight}
       defaultWidth={containerWidth}
       rowCount={rowCount}
       rowHeight={itemWidth}
-      style={{ height: 400, width: containerWidth }}
+      style={{ height: containerHeight, width: containerWidth }}
     />
   );
 }
@@ -293,12 +295,13 @@ export function MediaLibraryModal({
   }, []);
 
   const containerWidth = containerRef.current?.clientWidth || 600;
+  const containerHeight = containerRef.current?.clientHeight || 600;
   const useVirtualization = filteredItems.length > VIRTUALIZATION_THRESHOLD;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent 
-        className="max-w-3xl max-h-[85vh] flex flex-col p-0 gap-0"
+        className="w-screen h-screen max-w-none max-h-none m-0 rounded-none flex flex-col p-0 gap-0"
         aria-describedby={undefined}
         data-testid="modal-media-library"
       >
@@ -393,10 +396,11 @@ export function MediaLibraryModal({
                 onDownload={handleDownload}
                 selectable={selectable}
                 containerWidth={containerWidth}
+                containerHeight={containerHeight}
               />
             ) : (
-              <ScrollArea className="h-[400px] px-6 py-4">
-                <div className="grid grid-cols-4 gap-3">
+              <ScrollArea className="h-full px-6 py-4">
+                <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3">
                   {filteredItems.map((item) => (
                     <MediaItemCard
                       key={item.id}
@@ -412,7 +416,7 @@ export function MediaLibraryModal({
               </ScrollArea>
             )
           ) : (
-            <ScrollArea className="h-[400px]">
+            <ScrollArea className="h-full">
               <div className="flex flex-col divide-y">
                 {filteredItems.map((item) => (
                   <div
