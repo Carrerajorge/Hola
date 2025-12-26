@@ -25,6 +25,9 @@ interface VirtualizedExcelProps {
   onEditCell: (cell: { row: number; col: number } | null) => void;
   className?: string;
   version?: number;
+  activeStreamingCell?: { row: number; col: number } | null;
+  typingValue?: string;
+  isRecentCell?: (row: number, col: number) => boolean;
 }
 
 const VirtualCell = memo(function VirtualCell({
@@ -33,6 +36,9 @@ const VirtualCell = memo(function VirtualCell({
   data,
   isSelected,
   isEditing,
+  isStreaming,
+  isRecentlyWritten,
+  typingValue,
   style,
   onMouseDown,
   onDoubleClick,
@@ -45,6 +51,9 @@ const VirtualCell = memo(function VirtualCell({
   data: CellData;
   isSelected: boolean;
   isEditing: boolean;
+  isStreaming: boolean;
+  isRecentlyWritten: boolean;
+  typingValue?: string;
   style: React.CSSProperties;
   onMouseDown: () => void;
   onDoubleClick: () => void;
@@ -73,15 +82,19 @@ const VirtualCell = memo(function VirtualCell({
   return (
     <div
       className={cn(
-        "absolute border-r border-b border-gray-200 dark:border-gray-700 px-1.5 flex items-center text-sm select-none overflow-hidden whitespace-nowrap",
+        "absolute border-r border-b border-gray-200 dark:border-gray-700 px-1.5 flex items-center text-sm select-none overflow-hidden whitespace-nowrap transition-all duration-200",
         isSelected && !isEditing && "ring-2 ring-blue-500 ring-inset z-10 bg-blue-50 dark:bg-blue-950",
-        data.value && "bg-white dark:bg-gray-900",
-        !data.value && !isSelected && "bg-gray-50/50 dark:bg-gray-900/50"
+        isStreaming && "ring-2 ring-purple-500 ring-inset z-20 bg-purple-50 dark:bg-purple-950",
+        isRecentlyWritten && "animate-flash-green bg-green-100 dark:bg-green-900",
+        data.value && !isStreaming && !isRecentlyWritten && "bg-white dark:bg-gray-900",
+        !data.value && !isSelected && !isStreaming && "bg-gray-50/50 dark:bg-gray-900/50"
       )}
       style={cellStyle}
       onMouseDown={onMouseDown}
       onDoubleClick={onDoubleClick}
       data-testid={`cell-${row}-${col}`}
+      data-row={row}
+      data-col={col}
     >
       {isEditing ? (
         <input
@@ -96,6 +109,11 @@ const VirtualCell = memo(function VirtualCell({
           onKeyDown={onKeyDown}
           data-testid={`cell-input-${row}-${col}`}
         />
+      ) : isStreaming && typingValue ? (
+        <span className="truncate font-mono text-purple-700 dark:text-purple-300">
+          {typingValue}
+          <span className="inline-block w-0.5 h-4 bg-purple-500 animate-blink ml-0.5" />
+        </span>
       ) : (
         <span className="truncate">{data.value}</span>
       )}
@@ -148,6 +166,9 @@ export function VirtualizedExcel({
   onEditCell,
   className,
   version = 0,
+  activeStreamingCell = null,
+  typingValue = '',
+  isRecentCell = () => false,
 }: VirtualizedExcelProps) {
   void version;
   const [scrollPos, setScrollPos] = useState({ top: 0, left: 0 });
@@ -387,6 +408,9 @@ export function VirtualizedExcel({
                   const isSelected = selectedCell?.row === row && selectedCell?.col === col;
                   const isEditing = editingCell?.row === row && editingCell?.col === col;
 
+                  const isStreamingCell = activeStreamingCell?.row === row && activeStreamingCell?.col === col;
+                  const isRecentlyWritten = isRecentCell(row, col);
+                  
                   return (
                     <VirtualCell
                       key={`${row}:${col}`}
@@ -395,6 +419,9 @@ export function VirtualizedExcel({
                       data={cellData}
                       isSelected={isSelected}
                       isEditing={isEditing}
+                      isStreaming={isStreamingCell}
+                      isRecentlyWritten={isRecentlyWritten}
+                      typingValue={isStreamingCell ? typingValue : undefined}
                       style={{
                         top: row * GRID_CONFIG.ROW_HEIGHT,
                         left: col * GRID_CONFIG.COL_WIDTH,

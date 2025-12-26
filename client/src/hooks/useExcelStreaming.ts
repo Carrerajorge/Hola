@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { SparseGrid } from '@/lib/sparseGrid';
 import { FormulaEngine } from '@/lib/formulaEngine';
 
@@ -33,10 +33,12 @@ interface StreamProgress {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export function useExcelStreaming(
-  grid: SparseGrid,
-  onGridChange: (grid: SparseGrid) => void
-) {
+export function useExcelStreaming(grid: SparseGrid) {
+  const onGridChangeRef = useRef<((grid: SparseGrid) => void) | null>(null);
+  
+  const setOnGridChange = useCallback((fn: (grid: SparseGrid) => void) => {
+    onGridChangeRef.current = fn;
+  }, []);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>(STREAM_STATUS.IDLE);
   const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
   const [streamProgress, setStreamProgress] = useState<StreamProgress>({ current: 0, total: 0 });
@@ -103,8 +105,8 @@ export function useExcelStreaming(
     }
     
     setTypingValue('');
-    onGridChange(grid);
-  }, [grid, onGridChange]);
+    onGridChangeRef.current?.(grid);
+  }, [grid]);
 
   const processStreamQueue = useCallback(async () => {
     if (isStreaming.current || streamQueue.current.length === 0) return;
@@ -215,6 +217,7 @@ export function useExcelStreaming(
     processStreamQueue,
     isRecentCell,
     isActiveCell,
+    setOnGridChange,
     STREAM_STATUS
   };
 }

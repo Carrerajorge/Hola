@@ -21,6 +21,9 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { VirtualizedExcel, GRID_CONFIG } from './virtualized-excel';
 import { SparseGrid, getColumnName as getSparseColumnName, formatCellRef, CellData as SparseCellData } from '@/lib/sparseGrid';
 import { FormulaEngine } from '@/lib/formulaEngine';
+import { useExcelStreaming, STREAM_STATUS } from '@/hooks/useExcelStreaming';
+import { StreamingIndicator } from './excel-streaming-indicator';
+import { Sparkles } from 'lucide-react';
 
 interface SpreadsheetEditorProps {
   title: string;
@@ -315,10 +318,14 @@ export function SpreadsheetEditor({
   const [gridVersion, setGridVersion] = useState(0);
   const [virtualSelectedCell, setVirtualSelectedCell] = useState<{ row: number; col: number } | null>(null);
   const [virtualEditingCell, setVirtualEditingCell] = useState<{ row: number; col: number } | null>(null);
+  const [showAIPrompt, setShowAIPrompt] = useState(false);
+  const [aiPrompt, setAIPrompt] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const initialContentRef = useRef(content);
   const insertFnRegisteredRef = useRef(false);
+  
+  const streaming = useExcelStreaming(sparseGrid);
   
   const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
@@ -403,6 +410,53 @@ export function SpreadsheetEditor({
       )
     }));
   }, []);
+
+  useEffect(() => {
+    streaming.setOnGridChange(handleSparseGridChange);
+  }, [handleSparseGridChange, streaming.setOnGridChange]);
+
+  const handleAIGenerate = useCallback(async () => {
+    if (!aiPrompt.trim()) return;
+    setShowAIPrompt(false);
+    
+    const lowerPrompt = aiPrompt.toLowerCase();
+    let sampleData: (string | number | null)[][];
+    
+    if (lowerPrompt.includes('ventas') || lowerPrompt.includes('sales')) {
+      sampleData = [
+        ['Mes', 'Producto', 'Cantidad', 'Precio', 'Total'],
+        ['Enero', 'Laptop', 15, 1200, '=C2*D2'],
+        ['Febrero', 'Mouse', 45, 25, '=C3*D3'],
+        ['Marzo', 'Teclado', 30, 75, '=C4*D4'],
+        ['Abril', 'Monitor', 12, 350, '=C5*D5'],
+        ['Mayo', 'Laptop', 20, 1200, '=C6*D6'],
+        ['Junio', 'Mouse', 60, 25, '=C7*D7'],
+        ['', '', '', 'TOTAL:', '=SUM(E2:E7)'],
+      ];
+    } else if (lowerPrompt.includes('empleados') || lowerPrompt.includes('nómina')) {
+      sampleData = [
+        ['ID', 'Nombre', 'Departamento', 'Salario', 'Bono', 'Total'],
+        ['001', 'Juan Pérez', 'Ventas', 3500, 500, '=D2+E2'],
+        ['002', 'María García', 'Marketing', 3200, 400, '=D3+E3'],
+        ['003', 'Carlos López', 'IT', 4500, 700, '=D4+E4'],
+        ['004', 'Ana Martínez', 'RRHH', 3000, 350, '=D5+E5'],
+        ['', '', '', '', 'TOTAL:', '=SUM(F2:F5)'],
+      ];
+    } else {
+      sampleData = [
+        ['Dato 1', 'Dato 2', 'Resultado'],
+        ['Valor A', 100, '=B2*2'],
+        ['Valor B', 200, '=B3*2'],
+        ['Valor C', 300, '=B4*2'],
+        ['', 'Total:', '=SUM(C2:C4)'],
+      ];
+    }
+    
+    const startRow = virtualSelectedCell?.row || 0;
+    const startCol = virtualSelectedCell?.col || 0;
+    await streaming.simulateStreaming(sampleData, startRow, startCol);
+    setAIPrompt('');
+  }, [aiPrompt, virtualSelectedCell, streaming]);
 
   // Sheet management functions
   const addSheet = useCallback(() => {
@@ -1059,6 +1113,21 @@ export function SpreadsheetEditor({
 
         <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
 
+        {/* AI Generate Button */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1 text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
+          onClick={() => setShowAIPrompt(true)}
+          disabled={streaming.streamStatus === STREAM_STATUS.STREAMING}
+          data-testid="btn-ai-generate"
+        >
+          <Sparkles className="h-3 w-3" />
+          Generar con IA
+        </Button>
+
+        <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
+
         <Button
           variant={useVirtualized ? 'default' : 'ghost'}
           size="sm"
@@ -1162,7 +1231,7 @@ export function SpreadsheetEditor({
 
       {/* Spreadsheet Grid */}
       {useVirtualized ? (
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden relative">
           <VirtualizedExcel
             grid={sparseGrid}
             onGridChange={handleSparseGridChange}
@@ -1171,7 +1240,51 @@ export function SpreadsheetEditor({
             editingCell={virtualEditingCell}
             onEditCell={setVirtualEditingCell}
             version={gridVersion}
+            activeStreamingCell={streaming.activeCell}
+            typingValue={streaming.typingValue}
+            isRecentCell={streaming.isRecentCell}
           />
+          
+          {/* Streaming Indicator */}
+          <StreamingIndicator
+            status={streaming.streamStatus}
+            progress={streaming.streamProgress}
+            activeCell={streaming.activeCell}
+            onPause={streaming.pauseStreaming}
+            onResume={streaming.resumeStreaming}
+            onCancel={streaming.cancelStreaming}
+          />
+          
+          {/* AI Prompt Modal */}
+          {showAIPrompt && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl p-6 w-96">
+                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-purple-500" />
+                  Generar con IA
+                </h3>
+                <input
+                  type="text"
+                  value={aiPrompt}
+                  onChange={(e) => setAIPrompt(e.target.value)}
+                  placeholder="Ej: tabla de ventas mensuales, nómina de empleados..."
+                  className="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-purple-500 outline-none"
+                  onKeyDown={(e) => e.key === 'Enter' && handleAIGenerate()}
+                  autoFocus
+                  data-testid="input-ai-prompt"
+                />
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => setShowAIPrompt(false)}>
+                    Cancelar
+                  </Button>
+                  <Button onClick={handleAIGenerate} className="bg-purple-600 hover:bg-purple-700">
+                    <Sparkles className="w-4 h-4 mr-1" />
+                    Generar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex-1 overflow-auto">
