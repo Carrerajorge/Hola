@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, FileText, FileSpreadsheet, Download, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { autoSaveToMediaLibrary } from "@/lib/mediaAutoSave";
 
 interface DocumentGeneratorDialogProps {
   open: boolean;
@@ -71,6 +72,7 @@ export function DocumentGeneratorDialog({
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
+      autoSaveToMediaLibrary(blob, filename, { source: 'document-generator' });
 
       setStatus("success");
       

@@ -16,6 +16,7 @@ import { Download, Image, FileCode } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { ChartConfig, GeoPoint, DataPoint } from '@shared/schemas/visualization';
+import { autoSaveFromUrl } from '@/lib/mediaAutoSave';
 
 echarts.use([
   MapChart,
@@ -90,9 +91,11 @@ function EChartsChartImpl({ config, className, onDataClick }: EChartsChartProps)
     });
 
     const link = document.createElement('a');
-    link.download = `chart-${Date.now()}.png`;
+    const filename = `chart-${Date.now()}.png`;
+    link.download = filename;
     link.href = url;
     link.click();
+    autoSaveFromUrl(url, filename, { source: 'echarts' });
   }, []);
 
   const handleExportSVG = useCallback(() => {
@@ -104,9 +107,11 @@ function EChartsChartImpl({ config, className, onDataClick }: EChartsChartProps)
     });
 
     const link = document.createElement('a');
-    link.download = `chart-${Date.now()}.svg`;
+    const filename = `chart-${Date.now()}.svg`;
+    link.download = filename;
     link.href = url;
     link.click();
+    autoSaveFromUrl(url, filename, { source: 'echarts' });
   }, []);
 
   const option = useMemo(() => {

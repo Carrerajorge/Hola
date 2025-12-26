@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { X, Download, Sparkles, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { markdownToTipTap } from '@/lib/markdownToHtml';
+import { autoSaveToMediaLibrary } from '@/lib/mediaAutoSave';
 import 'katex/dist/katex.min.css';
 
 interface EnhancedDocumentEditorProps {
@@ -204,10 +205,12 @@ export function EnhancedDocumentEditor({
       const blob = await exportToWord(doc as any, title);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
+      const filename = `${title}.docx`;
       a.href = url;
-      a.download = `${title}.docx`;
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
+      autoSaveToMediaLibrary(blob, filename, { source: 'word-editor' });
     } catch (error) {
       console.error('Export failed:', error);
       onDownload();

@@ -41,6 +41,7 @@ import {
   Maximize2,
   Minimize2,
 } from 'lucide-react';
+import { autoSaveToMediaLibrary } from '@/lib/mediaAutoSave';
 
 export interface SmartTableProps {
   config: TableConfig;
@@ -270,6 +271,7 @@ export function SmartTable({ config, className, onRowClick }: SmartTableProps) {
     link.download = 'tabla.csv';
     link.click();
     URL.revokeObjectURL(url);
+    autoSaveToMediaLibrary(blob, 'tabla.csv', { source: 'smart-table' });
   }, []);
 
   useEffect(() => {

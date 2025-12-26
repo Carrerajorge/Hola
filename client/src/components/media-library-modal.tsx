@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef } from "react";
-import { FixedSizeGrid as Grid } from "react-window";
+import { Grid } from "react-window";
 import {
   Dialog,
   DialogContent,
@@ -145,6 +145,50 @@ function MediaItemCard({
   );
 }
 
+interface CellProps {
+  items: MediaItem[];
+  selectedId: string | null;
+  onSelect: (item: MediaItem) => void;
+  onDelete: (id: string) => void;
+  onDownload: (item: MediaItem) => void;
+  selectable?: boolean;
+  columnCount: number;
+}
+
+function GridCell({ 
+  columnIndex, 
+  rowIndex, 
+  style, 
+  items, 
+  selectedId, 
+  onSelect, 
+  onDelete, 
+  onDownload, 
+  selectable, 
+  columnCount 
+}: { 
+  columnIndex: number; 
+  rowIndex: number; 
+  style: React.CSSProperties;
+} & CellProps) {
+  const index = rowIndex * columnCount + columnIndex;
+  if (index >= items.length) return null;
+  const item = items[index];
+
+  return (
+    <div style={{ ...style, padding: 4 }}>
+      <MediaItemCard
+        item={item}
+        isSelected={selectedId === item.id}
+        onSelect={() => onSelect(item)}
+        onDelete={() => onDelete(item.id)}
+        onDownload={() => onDownload(item)}
+        selectable={selectable}
+      />
+    </div>
+  );
+}
+
 function VirtualizedGrid({ 
   items, 
   selectedId, 
@@ -166,36 +210,28 @@ function VirtualizedGrid({
   const rowCount = Math.ceil(items.length / columnCount);
   const itemWidth = (containerWidth - 16) / columnCount;
 
-  const Cell = useCallback(({ columnIndex, rowIndex, style }: { columnIndex: number; rowIndex: number; style: React.CSSProperties }) => {
-    const index = rowIndex * columnCount + columnIndex;
-    if (index >= items.length) return null;
-    const item = items[index];
-
-    return (
-      <div style={{ ...style, padding: 4 }}>
-        <MediaItemCard
-          item={item}
-          isSelected={selectedId === item.id}
-          onSelect={() => onSelect(item)}
-          onDelete={() => onDelete(item.id)}
-          onDownload={() => onDownload(item)}
-          selectable={selectable}
-        />
-      </div>
-    );
-  }, [items, selectedId, onSelect, onDelete, onDownload, selectable, columnCount]);
+  const cellProps = useMemo(() => ({
+    items,
+    selectedId,
+    onSelect,
+    onDelete,
+    onDownload,
+    selectable,
+    columnCount,
+  }), [items, selectedId, onSelect, onDelete, onDownload, selectable, columnCount]);
 
   return (
     <Grid
+      cellComponent={GridCell}
+      cellProps={cellProps}
       columnCount={columnCount}
       columnWidth={itemWidth}
-      height={400}
+      defaultHeight={400}
+      defaultWidth={containerWidth}
       rowCount={rowCount}
       rowHeight={itemWidth}
-      width={containerWidth}
-    >
-      {Cell}
-    </Grid>
+      style={{ height: 400, width: containerWidth }}
+    />
   );
 }
 

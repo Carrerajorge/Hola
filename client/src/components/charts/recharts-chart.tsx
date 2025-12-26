@@ -24,6 +24,7 @@ import { Download, Image, FileCode, ZoomIn, ZoomOut, RotateCcw } from 'lucide-re
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { ChartConfig, DataPoint } from '@shared/schemas/visualization';
+import { autoSaveToMediaLibrary } from '@/lib/mediaAutoSave';
 
 export interface RechartsChartProps {
   config: ChartConfig;
@@ -74,10 +75,12 @@ export async function exportChartAsPNG(elementRef: React.RefObject<HTMLDivElemen
       canvas.toBlob((blob) => {
         if (blob) {
           const link = document.createElement('a');
-          link.download = `chart-${Date.now()}.png`;
+          const filename = `chart-${Date.now()}.png`;
+          link.download = filename;
           link.href = URL.createObjectURL(blob);
           link.click();
           URL.revokeObjectURL(link.href);
+          autoSaveToMediaLibrary(blob, filename, { source: 'recharts' });
         }
         resolve();
       }, 'image/png');
@@ -101,10 +104,12 @@ export function exportChartAsSVG(elementRef: React.RefObject<HTMLDivElement | nu
   const url = URL.createObjectURL(blob);
   
   const link = document.createElement('a');
-  link.download = `chart-${Date.now()}.svg`;
+  const filename = `chart-${Date.now()}.svg`;
+  link.download = filename;
   link.href = url;
   link.click();
   URL.revokeObjectURL(url);
+  autoSaveToMediaLibrary(blob, filename, { source: 'recharts' });
 }
 
 interface CustomTooltipProps extends TooltipProps<number, string> {
