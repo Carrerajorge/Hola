@@ -74,6 +74,12 @@ interface SheetData {
     range: { startRow: number; endRow: number; startCol: number; endCol: number };
     rules: Array<{ condition: 'greaterThan' | 'lessThan' | 'equals' | 'between'; value?: number; min?: number; max?: number; style: { backgroundColor?: string; color?: string; } }>;
   }>;
+  columnWidths?: { [colIndex: number]: number };
+  rowHeights?: { [rowIndex: number]: number };
+  frozenRows?: number;
+  frozenColumns?: number;
+  hiddenRows?: number[];
+  hiddenColumns?: number[];
 }
 
 interface WorkbookData {
@@ -257,11 +263,24 @@ const parseContent = (content: string): WorkbookData => {
   try {
     const parsed = JSON.parse(content);
     if (parsed.sheets && Array.isArray(parsed.sheets)) {
-      return parsed as WorkbookData;
+      return {
+        sheets: parsed.sheets.map((sheet: SheetData) => ({
+          ...sheet,
+          columnWidths: sheet.columnWidths || {},
+          rowHeights: sheet.rowHeights || {},
+          charts: sheet.charts || [],
+          conditionalFormats: sheet.conditionalFormats || [],
+          frozenRows: sheet.frozenRows,
+          frozenColumns: sheet.frozenColumns,
+          hiddenRows: sheet.hiddenRows || [],
+          hiddenColumns: sheet.hiddenColumns || [],
+        })),
+        activeSheetId: parsed.activeSheetId
+      } as WorkbookData;
     }
     if (parsed.cells && typeof parsed.rowCount === 'number') {
       return {
-        sheets: [{ id: 'sheet1', name: 'Hoja 1', data: parsed }],
+        sheets: [{ id: 'sheet1', name: 'Hoja 1', data: parsed, columnWidths: {}, rowHeights: {}, charts: [], conditionalFormats: [], hiddenRows: [], hiddenColumns: [] }],
         activeSheetId: 'sheet1'
       };
     }
@@ -269,7 +288,7 @@ const parseContent = (content: string): WorkbookData => {
 
   const sheetData = parseSheetData(content);
   return {
-    sheets: [{ id: 'sheet1', name: 'Hoja 1', data: sheetData }],
+    sheets: [{ id: 'sheet1', name: 'Hoja 1', data: sheetData, columnWidths: {}, rowHeights: {}, charts: [], conditionalFormats: [], hiddenRows: [], hiddenColumns: [] }],
     activeSheetId: 'sheet1'
   };
 };
@@ -391,6 +410,41 @@ export function SpreadsheetEditor({
 
   // Get active sheet data
   const activeSheet = workbook.sheets.find(s => s.id === workbook.activeSheetId) || workbook.sheets[0];
+
+  // State for column widths and row heights (synced with active sheet)
+  const [columnWidths, setColumnWidths] = useState<{ [col: number]: number }>(
+    activeSheet?.columnWidths || {}
+  );
+  const [rowHeights, setRowHeights] = useState<{ [row: number]: number }>(
+    activeSheet?.rowHeights || {}
+  );
+
+  // Sync columnWidths/rowHeights when active sheet changes
+  useEffect(() => {
+    setColumnWidths(activeSheet?.columnWidths || {});
+    setRowHeights(activeSheet?.rowHeights || {});
+  }, [workbook.activeSheetId, activeSheet?.columnWidths, activeSheet?.rowHeights]);
+
+  // Update workbook when columnWidths or rowHeights change
+  useEffect(() => {
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: prev.sheets.map(sheet =>
+        sheet.id === prev.activeSheetId
+          ? { ...sheet, columnWidths, rowHeights }
+          : sheet
+      )
+    }));
+  }, [columnWidths, rowHeights]);
+
+  // Functions to update column widths and row heights
+  const setColumnWidth = useCallback((col: number, width: number) => {
+    setColumnWidths(prev => ({ ...prev, [col]: width }));
+  }, []);
+
+  const setRowHeight = useCallback((row: number, height: number) => {
+    setRowHeights(prev => ({ ...prev, [row]: height }));
+  }, []);
   const data = activeSheet?.data || { cells: {}, rowCount: 20, colCount: 10 };
 
   const getCellValue = useCallback((row: number, col: number): string | number => {
@@ -1653,6 +1707,10 @@ export function SpreadsheetEditor({
             charts={(activeSheet?.charts || []) as ChartLayerConfig[]}
             onUpdateChart={handleUpdateChart}
             onDeleteChart={handleDeleteChart}
+            columnWidths={columnWidths}
+            rowHeights={rowHeights}
+            onColumnWidthChange={setColumnWidth}
+            onRowHeightChange={setRowHeight}
           />
           
           {/* Streaming Indicator */}

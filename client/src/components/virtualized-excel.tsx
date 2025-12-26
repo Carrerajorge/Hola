@@ -46,6 +46,10 @@ interface VirtualizedExcelProps {
   charts?: ChartLayerConfig[];
   onUpdateChart?: (chartId: string, updates: Partial<ChartLayerConfig>) => void;
   onDeleteChart?: (chartId: string) => void;
+  columnWidths?: { [col: number]: number };
+  rowHeights?: { [row: number]: number };
+  onColumnWidthChange?: (col: number, width: number) => void;
+  onRowHeightChange?: (row: number, height: number) => void;
 }
 
 const VirtualCell = memo(function VirtualCell({
@@ -196,8 +200,14 @@ export function VirtualizedExcel({
   charts = [],
   onUpdateChart,
   onDeleteChart,
+  columnWidths,
+  rowHeights,
+  onColumnWidthChange,
+  onRowHeightChange,
 }: VirtualizedExcelProps) {
   void version;
+  void onColumnWidthChange;
+  void onRowHeightChange;
   const [scrollPos, setScrollPos] = useState({ top: 0, left: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
   const scrollRAF = useRef<number | null>(null);
@@ -206,6 +216,25 @@ export function VirtualizedExcel({
   useEffect(() => {
     formulaEngine.current.setGrid(grid);
   }, [grid]);
+
+  const getColumnWidth = useCallback((col: number) => columnWidths?.[col] || GRID_CONFIG.COL_WIDTH, [columnWidths]);
+  const getRowHeight = useCallback((row: number) => rowHeights?.[row] || GRID_CONFIG.ROW_HEIGHT, [rowHeights]);
+
+  const getColumnLeft = useCallback((col: number) => {
+    let left = 0;
+    for (let c = 0; c < col; c++) {
+      left += columnWidths?.[c] || GRID_CONFIG.COL_WIDTH;
+    }
+    return left;
+  }, [columnWidths]);
+
+  const getRowTop = useCallback((row: number) => {
+    let top = 0;
+    for (let r = 0; r < row; r++) {
+      top += rowHeights?.[r] || GRID_CONFIG.ROW_HEIGHT;
+    }
+    return top;
+  }, [rowHeights]);
 
   const getConditionalStyle = useCallback((row: number, col: number, value: string | number): React.CSSProperties => {
     if (!conditionalFormats) return {};
@@ -408,8 +437,21 @@ export function VirtualizedExcel({
     return cols;
   }, [startCol, endCol]);
 
-  const totalWidth = GRID_CONFIG.MAX_COLS * GRID_CONFIG.COL_WIDTH;
-  const totalHeight = GRID_CONFIG.MAX_ROWS * GRID_CONFIG.ROW_HEIGHT;
+  const totalWidth = useMemo(() => {
+    let width = 0;
+    for (let c = 0; c < GRID_CONFIG.MAX_COLS; c++) {
+      width += columnWidths?.[c] || GRID_CONFIG.COL_WIDTH;
+    }
+    return width;
+  }, [columnWidths]);
+
+  const totalHeight = useMemo(() => {
+    let height = 0;
+    for (let r = 0; r < GRID_CONFIG.MAX_ROWS; r++) {
+      height += rowHeights?.[r] || GRID_CONFIG.ROW_HEIGHT;
+    }
+    return height;
+  }, [rowHeights]);
 
   return (
     <div
@@ -440,10 +482,10 @@ export function VirtualizedExcel({
                   key={row}
                   row={row}
                   style={{
-                    top: row * GRID_CONFIG.ROW_HEIGHT,
+                    top: getRowTop(row),
                     left: 0,
                     width: GRID_CONFIG.ROW_HEADER_WIDTH,
-                    height: GRID_CONFIG.ROW_HEIGHT,
+                    height: getRowHeight(row),
                   }}
                 />
               ))}
@@ -470,8 +512,8 @@ export function VirtualizedExcel({
                   col={col}
                   style={{
                     top: 0,
-                    left: col * GRID_CONFIG.COL_WIDTH,
-                    width: GRID_CONFIG.COL_WIDTH,
+                    left: getColumnLeft(col),
+                    width: getColumnWidth(col),
                     height: GRID_CONFIG.COL_HEADER_HEIGHT,
                   }}
                 />
@@ -527,10 +569,10 @@ export function VirtualizedExcel({
                       isRecentlyWritten={isRecentlyWritten}
                       typingValue={isStreamingCell ? typingValue : undefined}
                       style={{
-                        top: row * GRID_CONFIG.ROW_HEIGHT,
-                        left: col * GRID_CONFIG.COL_WIDTH,
-                        width: GRID_CONFIG.COL_WIDTH,
-                        height: GRID_CONFIG.ROW_HEIGHT,
+                        top: getRowTop(row),
+                        left: getColumnLeft(col),
+                        width: getColumnWidth(col),
+                        height: getRowHeight(row),
                       }}
                       conditionalStyle={conditionalStyle}
                       onMouseDown={() => handleCellSelect(row, col)}
