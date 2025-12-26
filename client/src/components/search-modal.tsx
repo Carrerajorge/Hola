@@ -189,7 +189,7 @@ export function SearchModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="w-[50vw] max-w-[50vw] h-[50vh] max-h-[50vh] p-0 gap-0 overflow-hidden flex flex-col"
+        className="w-[65vw] max-w-[65vw] h-[65vh] max-h-[65vh] p-0 gap-0 overflow-hidden flex flex-col"
         aria-describedby={undefined}
         onKeyDown={handleKeyDown}
         data-testid="modal-search"
