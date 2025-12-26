@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
@@ -26,6 +26,8 @@ import { createGmailRouter } from "./routes/gmailRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
+import { llmGateway } from "./lib/llmGateway";
+import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -54,6 +56,112 @@ export async function registerRoutes(
   app.use("/api/integrations/google/gmail", createGmailRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
+
+  // ===== AI Quality Stats & Content Filter Endpoints =====
+  
+  // GET /api/ai/quality-stats - Return quality statistics
+  app.get("/api/ai/quality-stats", (req: Request, res: Response) => {
+    try {
+      const sinceParam = req.query.since as string | undefined;
+      const since = sinceParam ? new Date(sinceParam) : undefined;
+      
+      const stats = llmGateway.getQualityStats(since);
+      const filterStats = getFilterStats();
+      
+      res.json({
+        success: true,
+        data: {
+          qualityStats: stats,
+          filterStats,
+        },
+      });
+    } catch (error: any) {
+      console.error("[QualityStats] Error getting stats:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Failed to get quality stats" 
+      });
+    }
+  });
+
+  // GET /api/ai/content-filter - Get current filter config
+  app.get("/api/ai/content-filter", (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user?.id || "anonymous";
+      const config = getUserConfig(userId);
+      
+      res.json({
+        success: true,
+        data: config,
+      });
+    } catch (error: any) {
+      console.error("[ContentFilter] Error getting config:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Failed to get filter config" 
+      });
+    }
+  });
+
+  // PUT /api/ai/content-filter - Update filter config
+  app.put("/api/ai/content-filter", (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user?.id || "anonymous";
+      const { enabled, sensitivityLevel, customPatterns } = req.body;
+      
+      // Validate sensitivity level
+      if (sensitivityLevel && !["low", "medium", "high"].includes(sensitivityLevel)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid sensitivity level. Must be 'low', 'medium', or 'high'",
+        });
+      }
+      
+      // Validate custom patterns if provided
+      if (customPatterns && Array.isArray(customPatterns)) {
+        const validation = validatePatterns(customPatterns);
+        if (!validation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: `Invalid regex patterns: ${validation.invalidPatterns.join(", ")}`,
+          });
+        }
+      }
+      
+      const newConfig = setUserConfig(userId, {
+        enabled: enabled !== undefined ? Boolean(enabled) : undefined,
+        sensitivityLevel,
+        customPatterns,
+      });
+      
+      res.json({
+        success: true,
+        data: newConfig,
+      });
+    } catch (error: any) {
+      console.error("[ContentFilter] Error updating config:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Failed to update filter config" 
+      });
+    }
+  });
+
+  // GET /api/ai/content-filter/default - Get default filter config
+  app.get("/api/ai/content-filter/default", (_req: Request, res: Response) => {
+    try {
+      const defaultConfig = getDefaultConfig();
+      res.json({
+        success: true,
+        data: defaultConfig,
+      });
+    } catch (error: any) {
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Failed to get default config" 
+      });
+    }
+  });
 
   const objectStorageService = new ObjectStorageService();
 

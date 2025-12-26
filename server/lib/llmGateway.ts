@@ -3,6 +3,8 @@ import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/res
 import { MODELS } from "./openai";
 import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } from "./gemini";
 import crypto from "crypto";
+import { analyzeResponseQuality, calculateQualityScore } from "../services/responseQuality";
+import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityStats } from "./qualityMetrics";
 
 // ===== Types =====
 interface CircuitBreakerState {
@@ -673,6 +675,23 @@ class LLMGateway {
 
       console.log(`[LLMGateway] ${options.requestId} xai completed in ${latencyMs}ms, tokens: ${usage?.total_tokens || 0}`);
 
+      // Analyze response quality and record metrics
+      const qualityAnalysis = analyzeResponseQuality(content);
+      const qualityScore = calculateQualityScore(content, usage?.total_tokens || 0, latencyMs);
+      
+      const qualityMetric: QualityMetric = {
+        responseId: options.requestId,
+        provider: "xai",
+        score: qualityScore,
+        tokensUsed: usage?.total_tokens || 0,
+        latencyMs,
+        timestamp: new Date(),
+        issues: qualityAnalysis.issues,
+        isComplete: qualityAnalysis.isComplete,
+        hasContentIssues: qualityAnalysis.hasContentIssues,
+      };
+      recordQualityMetric(qualityMetric);
+
       return {
         content,
         usage: usage ? {
@@ -734,6 +753,23 @@ class LLMGateway {
     this.recordTokenUsage(usageRecord);
 
     console.log(`[LLMGateway] ${options.requestId} gemini completed in ${latencyMs}ms, est. tokens: ${estimatedTokens}`);
+
+    // Analyze response quality and record metrics
+    const qualityAnalysis = analyzeResponseQuality(response.content);
+    const qualityScore = calculateQualityScore(response.content, estimatedTokens, latencyMs);
+    
+    const qualityMetric: QualityMetric = {
+      responseId: options.requestId,
+      provider: "gemini",
+      score: qualityScore,
+      tokensUsed: estimatedTokens,
+      latencyMs,
+      timestamp: new Date(),
+      issues: qualityAnalysis.issues,
+      isComplete: qualityAnalysis.isComplete,
+      hasContentIssues: qualityAnalysis.hasContentIssues,
+    };
+    recordQualityMetric(qualityMetric);
 
     return {
       content: response.content,
@@ -941,6 +977,11 @@ class LLMGateway {
         gemini: { requests: 0, tokens: 0, failures: 0 },
       },
     };
+  }
+
+  // ===== Quality Stats =====
+  getQualityStats(since?: Date): QualityStats {
+    return getQualityStats(since);
   }
 
   // ===== Health Check =====
