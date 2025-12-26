@@ -4,6 +4,7 @@ import { ChatInterface } from "@/components/chat-interface";
 import { GptExplorer, Gpt } from "@/components/gpt-explorer";
 import { GptBuilder } from "@/components/gpt-builder";
 import { UserLibrary } from "@/components/user-library";
+import { SkillsExplorer } from "@/components/skills-explorer";
 import { AppsView } from "@/components/apps-view";
 import { SearchModal } from "@/components/search-modal";
 import { SettingsDialog } from "@/components/settings-dialog";
@@ -53,6 +54,7 @@ export default function Home() {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isFavoritesOpen, setIsFavoritesOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [isSkillsOpen, setIsSkillsOpen] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [editingGpt, setEditingGpt] = useState<Gpt | null>(null);
   const [activeGpt, setActiveGpt] = useState<Gpt | null>(null);
@@ -188,7 +190,7 @@ export default function Home() {
   };
 
   const handleOpenSkills = () => {
-    toast.info("Skills - Próximamente");
+    setIsSkillsOpen(true);
   };
 
   const handleOpenLibrary = () => {
@@ -402,6 +404,11 @@ export default function Home() {
       <UserLibrary
         open={isLibraryOpen}
         onOpenChange={setIsLibraryOpen}
+      />
+
+      <SkillsExplorer
+        open={isSkillsOpen}
+        onOpenChange={setIsSkillsOpen}
       />
 
       {/* Search Modal */}
