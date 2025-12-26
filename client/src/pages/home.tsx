@@ -12,6 +12,8 @@ import { ExportChatDialog } from "@/components/export-chat-dialog";
 import { FavoritesDialog } from "@/components/favorites-dialog";
 import { PromptTemplatesDialog } from "@/components/prompt-templates-dialog";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
+import { MediaLibraryModal } from "@/components/media-library-modal";
+import { useMediaLibrary } from "@/hooks/use-media-library";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useFavorites } from "@/hooks/use-favorites";
 import { usePromptTemplates } from "@/hooks/use-prompt-templates";
@@ -40,12 +42,17 @@ export default function Home() {
       setLocation("/welcome");
     }
   }, [isAuthenticated, isLoading, setLocation]);
+
+  useEffect(() => {
+    useMediaLibrary.getState().preload();
+  }, []);
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
   const [isGptExplorerOpen, setIsGptExplorerOpen] = useState(false);
   const [isGptBuilderOpen, setIsGptBuilderOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
   const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -192,7 +199,7 @@ export default function Home() {
   };
 
   const handleOpenLibrary = () => {
-    setIsLibraryOpen(true);
+    setIsMediaLibraryOpen(true);
   };
 
   const handleSelectGpt = (gpt: Gpt) => {
@@ -265,6 +272,7 @@ export default function Home() {
         setIsExportOpen(false);
         setIsGptExplorerOpen(false);
         setIsLibraryOpen(false);
+        setIsMediaLibraryOpen(false);
         setIsFavoritesOpen(false);
         setIsTemplatesOpen(false);
       },
@@ -402,6 +410,12 @@ export default function Home() {
       <UserLibrary
         open={isLibraryOpen}
         onOpenChange={setIsLibraryOpen}
+      />
+
+      {/* Media Library Modal */}
+      <MediaLibraryModal
+        open={isMediaLibraryOpen}
+        onOpenChange={setIsMediaLibraryOpen}
       />
 
       {/* Search Modal */}
