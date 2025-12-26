@@ -265,6 +265,7 @@ export const toolCallLogs = pgTable("tool_call_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").references(() => users.id),
   chatId: varchar("chat_id"),
+  runId: varchar("run_id"),
   toolId: varchar("tool_id").notNull(),
   providerId: varchar("provider_id").notNull(),
   accountId: varchar("account_id").references(() => integrationAccounts.id),
@@ -280,6 +281,7 @@ export const toolCallLogs = pgTable("tool_call_logs", {
   index("tool_call_logs_user_id_idx").on(table.userId),
   index("tool_call_logs_tool_id_idx").on(table.toolId),
   index("tool_call_logs_created_at_idx").on(table.createdAt),
+  index("tool_call_logs_run_created_idx").on(table.runId, table.createdAt),
 ]);
 
 export const insertToolCallLogSchema = createInsertSchema(toolCallLogs).omit({
@@ -398,6 +400,7 @@ export const agentSteps = pgTable("agent_steps", {
   stepIndex: integer("step_index").notNull().default(0),
 }, (table) => [
   index("agent_steps_run_idx").on(table.runId),
+  index("agent_steps_run_step_idx").on(table.runId, table.stepIndex),
 ]);
 
 export const insertAgentStepSchema = createInsertSchema(agentSteps).omit({
@@ -475,6 +478,8 @@ export const chats = pgTable("chats", {
   archived: text("archived").default("false"),
   hidden: text("hidden").default("false"),
   deletedAt: timestamp("deleted_at"),
+  lastMessageAt: timestamp("last_message_at"),
+  messageCount: integer("message_count").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
@@ -513,6 +518,7 @@ export const chatMessages = pgTable("chat_messages", {
   index("chat_messages_request_idx").on(table.requestId),
   index("chat_messages_status_idx").on(table.status),
   uniqueIndex("chat_messages_request_unique").on(table.requestId),
+  index("chat_messages_chat_created_idx").on(table.chatId, table.createdAt),
 ]);
 
 export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({
@@ -542,6 +548,7 @@ export const chatRuns = pgTable("chat_runs", {
   index("chat_runs_chat_idx").on(table.chatId),
   index("chat_runs_status_idx").on(table.status),
   uniqueIndex("chat_runs_client_request_unique").on(table.chatId, table.clientRequestId),
+  index("chat_runs_chat_created_idx").on(table.chatId, table.createdAt),
 ]);
 
 export const insertChatRunSchema = createInsertSchema(chatRuns).omit({
@@ -1038,6 +1045,90 @@ export const insertCompanyKnowledgeSchema = createInsertSchema(companyKnowledge)
 
 export type InsertCompanyKnowledge = z.infer<typeof insertCompanyKnowledgeSchema>;
 export type CompanyKnowledge = typeof companyKnowledge.$inferSelect;
+
+// ========================================
+// Response Quality Metrics (Enterprise Scalability)
+// ========================================
+
+export const responseQualityMetrics = pgTable("response_quality_metrics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id"),
+  requestId: varchar("request_id").notNull(),
+  provider: text("provider").notNull(),
+  score: integer("score").notNull(),
+  issues: text("issues").array(),
+  tokensUsed: integer("tokens_used"),
+  latencyMs: integer("latency_ms"),
+  userId: varchar("user_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("response_quality_metrics_created_idx").on(table.createdAt),
+  index("response_quality_metrics_provider_created_idx").on(table.provider, table.createdAt),
+  index("response_quality_metrics_user_created_idx").on(table.userId, table.createdAt),
+]);
+
+export const insertResponseQualityMetricSchema = createInsertSchema(responseQualityMetrics).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertResponseQualityMetric = z.infer<typeof insertResponseQualityMetricSchema>;
+export type ResponseQualityMetric = typeof responseQualityMetrics.$inferSelect;
+
+// ========================================
+// Connector Usage Hourly (Enterprise Metrics)
+// ========================================
+
+export const connectorUsageHourly = pgTable("connector_usage_hourly", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  connector: text("connector").notNull(),
+  hourBucket: timestamp("hour_bucket").notNull(),
+  totalCalls: integer("total_calls").default(0),
+  successCount: integer("success_count").default(0),
+  failureCount: integer("failure_count").default(0),
+  totalLatencyMs: integer("total_latency_ms").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("connector_usage_hourly_connector_bucket_idx").on(table.connector, table.hourBucket),
+  index("connector_usage_hourly_connector_created_idx").on(table.connector, table.createdAt),
+]);
+
+export const insertConnectorUsageHourlySchema = createInsertSchema(connectorUsageHourly).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertConnectorUsageHourly = z.infer<typeof insertConnectorUsageHourlySchema>;
+export type ConnectorUsageHourly = typeof connectorUsageHourly.$inferSelect;
+
+// ========================================
+// Offline Message Queue (Resilience)
+// ========================================
+
+export const offlineMessageQueue = pgTable("offline_message_queue", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tempId: varchar("temp_id").notNull().unique(),
+  userId: varchar("user_id"),
+  chatId: varchar("chat_id").references(() => chats.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  status: text("status").default("pending"),
+  retryCount: integer("retry_count").default(0),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  syncedAt: timestamp("synced_at"),
+}, (table) => [
+  index("offline_message_queue_status_created_idx").on(table.status, table.createdAt),
+  index("offline_message_queue_user_status_idx").on(table.userId, table.status),
+]);
+
+export const insertOfflineMessageQueueSchema = createInsertSchema(offlineMessageQueue).omit({
+  id: true,
+  createdAt: true,
+  syncedAt: true,
+});
+
+export type InsertOfflineMessageQueue = z.infer<typeof insertOfflineMessageQueueSchema>;
+export type OfflineMessageQueue = typeof offlineMessageQueue.$inferSelect;
 
 // ========================================
 // Gmail OAuth Tokens (Custom MCP Integration)

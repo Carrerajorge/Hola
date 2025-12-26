@@ -33,13 +33,17 @@ import {
   type ConsentLog, type SharedLink, type InsertSharedLink,
   type CompanyKnowledge, type InsertCompanyKnowledge,
   type GmailOAuthToken, type InsertGmailOAuthToken,
+  type ResponseQualityMetric, type InsertResponseQualityMetric,
+  type ConnectorUsageHourly, type InsertConnectorUsageHourly,
+  type OfflineMessageQueue, type InsertOfflineMessageQueue,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
   gpts, gptCategories, gptVersions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
   notificationEventTypes, notificationPreferences, userSettings,
   integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs,
-  consentLogs, sharedLinks, companyKnowledge, gmailOAuthTokens
+  consentLogs, sharedLinks, companyKnowledge, gmailOAuthTokens,
+  responseQualityMetrics, connectorUsageHourly, offlineMessageQueue
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
@@ -227,6 +231,19 @@ export interface IStorage {
   updateMessageStatus(messageId: string, status: 'pending' | 'processing' | 'done' | 'failed'): Promise<ChatMessage | null>;
   updateMessageContent(messageId: string, content: string, additionalData?: Partial<InsertChatMessage>): Promise<ChatMessage | null>;
   findAssistantResponseForUserMessage(userMessageId: string): Promise<ChatMessage | null>;
+  // Response Quality Metrics
+  recordQualityMetric(metric: InsertResponseQualityMetric): Promise<ResponseQualityMetric>;
+  getQualityMetrics(since: Date, limit?: number): Promise<ResponseQualityMetric[]>;
+  // Connector Usage Hourly
+  upsertConnectorUsage(connector: string, hourBucket: Date, success: boolean, latencyMs: number): Promise<ConnectorUsageHourly>;
+  getConnectorUsageStats(connector: string, since: Date): Promise<ConnectorUsageHourly[]>;
+  // Offline Message Queue
+  createOfflineMessage(message: InsertOfflineMessageQueue): Promise<OfflineMessageQueue>;
+  getOfflineMessages(userId: string, status?: string): Promise<OfflineMessageQueue[]>;
+  updateOfflineMessageStatus(id: string, status: string, error?: string): Promise<OfflineMessageQueue | null>;
+  syncOfflineMessage(id: string): Promise<OfflineMessageQueue | null>;
+  // Chat Stats
+  updateChatMessageStats(chatId: string): Promise<Chat | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -1413,6 +1430,125 @@ export class MemStorage implements IStorage {
         eq(chatMessages.role, 'assistant')
       ));
     return message || null;
+  }
+
+  // Response Quality Metrics
+  async recordQualityMetric(metric: InsertResponseQualityMetric): Promise<ResponseQualityMetric> {
+    const [result] = await db.insert(responseQualityMetrics).values(metric).returning();
+    return result;
+  }
+
+  async getQualityMetrics(since: Date, limit: number = 100): Promise<ResponseQualityMetric[]> {
+    return db.select().from(responseQualityMetrics)
+      .where(sql`${responseQualityMetrics.createdAt} >= ${since}`)
+      .orderBy(desc(responseQualityMetrics.createdAt))
+      .limit(limit);
+  }
+
+  // Connector Usage Hourly
+  async upsertConnectorUsage(connector: string, hourBucket: Date, success: boolean, latencyMs: number): Promise<ConnectorUsageHourly> {
+    const roundedHour = new Date(hourBucket);
+    roundedHour.setMinutes(0, 0, 0);
+
+    const existing = await db.select().from(connectorUsageHourly)
+      .where(and(
+        eq(connectorUsageHourly.connector, connector),
+        eq(connectorUsageHourly.hourBucket, roundedHour)
+      ));
+
+    if (existing.length > 0) {
+      const current = existing[0];
+      const [updated] = await db.update(connectorUsageHourly)
+        .set({
+          totalCalls: (current.totalCalls || 0) + 1,
+          successCount: success ? (current.successCount || 0) + 1 : current.successCount,
+          failureCount: !success ? (current.failureCount || 0) + 1 : current.failureCount,
+          totalLatencyMs: (current.totalLatencyMs || 0) + latencyMs,
+        })
+        .where(eq(connectorUsageHourly.id, current.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db.insert(connectorUsageHourly).values({
+      connector,
+      hourBucket: roundedHour,
+      totalCalls: 1,
+      successCount: success ? 1 : 0,
+      failureCount: !success ? 1 : 0,
+      totalLatencyMs: latencyMs,
+    }).returning();
+    return created;
+  }
+
+  async getConnectorUsageStats(connector: string, since: Date): Promise<ConnectorUsageHourly[]> {
+    return db.select().from(connectorUsageHourly)
+      .where(and(
+        eq(connectorUsageHourly.connector, connector),
+        sql`${connectorUsageHourly.createdAt} >= ${since}`
+      ))
+      .orderBy(desc(connectorUsageHourly.hourBucket));
+  }
+
+  // Offline Message Queue
+  async createOfflineMessage(message: InsertOfflineMessageQueue): Promise<OfflineMessageQueue> {
+    const [result] = await db.insert(offlineMessageQueue).values(message).returning();
+    return result;
+  }
+
+  async getOfflineMessages(userId: string, status?: string): Promise<OfflineMessageQueue[]> {
+    if (status) {
+      return db.select().from(offlineMessageQueue)
+        .where(and(
+          eq(offlineMessageQueue.userId, userId),
+          eq(offlineMessageQueue.status, status)
+        ))
+        .orderBy(offlineMessageQueue.createdAt);
+    }
+    return db.select().from(offlineMessageQueue)
+      .where(eq(offlineMessageQueue.userId, userId))
+      .orderBy(offlineMessageQueue.createdAt);
+  }
+
+  async updateOfflineMessageStatus(id: string, status: string, error?: string): Promise<OfflineMessageQueue | null> {
+    const updates: Partial<OfflineMessageQueue> = { status };
+    if (error) {
+      updates.error = error;
+      updates.retryCount = sql`${offlineMessageQueue.retryCount} + 1` as any;
+    }
+    const [result] = await db.update(offlineMessageQueue)
+      .set(updates)
+      .where(eq(offlineMessageQueue.id, id))
+      .returning();
+    return result || null;
+  }
+
+  async syncOfflineMessage(id: string): Promise<OfflineMessageQueue | null> {
+    const [result] = await db.update(offlineMessageQueue)
+      .set({ status: 'synced', syncedAt: new Date() })
+      .where(eq(offlineMessageQueue.id, id))
+      .returning();
+    return result || null;
+  }
+
+  // Chat Stats
+  async updateChatMessageStats(chatId: string): Promise<Chat | undefined> {
+    const messages = await db.select().from(chatMessages)
+      .where(eq(chatMessages.chatId, chatId))
+      .orderBy(desc(chatMessages.createdAt));
+    
+    const messageCount = messages.length;
+    const lastMessageAt = messages.length > 0 ? messages[0].createdAt : null;
+
+    const [result] = await db.update(chats)
+      .set({ 
+        messageCount, 
+        lastMessageAt,
+        updatedAt: new Date() 
+      })
+      .where(eq(chats.id, chatId))
+      .returning();
+    return result;
   }
 }
 
