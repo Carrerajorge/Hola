@@ -173,13 +173,15 @@ const RowHeader = memo(function RowHeader({
   row: number;
   style: React.CSSProperties;
 }) {
+  const displayNumber = row + 1;
   return (
     <div
       className="absolute flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-r border-b border-gray-200 dark:border-gray-700 select-none"
       style={style}
       data-testid={`row-header-${row}`}
+      title={`Fila ${displayNumber}`}
     >
-      {row + 1}
+      {displayNumber}
     </div>
   );
 });
