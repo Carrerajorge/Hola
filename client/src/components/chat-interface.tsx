@@ -2340,6 +2340,7 @@ export function ChatInterface({
       const isFigmaMode = selectedDocTool === "figma";
       const isPptMode = documentType === "ppt";
       const isWordMode = documentType === "word";
+      const isExcelMode = documentType === "excel";
       
       // Check if document has existing content (not just placeholder)
       const currentDocContent = editedDocumentContent || "";
@@ -2376,10 +2377,34 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
         }
       }
       
+      // Build Excel system prompt for direct streaming to spreadsheet
+      const excelSystemPrompt = `Eres un asistente de hojas de cálculo Excel. Genera datos estructurados en formato CSV.
+
+FORMATO DE RESPUESTA:
+- Para crear una nueva hoja: [NUEVA_HOJA:Nombre de la hoja]
+- Datos en formato CSV con comas como separador
+- Primera fila como encabezados
+- Sin explicaciones, solo datos
+
+EJEMPLO:
+[NUEVA_HOJA:Ventas 2024]
+Mes,Ventas,Crecimiento
+Enero,15000,5%
+Febrero,18000,20%
+Marzo,22000,22%
+
+IMPORTANTE:
+- Responde SOLO con datos CSV, sin texto explicativo
+- Usa comas como separador de columnas
+- Cada fila en una línea separada
+- Los datos numéricos sin formato de moneda (solo números)`;
+      
       // Build chat history with appropriate system prompt
       let finalChatHistory: Array<{role: string; content: string}> = chatHistory;
       if (isPptMode) {
         finalChatHistory = [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory];
+      } else if (isExcelMode) {
+        finalChatHistory = [{ role: "system", content: excelSystemPrompt }, ...chatHistory];
       } else if (isWordMode) {
         finalChatHistory = [{ role: "system", content: wordSystemPrompt }, ...chatHistory];
       }
@@ -2523,13 +2548,16 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
                   // Update UI based on mode
                   if (isPptMode && shouldWriteToDoc) {
                     pptStreaming.processChunk(data.content);
-                  } else if (shouldWriteToDoc && docInsertContentRef.current) {
+                  } else if (isExcelMode && shouldWriteToDoc) {
+                    // Excel mode: show streaming indicator in chat, data goes to Excel at end
+                    streamingContentRef.current = fullContent;
+                    setStreamingContent(fullContent);
+                  } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
                     try {
-                      // Cumulative mode: combine existing HTML + separator + converted new markdown
+                      // Word mode: Cumulative HTML mode
                       const newContentHTML = markdownToTipTap(fullContent);
                       const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
                       docInsertContentRef.current(cumulativeHTML, 'html');
-                      // Update state so subsequent instructions have the current cumulative content
                       setEditedDocumentContent(cumulativeHTML);
                     } catch (err) {
                       console.error('[ChatInterface] Error streaming to document:', err);
@@ -2580,13 +2608,34 @@ Responde SOLO con el contenido del documento en formato Markdown, sin explicacio
             userMessageId: userMsgId,
           };
           await onSendMessage(confirmMsg);
-        } else if (shouldWriteToDoc && docInsertContentRef.current) {
+        } else if (isExcelMode && shouldWriteToDoc && docInsertContentRef.current) {
+          // Excel mode: send raw CSV data to Excel editor for cell-by-cell streaming
           try {
-            // Cumulative mode: combine existing HTML + separator + converted new markdown
+            console.log('[ChatInterface] Excel streaming: sending', fullContent.length, 'chars to Excel');
+            // Clear streaming content first
+            streamingContentRef.current = "";
+            setStreamingContent("");
+            // Send raw CSV data to Excel - insertContentFn will handle the streaming animation
+            await docInsertContentRef.current(fullContent);
+          } catch (err) {
+            console.error('[ChatInterface] Error streaming to Excel:', err);
+          }
+          
+          const confirmMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: "✓ Datos generados en la hoja de cálculo",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          };
+          await onSendMessage(confirmMsg);
+        } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
+          try {
+            // Word mode: Cumulative HTML mode
             const newContentHTML = markdownToTipTap(fullContent);
             const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
             docInsertContentRef.current(cumulativeHTML, 'html');
-            // Update state so subsequent instructions have the current cumulative content
             setEditedDocumentContent(cumulativeHTML);
           } catch (err) {
             console.error('[ChatInterface] Error finalizing document:', err);
