@@ -91,7 +91,13 @@ Preferred communication style: Simple, everyday language.
 - **Runtime**: Node.js with Express.js.
 - **API Design**: RESTful endpoints.
 - **Build System**: esbuild (server), Vite (client).
-- **LLM Gateway**: Centralized `llmGateway.ts` for enterprise-grade reliability with Circuit Breaker, Exponential Backoff Retries, Per-User Rate Limiting, Request Timeout, Response Caching, Context Truncation, Metrics Collection, and SSE Streaming.
+- **LLM Gateway**: Centralized `llmGateway.ts` for enterprise-grade reliability:
+  - **Multi-Provider Fallback**: xAI → Gemini automatic failover with per-provider circuit breakers
+  - **Request Deduplication**: SHA256 content hashing prevents duplicate API calls for in-flight requests
+  - **Streaming Recovery**: Checkpoint system every 10 chunks for stream resumption
+  - **Token Usage Tracking**: Per-request metrics (provider, user, model, tokens, latency), `getTokenUsageStats(since)` for analytics
+  - **Health Check**: `healthCheck()` method tests both providers with latency measurement
+  - Circuit Breaker, Exponential Backoff Retries, Per-User Rate Limiting, Request Timeout, Response Caching, Context Truncation
 - **ETL Agent**: Automated economic data processing from official sources (e.g., World Bank API) into normalized schemas and ZIP bundles with Excel workbooks and audit reports.
 - **Multi-Intent Pipeline**: Processes complex user prompts via Plan → Decompose → Execute → Aggregate stages, featuring automatic detection, parallel execution, and error handling.
 - **Document Generation System**: Spec-based document rendering for Excel (.xlsx) and Word (.docx) files with LLM-driven generation and validation repair loops.
