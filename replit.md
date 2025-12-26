@@ -76,6 +76,31 @@ Preferred communication style: Simple, everyday language.
 ### UI Cleanup (STABLE)
 - Removed "Conectores" button from composer UI (`client/src/components/composer.tsx`)
 
+### Enterprise Features (December 2024 - STABLE)
+- **Offline Mode** (`client/src/hooks/use-offline-sync.ts`, `client/src/lib/offlineQueue.ts`):
+  - IndexedDB queue for offline messages with auto-sync on reconnect
+  - Retry logic: 5 max retries, 30s intervals
+  - Failed messages excluded from auto-retry loop
+  - UI shows pending/failed counts with manual retry button
+- **Unified Workspace** (`client/src/pages/workspace.tsx`, `client/src/contexts/workspace-context.tsx`):
+  - Resizable panels using react-resizable-panels (chat + documents + data)
+  - AI Steps Rail visualizing agent progress (planning/browsing/generation)
+  - Panel sizes persist to localStorage
+- **AI Quality System** (`server/services/responseQuality.ts`, `server/lib/qualityMetrics.ts`):
+  - Response quality analysis with 0-100 scoring
+  - Configurable content filters (sensitivity levels)
+  - Quality metrics linked to token tracking (1000 record rotation)
+- **System Observability**:
+  - `server/lib/structuredLogger.ts`: JSON logging with unique request IDs (nanoid)
+  - `server/lib/healthMonitor.ts`: Health monitoring for xAI/Gemini/Database (30-60s intervals)
+  - `server/lib/alertManager.ts`: Alert management (200 rotation limit)
+  - `server/lib/requestTracerMiddleware.ts`: Request tracing middleware
+- **Connector Management** (`server/lib/connectorMetrics.ts`, `server/lib/connectorAlerting.ts`):
+  - Usage tracking per connector (gmail, gemini, xai, database, forms)
+  - Hourly buckets with 24-hour retention
+  - Threshold-based alerting (failure rate 30%, latency 5000ms, usage spikes 2x)
+  - API endpoints: `/api/connectors/stats`, `/api/connectors/:name/stats`
+
 ## System Architecture
 ### Frontend
 - **Framework**: React with TypeScript, Vite.
