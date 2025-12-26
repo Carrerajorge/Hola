@@ -699,6 +699,7 @@ interface ChatInterfaceProps {
   chatId?: string | null;
   onOpenApps?: () => void;
   onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
+  onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
 }
 
 interface UploadedFile {
@@ -726,7 +727,8 @@ export function ChatInterface({
   setAiProcessSteps,
   chatId,
   onOpenApps,
-  onUpdateMessageAttachments
+  onUpdateMessageAttachments,
+  onEditMessageAndTruncate
 }: ChatInterfaceProps) {
   const { user } = useAuth();
   const [input, setInput] = useState("");
@@ -1695,6 +1697,10 @@ export function ChatInterface({
     const editedContent = editContent.trim();
     setEditingMessageId(null);
     setEditContent("");
+    
+    if (chatId && onEditMessageAndTruncate) {
+      onEditMessageAndTruncate(chatId, msgId, editedContent, msgIndex);
+    }
     
     setAiState("thinking");
     streamingContentRef.current = "";
