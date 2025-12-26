@@ -35,10 +35,23 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export function useExcelStreaming(grid: SparseGrid) {
   const onGridChangeRef = useRef<((grid: SparseGrid) => void) | null>(null);
+  const gridRef = useRef<SparseGrid>(grid);
+  
+  // Update the grid ref when the grid prop changes
+  useEffect(() => {
+    gridRef.current = grid;
+    formulaEngineRef.current = new FormulaEngine(grid);
+  }, [grid]);
   
   const setOnGridChange = useCallback((fn: (grid: SparseGrid) => void) => {
     onGridChangeRef.current = fn;
   }, []);
+  
+  const setGrid = useCallback((newGrid: SparseGrid) => {
+    gridRef.current = newGrid;
+    formulaEngineRef.current = new FormulaEngine(newGrid);
+  }, []);
+  
   const [streamStatus, setStreamStatus] = useState<StreamStatus>(STREAM_STATUS.IDLE);
   const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
   const [streamProgress, setStreamProgress] = useState<StreamProgress>({ current: 0, total: 0 });
@@ -48,13 +61,14 @@ export function useExcelStreaming(grid: SparseGrid) {
   const streamQueue = useRef<CellUpdate[]>([]);
   const isStreaming = useRef(false);
   const isPaused = useRef(false);
-  const formulaEngine = useRef(new FormulaEngine(grid));
+  const formulaEngineRef = useRef(new FormulaEngine(grid));
 
   const queueCell = useCallback((row: number, col: number, value: string, delay = 50) => {
     streamQueue.current.push({ row, col, value, delay });
   }, []);
 
   const typeInCell = useCallback(async (row: number, col: number, finalValue: string) => {
+    const currentGrid = gridRef.current;
     const isFormula = String(finalValue).startsWith('=');
     
     if (isFormula) {
@@ -74,9 +88,9 @@ export function useExcelStreaming(grid: SparseGrid) {
         await sleep(25);
       }
       
-      formulaEngine.current = new FormulaEngine(grid);
-      const evaluated = formulaEngine.current.evaluate(finalValue);
-      grid.setCell(row, col, {
+      formulaEngineRef.current = new FormulaEngine(currentGrid);
+      const evaluated = formulaEngineRef.current.evaluate(finalValue);
+      currentGrid.setCell(row, col, {
         value: String(evaluated),
         formula: finalValue,
         format: {}
@@ -97,7 +111,7 @@ export function useExcelStreaming(grid: SparseGrid) {
         await sleep(20);
       }
       
-      grid.setCell(row, col, {
+      currentGrid.setCell(row, col, {
         value: String(finalValue),
         formula: undefined,
         format: {}
@@ -105,8 +119,8 @@ export function useExcelStreaming(grid: SparseGrid) {
     }
     
     setTypingValue('');
-    onGridChangeRef.current?.(grid);
-  }, [grid]);
+    onGridChangeRef.current?.(currentGrid);
+  }, []);
 
   const processStreamQueue = useCallback(async () => {
     if (isStreaming.current || streamQueue.current.length === 0) return;
@@ -227,6 +241,7 @@ export function useExcelStreaming(grid: SparseGrid) {
     isRecentCell,
     isActiveCell,
     setOnGridChange,
+    setGrid,
     STREAM_STATUS
   };
 }

@@ -557,7 +557,9 @@ export function SpreadsheetEditor({
     }
   }, [editingCell]);
 
-  const insertContentFn = useCallback((text: string) => {
+  const insertContentFn = useCallback(async (text: string) => {
+    console.log('[insertContentFn] Called with text length:', text.length);
+    
     // Clean markdown from text
     const cleanMarkdown = (str: string) => str
       .replace(/^\*\*[^*]+\*\*\s*/gm, '')
@@ -581,7 +583,19 @@ export function SpreadsheetEditor({
       };
     };
     
-    // Parse lines and insert into a sheet, handling formulas
+    // Convert lines to 2D array for streaming
+    const linesToMatrix = (lines: string[]): (string | number | null)[][] => {
+      return lines.map(line => {
+        const values = line.split(/[,\t]/).map(v => v.trim());
+        return values.map(v => {
+          if (!v) return null;
+          const num = Number(v);
+          return isNaN(num) ? v : num;
+        });
+      });
+    };
+    
+    // Parse lines and insert into a sheet, handling formulas (non-streaming fallback)
     const insertLines = (lines: string[], sheetData: SpreadsheetData): SpreadsheetData => {
       const newCells = { ...sheetData.cells };
       let maxColInserted = 0;
@@ -639,13 +653,36 @@ export function SpreadsheetEditor({
     // Check if there are sheet commands
     const hasSheetCommands = /\[(NUEVA_HOJA|HOJA):/.test(text);
     
-    // If no sheet commands, insert into active sheet
+    // If no sheet commands, insert into active sheet with streaming
     if (!hasSheetCommands) {
       const cleanText = cleanMarkdown(text);
       const lines = cleanText.split('\n').filter(line => line.trim());
       if (lines.length === 0 && !chartConfig) return;
       
-      if (lines.length > 0) {
+      if (lines.length > 0 && useVirtualized) {
+        // Find the first empty row in the sparse grid
+        let startRow = 0;
+        for (let r = 0; r < 1000; r++) {
+          let rowHasData = false;
+          for (let c = 0; c < 26; c++) {
+            const cell = sparseGrid.getCell(r, c);
+            if (cell.value) {
+              rowHasData = true;
+              break;
+            }
+          }
+          if (!rowHasData) {
+            startRow = r;
+            break;
+          }
+          startRow = r + 1;
+        }
+        
+        // Use streaming for virtualized mode
+        const matrix = linesToMatrix(lines);
+        console.log('[insertContentFn] Streaming', matrix.length, 'rows to active sheet starting at row', startRow);
+        await streaming.simulateStreaming(matrix, startRow, 0);
+      } else if (lines.length > 0) {
         setData(prev => insertLines(lines, prev));
       }
       
@@ -696,6 +733,19 @@ export function SpreadsheetEditor({
       }
     }
     
+    // Pre-calculate the last sheet's data for streaming
+    let lastSheetLines: string[] = [];
+    if (useVirtualized && commands.length > 0) {
+      const lastCmd = commands[commands.length - 1];
+      if (lastCmd.type === 'NUEVA_HOJA') {
+        const contentStart = lastCmd.endIndex;
+        const contentEnd = text.length;
+        const content = text.substring(contentStart, contentEnd);
+        const cleanedText = cleanMarkdown(content);
+        lastSheetLines = cleanedText.split('\n').filter(line => line.trim());
+      }
+    }
+    
     // Process multiple sheets
     setWorkbook(prev => {
       const newSheets: SheetData[] = prev.sheets.map(s => ({ ...s, data: { ...s.data, cells: { ...s.data.cells } } }));
@@ -715,8 +765,12 @@ export function SpreadsheetEditor({
           const newId = `sheet${Date.now()}_${idx}`;
           const newSheet = createEmptySheet(newId, cmd.name);
           
-          if (lines.length > 0) {
-            newSheet.data = insertLines(lines, newSheet.data);
+          // For virtualized mode, we'll stream the last sheet - skip direct insert
+          const isLastCommand = idx === commands.length - 1;
+          if (!(useVirtualized && isLastCommand && lines.length > 0)) {
+            if (lines.length > 0) {
+              newSheet.data = insertLines(lines, newSheet.data);
+            }
           }
           
           if (sectionChartConfig) {
@@ -746,12 +800,33 @@ export function SpreadsheetEditor({
       return newWorkbook;
     });
     
+    // Stream the last sheet's data if we're in virtualized mode
+    if (useVirtualized && lastSheetLines.length > 0) {
+      // Wait for React to update the workbook state
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Create a fresh sparse grid for the new sheet
+      const newGrid = new SparseGrid();
+      setSparseGrid(newGrid);
+      setGridVersion(v => v + 1);
+      
+      // Update the streaming hook's grid reference
+      streaming.setGrid(newGrid);
+      
+      // Wait for state update
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      const matrix = linesToMatrix(lastSheetLines);
+      console.log('[insertContentFn] Streaming', matrix.length, 'rows to new sheet');
+      await streaming.simulateStreaming(matrix, 0, 0);
+    }
+    
     // Show chart if any sheet had chart config
     if (finalChartConfig) {
       setShowChart(true);
       setChartType(finalChartConfig.type);
     }
-  }, [setData]);
+  }, [setData, useVirtualized, streaming]);
 
   useEffect(() => {
     if (onInsertContent && !insertFnRegisteredRef.current) {
