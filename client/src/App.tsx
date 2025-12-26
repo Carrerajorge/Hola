@@ -12,6 +12,7 @@ import SettingsPage from "@/pages/settings";
 import PrivacyPage from "@/pages/privacy";
 import AdminPage from "@/pages/admin";
 import WorkspaceSettingsPage from "@/pages/workspace-settings";
+import WorkspacePage from "@/pages/workspace";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
@@ -41,6 +42,7 @@ function Router() {
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/admin" component={AdminPage} />
       <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
+      <Route path="/workspace" component={WorkspacePage} />
       <Route component={NotFound} />
     </Switch>
   );
