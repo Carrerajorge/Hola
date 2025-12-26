@@ -58,6 +58,21 @@ Preferred communication style: Simple, everyday language.
 - **Sidebar Indicators**:
   - SVG spinner for active chats, badge for pending responses
 
+### Productivity Features (December 2024 - STABLE)
+- **Chat Folders** (`client/src/hooks/use-chat-folders.ts`):
+  - Create folders with 6 color options
+  - Drag chats into folders, collapsible groups
+  - localStorage persistence
+- **Command History** (`client/src/hooks/use-command-history.ts`):
+  - Arrow up/down to navigate previous messages
+  - Last 50 messages stored
+- **Draft Auto-save** (`client/src/hooks/use-draft.ts`):
+  - Debounced save per chat
+  - Restore on chat switch
+- **Suggested Replies** (`client/src/components/suggested-replies.tsx`):
+  - Context-aware suggestions after AI responses
+  - Code, list, and default suggestion types
+
 ### UI Cleanup (STABLE)
 - Removed "Conectores" button from composer UI (`client/src/components/composer.tsx`)
 
