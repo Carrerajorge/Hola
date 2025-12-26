@@ -38,6 +38,26 @@ Preferred communication style: Simple, everyday language.
   - `client/src/components/charts/smart-table.tsx`: Copy, download, expand buttons
 - **Styling**: `opacity-0 group-hover:opacity-100` pattern, `z-10` for visibility
 
+### Professional Features (December 2024 - STABLE)
+- **Keyboard Shortcuts** (`client/src/hooks/use-keyboard-shortcuts.ts`):
+  - Ctrl+N: New chat, Ctrl+K: Search, Ctrl+E: Export, Ctrl+T: Templates
+  - Ctrl+Shift+F: Favorites, Ctrl+/: Show shortcuts, Escape: Close dialogs
+- **PWA Support** (`client/public/manifest.json`):
+  - Installable app with standalone display mode
+  - Theme colors matching dark mode
+- **Export Conversations** (`client/src/components/export-chat-dialog.tsx`):
+  - TXT, JSON, and Markdown export formats
+- **Favorites System** (`client/src/hooks/use-favorites.ts`, `client/src/components/favorites-dialog.tsx`):
+  - Star important messages, localStorage persistence
+  - Search and navigate to original chat
+- **Prompt Templates** (`client/src/hooks/use-prompt-templates.ts`, `client/src/components/prompt-templates-dialog.tsx`):
+  - Predefined templates with categories
+  - Custom templates, usage tracking
+- **Browser Notifications** (`client/src/hooks/use-notifications.ts`):
+  - Notify when background task completes
+- **Sidebar Indicators**:
+  - SVG spinner for active chats, badge for pending responses
+
 ### UI Cleanup (STABLE)
 - Removed "Conectores" button from composer UI (`client/src/components/composer.tsx`)
 
