@@ -790,6 +790,7 @@ export function ChatInterface({
   const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
   const dragCounterRef = useRef(0);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
+  const previewDocumentRef = useRef<DocumentBlock | null>(null);
   const editedDocumentContentRef = useRef<string>("");
   const chatIdRef = useRef<string | null>(null);
   
@@ -926,10 +927,14 @@ export function ChatInterface({
     return () => document.removeEventListener("keydown", handleEscape);
   }, [previewFileAttachment]);
   
-  // Keep ref in sync with state
+  // Keep refs in sync with state
   useEffect(() => {
     activeDocEditorRef.current = activeDocEditor;
   }, [activeDocEditor]);
+  
+  useEffect(() => {
+    previewDocumentRef.current = previewDocument;
+  }, [previewDocument]);
   
   // Document editor is now only opened manually by the user clicking the buttons
   // Removed auto-open behavior to prevent unwanted document creation
@@ -2335,12 +2340,15 @@ export function ChatInterface({
         .map(f => f.dataUrl as string);
 
       // Determine if we're in document mode for special AI behavior
-      const isDocumentMode = !!activeDocEditorRef.current;
-      const documentType = activeDocEditorRef.current?.type || null;
+      // Check both activeDocEditor and previewDocument for Excel mode
+      const isDocumentMode = !!activeDocEditorRef.current || !!previewDocumentRef.current;
+      const documentType = activeDocEditorRef.current?.type || previewDocumentRef.current?.type || null;
       const isFigmaMode = selectedDocTool === "figma";
       const isPptMode = documentType === "ppt";
       const isWordMode = documentType === "word";
       const isExcelMode = documentType === "excel";
+      
+      console.log('[ChatInterface] Document mode detection:', { isDocumentMode, documentType, isExcelMode, hasInsertFn: !!docInsertContentRef.current });
       
       // Check if document has existing content (not just placeholder)
       const currentDocContent = editedDocumentContent || "";
@@ -2410,7 +2418,8 @@ IMPORTANTE:
       }
       
       // Capture document mode state NOW using ref (avoids closure issues)
-      const shouldWriteToDoc = !!activeDocEditorRef.current;
+      // For Excel, also check previewDocument since Excel can be opened via preview
+      const shouldWriteToDoc = !!activeDocEditorRef.current || (isExcelMode && !!docInsertContentRef.current);
       
       // Capture existing document HTML for cumulative mode (shared between SSE and legacy)
       // Note: currentDocContent is HTML from the editor
