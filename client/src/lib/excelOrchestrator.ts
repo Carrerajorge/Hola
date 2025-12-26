@@ -23,11 +23,13 @@ export interface ExecutionTask {
 export interface PromptAnalysis {
   sheets: string[];
   requiresCharts: boolean;
-  chartTypes: ('bar' | 'line' | 'pie')[];
+  chartTypes: ('bar' | 'line' | 'pie' | 'area')[];
   requiresFormulas: boolean;
   formulaTypes: string[];
   requiresConditionalFormat: boolean;
   dataTheme: 'sales' | 'employees' | 'inventory' | null;
+  yearRange?: { start: number; end: number };
+  isSimpleChartRequest: boolean;
 }
 
 export interface ChartDataRange {
@@ -142,8 +144,17 @@ export class ExcelOrchestrator {
       requiresFormulas: false,
       formulaTypes: [],
       requiresConditionalFormat: false,
-      dataTheme: null
+      dataTheme: null,
+      isSimpleChartRequest: false
     };
+
+    const yearMatch = prompt.match(/(\d{4})\s*(?:al?|to|-|hasta)\s*(\d{4})/i);
+    if (yearMatch) {
+      analysis.yearRange = {
+        start: parseInt(yearMatch[1]),
+        end: parseInt(yearMatch[2])
+      };
+    }
 
     const sheetPatterns = [
       { regex: /(ventas|sales)/gi, name: 'Ventas' },
@@ -160,7 +171,7 @@ export class ExcelOrchestrator {
       }
     });
 
-    if (/gráfico|chart|graph/i.test(lowerPrompt)) {
+    if (/gr[aá]fic[oa]?s?|chart|graph/i.test(lowerPrompt)) {
       analysis.requiresCharts = true;
       if (/barras?|columnas?|bar|column/i.test(lowerPrompt)) {
         analysis.chartTypes.push('bar');
@@ -168,8 +179,14 @@ export class ExcelOrchestrator {
       if (/circular|pie|pastel|torta/i.test(lowerPrompt)) {
         analysis.chartTypes.push('pie');
       }
-      if (/líneas?|line/i.test(lowerPrompt)) {
+      if (/l[ií]neas?|line/i.test(lowerPrompt)) {
         analysis.chartTypes.push('line');
+      }
+      if (/[aá]rea/i.test(lowerPrompt)) {
+        analysis.chartTypes.push('line');
+      }
+      if (analysis.chartTypes.length === 0) {
+        analysis.chartTypes.push('bar');
       }
     }
 
@@ -198,13 +215,19 @@ export class ExcelOrchestrator {
       analysis.sheets = ['Ventas', 'Resumen', 'Gráficos', 'Análisis'];
     }
 
+    if (analysis.requiresCharts && !analysis.dataTheme && analysis.sheets.length === 0) {
+      analysis.isSimpleChartRequest = true;
+    }
+
     return analysis;
   }
 
   generateExecutionPlan(analysis: PromptAnalysis): ExecutionTask[] {
     const plan: ExecutionTask[] = [];
 
-    if (analysis.sheets.includes('Ventas') || analysis.dataTheme === 'sales') {
+    if (analysis.isSimpleChartRequest) {
+      plan.push(...this.generateSimpleChartPlan(analysis));
+    } else if (analysis.sheets.includes('Ventas') || analysis.dataTheme === 'sales') {
       plan.push(...this.generateSalesWorkbookPlan());
     } else {
       analysis.sheets.forEach((sheetName, idx) => {
@@ -216,6 +239,59 @@ export class ExcelOrchestrator {
     }
 
     return plan;
+  }
+
+  generateSimpleChartPlan(analysis: PromptAnalysis): ExecutionTask[] {
+    const startYear = analysis.yearRange?.start || 2020;
+    const endYear = analysis.yearRange?.end || 2025;
+    const chartType = analysis.chartTypes[0] || 'bar';
+    
+    const yearData: (string | number)[][] = [['Año', 'Valor']];
+    for (let year = startYear; year <= endYear; year++) {
+      const value = Math.round(100 + Math.random() * 900);
+      yearData.push([String(year), value]);
+    }
+
+    const dataRowCount = yearData.length - 1;
+    const chartTitle = chartType === 'bar' ? 'Gráfico de Barras' : 
+                       chartType === 'line' ? 'Gráfico de Líneas' :
+                       chartType === 'pie' ? 'Gráfico Circular' : 'Gráfico';
+
+    return [
+      {
+        action: ACTIONS.CREATE_SHEET,
+        params: { name: 'Datos', index: 0 }
+      },
+      {
+        action: ACTIONS.INSERT_DATA,
+        params: {
+          sheetName: 'Datos',
+          startRow: 0,
+          startCol: 0,
+          data: yearData,
+          headers: true
+        }
+      },
+      {
+        action: ACTIONS.APPLY_STYLE,
+        params: {
+          sheetName: 'Datos',
+          range: { startRow: 0, endRow: 0, startCol: 0, endCol: 1 },
+          style: { fontWeight: 'bold', backgroundColor: '#3b82f6', color: '#ffffff' }
+        }
+      },
+      {
+        action: ACTIONS.CREATE_CHART,
+        params: {
+          sheetName: 'Datos',
+          chartType: chartType,
+          title: `${chartTitle} (${startYear}-${endYear})`,
+          dataRange: { startRow: 1, endRow: dataRowCount, startCol: 0, endCol: 1 },
+          position: { row: 0, col: 3 },
+          size: { width: 400, height: 300 }
+        }
+      }
+    ];
   }
 
   generateSalesWorkbookPlan(): ExecutionTask[] {

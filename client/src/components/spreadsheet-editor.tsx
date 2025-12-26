@@ -495,8 +495,8 @@ export function SpreadsheetEditor({
     
     const lowerPrompt = aiPrompt.toLowerCase();
     
-    // Detect complex prompts that need orchestration
-    const isComplexPrompt = /completo|análisis|análisis completo|4 hojas|gráficos?|chart|dashboard|resumen|fórmulas múltiples/i.test(lowerPrompt);
+    // Detect complex prompts that need orchestration (includes chart requests)
+    const isComplexPrompt = /completo|análisis|análisis completo|4 hojas|gráficos?|gráfica|grafica|gr[aá]fico de barras|gr[aá]fico de lineas|gr[aá]fico de pastel|charts?|bar chart|line chart|pie chart|dashboard|resumen|fórmulas múltiples|crea.*gr[aá]fic|genera.*gr[aá]fic/i.test(lowerPrompt);
     
     if (isComplexPrompt) {
       // Use the AI Orchestrator for complex multi-sheet workbooks

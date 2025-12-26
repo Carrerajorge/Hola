@@ -938,7 +938,7 @@ export function ChatInterface({
   }, [previewDocument]);
   
   const isComplexExcelPrompt = (prompt: string): boolean => {
-    return /completo|análisis|análisis completo|4 hojas|gráficos?|charts?|dashboard|resumen ejecutivo|fórmulas múltiples|ventas.*gráfico|workbook/i.test(prompt.toLowerCase());
+    return /completo|análisis|análisis completo|4 hojas|gráficos?|gráfica|grafica|gr[aá]fico de barras|gr[aá]fico de lineas|gr[aá]fico de pastel|charts?|bar chart|line chart|pie chart|dashboard|resumen ejecutivo|fórmulas múltiples|ventas.*gráfico|workbook|crea.*gr[aá]fic|genera.*gr[aá]fic|insert.*chart/i.test(prompt.toLowerCase());
   };
   
   // Document editor is now only opened manually by the user clicking the buttons
