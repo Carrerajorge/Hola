@@ -1,7 +1,10 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionChunk } from "openai/resources/chat/completions";
 import { MODELS } from "./openai";
+import { geminiChat, geminiStreamChat, GEMINI_MODELS, type GeminiChatMessage } from "./gemini";
+import crypto from "crypto";
 
+// ===== Types =====
 interface CircuitBreakerState {
   failures: number;
   lastFailure: number;
@@ -23,6 +26,9 @@ interface LLMRequestOptions {
   userId?: string;
   requestId?: string;
   timeout?: number;
+  provider?: "xai" | "gemini" | "auto";
+  enableFallback?: boolean;
+  skipCache?: boolean;
 }
 
 interface LLMResponse {
@@ -35,7 +41,9 @@ interface LLMResponse {
   requestId: string;
   latencyMs: number;
   model: string;
+  provider: "xai" | "gemini";
   cached?: boolean;
+  fromFallback?: boolean;
 }
 
 interface StreamChunk {
@@ -43,8 +51,37 @@ interface StreamChunk {
   sequenceId: number;
   done: boolean;
   requestId: string;
+  provider?: "xai" | "gemini";
+  checkpoint?: StreamCheckpoint;
 }
 
+interface StreamCheckpoint {
+  requestId: string;
+  sequenceId: number;
+  accumulatedContent: string;
+  timestamp: number;
+}
+
+interface InFlightRequest {
+  promise: Promise<LLMResponse>;
+  startTime: number;
+}
+
+interface TokenUsageRecord {
+  requestId: string;
+  userId: string;
+  provider: "xai" | "gemini";
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  timestamp: number;
+  latencyMs: number;
+  cached: boolean;
+  fromFallback: boolean;
+}
+
+// ===== Configuration =====
 const CIRCUIT_BREAKER_CONFIG = {
   failureThreshold: 5,
   resetTimeoutMs: 30000,
@@ -66,12 +103,32 @@ const RETRY_CONFIG = {
 
 const DEFAULT_TIMEOUT_MS = 60000;
 const MAX_CONTEXT_TOKENS = 8000;
+const CACHE_TTL_MS = 300000; // 5 minutes
+const IN_FLIGHT_TIMEOUT_MS = 120000; // 2 minutes
+const TOKEN_HISTORY_MAX = 1000;
+
+// ===== Provider Mapping =====
+const PROVIDER_MODELS = {
+  xai: {
+    default: MODELS.TEXT,
+    vision: MODELS.VISION,
+  },
+  gemini: {
+    default: GEMINI_MODELS.FLASH_PREVIEW,
+    pro: GEMINI_MODELS.PRO,
+    flash: GEMINI_MODELS.FLASH,
+  },
+};
 
 class LLMGateway {
-  private client: OpenAI;
-  private circuitBreaker: CircuitBreakerState;
+  private xaiClient: OpenAI;
+  private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
   private rateLimitByUser: Map<string, RateLimitState> = new Map();
   private requestCache: Map<string, { response: LLMResponse; expiresAt: number }> = new Map();
+  private inFlightRequests: Map<string, InFlightRequest> = new Map();
+  private streamCheckpoints: Map<string, StreamCheckpoint> = new Map();
+  private tokenUsageHistory: TokenUsageRecord[] = [];
+  
   private metrics: {
     totalRequests: number;
     successfulRequests: number;
@@ -81,21 +138,24 @@ class LLMGateway {
     rateLimitHits: number;
     circuitBreakerOpens: number;
     cacheHits: number;
+    fallbackSuccesses: number;
+    deduplicatedRequests: number;
+    streamRecoveries: number;
+    byProvider: {
+      xai: { requests: number; tokens: number; failures: number };
+      gemini: { requests: number; tokens: number; failures: number };
+    };
   };
 
   constructor() {
-    this.client = new OpenAI({
+    this.xaiClient = new OpenAI({
       baseURL: "https://api.x.ai/v1",
       apiKey: process.env.XAI_API_KEY,
     });
 
-    this.circuitBreaker = {
-      failures: 0,
-      lastFailure: 0,
-      state: "closed",
-      halfOpenAt: 0,
-      halfOpenAttempts: 0,
-    };
+    // Initialize circuit breakers for each provider
+    this.circuitBreakers.set("xai", this.createCircuitBreaker());
+    this.circuitBreakers.set("gemini", this.createCircuitBreaker());
 
     this.metrics = {
       totalRequests: 0,
@@ -106,27 +166,70 @@ class LLMGateway {
       rateLimitHits: 0,
       circuitBreakerOpens: 0,
       cacheHits: 0,
+      fallbackSuccesses: 0,
+      deduplicatedRequests: 0,
+      streamRecoveries: 0,
+      byProvider: {
+        xai: { requests: 0, tokens: 0, failures: 0 },
+        gemini: { requests: 0, tokens: 0, failures: 0 },
+      },
     };
 
+    // Cleanup intervals
     setInterval(() => this.cleanupCache(), 60000);
+    setInterval(() => this.cleanupInFlightRequests(), 30000);
+    setInterval(() => this.cleanupStreamCheckpoints(), 60000);
   }
 
+  private createCircuitBreaker(): CircuitBreakerState {
+    return {
+      failures: 0,
+      lastFailure: 0,
+      state: "closed",
+      halfOpenAt: 0,
+      halfOpenAttempts: 0,
+    };
+  }
+
+  // ===== Request Deduplication =====
+  private generateContentHash(messages: ChatCompletionMessageParam[], options: LLMRequestOptions): string {
+    const content = JSON.stringify({
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      model: options.model,
+      temperature: options.temperature,
+      topP: options.topP,
+      maxTokens: options.maxTokens,
+    });
+    return crypto.createHash("sha256").update(content).digest("hex").slice(0, 32);
+  }
+
+  private getInFlightRequest(hash: string): InFlightRequest | undefined {
+    const request = this.inFlightRequests.get(hash);
+    if (request && Date.now() - request.startTime < IN_FLIGHT_TIMEOUT_MS) {
+      return request;
+    }
+    if (request) {
+      this.inFlightRequests.delete(hash);
+    }
+    return undefined;
+  }
+
+  // ===== Cache Management =====
   private generateRequestId(): string {
     return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
   private getCacheKey(messages: ChatCompletionMessageParam[], options: LLMRequestOptions): string | null {
-    // Don't cache short conversational messages - they should get dynamic responses
+    if (options.skipCache) return null;
+    
     const lastUserMessage = messages.filter(m => m.role === "user").pop();
     const lastMsgContent = typeof lastUserMessage?.content === "string" ? lastUserMessage.content : "";
     if (lastMsgContent.length < 50) {
-      return null; // Skip caching for short messages
+      return null;
     }
     
     const userId = options.userId || "anonymous";
-    const msgHash = JSON.stringify(messages);
-    const optsHash = `${userId}:${options.model}:${options.temperature}:${options.topP}`;
-    return `${optsHash}:${Buffer.from(msgHash).toString("base64").slice(0, 64)}`;
+    return `${userId}:${this.generateContentHash(messages, options)}`;
   }
 
   private cleanupCache(): void {
@@ -139,6 +242,27 @@ class LLMGateway {
     }
   }
 
+  private cleanupInFlightRequests(): void {
+    const now = Date.now();
+    const entries = Array.from(this.inFlightRequests.entries());
+    for (const [key, value] of entries) {
+      if (now - value.startTime > IN_FLIGHT_TIMEOUT_MS) {
+        this.inFlightRequests.delete(key);
+      }
+    }
+  }
+
+  private cleanupStreamCheckpoints(): void {
+    const now = Date.now();
+    const entries = Array.from(this.streamCheckpoints.entries());
+    for (const [key, value] of entries) {
+      if (now - value.timestamp > 300000) { // 5 minutes
+        this.streamCheckpoints.delete(key);
+      }
+    }
+  }
+
+  // ===== Rate Limiting =====
   private checkRateLimit(userId: string): boolean {
     const now = Date.now();
     let state = this.rateLimitByUser.get(userId);
@@ -168,61 +292,69 @@ class LLMGateway {
     return false;
   }
 
-  private checkCircuitBreaker(): boolean {
+  // ===== Circuit Breaker =====
+  private checkCircuitBreaker(provider: "xai" | "gemini"): boolean {
     const now = Date.now();
+    const cb = this.circuitBreakers.get(provider)!;
 
-    if (this.circuitBreaker.state === "open") {
-      if (now >= this.circuitBreaker.halfOpenAt) {
-        this.circuitBreaker.state = "half-open";
-        this.circuitBreaker.halfOpenAttempts = 0;
-        this.circuitBreaker.failures = 0;
-        console.log(`[LLMGateway] Circuit breaker transitioning to half-open`);
+    if (cb.state === "open") {
+      if (now >= cb.halfOpenAt) {
+        cb.state = "half-open";
+        cb.halfOpenAttempts = 0;
+        cb.failures = 0;
+        console.log(`[LLMGateway] ${provider} circuit breaker transitioning to half-open`);
       } else {
         return false;
       }
     }
 
-    if (this.circuitBreaker.state === "half-open") {
-      if (this.circuitBreaker.halfOpenAttempts >= CIRCUIT_BREAKER_CONFIG.halfOpenRequests) {
+    if (cb.state === "half-open") {
+      if (cb.halfOpenAttempts >= CIRCUIT_BREAKER_CONFIG.halfOpenRequests) {
         return false;
       }
-      this.circuitBreaker.halfOpenAttempts++;
+      cb.halfOpenAttempts++;
     }
 
     return true;
   }
 
-  private recordSuccess(): void {
-    if (this.circuitBreaker.state === "half-open") {
-      if (this.circuitBreaker.halfOpenAttempts >= CIRCUIT_BREAKER_CONFIG.halfOpenRequests) {
-        this.circuitBreaker.state = "closed";
-        this.circuitBreaker.halfOpenAttempts = 0;
-        console.log(`[LLMGateway] Circuit breaker closed after successful probes`);
+  private recordSuccess(provider: "xai" | "gemini"): void {
+    const cb = this.circuitBreakers.get(provider)!;
+    
+    if (cb.state === "half-open") {
+      if (cb.halfOpenAttempts >= CIRCUIT_BREAKER_CONFIG.halfOpenRequests) {
+        cb.state = "closed";
+        cb.halfOpenAttempts = 0;
+        console.log(`[LLMGateway] ${provider} circuit breaker closed after successful probes`);
       }
     }
-    this.circuitBreaker.failures = 0;
+    cb.failures = 0;
     this.metrics.successfulRequests++;
+    this.metrics.byProvider[provider].requests++;
   }
 
-  private recordFailure(): void {
-    this.circuitBreaker.failures++;
-    this.circuitBreaker.lastFailure = Date.now();
+  private recordFailure(provider: "xai" | "gemini"): void {
+    const cb = this.circuitBreakers.get(provider)!;
+    cb.failures++;
+    cb.lastFailure = Date.now();
     this.metrics.failedRequests++;
+    this.metrics.byProvider[provider].failures++;
 
-    if (this.circuitBreaker.state === "half-open") {
-      this.circuitBreaker.state = "open";
-      this.circuitBreaker.halfOpenAt = Date.now() + CIRCUIT_BREAKER_CONFIG.resetTimeoutMs;
-      this.circuitBreaker.halfOpenAttempts = 0;
+    if (cb.state === "half-open") {
+      cb.state = "open";
+      cb.halfOpenAt = Date.now() + CIRCUIT_BREAKER_CONFIG.resetTimeoutMs;
+      cb.halfOpenAttempts = 0;
       this.metrics.circuitBreakerOpens++;
-      console.error(`[LLMGateway] Circuit breaker re-opened from half-open at ${new Date().toISOString()}`);
-    } else if (this.circuitBreaker.failures >= CIRCUIT_BREAKER_CONFIG.failureThreshold) {
-      this.circuitBreaker.state = "open";
-      this.circuitBreaker.halfOpenAt = Date.now() + CIRCUIT_BREAKER_CONFIG.resetTimeoutMs;
+      console.error(`[LLMGateway] ${provider} circuit breaker re-opened from half-open`);
+    } else if (cb.failures >= CIRCUIT_BREAKER_CONFIG.failureThreshold) {
+      cb.state = "open";
+      cb.halfOpenAt = Date.now() + CIRCUIT_BREAKER_CONFIG.resetTimeoutMs;
       this.metrics.circuitBreakerOpens++;
-      console.error(`[LLMGateway] Circuit breaker opened at ${new Date().toISOString()}`);
+      console.error(`[LLMGateway] ${provider} circuit breaker opened`);
     }
   }
 
+  // ===== Retry Logic =====
   private calculateRetryDelay(attempt: number): number {
     const baseDelay = RETRY_CONFIG.baseDelayMs * Math.pow(2, attempt);
     const jitter = baseDelay * RETRY_CONFIG.jitterFactor * Math.random();
@@ -233,6 +365,7 @@ class LLMGateway {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  // ===== Context Truncation =====
   truncateContext(messages: ChatCompletionMessageParam[], maxTokens: number = MAX_CONTEXT_TOKENS): ChatCompletionMessageParam[] {
     let totalEstimatedTokens = messages.reduce((sum, msg) => {
       const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
@@ -274,6 +407,75 @@ class LLMGateway {
     return truncated;
   }
 
+  // ===== Message Conversion =====
+  private convertToGeminiMessages(messages: ChatCompletionMessageParam[]): { messages: GeminiChatMessage[]; systemInstruction?: string } {
+    const systemMsg = messages.find(m => m.role === "system");
+    const systemInstruction = systemMsg && typeof systemMsg.content === "string" ? systemMsg.content : undefined;
+    
+    const geminiMessages: GeminiChatMessage[] = messages
+      .filter(m => m.role !== "system")
+      .map(m => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+      }));
+    
+    return { messages: geminiMessages, systemInstruction };
+  }
+
+  // ===== Provider Selection =====
+  private selectProvider(options: LLMRequestOptions): "xai" | "gemini" {
+    if (options.provider && options.provider !== "auto") {
+      return options.provider;
+    }
+    
+    // Check circuit breaker states
+    const xaiAvailable = this.checkCircuitBreaker("xai");
+    const geminiAvailable = this.checkCircuitBreaker("gemini");
+    
+    if (xaiAvailable && process.env.XAI_API_KEY) {
+      return "xai";
+    }
+    if (geminiAvailable && process.env.GEMINI_API_KEY) {
+      return "gemini";
+    }
+    
+    // Default to xai if both are available or unavailable
+    return "xai";
+  }
+
+  // ===== Token Usage Tracking =====
+  private recordTokenUsage(record: TokenUsageRecord): void {
+    this.tokenUsageHistory.push(record);
+    if (this.tokenUsageHistory.length > TOKEN_HISTORY_MAX) {
+      this.tokenUsageHistory.shift();
+    }
+    this.metrics.totalTokens += record.totalTokens;
+    this.metrics.byProvider[record.provider].tokens += record.totalTokens;
+  }
+
+  getTokenUsageStats(since?: number): {
+    total: number;
+    byProvider: Record<string, number>;
+    byUser: Record<string, number>;
+    recentRequests: number;
+  } {
+    const cutoff = since || Date.now() - 3600000; // Last hour by default
+    const relevant = this.tokenUsageHistory.filter(r => r.timestamp >= cutoff);
+    
+    const byProvider: Record<string, number> = { xai: 0, gemini: 0 };
+    const byUser: Record<string, number> = {};
+    let total = 0;
+    
+    for (const record of relevant) {
+      total += record.totalTokens;
+      byProvider[record.provider] += record.totalTokens;
+      byUser[record.userId] = (byUser[record.userId] || 0) + record.totalTokens;
+    }
+    
+    return { total, byProvider, byUser, recentRequests: relevant.length };
+  }
+
+  // ===== Main Chat Method with Multi-Provider Fallback =====
   async chat(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions = {}
@@ -281,93 +483,127 @@ class LLMGateway {
     const requestId = options.requestId || this.generateRequestId();
     const startTime = Date.now();
     const userId = options.userId || "anonymous";
-    const model = options.model || MODELS.TEXT;
+    const enableFallback = options.enableFallback !== false;
     const timeout = options.timeout || DEFAULT_TIMEOUT_MS;
 
     this.metrics.totalRequests++;
 
+    // Check cache first
     const cacheKey = this.getCacheKey(messages, options);
     if (cacheKey) {
       const cached = this.requestCache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
         this.metrics.cacheHits++;
+        console.log(`[LLMGateway] ${requestId} cache hit`);
         return { ...cached.response, cached: true, requestId };
       }
     }
 
+    // Check for duplicate in-flight request
+    const contentHash = this.generateContentHash(messages, options);
+    const inFlight = this.getInFlightRequest(contentHash);
+    if (inFlight) {
+      this.metrics.deduplicatedRequests++;
+      console.log(`[LLMGateway] ${requestId} deduplicated (waiting for existing request)`);
+      return inFlight.promise;
+    }
+
+    // Rate limit check
     if (!this.checkRateLimit(userId)) {
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
 
-    if (!this.checkCircuitBreaker()) {
-      throw new Error("Service temporarily unavailable (circuit breaker open)");
-    }
-
+    // Truncate context
     const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
+
+    // Create the request promise
+    const requestPromise = this.executeWithFallback(
+      truncatedMessages,
+      { ...options, requestId, timeout },
+      startTime,
+      enableFallback
+    );
+
+    // Register as in-flight
+    this.inFlightRequests.set(contentHash, { promise: requestPromise, startTime });
+
+    try {
+      const result = await requestPromise;
+      
+      // Cache successful response
+      if (cacheKey) {
+        this.requestCache.set(cacheKey, {
+          response: result,
+          expiresAt: Date.now() + CACHE_TTL_MS,
+        });
+      }
+
+      return result;
+    } finally {
+      this.inFlightRequests.delete(contentHash);
+    }
+  }
+
+  private async executeWithFallback(
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions & { requestId: string; timeout: number },
+    startTime: number,
+    enableFallback: boolean
+  ): Promise<LLMResponse> {
+    // Respect explicit provider selection
+    const primaryProvider = this.selectProvider(options);
+    const alternateProvider: "xai" | "gemini" = primaryProvider === "xai" ? "gemini" : "xai";
+    
+    const providers: ("xai" | "gemini")[] = enableFallback 
+      ? [primaryProvider, alternateProvider] 
+      : [primaryProvider];
 
     let lastError: Error | null = null;
 
-    for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    for (const provider of providers) {
+      if (!this.checkCircuitBreaker(provider)) {
+        console.log(`[LLMGateway] ${options.requestId} skipping ${provider} (circuit breaker open)`);
+        continue;
+      }
+
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-        const response = await this.client.chat.completions.create(
-          {
-            model,
-            messages: truncatedMessages,
-            temperature: options.temperature ?? 0.7,
-            top_p: options.topP ?? 1,
-            max_tokens: options.maxTokens,
-          },
-          { signal: controller.signal }
-        );
-
-        clearTimeout(timeoutId);
-
-        const latencyMs = Date.now() - startTime;
-        const content = response.choices[0]?.message?.content || "";
-        const usage = response.usage;
-
-        if (usage) {
-          this.metrics.totalTokens += usage.total_tokens;
+        const result = await this.executeOnProvider(provider, messages, options, startTime);
+        
+        if (providers.indexOf(provider) > 0) {
+          this.metrics.fallbackSuccesses++;
+          console.log(`[LLMGateway] ${options.requestId} succeeded on fallback provider ${provider}`);
         }
-
-        this.recordSuccess();
-        this.metrics.totalLatencyMs += latencyMs;
-
-        const result: LLMResponse = {
-          content,
-          usage: usage
-            ? {
-                promptTokens: usage.prompt_tokens,
-                completionTokens: usage.completion_tokens,
-                totalTokens: usage.total_tokens,
-              }
-            : undefined,
-          requestId,
-          latencyMs,
-          model,
-        };
-
-        if (cacheKey) {
-          this.requestCache.set(cacheKey, {
-            response: result,
-            expiresAt: Date.now() + 300000,
-          });
-        }
-
-        console.log(`[LLMGateway] ${requestId} completed in ${latencyMs}ms, tokens: ${usage?.total_tokens || 0}`);
-        return result;
+        
+        return { ...result, fromFallback: providers.indexOf(provider) > 0 };
       } catch (error: any) {
         lastError = error;
-
-        if (error.name === "AbortError") {
-          console.error(`[LLMGateway] ${requestId} timeout after ${timeout}ms`);
-          this.recordFailure();
-          throw new Error(`Request timeout after ${timeout}ms`);
+        console.warn(`[LLMGateway] ${options.requestId} failed on ${provider}: ${error.message}`);
+        
+        if (!enableFallback) {
+          throw error;
         }
+      }
+    }
 
+    throw lastError || new Error("All providers failed");
+  }
+
+  private async executeOnProvider(
+    provider: "xai" | "gemini",
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions & { requestId: string; timeout: number },
+    startTime: number
+  ): Promise<LLMResponse> {
+    const model = options.model || (provider === "xai" ? MODELS.TEXT : GEMINI_MODELS.FLASH_PREVIEW);
+    
+    for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+      try {
+        if (provider === "xai") {
+          return await this.executeXai(messages, options, model, startTime);
+        } else {
+          return await this.executeGemini(messages, options, model, startTime);
+        }
+      } catch (error: any) {
         const isRetryable =
           error.status === 429 ||
           error.status === 500 ||
@@ -377,29 +613,153 @@ class LLMGateway {
           error.code === "ETIMEDOUT";
 
         if (!isRetryable || attempt >= RETRY_CONFIG.maxRetries) {
-          this.recordFailure();
-          console.error(`[LLMGateway] ${requestId} failed after ${attempt + 1} attempts:`, error.message);
+          this.recordFailure(provider);
           throw error;
         }
 
         const delay = this.calculateRetryDelay(attempt);
-        console.warn(`[LLMGateway] ${requestId} attempt ${attempt + 1} failed, retrying in ${delay}ms`);
+        console.warn(`[LLMGateway] ${options.requestId} ${provider} attempt ${attempt + 1} failed, retrying in ${delay}ms`);
         await this.sleep(delay);
       }
     }
 
-    this.recordFailure();
-    throw lastError || new Error("Unknown error");
+    throw new Error("Max retries exceeded");
   }
 
+  private async executeXai(
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions & { requestId: string; timeout: number },
+    model: string,
+    startTime: number
+  ): Promise<LLMResponse> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), options.timeout);
+
+    try {
+      const response = await this.xaiClient.chat.completions.create(
+        {
+          model,
+          messages,
+          temperature: options.temperature ?? 0.7,
+          top_p: options.topP ?? 1,
+          max_tokens: options.maxTokens,
+        },
+        { signal: controller.signal }
+      );
+
+      clearTimeout(timeoutId);
+
+      const latencyMs = Date.now() - startTime;
+      const content = response.choices[0]?.message?.content || "";
+      const usage = response.usage;
+
+      this.recordSuccess("xai");
+      this.metrics.totalLatencyMs += latencyMs;
+
+      const usageRecord: TokenUsageRecord = {
+        requestId: options.requestId,
+        userId: options.userId || "anonymous",
+        provider: "xai",
+        model,
+        promptTokens: usage?.prompt_tokens || 0,
+        completionTokens: usage?.completion_tokens || 0,
+        totalTokens: usage?.total_tokens || 0,
+        timestamp: Date.now(),
+        latencyMs,
+        cached: false,
+        fromFallback: false,
+      };
+      this.recordTokenUsage(usageRecord);
+
+      console.log(`[LLMGateway] ${options.requestId} xai completed in ${latencyMs}ms, tokens: ${usage?.total_tokens || 0}`);
+
+      return {
+        content,
+        usage: usage ? {
+          promptTokens: usage.prompt_tokens,
+          completionTokens: usage.completion_tokens,
+          totalTokens: usage.total_tokens,
+        } : undefined,
+        requestId: options.requestId,
+        latencyMs,
+        model,
+        provider: "xai",
+      };
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === "AbortError") {
+        throw new Error(`Request timeout after ${options.timeout}ms`);
+      }
+      throw error;
+    }
+  }
+
+  private async executeGemini(
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions & { requestId: string; timeout: number },
+    model: string,
+    startTime: number
+  ): Promise<LLMResponse> {
+    const { messages: geminiMessages, systemInstruction } = this.convertToGeminiMessages(messages);
+
+    const response = await geminiChat(geminiMessages, {
+      model: model as any,
+      systemInstruction,
+      temperature: options.temperature ?? 0.7,
+      topP: options.topP ?? 1,
+      maxOutputTokens: options.maxTokens,
+    });
+
+    const latencyMs = Date.now() - startTime;
+    
+    this.recordSuccess("gemini");
+    this.metrics.totalLatencyMs += latencyMs;
+
+    // Estimate tokens for Gemini (Gemini doesn't return usage in simple API)
+    const estimatedTokens = Math.ceil((JSON.stringify(messages).length + response.content.length) / 4);
+    
+    const usageRecord: TokenUsageRecord = {
+      requestId: options.requestId,
+      userId: options.userId || "anonymous",
+      provider: "gemini",
+      model,
+      promptTokens: Math.ceil(JSON.stringify(messages).length / 4),
+      completionTokens: Math.ceil(response.content.length / 4),
+      totalTokens: estimatedTokens,
+      timestamp: Date.now(),
+      latencyMs,
+      cached: false,
+      fromFallback: false,
+    };
+    this.recordTokenUsage(usageRecord);
+
+    console.log(`[LLMGateway] ${options.requestId} gemini completed in ${latencyMs}ms, est. tokens: ${estimatedTokens}`);
+
+    return {
+      content: response.content,
+      usage: {
+        promptTokens: usageRecord.promptTokens,
+        completionTokens: usageRecord.completionTokens,
+        totalTokens: estimatedTokens,
+      },
+      requestId: options.requestId,
+      latencyMs,
+      model,
+      provider: "gemini",
+    };
+  }
+
+  // ===== Streaming with Checkpoints =====
   async *streamChat(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions = {}
   ): AsyncGenerator<StreamChunk, void, unknown> {
     const requestId = options.requestId || this.generateRequestId();
     const userId = options.userId || "anonymous";
-    const model = options.model || MODELS.TEXT;
+    const enableFallback = options.enableFallback !== false;
     let sequenceId = 0;
+    let accumulatedContent = "";
+    let currentProvider: "xai" | "gemini" = this.selectProvider(options);
 
     this.metrics.totalRequests++;
 
@@ -407,64 +767,140 @@ class LLMGateway {
       throw new Error(`Rate limit exceeded for user ${userId}`);
     }
 
-    if (!this.checkCircuitBreaker()) {
-      throw new Error("Service temporarily unavailable (circuit breaker open)");
-    }
-
     const truncatedMessages = this.truncateContext(messages, options.maxTokens ? options.maxTokens * 2 : MAX_CONTEXT_TOKENS);
 
-    try {
-      const stream = await this.client.chat.completions.create({
-        model,
-        messages: truncatedMessages,
-        temperature: options.temperature ?? 0.7,
-        top_p: options.topP ?? 1,
-        max_tokens: options.maxTokens,
-        stream: true,
-      });
+    // Check for existing checkpoint (recovery)
+    const existingCheckpoint = this.streamCheckpoints.get(requestId);
+    if (existingCheckpoint) {
+      sequenceId = existingCheckpoint.sequenceId;
+      accumulatedContent = existingCheckpoint.accumulatedContent;
+      this.metrics.streamRecoveries++;
+      console.log(`[LLMGateway] ${requestId} recovering from checkpoint at seq ${sequenceId}`);
+    }
 
-      let buffer = "";
-      const flushThreshold = 50;
+    const providers: ("xai" | "gemini")[] = enableFallback ? [currentProvider, currentProvider === "xai" ? "gemini" : "xai"] : [currentProvider];
 
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        buffer += content;
+    for (const provider of providers) {
+      if (!this.checkCircuitBreaker(provider)) {
+        continue;
+      }
 
-        if (buffer.length >= flushThreshold || content.includes("\n") || content.includes(".")) {
-          yield {
-            content: buffer,
+      try {
+        const stream = provider === "xai" 
+          ? this.streamXai(truncatedMessages, options, requestId)
+          : this.streamGemini(truncatedMessages, options, requestId);
+
+        for await (const chunk of stream) {
+          accumulatedContent += chunk.content;
+          
+          const streamChunk: StreamChunk = {
+            content: chunk.content,
             sequenceId: sequenceId++,
-            done: false,
+            done: chunk.done,
             requestId,
+            provider,
+            checkpoint: {
+              requestId,
+              sequenceId,
+              accumulatedContent,
+              timestamp: Date.now(),
+            },
           };
-          buffer = "";
+
+          // Save checkpoint periodically
+          if (sequenceId % 10 === 0) {
+            this.streamCheckpoints.set(requestId, streamChunk.checkpoint!);
+          }
+
+          yield streamChunk;
+
+          if (chunk.done) {
+            this.streamCheckpoints.delete(requestId);
+            this.recordSuccess(provider);
+            return;
+          }
         }
-      }
-
-      if (buffer) {
-        yield {
-          content: buffer,
-          sequenceId: sequenceId++,
-          done: false,
+      } catch (error: any) {
+        // Save checkpoint before failing
+        this.streamCheckpoints.set(requestId, {
           requestId,
-        };
+          sequenceId,
+          accumulatedContent,
+          timestamp: Date.now(),
+        });
+
+        this.recordFailure(provider);
+        console.warn(`[LLMGateway] ${requestId} stream failed on ${provider}: ${error.message}`);
+
+        if (!enableFallback || providers.indexOf(provider) === providers.length - 1) {
+          throw error;
+        }
+        
+        console.log(`[LLMGateway] ${requestId} attempting stream fallback to next provider`);
       }
+    }
 
-      yield {
-        content: "",
-        sequenceId: sequenceId++,
-        done: true,
-        requestId,
-      };
+    throw new Error("All providers failed during streaming");
+  }
 
-      this.recordSuccess();
-    } catch (error: any) {
-      this.recordFailure();
-      console.error(`[LLMGateway] Stream ${requestId} failed:`, error.message);
-      throw error;
+  private async *streamXai(
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions,
+    requestId: string
+  ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
+    const model = options.model || MODELS.TEXT;
+
+    const stream = await this.xaiClient.chat.completions.create({
+      model,
+      messages,
+      temperature: options.temperature ?? 0.7,
+      top_p: options.topP ?? 1,
+      max_tokens: options.maxTokens,
+      stream: true,
+    });
+
+    let buffer = "";
+    const flushThreshold = 50;
+
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || "";
+      buffer += content;
+
+      if (buffer.length >= flushThreshold || content.includes("\n") || content.includes(".")) {
+        yield { content: buffer, done: false };
+        buffer = "";
+      }
+    }
+
+    if (buffer) {
+      yield { content: buffer, done: false };
+    }
+
+    yield { content: "", done: true };
+  }
+
+  private async *streamGemini(
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions,
+    requestId: string
+  ): AsyncGenerator<{ content: string; done: boolean }, void, unknown> {
+    const model = options.model || GEMINI_MODELS.FLASH_PREVIEW;
+    const { messages: geminiMessages, systemInstruction } = this.convertToGeminiMessages(messages);
+
+    const stream = geminiStreamChat(geminiMessages, {
+      model: model as any,
+      systemInstruction,
+      temperature: options.temperature ?? 0.7,
+      topP: options.topP ?? 1,
+      maxOutputTokens: options.maxTokens,
+    });
+
+    for await (const chunk of stream) {
+      yield chunk;
     }
   }
 
+  // ===== Metrics =====
   getMetrics() {
     return {
       ...this.metrics,
@@ -476,8 +912,13 @@ class LLMGateway {
         this.metrics.totalRequests > 0
           ? Math.round((this.metrics.successfulRequests / this.metrics.totalRequests) * 100)
           : 100,
-      circuitBreakerStatus: this.circuitBreaker.state,
+      circuitBreakerStatus: {
+        xai: this.circuitBreakers.get("xai")!.state,
+        gemini: this.circuitBreakers.get("gemini")!.state,
+      },
       cacheSize: this.requestCache.size,
+      inFlightRequests: this.inFlightRequests.size,
+      streamCheckpoints: this.streamCheckpoints.size,
       rateLimitedUsers: this.rateLimitByUser.size,
     };
   }
@@ -492,9 +933,52 @@ class LLMGateway {
       rateLimitHits: 0,
       circuitBreakerOpens: 0,
       cacheHits: 0,
+      fallbackSuccesses: 0,
+      deduplicatedRequests: 0,
+      streamRecoveries: 0,
+      byProvider: {
+        xai: { requests: 0, tokens: 0, failures: 0 },
+        gemini: { requests: 0, tokens: 0, failures: 0 },
+      },
     };
+  }
+
+  // ===== Health Check =====
+  async healthCheck(): Promise<{
+    xai: { available: boolean; latencyMs?: number; error?: string };
+    gemini: { available: boolean; latencyMs?: number; error?: string };
+  }> {
+    const testMessage: ChatCompletionMessageParam[] = [
+      { role: "user", content: "ping" }
+    ];
+
+    const results: any = { xai: { available: false }, gemini: { available: false } };
+
+    // Test xAI
+    if (process.env.XAI_API_KEY) {
+      try {
+        const start = Date.now();
+        await this.executeXai(testMessage, { requestId: "health-xai", timeout: 10000 } as any, MODELS.TEXT, start);
+        results.xai = { available: true, latencyMs: Date.now() - start };
+      } catch (error: any) {
+        results.xai = { available: false, error: error.message };
+      }
+    }
+
+    // Test Gemini
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const start = Date.now();
+        await this.executeGemini(testMessage, { requestId: "health-gemini", timeout: 10000 } as any, GEMINI_MODELS.FLASH_PREVIEW, start);
+        results.gemini = { available: true, latencyMs: Date.now() - start };
+      } catch (error: any) {
+        results.gemini = { available: false, error: error.message };
+      }
+    }
+
+    return results;
   }
 }
 
 export const llmGateway = new LLMGateway();
-export type { LLMRequestOptions, LLMResponse, StreamChunk };
+export type { LLMRequestOptions, LLMResponse, StreamChunk, StreamCheckpoint, TokenUsageRecord };
