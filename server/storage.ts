@@ -67,7 +67,7 @@ export interface IStorage {
   updateFileJobStatus(fileId: string, status: string, error?: string): Promise<FileJob | undefined>;
   createFileChunks(chunks: InsertFileChunk[]): Promise<FileChunk[]>;
   getFileChunks(fileId: string): Promise<FileChunk[]>;
-  searchSimilarChunks(embedding: number[], limit?: number): Promise<FileChunk[]>;
+  searchSimilarChunks(embedding: number[], limit?: number, userId?: string): Promise<FileChunk[]>;
   updateFileChunkEmbedding(fileId: string, chunkIndex: number, embedding: number[]): Promise<void>;
   // Agent CRUD operations
   createAgentRun(run: InsertAgentRun): Promise<AgentRun>;
@@ -357,8 +357,23 @@ export class MemStorage implements IStorage {
     return db.select().from(fileChunks).where(eq(fileChunks.fileId, fileId));
   }
 
-  async searchSimilarChunks(embedding: number[], limit: number = 5): Promise<FileChunk[]> {
+  async searchSimilarChunks(embedding: number[], limit: number = 5, userId?: string): Promise<FileChunk[]> {
     const embeddingStr = `[${embedding.join(",")}]`;
+    
+    if (userId) {
+      const result = await db.execute(sql`
+        SELECT fc.*, f.name as file_name,
+          fc.embedding <=> ${embeddingStr}::vector AS distance
+        FROM file_chunks fc
+        JOIN files f ON fc.file_id = f.id
+        WHERE fc.embedding IS NOT NULL
+          AND f.user_id = ${userId}
+        ORDER BY fc.embedding <=> ${embeddingStr}::vector
+        LIMIT ${limit}
+      `);
+      return result.rows as FileChunk[];
+    }
+    
     const result = await db.execute(sql`
       SELECT fc.*, f.name as file_name,
         fc.embedding <=> ${embeddingStr}::vector AS distance

@@ -503,7 +503,7 @@ export async function handleChatRequest(
   if (useRag && featureFlags.memoryEnabled && lastUserMessage) {
     try {
       const queryEmbedding = await generateEmbedding(lastUserMessage.content);
-      const similarChunks = await storage.searchSimilarChunks(queryEmbedding, LIMITS.RAG_SIMILAR_CHUNKS);
+      const similarChunks = await storage.searchSimilarChunks(queryEmbedding, LIMITS.RAG_SIMILAR_CHUNKS, userId);
       
       if (similarChunks.length > 0) {
         sources = similarChunks.map((chunk: any) => ({
