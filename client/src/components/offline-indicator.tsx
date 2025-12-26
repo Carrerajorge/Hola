@@ -1,17 +1,26 @@
 import { useOnlineStatus } from '../hooks/use-online-status';
-import { WifiOff, Wifi, CloudOff, RefreshCw } from 'lucide-react';
+import { WifiOff, Wifi, CloudOff, RefreshCw, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 interface OfflineIndicatorProps {
   pendingCount?: number;
+  failedCount?: number;
   isSyncing?: boolean;
+  onRetry?: () => void;
   className?: string;
 }
 
-export function OfflineIndicator({ pendingCount = 0, isSyncing = false, className }: OfflineIndicatorProps) {
+export function OfflineIndicator({ 
+  pendingCount = 0, 
+  failedCount = 0,
+  isSyncing = false, 
+  onRetry,
+  className 
+}: OfflineIndicatorProps) {
   const { isOnline } = useOnlineStatus();
 
-  if (isOnline && pendingCount === 0 && !isSyncing) {
+  if (isOnline && pendingCount === 0 && !isSyncing && failedCount === 0) {
     return null;
   }
 
@@ -23,6 +32,8 @@ export function OfflineIndicator({ pendingCount = 0, isSyncing = false, classNam
           ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30'
           : isSyncing
           ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30'
+          : failedCount > 0
+          ? 'bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/30'
           : pendingCount > 0
           ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400 border border-orange-500/30'
           : '',
@@ -44,6 +55,22 @@ export function OfflineIndicator({ pendingCount = 0, isSyncing = false, classNam
         <>
           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
           <span>Sincronizando...</span>
+        </>
+      ) : failedCount > 0 ? (
+        <>
+          <AlertCircle className="w-3.5 h-3.5" />
+          <span>{failedCount} fallidos</span>
+          {onRetry && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1.5 text-xs"
+              onClick={onRetry}
+              data-testid="button-retry-failed"
+            >
+              Reintentar
+            </Button>
+          )}
         </>
       ) : pendingCount > 0 ? (
         <>

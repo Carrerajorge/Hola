@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOnlineStatus } from './use-online-status';
-import { offlineQueue, PendingMessage } from '../lib/offlineQueue';
+import { offlineQueue } from '../lib/offlineQueue';
 import { nanoid } from 'nanoid';
+
+const MAX_RETRIES = 5;
+const RETRY_INTERVAL_MS = 30000;
 
 interface UseOfflineSyncOptions {
   onSyncStart?: () => void;
@@ -14,15 +17,19 @@ export function useOfflineSync(options: UseOfflineSyncOptions) {
   const { sendMessage, onSyncStart, onSyncComplete, onSyncError } = options;
   const { isOnline, wasOffline, resetWasOffline } = useOnlineStatus();
   const [pendingCount, setPendingCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const syncInProgress = useRef(false);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const updatePendingCount = useCallback(async () => {
+  const updateCounts = useCallback(async () => {
     try {
-      const count = await offlineQueue.getMessageCount();
-      setPendingCount(count);
+      const total = await offlineQueue.getMessageCount();
+      const failed = await offlineQueue.getFailedCount();
+      setPendingCount(total);
+      setFailedCount(failed);
     } catch (error) {
-      console.error('Error getting pending count:', error);
+      console.error('Error getting counts:', error);
     }
   }, []);
 
@@ -34,9 +41,9 @@ export function useOfflineSync(options: UseOfflineSyncOptions) {
       content,
       timestamp: Date.now(),
     });
-    await updatePendingCount();
+    await updateCounts();
     return id;
-  }, [updatePendingCount]);
+  }, [updateCounts]);
 
   const syncPendingMessages = useCallback(async () => {
     if (syncInProgress.current || !isOnline) return;
@@ -51,6 +58,11 @@ export function useOfflineSync(options: UseOfflineSyncOptions) {
 
       for (const message of pending) {
         if (!navigator.onLine) break;
+        
+        if (message.retryCount >= MAX_RETRIES) {
+          await offlineQueue.updateMessageStatus(message.id, 'failed');
+          continue;
+        }
 
         try {
           await offlineQueue.updateMessageStatus(message.id, 'syncing');
@@ -60,16 +72,21 @@ export function useOfflineSync(options: UseOfflineSyncOptions) {
             await offlineQueue.removeMessage(message.id);
             syncedCount++;
           } else {
-            await offlineQueue.updateMessageStatus(message.id, 'failed');
+            await offlineQueue.updateMessageStatus(message.id, 'pending');
           }
         } catch (error) {
           console.error('Error syncing message:', error);
-          await offlineQueue.updateMessageStatus(message.id, 'failed');
+          await offlineQueue.updateMessageStatus(message.id, 'pending');
         }
       }
 
-      await updatePendingCount();
+      await updateCounts();
       onSyncComplete?.(syncedCount);
+      
+      const remainingPending = await offlineQueue.getPendingMessages();
+      if (remainingPending.length > 0 && isOnline) {
+        scheduleRetry();
+      }
     } catch (error) {
       console.error('Sync error:', error);
       onSyncError?.(error as Error);
@@ -77,7 +94,25 @@ export function useOfflineSync(options: UseOfflineSyncOptions) {
       setIsSyncing(false);
       syncInProgress.current = false;
     }
-  }, [isOnline, sendMessage, onSyncStart, onSyncComplete, onSyncError, updatePendingCount]);
+  }, [isOnline, sendMessage, onSyncStart, onSyncComplete, onSyncError, updateCounts]);
+
+  const scheduleRetry = useCallback(() => {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+    }
+    
+    retryTimeoutRef.current = setTimeout(() => {
+      if (navigator.onLine) {
+        syncPendingMessages();
+      }
+    }, RETRY_INTERVAL_MS);
+  }, [syncPendingMessages]);
+
+  const retryFailed = useCallback(async () => {
+    await offlineQueue.resetFailedToPending();
+    await updateCounts();
+    syncPendingMessages();
+  }, [updateCounts, syncPendingMessages]);
 
   useEffect(() => {
     if (wasOffline && isOnline) {
@@ -87,8 +122,16 @@ export function useOfflineSync(options: UseOfflineSyncOptions) {
   }, [wasOffline, isOnline, syncPendingMessages, resetWasOffline]);
 
   useEffect(() => {
-    updatePendingCount();
-  }, [updatePendingCount]);
+    updateCounts();
+  }, [updateCounts]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const sendOrQueue = useCallback(async (chatId: string, content: string): Promise<{ queued: boolean; id?: string }> => {
     if (!isOnline) {
@@ -100,22 +143,26 @@ export function useOfflineSync(options: UseOfflineSyncOptions) {
       const success = await sendMessage(chatId, content);
       if (!success) {
         const id = await queueMessage(chatId, content);
+        scheduleRetry();
         return { queued: true, id };
       }
       return { queued: false };
     } catch (error) {
       const id = await queueMessage(chatId, content);
+      scheduleRetry();
       return { queued: true, id };
     }
-  }, [isOnline, sendMessage, queueMessage]);
+  }, [isOnline, sendMessage, queueMessage, scheduleRetry]);
 
   return {
     isOnline,
     isSyncing,
     pendingCount,
+    failedCount,
     queueMessage,
     sendOrQueue,
     syncPendingMessages,
-    updatePendingCount,
+    retryFailed,
+    updateCounts,
   };
 }

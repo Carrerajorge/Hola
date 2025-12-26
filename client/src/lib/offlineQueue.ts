@@ -71,10 +71,64 @@ class OfflineQueue {
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction(STORE_NAME, 'readonly');
       const store = transaction.objectStore(STORE_NAME);
-      const index = store.index('status');
-      const request = index.getAll('pending');
+      const request = store.getAll();
 
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const all = request.result as PendingMessage[];
+        const pending = all.filter(m => m.status === 'pending');
+        resolve(pending.sort((a, b) => a.timestamp - b.timestamp));
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async resetFailedToPending(): Promise<void> {
+    await this.init();
+    if (!this.db) return;
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const messages = request.result as PendingMessage[];
+        const failed = messages.filter(m => m.status === 'failed');
+        
+        let completed = 0;
+        if (failed.length === 0) {
+          resolve();
+          return;
+        }
+
+        failed.forEach(msg => {
+          msg.status = 'pending';
+          msg.retryCount = 0;
+          const putRequest = store.put(msg);
+          putRequest.onsuccess = () => {
+            completed++;
+            if (completed === failed.length) resolve();
+          };
+          putRequest.onerror = () => reject(putRequest.error);
+        });
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getFailedCount(): Promise<number> {
+    await this.init();
+    if (!this.db) return 0;
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const all = request.result as PendingMessage[];
+        resolve(all.filter(m => m.status === 'failed').length);
+      };
       request.onerror = () => reject(request.error);
     });
   }
