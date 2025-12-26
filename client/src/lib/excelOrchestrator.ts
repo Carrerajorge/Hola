@@ -30,15 +30,18 @@ export interface PromptAnalysis {
   dataTheme: 'sales' | 'employees' | 'inventory' | null;
 }
 
+export interface ChartDataRange {
+  labels: { startRow: number; endRow: number; col: number };
+  values: { startRow: number; endRow: number; col: number };
+}
+
 export interface ChartConfig {
   id: string;
-  type: 'bar' | 'line' | 'pie';
+  type: 'bar' | 'line' | 'pie' | 'area';
   title: string;
-  data: Array<{ name: string; value: number }>;
-  dataRange?: { startRow: number; endRow: number; startCol: number; endCol: number };
+  dataRange: ChartDataRange;
   position: { row: number; col: number };
   size: { width: number; height: number };
-  colors: string[];
 }
 
 export interface ConditionalFormatRule {
@@ -753,7 +756,7 @@ class ChartAgent {
     size 
   }: {
     sheetName: string;
-    chartType: 'bar' | 'line' | 'pie';
+    chartType: 'bar' | 'line' | 'pie' | 'area';
     title: string;
     dataRange: { startRow: number; endRow: number; startCol: number; endCol: number };
     position: { row: number; col: number };
@@ -762,45 +765,22 @@ class ChartAgent {
     const sheet = this.orchestrator.getSheet(sheetName);
     if (!sheet) return;
 
-    const chartData = this.extractChartData(sheet.grid, dataRange);
+    const chartDataRange: ChartDataRange = {
+      labels: { startRow: dataRange.startRow, endRow: dataRange.endRow, col: dataRange.startCol },
+      values: { startRow: dataRange.startRow, endRow: dataRange.endRow, col: dataRange.endCol }
+    };
 
     const chart: ChartConfig = {
-      id: `chart_${Date.now()}`,
+      id: `chart_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       type: chartType,
       title: title,
-      data: chartData,
-      dataRange: dataRange,
+      dataRange: chartDataRange,
       position: position,
-      size: size,
-      colors: this.getChartColors(chartType)
+      size: size
     };
 
     sheet.charts.push(chart);
     console.log(`📊 Gráfico creado: ${title} (${chartType})`);
-  }
-
-  private extractChartData(
-    grid: SparseGrid, 
-    range: { startRow: number; endRow: number; startCol: number; endCol: number }
-  ): Array<{ name: string; value: number }> {
-    const data: Array<{ name: string; value: number }> = [];
-    for (let r = range.startRow; r <= range.endRow; r++) {
-      const label = grid.getCell(r, range.startCol).value;
-      const value = parseFloat(grid.getCell(r, range.startCol + 1).value) || 0;
-      if (label) {
-        data.push({ name: label, value: value });
-      }
-    }
-    return data;
-  }
-
-  private getChartColors(type: 'bar' | 'line' | 'pie'): string[] {
-    const palettes: Record<string, string[]> = {
-      bar: ['#3b82f6', '#60a5fa', '#93c5fd'],
-      pie: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'],
-      line: ['#3b82f6']
-    };
-    return palettes[type] || palettes.bar;
   }
 }
 

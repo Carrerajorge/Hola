@@ -25,6 +25,7 @@ import { useExcelStreaming, STREAM_STATUS } from '@/hooks/useExcelStreaming';
 import { StreamingIndicator } from './excel-streaming-indicator';
 import { Sparkles } from 'lucide-react';
 import { ExcelOrchestrator, WorkbookData as OrchestratorWorkbook, SheetData as OrchestratorSheet, ChartConfig as OrchestratorChartConfig } from '@/lib/excelOrchestrator';
+import { ChartLayer, ChartConfig as ChartLayerConfig, createChartFromSelection } from './excel-chart-layer';
 
 interface SpreadsheetEditorProps {
   title: string;
@@ -61,10 +62,10 @@ interface SheetData {
   name: string;
   data: SpreadsheetData;
   chartConfig?: ChartConfig;
-  charts?: OrchestratorChartConfig[];
+  charts?: ChartLayerConfig[];
   conditionalFormats?: Array<{
     range: { startRow: number; endRow: number; startCol: number; endCol: number };
-    rules: Array<{ condition: string; value?: number; style: { backgroundColor?: string; color?: string; } }>;
+    rules: Array<{ condition: 'greaterThan' | 'lessThan' | 'equals' | 'between'; value?: number; min?: number; max?: number; style: { backgroundColor?: string; color?: string; } }>;
   }>;
 }
 
@@ -306,139 +307,6 @@ const convertFromSparseGrid = (grid: SparseGrid): SpreadsheetData => {
   };
 };
 
-interface EmbeddedChartRendererProps {
-  charts: OrchestratorChartConfig[];
-  getCellValue: (row: number, col: number) => string | number;
-}
-
-const EMBEDDED_CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
-
-const EmbeddedChartRenderer: React.FC<EmbeddedChartRendererProps> = ({ charts, getCellValue }) => {
-  if (!charts || charts.length === 0) return null;
-
-  const extractChartData = (chart: OrchestratorChartConfig): Array<{ name: string; value: number }> => {
-    const dataRange = (chart as any).dataRange;
-    if (dataRange) {
-      const { startRow, endRow, startCol, endCol } = dataRange;
-      const data: Array<{ name: string; value: number }> = [];
-      for (let row = startRow; row <= endRow; row++) {
-        const name = String(getCellValue(row, startCol) || '');
-        const valueCell = getCellValue(row, endCol);
-        const value = typeof valueCell === 'number' ? valueCell : parseFloat(String(valueCell).replace(/[^\d.-]/g, '')) || 0;
-        if (name) {
-          data.push({ name, value });
-        }
-      }
-      return data;
-    }
-    if (chart.data && chart.data.length > 0) {
-      return chart.data;
-    }
-    return [];
-  };
-
-  return (
-    <>
-      {charts.map((chart) => {
-        const chartData = extractChartData(chart);
-        if (chartData.length === 0) return null;
-
-        const chartTop = chart.position.row * GRID_CONFIG.ROW_HEIGHT + GRID_CONFIG.COL_HEADER_HEIGHT;
-        const chartLeft = chart.position.col * GRID_CONFIG.COL_WIDTH + GRID_CONFIG.ROW_HEADER_WIDTH;
-        const width = chart.size.width || 400;
-        const height = chart.size.height || 300;
-
-        return (
-          <div
-            key={chart.id}
-            className="absolute bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg shadow-lg p-3 z-20"
-            style={{
-              top: `${chartTop}px`,
-              left: `${chartLeft}px`,
-              width: `${width}px`,
-              height: `${height}px`,
-            }}
-            data-testid={`embedded-chart-${chart.id}`}
-          >
-            <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2 truncate">
-              {chart.title || 'Chart'}
-            </div>
-            <div style={{ width: '100%', height: 'calc(100% - 24px)' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                {chart.type === 'bar' ? (
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'white',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '6px',
-                        fontSize: '11px',
-                      }}
-                    />
-                    <Bar dataKey="value" fill={chart.colors?.[0] || EMBEDDED_CHART_COLORS[0]} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                ) : chart.type === 'line' ? (
-                  <RechartsLineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'white',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '6px',
-                        fontSize: '11px',
-                      }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="value"
-                      stroke={chart.colors?.[0] || EMBEDDED_CHART_COLORS[0]}
-                      strokeWidth={2}
-                      dot={{ fill: chart.colors?.[0] || EMBEDDED_CHART_COLORS[0] }}
-                    />
-                  </RechartsLineChart>
-                ) : (
-                  <RechartsPieChart>
-                    <Pie
-                      data={chartData}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={Math.min(width, height) / 3.5}
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      labelLine={{ stroke: '#9ca3af' }}
-                    >
-                      {chartData.map((_, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={chart.colors?.[index] || EMBEDDED_CHART_COLORS[index % EMBEDDED_CHART_COLORS.length]}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'white',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '6px',
-                        fontSize: '11px',
-                      }}
-                    />
-                  </RechartsPieChart>
-                )}
-              </ResponsiveContainer>
-            </div>
-          </div>
-        );
-      })}
-    </>
-  );
-};
-
 export function SpreadsheetEditor({
   title,
   content,
@@ -475,7 +343,6 @@ export function SpreadsheetEditor({
   // Get active sheet data
   const activeSheet = workbook.sheets.find(s => s.id === workbook.activeSheetId) || workbook.sheets[0];
   const data = activeSheet?.data || { cells: {}, rowCount: 20, colCount: 10 };
-  const activeCharts = activeSheet?.charts || [];
 
   const getCellValue = useCallback((row: number, col: number): string | number => {
     const cell = sparseGrid.getCell(row, col);
@@ -560,6 +427,61 @@ export function SpreadsheetEditor({
       )
     }));
   }, []);
+
+  const handleUpdateChart = useCallback((chartId: string, updates: Partial<ChartLayerConfig>) => {
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: prev.sheets.map(sheet => 
+        sheet.id === prev.activeSheetId
+          ? {
+              ...sheet,
+              charts: (sheet.charts || []).map(chart =>
+                chart.id === chartId ? { ...chart, ...updates } : chart
+              )
+            }
+          : sheet
+      )
+    }));
+  }, []);
+
+  const handleDeleteChart = useCallback((chartId: string) => {
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: prev.sheets.map(sheet => 
+        sheet.id === prev.activeSheetId
+          ? {
+              ...sheet,
+              charts: (sheet.charts || []).filter(chart => chart.id !== chartId)
+            }
+          : sheet
+      )
+    }));
+  }, []);
+
+  const handleInsertChart = useCallback((chartType: ChartLayerConfig['type']) => {
+    if (!virtualSelectedCell) return;
+    
+    const title = `Gráfico de ${chartType === 'bar' ? 'Barras' : chartType === 'line' ? 'Líneas' : chartType === 'pie' ? 'Circular' : 'Área'}`;
+    const newChart = createChartFromSelection(
+      chartType,
+      title,
+      {
+        startRow: Math.max(0, virtualSelectedCell.row - 5),
+        endRow: virtualSelectedCell.row,
+        startCol: Math.max(0, virtualSelectedCell.col - 1),
+        endCol: virtualSelectedCell.col
+      }
+    );
+    
+    setWorkbook(prev => ({
+      ...prev,
+      sheets: prev.sheets.map(sheet => 
+        sheet.id === prev.activeSheetId
+          ? { ...sheet, charts: [...(sheet.charts || []), newChart] }
+          : sheet
+      )
+    }));
+  }, [virtualSelectedCell]);
 
   useEffect(() => {
     streaming.setOnGridChange(handleSparseGridChange);
@@ -1628,14 +1550,14 @@ export function SpreadsheetEditor({
             conditionalFormats={activeSheet?.conditionalFormats}
           />
           
-          {/* Embedded Charts Overlay */}
-          {activeCharts.length > 0 && (
-            <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ marginLeft: GRID_CONFIG.ROW_HEADER_WIDTH, marginTop: GRID_CONFIG.COL_HEADER_HEIGHT }}>
-              <div className="relative pointer-events-auto">
-                <EmbeddedChartRenderer charts={activeCharts} getCellValue={getCellValue} />
-              </div>
-            </div>
-          )}
+          {/* Chart Layer */}
+          <ChartLayer
+            charts={(activeSheet?.charts || []) as ChartLayerConfig[]}
+            grid={sparseGrid}
+            gridConfig={GRID_CONFIG}
+            onUpdateChart={handleUpdateChart}
+            onDeleteChart={handleDeleteChart}
+          />
           
           {/* Streaming Indicator */}
           <StreamingIndicator
