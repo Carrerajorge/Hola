@@ -3,6 +3,12 @@ import { cn } from '@/lib/utils';
 import { SparseGrid, getColumnName, formatCellRef, CellData } from '@/lib/sparseGrid';
 import { FormulaEngine } from '@/lib/formulaEngine';
 import { ChartLayer, ChartConfig as ChartLayerConfig } from './excel-chart-layer';
+import { 
+  buildPositionCache, 
+  getVisibleRange, 
+  ScrollThrottler,
+  type PositionCache 
+} from '@/lib/excelPerformance';
 
 const GRID_CONFIG = {
   MAX_ROWS: 10000,
@@ -335,6 +341,7 @@ export function VirtualizedExcel({
   const scrollRAF = useRef<number | null>(null);
   const formulaEngine = useRef(new FormulaEngine(grid));
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollThrottler = useRef(new ScrollThrottler(16));
   
   const [resizeState, setResizeState] = useState<ResizeState>({
     isResizing: false,
@@ -490,6 +497,22 @@ export function VirtualizedExcel({
     formulaEngine.current.setGrid(grid);
   }, [grid]);
 
+  useEffect(() => {
+    const throttler = scrollThrottler.current;
+    return () => {
+      throttler.cancel();
+    };
+  }, []);
+
+  const positionCacheOptimized = useMemo<PositionCache>(() => {
+    return buildPositionCache(
+      GRID_CONFIG.MAX_ROWS,
+      GRID_CONFIG.MAX_COLS,
+      columnWidths || {},
+      rowHeights || {}
+    );
+  }, [columnWidths, rowHeights]);
+
   const getColumnWidth = useCallback((col: number) => columnWidths?.[col] || GRID_CONFIG.COL_WIDTH, [columnWidths]);
   const getRowHeight = useCallback((row: number) => rowHeights?.[row] || GRID_CONFIG.ROW_HEIGHT, [rowHeights]);
 
@@ -547,28 +570,40 @@ export function VirtualizedExcel({
   const getRowTop = positionCache.getRowTop;
 
   const findRowAtPosition = useCallback((scrollTop: number): number => {
-    let cumulative = 0;
-    for (let r = 0; r < GRID_CONFIG.MAX_ROWS; r++) {
-      const height = rowHeights?.[r] ?? GRID_CONFIG.ROW_HEIGHT;
-      if (cumulative + height > scrollTop) {
-        return r;
+    const positions = positionCacheOptimized.rowPositions;
+    let left = 0;
+    let right = positions.length - 2;
+    
+    while (left <= right) {
+      const mid = Math.floor((left + right) / 2);
+      if (positions[mid] <= scrollTop && scrollTop < positions[mid + 1]) {
+        return mid;
+      } else if (positions[mid] > scrollTop) {
+        right = mid - 1;
+      } else {
+        left = mid + 1;
       }
-      cumulative += height;
     }
-    return GRID_CONFIG.MAX_ROWS - 1;
-  }, [rowHeights]);
+    return Math.max(0, Math.min(left, GRID_CONFIG.MAX_ROWS - 1));
+  }, [positionCacheOptimized]);
 
   const findColAtPosition = useCallback((scrollLeft: number): number => {
-    let cumulative = 0;
-    for (let c = 0; c < GRID_CONFIG.MAX_COLS; c++) {
-      const width = columnWidths?.[c] ?? GRID_CONFIG.COL_WIDTH;
-      if (cumulative + width > scrollLeft) {
-        return c;
+    const positions = positionCacheOptimized.columnPositions;
+    let left = 0;
+    let right = positions.length - 2;
+    
+    while (left <= right) {
+      const mid = Math.floor((left + right) / 2);
+      if (positions[mid] <= scrollLeft && scrollLeft < positions[mid + 1]) {
+        return mid;
+      } else if (positions[mid] > scrollLeft) {
+        right = mid - 1;
+      } else {
+        left = mid + 1;
       }
-      cumulative += width;
     }
-    return GRID_CONFIG.MAX_COLS - 1;
-  }, [columnWidths]);
+    return Math.max(0, Math.min(left, GRID_CONFIG.MAX_COLS - 1));
+  }, [positionCacheOptimized]);
 
   const getConditionalStyle = useCallback((row: number, col: number, value: string | number): React.CSSProperties => {
     if (!conditionalFormats) return {};
@@ -615,10 +650,7 @@ export function VirtualizedExcel({
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
-    if (scrollRAF.current) {
-      cancelAnimationFrame(scrollRAF.current);
-    }
-    scrollRAF.current = requestAnimationFrame(() => {
+    scrollThrottler.current.throttle(() => {
       setScrollPos({ top: target.scrollTop, left: target.scrollLeft });
     });
   }, []);
@@ -772,21 +804,8 @@ export function VirtualizedExcel({
     return cols;
   }, [startCol, endCol]);
 
-  const totalWidth = useMemo(() => {
-    let width = 0;
-    for (let c = 0; c < GRID_CONFIG.MAX_COLS; c++) {
-      width += columnWidths?.[c] || GRID_CONFIG.COL_WIDTH;
-    }
-    return width;
-  }, [columnWidths]);
-
-  const totalHeight = useMemo(() => {
-    let height = 0;
-    for (let r = 0; r < GRID_CONFIG.MAX_ROWS; r++) {
-      height += rowHeights?.[r] || GRID_CONFIG.ROW_HEIGHT;
-    }
-    return height;
-  }, [rowHeights]);
+  const totalWidth = positionCacheOptimized.totalWidth;
+  const totalHeight = positionCacheOptimized.totalHeight;
 
   return (
     <div
