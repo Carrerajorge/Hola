@@ -418,6 +418,7 @@ export function SpreadsheetEditor({
   }, [handleSparseGridChange]);
 
   const handleAIGenerate = useCallback(async () => {
+    console.log('[AI Generate] Called with prompt:', aiPrompt);
     if (!aiPrompt.trim()) return;
     setShowAIPrompt(false);
     
@@ -456,7 +457,14 @@ export function SpreadsheetEditor({
     
     const startRow = virtualSelectedCell?.row || 0;
     const startCol = virtualSelectedCell?.col || 0;
-    await streaming.simulateStreaming(sampleData, startRow, startCol);
+    console.log('[AI Generate] Starting streaming at', startRow, startCol);
+    
+    try {
+      await streaming.simulateStreaming(sampleData, startRow, startCol);
+      console.log('[AI Generate] Streaming completed');
+    } catch (err) {
+      console.error('[AI Generate] Error:', err);
+    }
     setAIPrompt('');
   }, [aiPrompt, virtualSelectedCell, streaming]);
 
@@ -1256,37 +1264,6 @@ export function SpreadsheetEditor({
             onResume={streaming.resumeStreaming}
             onCancel={streaming.cancelStreaming}
           />
-          
-          {/* AI Prompt Modal */}
-          {showAIPrompt && (
-            <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl p-6 w-96">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-purple-500" />
-                  Generar con IA
-                </h3>
-                <input
-                  type="text"
-                  value={aiPrompt}
-                  onChange={(e) => setAIPrompt(e.target.value)}
-                  placeholder="Ej: tabla de ventas mensuales, nómina de empleados..."
-                  className="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-purple-500 outline-none"
-                  onKeyDown={(e) => e.key === 'Enter' && handleAIGenerate()}
-                  autoFocus
-                  data-testid="input-ai-prompt"
-                />
-                <div className="flex gap-2 justify-end">
-                  <Button variant="outline" onClick={() => setShowAIPrompt(false)}>
-                    Cancelar
-                  </Button>
-                  <Button onClick={handleAIGenerate} className="bg-purple-600 hover:bg-purple-700">
-                    <Sparkles className="w-4 h-4 mr-1" />
-                    Generar
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       ) : (
         <div className="flex-1 overflow-auto">
@@ -1386,6 +1363,37 @@ export function SpreadsheetEditor({
           {data.rowCount} × {data.colCount}
         </div>
       </div>
+
+      {/* AI Prompt Modal - Always visible when showAIPrompt is true */}
+      {showAIPrompt && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl p-6 w-96">
+            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-purple-500" />
+              Generar con IA
+            </h3>
+            <input
+              type="text"
+              value={aiPrompt}
+              onChange={(e) => setAIPrompt(e.target.value)}
+              placeholder="Ej: tabla de ventas mensuales, nómina de empleados..."
+              className="w-full px-4 py-2 border rounded-lg mb-4 focus:ring-2 focus:ring-purple-500 outline-none dark:bg-gray-800 dark:border-gray-700"
+              onKeyDown={(e) => e.key === 'Enter' && handleAIGenerate()}
+              autoFocus
+              data-testid="input-ai-prompt"
+            />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setShowAIPrompt(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleAIGenerate} className="bg-purple-600 hover:bg-purple-700 text-white">
+                <Sparkles className="w-4 h-4 mr-1" />
+                Generar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

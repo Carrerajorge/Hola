@@ -158,9 +158,14 @@ export function useExcelStreaming(grid: SparseGrid) {
     startRow = 0,
     startCol = 0
   ) => {
-    streamQueue.current = [];
-    setStreamStatus(STREAM_STATUS.STREAMING);
+    console.log('[Streaming] Starting simulation with data:', data.length, 'rows');
     
+    // Reset state
+    streamQueue.current = [];
+    isStreaming.current = false;
+    isPaused.current = false;
+    
+    // Queue all cells
     for (let r = 0; r < data.length; r++) {
       for (let c = 0; c < data[r].length; c++) {
         const cellValue = data[r][c];
@@ -170,7 +175,11 @@ export function useExcelStreaming(grid: SparseGrid) {
       }
     }
     
+    console.log('[Streaming] Queued', streamQueue.current.length, 'cells');
+    
+    // Process the queue
     await processStreamQueue();
+    console.log('[Streaming] Completed');
   }, [queueCell, processStreamQueue]);
 
   const pauseStreaming = useCallback(() => {
