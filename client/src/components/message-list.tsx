@@ -588,54 +588,53 @@ const ActionToolbar = memo(function ActionToolbar({
             </TooltipContent>
           </Tooltip>
           <PopoverContent 
-            className="w-56 p-2" 
+            className="w-52 p-1.5 bg-background/95 backdrop-blur-xl border-border/50 shadow-lg" 
             align="start" 
             side="top"
             sideOffset={8}
           >
-            <div className="space-y-1">
-              <div className="flex items-center gap-1 pb-1">
-                <Input
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-1 px-1 pb-1 border-b border-border/30 mb-1">
+                <input
+                  type="text"
                   placeholder="Pedir cambio de respuesta"
                   value={customInstruction}
                   onChange={(e) => setCustomInstruction(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleCustomSubmit()}
-                  className="h-8 text-sm flex-1"
+                  className="flex-1 h-7 px-2 text-[13px] bg-transparent border-none outline-none placeholder:text-muted-foreground/50"
                   data-testid={`input-custom-regenerate-${testIdSuffix}`}
                 />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 shrink-0"
+                <button
                   onClick={handleCustomSubmit}
                   disabled={!customInstruction.trim()}
+                  className="h-6 w-6 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                   data-testid={`button-submit-custom-${testIdSuffix}`}
                 >
-                  <ArrowUp className="h-4 w-4" />
-                </Button>
+                  <ArrowUp className="h-3.5 w-3.5" />
+                </button>
               </div>
               <button
-                className="w-full flex items-center gap-3 px-2 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors"
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-left hover:bg-muted/60 rounded transition-colors"
                 onClick={() => handleRegenerateOption()}
                 data-testid={`option-retry-${testIdSuffix}`}
               >
-                <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground/70" />
                 <span>Inténtalo nuevamente</span>
               </button>
               <button
-                className="w-full flex items-center gap-3 px-2 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors"
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-left hover:bg-muted/60 rounded transition-colors"
                 onClick={() => handleRegenerateOption("Agrega más detalles y explicaciones a tu respuesta")}
                 data-testid={`option-details-${testIdSuffix}`}
               >
-                <ListPlus className="h-4 w-4 text-muted-foreground" />
+                <ListPlus className="h-3.5 w-3.5 text-muted-foreground/70" />
                 <span>Agregar detalles</span>
               </button>
               <button
-                className="w-full flex items-center gap-3 px-2 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors"
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 text-[13px] text-left hover:bg-muted/60 rounded transition-colors"
                 onClick={() => handleRegenerateOption("Hazlo más conciso y breve, elimina redundancias")}
                 data-testid={`option-concise-${testIdSuffix}`}
               >
-                <Minus className="h-4 w-4 text-muted-foreground" />
+                <Minus className="h-3.5 w-3.5 text-muted-foreground/70" />
                 <span>Más concisa</span>
               </button>
             </div>
