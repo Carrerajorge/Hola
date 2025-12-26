@@ -167,12 +167,11 @@ function WorkspaceContent() {
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     setActiveChatId(id);
-    // Clear the ref BEFORE setting idle so useEffect doesn't clean up background chat
-    processingChatIdRef.current = null;
-    // Reset AI state for the new active chat (fresh start)
-    setAiState("idle");
+    // DON'T clear processingChatIdRef or call setAiState("idle") here
+    // Let the background streaming complete naturally and trigger badge notification
+    // Only reset the process steps for UI
     setAiProcessSteps([]);
-  }, [handleClearPendingCount, setActiveChatId, setAiState, setAiProcessSteps]);
+  }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
 
   const handleNewChat = () => {
     // Keep processing state for background chats - don't clear processingChatIds
@@ -182,10 +181,9 @@ function WorkspaceContent() {
     setIsNewChatMode(true);
     setNewChatStableKey(newKey);
     pendingChatIdRef.current = null;
-    // Clear the ref BEFORE setting idle so useEffect doesn't clean up background chat
-    processingChatIdRef.current = null;
-    // Reset AI state for new chat (fresh start)
-    setAiState("idle");
+    // DON'T clear processingChatIdRef or call setAiState("idle") here
+    // Let the background streaming complete naturally and trigger badge notification
+    // Only reset the process steps for UI
     setAiProcessSteps([]);
   };
 
