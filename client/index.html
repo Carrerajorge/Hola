@@ -30,6 +30,17 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (function() {
+        const originalError = console.error;
+        console.error = function(...args) {
+          if (args[0] && typeof args[0] === 'string' && args[0].includes('[vite] failed to connect to websocket')) {
+            return;
+          }
+          originalError.apply(console, args);
+        };
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
