@@ -105,6 +105,7 @@ export interface ComposerProps {
   onOpenApps?: () => void;
   isGoogleFormsActive?: boolean;
   setIsGoogleFormsActive?: (value: boolean) => void;
+  onTextareaFocus?: () => void;
 }
 
 function formatFileSize(bytes: number): string {
@@ -168,6 +169,7 @@ export function Composer({
   onOpenApps,
   isGoogleFormsActive,
   setIsGoogleFormsActive,
+  onTextareaFocus,
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
@@ -875,6 +877,7 @@ export function Composer({
               ref={textareaRef}
               value={input}
               onChange={handleInputChange}
+              onFocus={onTextareaFocus}
               onKeyDown={(e) => {
                 handleMentionKeyDown(e);
                 if (showMentionPopover) return;

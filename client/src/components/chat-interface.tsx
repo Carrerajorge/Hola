@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { 
   Mic,
   MicOff,
@@ -762,6 +762,7 @@ export function ChatInterface({
   const [selectedProvider, setSelectedProvider] = useState<"xai" | "gemini">("gemini");
   const [selectedModel, setSelectedModel] = useState<string>("gemini-3-flash-preview");
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
+  const modelSelectorRef = useRef<HTMLDivElement>(null);
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [isDocGeneratorOpen, setIsDocGeneratorOpen] = useState(false);
   const [docGeneratorType, setDocGeneratorType] = useState<"word" | "excel">("word");
@@ -895,6 +896,25 @@ export function ChatInterface({
         speechRecognitionRef.current = null;
       }
     };
+  }, []);
+
+  // Click-outside handler for model selector dropdown
+  useEffect(() => {
+    if (!isModelSelectorOpen) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelSelectorRef.current && !modelSelectorRef.current.contains(e.target as Node)) {
+        setIsModelSelectorOpen(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isModelSelectorOpen]);
+
+  // Callback to close model selector when textarea receives focus
+  const handleCloseModelSelector = useCallback(() => {
+    setIsModelSelectorOpen(false);
   }, []);
 
   // Recording timer effect
@@ -2964,7 +2984,7 @@ IMPORTANTE:
     <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
       <header className="flex h-14 items-center justify-between px-2 sm:px-4 border-b border-white/20 dark:border-white/10 glass-card-light dark:glass-card rounded-none z-10 sticky top-0 flex-shrink-0 safe-area-top">
-        <div className="flex items-center gap-1 sm:gap-2 relative min-w-0">
+        <div ref={modelSelectorRef} className="flex items-center gap-1 sm:gap-2 relative min-w-0">
           <div 
             className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors"
             onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
@@ -3275,6 +3295,7 @@ IMPORTANTE:
             placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
             selectedDocText={selectedDocText}
             handleDocTextDeselect={handleDocTextDeselect}
+            onTextareaFocus={handleCloseModelSelector}
           />
             </div>
           </Panel>
@@ -3550,6 +3571,7 @@ IMPORTANTE:
             onOpenApps={onOpenApps}
             isGoogleFormsActive={isGoogleFormsActive}
             setIsGoogleFormsActive={setIsGoogleFormsActive}
+            onTextareaFocus={handleCloseModelSelector}
           />
         </div>
       )}
