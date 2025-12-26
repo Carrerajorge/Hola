@@ -16,6 +16,19 @@ const GRID_CONFIG = {
   BUFFER_COLS: 3,
 };
 
+interface ConditionalFormatRule {
+  condition: 'greaterThan' | 'lessThan' | 'equals' | 'between';
+  value?: number;
+  min?: number;
+  max?: number;
+  style: { backgroundColor?: string; color?: string; };
+}
+
+interface ConditionalFormat {
+  range: { startRow: number; endRow: number; startCol: number; endCol: number };
+  rules: ConditionalFormatRule[];
+}
+
 interface VirtualizedExcelProps {
   grid: SparseGrid;
   onGridChange: (grid: SparseGrid) => void;
@@ -28,6 +41,7 @@ interface VirtualizedExcelProps {
   activeStreamingCell?: { row: number; col: number } | null;
   typingValue?: string;
   isRecentCell?: (row: number, col: number) => boolean;
+  conditionalFormats?: ConditionalFormat[];
 }
 
 const VirtualCell = memo(function VirtualCell({
@@ -40,6 +54,7 @@ const VirtualCell = memo(function VirtualCell({
   isRecentlyWritten,
   typingValue,
   style,
+  conditionalStyle,
   onMouseDown,
   onDoubleClick,
   onBlur,
@@ -55,6 +70,7 @@ const VirtualCell = memo(function VirtualCell({
   isRecentlyWritten: boolean;
   typingValue?: string;
   style: React.CSSProperties;
+  conditionalStyle?: React.CSSProperties;
   onMouseDown: () => void;
   onDoubleClick: () => void;
   onBlur: () => void;
@@ -75,8 +91,8 @@ const VirtualCell = memo(function VirtualCell({
     fontWeight: data.bold ? 'bold' : 'normal',
     fontStyle: data.italic ? 'italic' : 'normal',
     textAlign: data.align || 'left',
-    backgroundColor: data.format?.backgroundColor,
-    color: data.format?.textColor,
+    backgroundColor: conditionalStyle?.backgroundColor || data.format?.backgroundColor,
+    color: conditionalStyle?.color || data.format?.textColor,
   };
 
   return (
@@ -169,6 +185,7 @@ export function VirtualizedExcel({
   activeStreamingCell = null,
   typingValue = '',
   isRecentCell = () => false,
+  conditionalFormats,
 }: VirtualizedExcelProps) {
   void version;
   const [scrollPos, setScrollPos] = useState({ top: 0, left: 0 });
@@ -179,6 +196,43 @@ export function VirtualizedExcel({
   useEffect(() => {
     formulaEngine.current.setGrid(grid);
   }, [grid]);
+
+  const getConditionalStyle = useCallback((row: number, col: number, value: string | number): React.CSSProperties => {
+    if (!conditionalFormats) return {};
+    
+    const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^\d.-]/g, ''));
+    if (isNaN(numValue)) return {};
+    
+    for (const format of conditionalFormats) {
+      const { range, rules } = format;
+      if (row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol) {
+        for (const rule of rules) {
+          let matches = false;
+          switch (rule.condition) {
+            case 'greaterThan':
+              matches = numValue > (rule.value ?? 0);
+              break;
+            case 'lessThan':
+              matches = numValue < (rule.value ?? 0);
+              break;
+            case 'equals':
+              matches = numValue === rule.value;
+              break;
+            case 'between':
+              matches = numValue >= (rule.min ?? -Infinity) && numValue <= (rule.max ?? Infinity);
+              break;
+          }
+          if (matches) {
+            return {
+              backgroundColor: rule.style.backgroundColor,
+              color: rule.style.color
+            };
+          }
+        }
+      }
+    }
+    return {};
+  }, [conditionalFormats]);
 
   const startRow = Math.max(0, Math.floor(scrollPos.top / GRID_CONFIG.ROW_HEIGHT) - GRID_CONFIG.BUFFER_ROWS);
   const startCol = Math.max(0, Math.floor(scrollPos.left / GRID_CONFIG.COL_WIDTH) - GRID_CONFIG.BUFFER_COLS);
@@ -410,6 +464,7 @@ export function VirtualizedExcel({
 
                   const isStreamingCell = activeStreamingCell?.row === row && activeStreamingCell?.col === col;
                   const isRecentlyWritten = isRecentCell(row, col);
+                  const conditionalStyle = getConditionalStyle(row, col, cellData.value);
                   
                   return (
                     <VirtualCell
@@ -428,6 +483,7 @@ export function VirtualizedExcel({
                         width: GRID_CONFIG.COL_WIDTH,
                         height: GRID_CONFIG.ROW_HEIGHT,
                       }}
+                      conditionalStyle={conditionalStyle}
                       onMouseDown={() => handleCellSelect(row, col)}
                       onDoubleClick={() => handleCellEdit(row, col)}
                       onBlur={handleCellBlur}
@@ -458,4 +514,4 @@ export function VirtualizedExcel({
 }
 
 export { GRID_CONFIG };
-export type { VirtualizedExcelProps };
+export type { VirtualizedExcelProps, ConditionalFormat, ConditionalFormatRule };

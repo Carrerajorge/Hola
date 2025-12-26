@@ -35,6 +35,7 @@ export interface ChartConfig {
   type: 'bar' | 'line' | 'pie';
   title: string;
   data: Array<{ name: string; value: number }>;
+  dataRange?: { startRow: number; endRow: number; startCol: number; endCol: number };
   position: { row: number; col: number };
   size: { width: number; height: number };
   colors: string[];
@@ -768,6 +769,7 @@ class ChartAgent {
       type: chartType,
       title: title,
       data: chartData,
+      dataRange: dataRange,
       position: position,
       size: size,
       colors: this.getChartColors(chartType)
