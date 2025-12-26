@@ -26,6 +26,7 @@ import { StreamingIndicator } from './excel-streaming-indicator';
 import { Sparkles } from 'lucide-react';
 import { ExcelOrchestrator, WorkbookData as OrchestratorWorkbook, SheetData as OrchestratorSheet, ChartConfig as OrchestratorChartConfig } from '@/lib/excelOrchestrator';
 import { ChartLayer, ChartConfig as ChartLayerConfig, createChartFromSelection } from './excel-chart-layer';
+import { ExcelRibbon, RibbonCommands, CellFormat } from './excel-ribbon';
 
 interface SpreadsheetEditorProps {
   title: string;
@@ -1236,6 +1237,61 @@ export function SpreadsheetEditor({
     setShowChart(false);
   }, []);
 
+  const ribbonCommands: Partial<RibbonCommands> = useMemo(() => ({
+    copy: () => {
+      if (selectedCell) {
+        const cell = data.cells[selectedCell];
+        if (cell?.value) navigator.clipboard.writeText(cell.value);
+      }
+    },
+    cut: () => {
+      if (selectedCell) {
+        const cell = data.cells[selectedCell];
+        if (cell?.value) {
+          navigator.clipboard.writeText(cell.value);
+          updateCell(selectedCell, { ...cell, value: '' });
+        }
+      }
+    },
+    paste: async () => {
+      if (selectedCell) {
+        try {
+          const text = await navigator.clipboard.readText();
+          const cell = data.cells[selectedCell] || { value: '' };
+          updateCell(selectedCell, { ...cell, value: text });
+        } catch (e) {
+          console.error('Paste failed:', e);
+        }
+      }
+    },
+    toggleBold,
+    toggleItalic,
+    alignLeft: () => setAlignment('left'),
+    alignCenter: () => setAlignment('center'),
+    alignRight: () => setAlignment('right'),
+    insertRow: addRow,
+    insertColumn: addColumn,
+    deleteRow,
+    deleteColumn,
+    insertChart: (type) => updateChartConfig(type, true),
+    sort: (direction) => {
+      console.log('Sort:', direction);
+    },
+    filter: () => {
+      console.log('Filter toggle');
+    },
+  }), [selectedCell, data.cells, updateCell, toggleBold, toggleItalic, setAlignment, addRow, addColumn, deleteRow, deleteColumn, updateChartConfig]);
+
+  const cellFormat: CellFormat = useMemo(() => {
+    if (!selectedCell) return {};
+    const cell = data.cells[selectedCell];
+    return {
+      bold: cell?.bold,
+      italic: cell?.italic,
+      align: cell?.align,
+    };
+  }, [selectedCell, data.cells]);
+
   // Recalculate formulas when cells change
   const recalculateFormulas = useCallback(() => {
     setData(prev => {
@@ -1298,152 +1354,38 @@ export function SpreadsheetEditor({
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
-        {/* Cell Reference */}
+      {/* Excel Ribbon */}
+      <ExcelRibbon
+        commands={ribbonCommands}
+        cellFormat={cellFormat}
+        currentFont="Calibri"
+        currentFontSize={11}
+        currentNumberFormat="General"
+        onRunAutomation={(prompt) => {
+          if (orchestratorRef.current) {
+            orchestratorRef.current.runPrompt(prompt);
+          }
+        }}
+      />
+
+      {/* Formula Bar */}
+      <div className="flex items-center gap-1 px-4 py-1.5 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
         <div className="w-16 px-2 py-1 text-xs font-mono bg-white dark:bg-black border rounded text-center">
           {selectedCellLabel}
         </div>
-        
-        {/* Formula Bar */}
+        <span className="text-gray-400 text-sm mx-1">fx</span>
         <input
           ref={formulaInputRef}
           type="text"
-          className="flex-1 max-w-md px-3 py-1 text-sm border rounded bg-white dark:bg-black focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white"
+          className="flex-1 px-3 py-1 text-sm border rounded bg-white dark:bg-black focus:outline-none focus:ring-1 focus:ring-green-500"
           placeholder="Ingresa un valor o fórmula"
           value={selectedCellData?.formula || selectedCellData?.value || ''}
           onChange={(e) => selectedCell && handleCellChange(selectedCell, e.target.value)}
         />
-
-        <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
-
-        {/* Formatting */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn('h-8 w-8', selectedCellData?.bold && 'bg-gray-200 dark:bg-gray-800')}
-          onClick={toggleBold}
-        >
-          <Bold className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn('h-8 w-8', selectedCellData?.italic && 'bg-gray-200 dark:bg-gray-800')}
-          onClick={toggleItalic}
-        >
-          <Italic className="h-4 w-4" />
-        </Button>
-
-        <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
-
-        {/* Alignment */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn('h-8 w-8', selectedCellData?.align === 'left' && 'bg-gray-200 dark:bg-gray-800')}
-          onClick={() => setAlignment('left')}
-        >
-          <AlignLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn('h-8 w-8', selectedCellData?.align === 'center' && 'bg-gray-200 dark:bg-gray-800')}
-          onClick={() => setAlignment('center')}
-        >
-          <AlignCenter className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn('h-8 w-8', selectedCellData?.align === 'right' && 'bg-gray-200 dark:bg-gray-800')}
-          onClick={() => setAlignment('right')}
-        >
-          <AlignRight className="h-4 w-4" />
-        </Button>
-
-        <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
-
-        {/* Row/Column Actions */}
-        <Button variant="ghost" size="sm" onClick={addRow} className="gap-1 text-xs">
-          <Plus className="h-3 w-3" /> Fila
-        </Button>
-        <Button variant="ghost" size="sm" onClick={addColumn} className="gap-1 text-xs">
-          <Plus className="h-3 w-3" /> Columna
-        </Button>
-        <Button variant="ghost" size="sm" onClick={deleteRow} disabled={!selectedCell} className="gap-1 text-xs text-red-600">
-          <Trash2 className="h-3 w-3" /> Fila
-        </Button>
-        <Button variant="ghost" size="sm" onClick={deleteColumn} disabled={!selectedCell} className="gap-1 text-xs text-red-600">
-          <Trash2 className="h-3 w-3" /> Col
-        </Button>
-
-        <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
-
-        {/* Chart Controls */}
-        <Button
-          variant={showChart && chartType === 'bar' ? 'default' : 'ghost'}
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => updateChartConfig('bar', true)}
-          title="Gráfico de barras"
-          data-testid="btn-bar-chart"
-        >
-          <BarChart3 className="h-4 w-4" />
-        </Button>
-        <Button
-          variant={showChart && chartType === 'line' ? 'default' : 'ghost'}
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => updateChartConfig('line', true)}
-          title="Gráfico de líneas"
-          data-testid="btn-line-chart"
-        >
-          <LineChart className="h-4 w-4" />
-        </Button>
-        <Button
-          variant={showChart && chartType === 'pie' ? 'default' : 'ghost'}
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => updateChartConfig('pie', true)}
-          title="Gráfico circular"
-          data-testid="btn-pie-chart"
-        >
-          <PieChart className="h-4 w-4" />
-        </Button>
-        {showChart && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-xs text-gray-500"
-            onClick={hideChart}
-          >
-            Ocultar
-          </Button>
-        )}
-
-        <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
-
-        {/* AI Generate Button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1 text-xs bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600"
-          onClick={() => setShowAIPrompt(true)}
-          disabled={streaming.streamStatus === STREAM_STATUS.STREAMING}
-          data-testid="btn-ai-generate"
-        >
-          <Sparkles className="h-3 w-3" />
-          Generar con IA
-        </Button>
-
-        <div className="h-6 w-px bg-gray-300 dark:bg-gray-700 mx-2" />
-
         <Button
           variant={useVirtualized ? 'default' : 'ghost'}
           size="sm"
-          className="gap-1 text-xs"
+          className="gap-1 text-xs ml-2"
           onClick={() => setUseVirtualized(!useVirtualized)}
           title={useVirtualized ? 'Modo empresarial: 10,000 × 10,000 celdas' : 'Cambiar a modo empresarial'}
           data-testid="btn-toggle-virtualized"
