@@ -701,6 +701,7 @@ interface ChatInterfaceProps {
   onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
   onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
   onTruncateAndReplaceMessage?: (chatId: string, messageIndex: number, newMessage: Message) => void;
+  onTruncateMessagesAt?: (chatId: string, messageIndex: number) => void;
 }
 
 interface UploadedFile {
@@ -730,7 +731,8 @@ export function ChatInterface({
   onOpenApps,
   onUpdateMessageAttachments,
   onEditMessageAndTruncate,
-  onTruncateAndReplaceMessage
+  onTruncateAndReplaceMessage,
+  onTruncateMessagesAt
 }: ChatInterfaceProps) {
   const { user } = useAuth();
   const [input, setInput] = useState("");
@@ -1622,7 +1624,11 @@ export function ChatInterface({
     
     const contextUpToUser = prevMessages.slice(0, prevMessages.length - lastUserMsgIndex);
     
-    setRegeneratingMsgIndex(msgIndex);
+    if (chatId && onTruncateMessagesAt) {
+      onTruncateMessagesAt(chatId, msgIndex);
+    }
+    
+    setRegeneratingMsgIndex(null);
     setAiState("thinking");
     streamingContentRef.current = "";
     setStreamingContent("");
@@ -1674,15 +1680,10 @@ export function ChatInterface({
             content: fullContent,
             timestamp: new Date(),
           };
-          if (chatId && onTruncateAndReplaceMessage) {
-            onTruncateAndReplaceMessage(chatId, msgIndex, aiMsg);
-          } else {
-            onSendMessage(aiMsg);
-          }
+          onSendMessage(aiMsg);
           streamingContentRef.current = "";
           setStreamingContent("");
           setAiState("idle");
-          setRegeneratingMsgIndex(null);
           abortControllerRef.current = null;
         }
       }, 15);
@@ -1690,7 +1691,6 @@ export function ChatInterface({
       if (error.name === "AbortError") return;
       console.error("Regenerate error:", error);
       setAiState("idle");
-      setRegeneratingMsgIndex(null);
       abortControllerRef.current = null;
     }
   };

@@ -688,6 +688,19 @@ export function useChats() {
     }));
   }, []);
 
+  const truncateMessagesAt = useCallback((chatId: string, messageIndex: number) => {
+    setChats(prev => prev.map(chat => {
+      if (chat.id === chatId) {
+        return {
+          ...chat,
+          messages: chat.messages.slice(0, messageIndex),
+          timestamp: Date.now()
+        };
+      }
+      return chat;
+    }));
+  }, []);
+
   const activeChat = chats.find(c => c.id === activeChatId) || null;
   const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp);
   const visibleChats = sortedChats.filter(c => !c.hidden);
@@ -721,6 +734,7 @@ export function useChats() {
     updateMessageAttachments,
     editMessageAndTruncate,
     truncateAndReplaceMessage,
+    truncateMessagesAt,
     getChatDateLabel
   };
 }
