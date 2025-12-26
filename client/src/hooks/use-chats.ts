@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 
 export interface FigmaDiagram {
@@ -182,6 +182,14 @@ export function useChats() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Track if user has manually set activeChatId to prevent auto-selection
+  const userHasSelectedRef = useRef(false);
+  
+  // Wrapper that tracks user selection intent
+  const setActiveChatIdWithTracking = useCallback((id: string | null) => {
+    userHasSelectedRef.current = true;
+    setActiveChatId(id);
+  }, []);
 
   const loadChatsFromServer = useCallback(async () => {
     try {
@@ -245,7 +253,8 @@ export function useChats() {
           console.warn("Failed to cache chats to localStorage:", e);
           localStorage.removeItem(STORAGE_KEY);
         }
-        if (!activeChatId) {
+        // Only auto-select first chat if user hasn't manually selected/deselected
+        if (!userHasSelectedRef.current && !activeChatId) {
           setActiveChatId(serverChats[0]?.id || null);
         }
       } else {
@@ -268,7 +277,8 @@ export function useChats() {
               })
             }));
             setChats(restored);
-            if (!activeChatId && restored.length > 0) {
+            // Only auto-select first chat if user hasn't manually selected/deselected
+            if (!userHasSelectedRef.current && !activeChatId && restored.length > 0) {
               setActiveChatId(restored[0]?.id || null);
             }
           } catch (e) {
@@ -724,7 +734,7 @@ export function useChats() {
     activeChatId,
     activeChat,
     isLoading,
-    setActiveChatId,
+    setActiveChatId: setActiveChatIdWithTracking,
     createChat,
     addMessage,
     deleteChat,
