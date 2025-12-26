@@ -125,7 +125,7 @@ export function createUserRouter() {
             bio: ''
           },
           featureFlags: {
-            memoryEnabled: true,
+            memoryEnabled: false,
             recordingHistoryEnabled: false,
             webSearchAuto: true,
             codeInterpreterEnabled: true,

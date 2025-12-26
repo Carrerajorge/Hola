@@ -1032,7 +1032,7 @@ export class MemStorage implements IStorage {
 
   async upsertUserSettings(userId: string, settings: Partial<InsertUserSettings>): Promise<UserSettings> {
     const defaultFeatureFlags = {
-      memoryEnabled: true,
+      memoryEnabled: false,
       recordingHistoryEnabled: false,
       webSearchAuto: true,
       codeInterpreterEnabled: true,

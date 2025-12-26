@@ -276,7 +276,7 @@ export async function handleChatRequest(
   // - canvasEnabled: controls canvas/visualization features
   // - voiceEnabled: controls voice input/output features
   const featureFlags = {
-    memoryEnabled: userSettings?.featureFlags?.memoryEnabled ?? true,
+    memoryEnabled: userSettings?.featureFlags?.memoryEnabled ?? false,
     webSearchAuto: userSettings?.featureFlags?.webSearchAuto ?? false,
     codeInterpreterEnabled: userSettings?.featureFlags?.codeInterpreterEnabled ?? true,
     connectorSearchAuto: userSettings?.featureFlags?.connectorSearchAuto ?? false,

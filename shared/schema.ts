@@ -67,7 +67,7 @@ export const userProfileSchema = z.object({
 });
 
 export const featureFlagsSchema = z.object({
-  memoryEnabled: z.boolean().default(true),
+  memoryEnabled: z.boolean().default(false),
   recordingHistoryEnabled: z.boolean().default(false),
   webSearchAuto: z.boolean().default(true),
   codeInterpreterEnabled: z.boolean().default(true),

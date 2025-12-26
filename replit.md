@@ -8,6 +8,15 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes (December 2024)
 
+### RAG Privacy Fix (December 2024 - CRITICAL)
+- **User Context Isolation**: `searchSimilarChunks()` now filters by userId to prevent cross-user data leakage
+- **Memory Disabled by Default**: `memoryEnabled` feature flag defaults to `false` for all new users
+- **Files**:
+  - `server/storage.ts`: searchSimilarChunks accepts optional userId parameter
+  - `server/services/chatService.ts`: Passes userId to RAG search
+  - `shared/schema.ts`: featureFlagsSchema.memoryEnabled defaults to false
+- **Database Cleanup**: Removed 3,486 orphaned file chunks without user ownership
+
 ### Gmail Integration (STABLE - DO NOT MODIFY)
 - **Custom OAuth Flow**: Gmail OAuth with custom credentials via `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
 - **Files**:
