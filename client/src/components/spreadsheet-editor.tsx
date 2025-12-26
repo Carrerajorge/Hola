@@ -1556,13 +1556,7 @@ export function SpreadsheetEditor({
             typingValue={streaming.typingValue}
             isRecentCell={streaming.isRecentCell}
             conditionalFormats={activeSheet?.conditionalFormats}
-          />
-          
-          {/* Chart Layer */}
-          <ChartLayer
             charts={(activeSheet?.charts || []) as ChartLayerConfig[]}
-            grid={sparseGrid}
-            gridConfig={GRID_CONFIG}
             onUpdateChart={handleUpdateChart}
             onDeleteChart={handleDeleteChart}
           />

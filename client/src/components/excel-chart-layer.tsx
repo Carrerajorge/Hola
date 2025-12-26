@@ -399,9 +399,10 @@ export const ChartLayer: React.FC<ChartLayerProps> = ({
 
   return (
     <div
-      className="chart-layer absolute inset-0 pointer-events-none"
+      className="chart-layer"
       onClick={handleLayerClick}
       data-testid="chart-layer"
+      style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none' }}
     >
       {charts.map((chart) => (
         <div key={chart.id} className="pointer-events-auto">

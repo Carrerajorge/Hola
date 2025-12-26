@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { cn } from '@/lib/utils';
 import { SparseGrid, getColumnName, formatCellRef, CellData } from '@/lib/sparseGrid';
 import { FormulaEngine } from '@/lib/formulaEngine';
+import { ChartLayer, ChartConfig as ChartLayerConfig } from './excel-chart-layer';
 
 const GRID_CONFIG = {
   MAX_ROWS: 10000,
@@ -42,6 +43,9 @@ interface VirtualizedExcelProps {
   typingValue?: string;
   isRecentCell?: (row: number, col: number) => boolean;
   conditionalFormats?: ConditionalFormat[];
+  charts?: ChartLayerConfig[];
+  onUpdateChart?: (chartId: string, updates: Partial<ChartLayerConfig>) => void;
+  onDeleteChart?: (chartId: string) => void;
 }
 
 const VirtualCell = memo(function VirtualCell({
@@ -186,6 +190,9 @@ export function VirtualizedExcel({
   typingValue = '',
   isRecentCell = () => false,
   conditionalFormats,
+  charts = [],
+  onUpdateChart,
+  onDeleteChart,
 }: VirtualizedExcelProps) {
   void version;
   const [scrollPos, setScrollPos] = useState({ top: 0, left: 0 });
@@ -492,6 +499,16 @@ export function VirtualizedExcel({
                     />
                   );
                 })
+              )}
+              
+              {charts && charts.length > 0 && onUpdateChart && onDeleteChart && (
+                <ChartLayer
+                  charts={charts}
+                  grid={grid}
+                  gridConfig={GRID_CONFIG}
+                  onUpdateChart={onUpdateChart}
+                  onDeleteChart={onDeleteChart}
+                />
               )}
             </div>
           </div>
