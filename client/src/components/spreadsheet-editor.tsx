@@ -50,6 +50,7 @@ interface CellData {
   fontSize?: number;
   color?: string;
   backgroundColor?: string;
+  numberFormat?: string;  // 'General', 'Number', 'Currency', 'Percentage', 'Date', 'Text'
 }
 
 interface ChartConfig {
@@ -318,6 +319,7 @@ const convertToSparseGrid = (data: SpreadsheetData): SparseGrid => {
         fontSize: cellData.fontSize,
         color: cellData.color,
         backgroundColor: cellData.backgroundColor,
+        numberFormat: cellData.numberFormat,
       });
     } catch (e) {
       console.warn(`Failed to set cell at ${key}:`, e);
@@ -353,6 +355,7 @@ const convertFromSparseGrid = (grid: SparseGrid): SpreadsheetData => {
         fontSize: data.fontSize,
         color: data.color,
         backgroundColor: data.backgroundColor,
+        numberFormat: data.numberFormat,
       };
       maxRow = Math.max(maxRow, row);
       maxCol = Math.max(maxCol, col);
@@ -1165,8 +1168,12 @@ export function SpreadsheetEditor({
     }
   }, [onInsertContent, insertContentFn]);
 
-  const updateCell = useCallback((key: string, updates: Partial<CellData>) => {
+  const updateCell = useCallback((key: string, updates: Partial<CellData>, skipUndo = false) => {
     try {
+      const [row, col] = key.split('-').map(Number);
+      if (isNaN(row) || isNaN(col)) return;
+      
+      // Update the data state
       setData(prev => ({
         ...prev,
         cells: {
@@ -1174,10 +1181,27 @@ export function SpreadsheetEditor({
           [key]: { ...prev.cells[key], value: '', ...updates },
         },
       }));
+      
+      // Also update sparse grid for virtualized view
+      sparseGrid.setCell(row, col, {
+        value: updates.value ?? '',
+        formula: updates.formula,
+        bold: updates.bold,
+        italic: updates.italic,
+        underline: updates.underline,
+        align: updates.align,
+        fontFamily: updates.fontFamily,
+        fontSize: updates.fontSize,
+        color: updates.color,
+        backgroundColor: updates.backgroundColor,
+        numberFormat: updates.numberFormat,
+      });
+      setGridVersion(v => v + 1);
+      
     } catch (e) {
       console.error('Failed to update cell:', e);
     }
-  }, []);
+  }, [sparseGrid]);
 
   const handleCellClick = useCallback((key: string) => {
     setSelectedCell(key);
@@ -1425,7 +1449,7 @@ export function SpreadsheetEditor({
   const setNumberFormat = useCallback((format: string) => {
     if (!selectedCell) return;
     const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, format: { type: format } as any });
+    updateCell(selectedCell, { ...cell, numberFormat: format });
   }, [selectedCell, data.cells, updateCell]);
 
   const ribbonCommands: Partial<RibbonCommands> = useMemo(() => ({

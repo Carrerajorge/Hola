@@ -220,21 +220,58 @@ export function VirtualizedExcel({
   const getColumnWidth = useCallback((col: number) => columnWidths?.[col] || GRID_CONFIG.COL_WIDTH, [columnWidths]);
   const getRowHeight = useCallback((row: number) => rowHeights?.[row] || GRID_CONFIG.ROW_HEIGHT, [rowHeights]);
 
-  const getColumnLeft = useCallback((col: number) => {
-    let left = 0;
-    for (let c = 0; c < col; c++) {
-      left += columnWidths?.[c] || GRID_CONFIG.COL_WIDTH;
-    }
-    return left;
-  }, [columnWidths]);
+  const positionCache = useMemo(() => {
+    const colCache = new Map<number, number>();
+    const rowCache = new Map<number, number>();
+    
+    return {
+      getColumnLeft: (col: number): number => {
+        if (col === 0) return 0;
+        if (colCache.has(col)) return colCache.get(col)!;
+        
+        let startCol = 0;
+        let startPos = 0;
+        for (let i = col - 1; i >= 0; i--) {
+          if (colCache.has(i)) {
+            startCol = i;
+            startPos = colCache.get(i)!;
+            break;
+          }
+        }
+        
+        let pos = startPos;
+        for (let i = startCol; i < col; i++) {
+          pos += columnWidths?.[i] ?? GRID_CONFIG.COL_WIDTH;
+        }
+        colCache.set(col, pos);
+        return pos;
+      },
+      getRowTop: (row: number): number => {
+        if (row === 0) return 0;
+        if (rowCache.has(row)) return rowCache.get(row)!;
+        
+        let startRow = 0;
+        let startPos = 0;
+        for (let i = row - 1; i >= 0; i--) {
+          if (rowCache.has(i)) {
+            startRow = i;
+            startPos = rowCache.get(i)!;
+            break;
+          }
+        }
+        
+        let pos = startPos;
+        for (let i = startRow; i < row; i++) {
+          pos += rowHeights?.[i] ?? GRID_CONFIG.ROW_HEIGHT;
+        }
+        rowCache.set(row, pos);
+        return pos;
+      }
+    };
+  }, [columnWidths, rowHeights]);
 
-  const getRowTop = useCallback((row: number) => {
-    let top = 0;
-    for (let r = 0; r < row; r++) {
-      top += rowHeights?.[r] || GRID_CONFIG.ROW_HEIGHT;
-    }
-    return top;
-  }, [rowHeights]);
+  const getColumnLeft = positionCache.getColumnLeft;
+  const getRowTop = positionCache.getRowTop;
 
   const getConditionalStyle = useCallback((row: number, col: number, value: string | number): React.CSSProperties => {
     if (!conditionalFormats) return {};

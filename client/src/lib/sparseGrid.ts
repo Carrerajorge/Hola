@@ -9,6 +9,7 @@ export interface CellData {
   fontSize?: number;
   color?: string;
   backgroundColor?: string;
+  numberFormat?: string;  // 'General', 'Number', 'Currency', 'Percentage', 'Date', 'Text'
   format?: {
     backgroundColor?: string;
     textColor?: string;

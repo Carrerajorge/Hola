@@ -399,63 +399,63 @@ export class FormulaEngine {
 
     this.registerFormula('LEFT', (args) => {
       if (args.length < 1) return ExcelErrors.VALUE;
-      const text = String(this.evaluateExpression(args[0]));
+      const text = this.getStringValue(args[0]);
       if (isExcelError(text)) return text;
-      const numChars = args.length > 1 ? parseInt(String(this.evaluateExpression(args[1])), 10) : 1;
+      const numChars = args.length > 1 ? this.getNumericValue(args[1]) : 1;
       if (isNaN(numChars) || numChars < 0) return ExcelErrors.VALUE;
       return text.substring(0, numChars);
     });
 
     this.registerFormula('RIGHT', (args) => {
       if (args.length < 1) return ExcelErrors.VALUE;
-      const text = String(this.evaluateExpression(args[0]));
+      const text = this.getStringValue(args[0]);
       if (isExcelError(text)) return text;
-      const numChars = args.length > 1 ? parseInt(String(this.evaluateExpression(args[1])), 10) : 1;
+      const numChars = args.length > 1 ? this.getNumericValue(args[1]) : 1;
       if (isNaN(numChars) || numChars < 0) return ExcelErrors.VALUE;
       return text.substring(Math.max(0, text.length - numChars));
     });
 
     this.registerFormula('MID', (args) => {
       if (args.length < 3) return ExcelErrors.VALUE;
-      const text = String(this.evaluateExpression(args[0]));
+      const text = this.getStringValue(args[0]);
       if (isExcelError(text)) return text;
-      const start = parseInt(String(this.evaluateExpression(args[1])), 10);
-      const numChars = parseInt(String(this.evaluateExpression(args[2])), 10);
+      const start = this.getNumericValue(args[1]);
+      const numChars = this.getNumericValue(args[2]);
       if (isNaN(start) || isNaN(numChars) || start < 1 || numChars < 0) return ExcelErrors.VALUE;
       return text.substring(start - 1, start - 1 + numChars);
     });
 
     this.registerFormula('LEN', (args) => {
       if (args.length < 1) return ExcelErrors.VALUE;
-      const text = String(this.evaluateExpression(args[0]));
+      const text = this.getStringValue(args[0]);
       if (isExcelError(text)) return text;
       return text.length.toString();
     });
 
     this.registerFormula('TRIM', (args) => {
       if (args.length < 1) return ExcelErrors.VALUE;
-      const text = String(this.evaluateExpression(args[0]));
+      const text = this.getStringValue(args[0]);
       if (isExcelError(text)) return text;
       return text.replace(/\s+/g, ' ').trim();
     });
 
     this.registerFormula('UPPER', (args) => {
       if (args.length < 1) return ExcelErrors.VALUE;
-      const text = String(this.evaluateExpression(args[0]));
+      const text = this.getStringValue(args[0]);
       if (isExcelError(text)) return text;
       return text.toUpperCase();
     });
 
     this.registerFormula('LOWER', (args) => {
       if (args.length < 1) return ExcelErrors.VALUE;
-      const text = String(this.evaluateExpression(args[0]));
+      const text = this.getStringValue(args[0]);
       if (isExcelError(text)) return text;
       return text.toLowerCase();
     });
 
     this.registerFormula('PROPER', (args) => {
       if (args.length < 1) return ExcelErrors.VALUE;
-      const text = String(this.evaluateExpression(args[0]));
+      const text = this.getStringValue(args[0]);
       if (isExcelError(text)) return text;
       return text.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
     });
@@ -505,18 +505,7 @@ export class FormulaEngine {
   }
 
   private handleConcat(args: string[]): string {
-    return args.map(p => {
-      const trimmed = p.trim();
-      if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-        return trimmed.slice(1, -1);
-      }
-      const { sheetName, cellRef } = this.parseSheetReference(trimmed);
-      const ref = parseCellRef(cellRef);
-      if (ref) {
-        return this.getGridCell(ref.row, ref.col, sheetName).value;
-      }
-      return trimmed;
-    }).join('');
+    return args.map(p => this.getStringValue(p)).join('');
   }
 
   private parseSheetReference(ref: string): { sheetName: string | null; cellRef: string } {
@@ -679,6 +668,40 @@ export class FormulaEngine {
     return trimmed;
   }
 
+  private getArgumentValue(arg: string): string | number {
+    const trimmed = arg.trim();
+    
+    if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+      return trimmed.slice(1, -1);
+    }
+    
+    const { sheetName, cellRef } = this.parseSheetReference(trimmed);
+    const ref = parseCellRef(cellRef);
+    if (ref) {
+      const cell = this.getGridCell(ref.row, ref.col, sheetName);
+      return cell.value;
+    }
+    
+    const numVal = parseFloat(trimmed);
+    if (!isNaN(numVal) && trimmed === String(numVal)) {
+      return numVal;
+    }
+    
+    return trimmed;
+  }
+
+  private getNumericValue(arg: string): number {
+    const val = this.getArgumentValue(arg);
+    if (typeof val === 'number') return val;
+    const num = parseFloat(String(val).replace(/[^\d.-]/g, ''));
+    return isNaN(num) ? 0 : num;
+  }
+
+  private getStringValue(arg: string): string {
+    const val = this.getArgumentValue(arg);
+    return String(val);
+  }
+
   private formatNumber(value: number, format: string): string {
     if (isNaN(value)) return ExcelErrors.VALUE;
     
@@ -761,6 +784,8 @@ export class FormulaEngine {
   }
 
   evaluate(formula: string): string {
+    this.evaluationStack.clear();
+    
     if (!formula?.startsWith('=')) return formula;
     const expr = formula.substring(1).trim();
 
