@@ -1,7 +1,7 @@
 import { openai, MODELS } from "../lib/openai";
 import { llmGateway } from "../lib/llmGateway";
 import { geminiChat, geminiStreamChat, GEMINI_MODELS, GeminiChatMessage } from "../lib/gemini";
-import { LIMITS } from "../lib/constants";
+import { LIMITS, MEMORY_INTENT_KEYWORDS } from "../lib/constants";
 import { storage } from "../storage";
 import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
@@ -78,6 +78,11 @@ function detectDiagramType(prompt: string): DiagramType {
   if (orgChartKeywords.some(kw => lowerPrompt.includes(kw))) return "orgchart";
   if (mindmapKeywords.some(kw => lowerPrompt.includes(kw))) return "mindmap";
   return "flowchart";
+}
+
+function detectMemoryIntent(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+  return MEMORY_INTENT_KEYWORDS.some(keyword => lowerMessage.includes(keyword));
 }
 
 function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: string[] } {
@@ -498,12 +503,20 @@ export async function handleChatRequest(
     }
   }
 
-  // RAG/Memory retrieval is gated by the memoryEnabled feature flag
-  // If memoryEnabled is false, skip document memory retrieval
-  if (useRag && featureFlags.memoryEnabled && lastUserMessage) {
+  // RAG/Memory retrieval is gated by memoryEnabled AND explicit user intent
+  // Only inject memory context when user explicitly mentions their documents
+  const userWantsMemory = lastUserMessage ? detectMemoryIntent(lastUserMessage.content) : false;
+  
+  if (useRag && featureFlags.memoryEnabled && lastUserMessage && userWantsMemory) {
     try {
       const queryEmbedding = await generateEmbedding(lastUserMessage.content);
-      const similarChunks = await storage.searchSimilarChunks(queryEmbedding, LIMITS.RAG_SIMILAR_CHUNKS, userId);
+      const allChunks = await storage.searchSimilarChunks(queryEmbedding, LIMITS.RAG_SIMILAR_CHUNKS, userId);
+      
+      // Filter by similarity threshold - only include highly relevant chunks
+      const similarChunks = allChunks.filter((chunk: any) => {
+        const distance = parseFloat(chunk.distance || "1");
+        return distance < LIMITS.RAG_SIMILARITY_THRESHOLD;
+      });
       
       if (similarChunks.length > 0) {
         sources = similarChunks.map((chunk: any) => ({
@@ -511,7 +524,7 @@ export async function handleChatRequest(
           content: chunk.content.slice(0, 200) + "..."
         }));
         
-        contextInfo = "\n\nContexto de documentos relevantes:\n" + 
+        contextInfo = "\n\nContexto de tus documentos:\n" + 
           similarChunks.map((chunk: any, i: number) => 
             `[${i + 1}] ${chunk.file_name || "Documento"}: ${chunk.content}`
           ).join("\n\n");

@@ -36,10 +36,20 @@ export const LIMITS = {
   MAX_CONTENT_FETCH: 3,
   EMBEDDING_BATCH_SIZE: 20,
   MAX_EMBEDDING_INPUT: 8000,
-  RAG_SIMILAR_CHUNKS: 5,
+  RAG_SIMILAR_CHUNKS: 3,
+  RAG_SIMILARITY_THRESHOLD: 0.5,
   MAX_FILE_SIZE_MB: 100,
   MAX_FILE_SIZE_BYTES: 100 * 1024 * 1024
 } as const;
+
+export const MEMORY_INTENT_KEYWORDS = [
+  "mi archivo", "mis archivos", "mi documento", "mis documentos",
+  "el archivo que", "el documento que", "lo que subí", "lo que cargué",
+  "el pdf", "el excel", "el word", "la presentación",
+  "según mi", "de acuerdo a mi", "basándote en mi",
+  "usa mi", "revisa mi", "analiza mi", "lee mi",
+  "en mi archivo", "en mis documentos", "de mi archivo"
+] as const;
 
 export const FILE_UPLOAD_CONFIG = {
   CHUNK_SIZE_MB: 5,
