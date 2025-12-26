@@ -27,6 +27,7 @@ import { Sparkles } from 'lucide-react';
 import { ExcelOrchestrator, WorkbookData as OrchestratorWorkbook, SheetData as OrchestratorSheet, ChartConfig as OrchestratorChartConfig } from '@/lib/excelOrchestrator';
 import { ChartLayer, ChartConfig as ChartLayerConfig, createChartFromSelection } from './excel-chart-layer';
 import { ExcelRibbon, RibbonCommands, CellFormat } from './excel-ribbon';
+import { useExcelUndoRedo } from '@/hooks/useExcelUndoRedo';
 
 interface SpreadsheetEditorProps {
   title: string;
@@ -343,6 +344,8 @@ export function SpreadsheetEditor({
   const [gridVersion, setGridVersion] = useState(0);
   const [virtualSelectedCell, setVirtualSelectedCell] = useState<{ row: number; col: number } | null>(null);
   const [virtualEditingCell, setVirtualEditingCell] = useState<{ row: number; col: number } | null>(null);
+  const [mergedCells, setMergedCells] = useState<Set<string>>(new Set());
+  const [wrapText, setWrapTextEnabled] = useState(false);
   const [showAIPrompt, setShowAIPrompt] = useState(false);
   const [aiPrompt, setAIPrompt] = useState('');
   const [orchestratorProgress, setOrchestratorProgress] = useState<{ current: number; total: number; task: string } | null>(null);
@@ -353,6 +356,11 @@ export function SpreadsheetEditor({
   
   const streaming = useExcelStreaming(sparseGrid);
   const { STREAM_STATUS } = streaming;
+  
+  const undoRedo = useExcelUndoRedo(sparseGrid, (newGrid) => {
+    setSparseGrid(newGrid);
+    setGridVersion(v => v + 1);
+  });
   
   const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
@@ -1282,6 +1290,21 @@ export function SpreadsheetEditor({
     setShowChart(false);
   }, []);
 
+  const mergeCells = useCallback(() => {
+    if (!selectionRange) return;
+    console.log('Merge cells:', selectionRange);
+  }, [selectionRange]);
+
+  const toggleWrapText = useCallback(() => {
+    setWrapTextEnabled(prev => !prev);
+  }, []);
+
+  const setNumberFormat = useCallback((format: string) => {
+    if (!selectedCell) return;
+    const cell = data.cells[selectedCell] || { value: '' };
+    updateCell(selectedCell, { ...cell, format: { type: format } as any });
+  }, [selectedCell, data.cells, updateCell]);
+
   const ribbonCommands: Partial<RibbonCommands> = useMemo(() => ({
     copy: () => {
       if (selectedCell) {
@@ -1330,7 +1353,12 @@ export function SpreadsheetEditor({
     filter: () => {
       console.log('Filter toggle');
     },
-  }), [selectedCell, data.cells, updateCell, toggleBold, toggleItalic, toggleUnderline, setFontFamily, setFontSize, setFontColor, setFillColor, setAlignment, addRow, addColumn, deleteRow, deleteColumn, updateChartConfig]);
+    undo: undoRedo.undo,
+    redo: undoRedo.redo,
+    mergeCells,
+    wrapText: toggleWrapText,
+    setNumberFormat,
+  }), [selectedCell, data.cells, updateCell, toggleBold, toggleItalic, toggleUnderline, setFontFamily, setFontSize, setFontColor, setFillColor, setAlignment, addRow, addColumn, deleteRow, deleteColumn, updateChartConfig, undoRedo.undo, undoRedo.redo, mergeCells, toggleWrapText, setNumberFormat]);
 
   const cellFormat: CellFormat = useMemo(() => {
     if (!selectedCell) return {};

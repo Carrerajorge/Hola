@@ -364,6 +364,8 @@ export interface RibbonCommands {
   alignCenter: () => void;
   alignRight: () => void;
   mergeCells: () => void;
+  wrapText: () => void;
+  setNumberFormat: (format: string) => void;
   insertRow: () => void;
   insertColumn: () => void;
   deleteRow: () => void;
@@ -683,7 +685,7 @@ const HomeTabContent: React.FC<{
             <RibbonButton icon={Icons.alignRight} onClick={() => commands.alignRight?.()} active={cellFormat?.align === 'right'} tooltip="Alinear derecha" />
           </div>
           <div className="flex items-center gap-px">
-            <RibbonButton icon={Icons.wrapText} hasDropdown tooltip="Ajustar texto" />
+            <RibbonButton icon={Icons.wrapText} hasDropdown onClick={() => commands.wrapText?.()} tooltip="Ajustar texto" />
             <RibbonButton icon={Icons.merge} hasDropdown onClick={() => commands.mergeCells?.()} tooltip="Combinar y centrar" />
           </div>
         </div>
@@ -693,7 +695,7 @@ const HomeTabContent: React.FC<{
 
       <RibbonGroup title="Número">
         <div className="flex flex-col gap-1">
-          <Dropdown value={currentNumberFormat} options={numberFormats} onChange={() => {}} width={90} />
+          <Dropdown value={currentNumberFormat} options={numberFormats} onChange={(fmt) => commands.setNumberFormat?.(fmt)} width={90} />
           <div className="flex items-center gap-px">
             <RibbonButton icon={<span className="text-[11px] font-bold text-green-700">$</span>} hasDropdown tooltip="Formato moneda" />
             <RibbonButton icon={<span className="text-[11px] font-bold">%</span>} tooltip="Formato porcentaje" />
@@ -772,7 +774,7 @@ const InsertTabContent: React.FC<{ commands: Partial<RibbonCommands> }> = ({ com
   );
 };
 
-const DrawTabContent: React.FC = () => {
+const DrawTabContent: React.FC<{ commands: Partial<RibbonCommands> }> = ({ commands }) => {
   return (
     <div className="flex items-start gap-0.5 px-1 py-0.5 min-h-[72px]">
       <RibbonGroup title="Herramientas">
@@ -785,8 +787,8 @@ const DrawTabContent: React.FC = () => {
       <RibbonSeparator />
       <RibbonGroup title="Acciones">
         <div className="flex items-start gap-0.5">
-          <RibbonButton icon={Icons.undo} size="large" label="Deshacer" onClick={() => {}} tooltip="Deshacer trazo" />
-          <RibbonButton icon={Icons.redo} size="large" label="Rehacer" onClick={() => {}} tooltip="Rehacer trazo" />
+          <RibbonButton icon={Icons.undo} size="large" label="Deshacer" onClick={() => commands.undo?.()} tooltip="Deshacer (Ctrl+Z)" />
+          <RibbonButton icon={Icons.redo} size="large" label="Rehacer" onClick={() => commands.redo?.()} tooltip="Rehacer (Ctrl+Y)" />
         </div>
       </RibbonGroup>
     </div>
@@ -1024,7 +1026,7 @@ export function ExcelRibbon({ commands, cellFormat, currentFont = 'Calibri', cur
       case 'insert':
         return <InsertTabContent commands={commands} />;
       case 'draw':
-        return <DrawTabContent />;
+        return <DrawTabContent commands={commands} />;
       case 'pageLayout':
         return <PageLayoutTabContent />;
       case 'formulas':
