@@ -57,6 +57,59 @@ interface SidebarProps {
   onOpenGpts?: () => void;
   onOpenApps?: () => void;
   onOpenLibrary?: () => void;
+  processingChatIds?: string[];
+  pendingResponseCounts?: Record<string, number>;
+  onClearPendingCount?: (chatId: string) => void;
+}
+
+function ChatSpinner() {
+  return (
+    <svg 
+      className="h-4 w-4 flex-shrink-0" 
+      fill="hsl(228, 97%, 42%)" 
+      viewBox="0 0 24 24" 
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <g>
+        <circle cx="12" cy="3" r="1">
+          <animate id="spinner_7Z73" begin="0;spinner_tKsu.end-0.5s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="16.50" cy="4.21" r="1">
+          <animate id="spinner_Wd87" begin="spinner_7Z73.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="7.50" cy="4.21" r="1">
+          <animate id="spinner_tKsu" begin="spinner_tVVl.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="19.79" cy="7.50" r="1">
+          <animate id="spinner_5L0R" begin="spinner_Wd87.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="4.21" cy="7.50" r="1">
+          <animate id="spinner_tVVl" begin="spinner_u6j3.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="21.00" cy="12.00" r="1">
+          <animate id="spinner_JSUN" begin="spinner_5L0R.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="3.00" cy="12.00" r="1">
+          <animate id="spinner_u6j3" begin="spinner_YHwI.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="19.79" cy="16.50" r="1">
+          <animate id="spinner_GKXF" begin="spinner_JSUN.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="4.21" cy="16.50" r="1">
+          <animate id="spinner_YHwI" begin="spinner_xGMk.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="16.50" cy="19.79" r="1">
+          <animate id="spinner_pMgl" begin="spinner_GKXF.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="7.50" cy="19.79" r="1">
+          <animate id="spinner_xGMk" begin="spinner_pMgl.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+        <circle cx="12" cy="21" r="1">
+          <animate begin="spinner_xGMk.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+        </circle>
+      </g>
+    </svg>
+  );
 }
 
 export function Sidebar({ 
@@ -73,7 +126,10 @@ export function Sidebar({
   onHideChat,
   onOpenGpts,
   onOpenApps,
-  onOpenLibrary
+  onOpenLibrary,
+  processingChatIds = [],
+  pendingResponseCounts = {},
+  onClearPendingCount
 }: SidebarProps) {
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
@@ -261,6 +317,17 @@ export function Sidebar({
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                           {chat.archived && <Archive className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
                           <span className="truncate text-sm font-medium">{chat.title}</span>
+                          {processingChatIds.includes(chat.id) && (
+                            <ChatSpinner />
+                          )}
+                          {!processingChatIds.includes(chat.id) && pendingResponseCounts[chat.id] > 0 && (
+                            <span 
+                              className="flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-blue-600 text-white text-xs font-medium flex-shrink-0"
+                              data-testid={`badge-pending-${chat.id}`}
+                            >
+                              {pendingResponseCounts[chat.id]}
+                            </span>
+                          )}
                         </div>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>

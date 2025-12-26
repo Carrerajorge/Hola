@@ -56,9 +56,60 @@ export default function Home() {
   // AI processing state - kept in parent to survive ChatInterface key changes
   const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
   const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
+  
+  // Track which chats are processing and pending response counts
+  const [processingChatIds, setProcessingChatIds] = useState<string[]>([]);
+  const [pendingResponseCounts, setPendingResponseCounts] = useState<Record<string, number>>({});
 
   // Store the pending chat ID during new chat creation
   const pendingChatIdRef = useRef<string | null>(null);
+  
+  // Track which chat was being processed
+  const processingChatIdRef = useRef<string | null>(null);
+  
+  // Track current processing chat and update spinner/badge
+  useEffect(() => {
+    const currentChatId = activeChat?.id || pendingChatIdRef.current;
+    
+    if (aiState === "thinking" || aiState === "responding") {
+      if (currentChatId) {
+        processingChatIdRef.current = currentChatId;
+        // Add to processing chats
+        setProcessingChatIds(prev => 
+          prev.includes(currentChatId) ? prev : [...prev, currentChatId]
+        );
+      }
+    } else if (aiState === "idle" && processingChatIdRef.current) {
+      const finishedChatId = processingChatIdRef.current;
+      // Remove from processing
+      setProcessingChatIds(prev => prev.filter(id => id !== finishedChatId));
+      
+      // If this chat is not the currently active one, increment pending count
+      if (finishedChatId !== activeChat?.id) {
+        setPendingResponseCounts(prev => ({
+          ...prev,
+          [finishedChatId]: (prev[finishedChatId] || 0) + 1
+        }));
+      }
+      processingChatIdRef.current = null;
+    }
+  }, [aiState, activeChat?.id]);
+  
+  const handleClearPendingCount = useCallback((chatId: string) => {
+    setPendingResponseCounts(prev => {
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+  }, []);
+  
+  // Clear pending count when selecting a chat
+  const handleSelectChatWithClear = useCallback((id: string) => {
+    handleClearPendingCount(id);
+    setIsNewChatMode(false);
+    setNewChatStableKey(null);
+    setActiveChatId(id);
+  }, [handleClearPendingCount, setActiveChatId]);
 
   const handleNewChat = () => {
     const newKey = `new-chat-${Date.now()}`;
@@ -92,11 +143,6 @@ export default function Home() {
     }
   }, [activeChat?.id, addMessage, handleSendNewChatMessage]);
 
-  const handleSelectChat = (id: string) => {
-    setIsNewChatMode(false);
-    setNewChatStableKey(null);
-    setActiveChatId(id);
-  };
 
   const chatInterfaceKey = useMemo(() => {
     // Prioritize newChatStableKey to prevent component remount during new chat creation
@@ -152,7 +198,7 @@ export default function Home() {
           chats={chats} 
           hiddenChats={hiddenChats}
           activeChatId={activeChat?.id || null} 
-          onSelectChat={handleSelectChat} 
+          onSelectChat={handleSelectChatWithClear} 
           onNewChat={handleNewChat} 
           onToggle={() => setIsSidebarOpen(false)} 
           onDeleteChat={deleteChat}
@@ -162,6 +208,9 @@ export default function Home() {
           onOpenGpts={handleOpenGpts}
           onOpenApps={handleOpenApps}
           onOpenLibrary={handleOpenLibrary}
+          processingChatIds={processingChatIds}
+          pendingResponseCounts={pendingResponseCounts}
+          onClearPendingCount={handleClearPendingCount}
         />
       </div>
 
@@ -186,7 +235,7 @@ export default function Home() {
               chats={chats} 
               hiddenChats={hiddenChats}
               activeChatId={activeChat?.id || null} 
-              onSelectChat={handleSelectChat} 
+              onSelectChat={handleSelectChatWithClear} 
               onNewChat={handleNewChat} 
               onToggle={() => setIsSidebarOpen(!isSidebarOpen)} 
               onDeleteChat={deleteChat}
@@ -196,6 +245,9 @@ export default function Home() {
               onOpenGpts={handleOpenGpts}
               onOpenApps={handleOpenApps}
               onOpenLibrary={handleOpenLibrary}
+              processingChatIds={processingChatIds}
+              pendingResponseCounts={pendingResponseCounts}
+              onClearPendingCount={handleClearPendingCount}
             />
           </SheetContent>
         </Sheet>
