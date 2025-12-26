@@ -336,10 +336,24 @@ export function VirtualizedExcel({
     return {};
   }, [conditionalFormats]);
 
-  const startRow = Math.max(0, findRowAtPosition(scrollPos.top) - GRID_CONFIG.BUFFER_ROWS);
+  const calculatedStartRow = findRowAtPosition(scrollPos.top);
+  const startRow = Math.max(0, calculatedStartRow - GRID_CONFIG.BUFFER_ROWS);
   const startCol = Math.max(0, findColAtPosition(scrollPos.left) - GRID_CONFIG.BUFFER_COLS);
   const endRow = Math.min(GRID_CONFIG.MAX_ROWS, startRow + GRID_CONFIG.VISIBLE_ROWS + GRID_CONFIG.BUFFER_ROWS * 2);
   const endCol = Math.min(GRID_CONFIG.MAX_COLS, startCol + GRID_CONFIG.VISIBLE_COLS + GRID_CONFIG.BUFFER_COLS * 2);
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('VirtualizedExcel Debug:', {
+      scrollTop: scrollPos.top,
+      calculatedStartRow,
+      startRow,
+      endRow,
+      visibleRowsCount: endRow - startRow,
+      firstVisibleRow: startRow,
+      lastVisibleRow: endRow - 1
+    });
+  }, [scrollPos.top, calculatedStartRow, startRow, endRow]);
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
@@ -525,26 +539,32 @@ export function VirtualizedExcel({
     >
       <div className="flex flex-1 overflow-hidden">
         <div
-          className="flex-shrink-0 bg-gray-100 dark:bg-gray-800"
+          className="flex-shrink-0 bg-gray-100 dark:bg-gray-800 flex flex-col"
           style={{ width: GRID_CONFIG.ROW_HEADER_WIDTH }}
         >
           <div
-            className="sticky top-0 z-20 bg-gray-200 dark:bg-gray-700 border-r border-b border-gray-300 dark:border-gray-600"
+            className="flex-shrink-0 z-20 bg-gray-200 dark:bg-gray-700 border-r border-b border-gray-300 dark:border-gray-600"
             style={{ height: GRID_CONFIG.COL_HEADER_HEIGHT, width: GRID_CONFIG.ROW_HEADER_WIDTH }}
           />
           <div
-            className="relative overflow-hidden"
-            style={{
-              height: `calc(100% - ${GRID_CONFIG.COL_HEADER_HEIGHT}px)`,
-              transform: `translateY(-${scrollPos.top}px)`,
-            }}
+            className="flex-1 relative overflow-hidden"
           >
-            <div style={{ height: totalHeight, position: 'relative' }}>
+            <div 
+              style={{ 
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: totalHeight,
+                transform: `translateY(-${scrollPos.top}px)`,
+              }}
+            >
               {visibleRows.map(row => (
                 <RowHeader
                   key={row}
                   row={row}
                   style={{
+                    position: 'absolute',
                     top: getRowTop(row),
                     left: 0,
                     width: GRID_CONFIG.ROW_HEADER_WIDTH,
