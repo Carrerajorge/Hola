@@ -1204,6 +1204,22 @@ export function ChatInterface({
   useEffect(() => {
     aiStateRef.current = aiState;
   }, [aiState]);
+  
+  // Cleanup: abort any ongoing requests when component unmounts (chat switch)
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+        streamIntervalRef.current = null;
+      }
+      streamingContentRef.current = "";
+    };
+  }, []);
+  
   const agent = useAgent();
   const browserSession = useBrowserSession();
 
