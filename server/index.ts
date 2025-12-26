@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { requestTracerMiddleware } from "./lib/requestTracer";
 
 const app = express();
 const httpServer = createServer(app);
@@ -11,6 +12,9 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+// Request tracer middleware - debe ir primero para capturar todas las requests
+app.use(requestTracerMiddleware);
 
 app.use(
   express.json({

@@ -28,6 +28,10 @@ import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
+import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
+import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
+import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
+import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -159,6 +163,159 @@ export async function registerRoutes(
       res.status(500).json({ 
         success: false, 
         error: error.message || "Failed to get default config" 
+      });
+    }
+  });
+
+  // ===== Observability Endpoints =====
+  
+  // Initialize health monitoring
+  initializeHealthMonitoring();
+
+  // GET /api/observability/logs - Query logs with filters
+  app.get("/api/observability/logs", (req: Request, res: Response) => {
+    try {
+      const filters: LogFilters = {};
+      
+      if (req.query.level) {
+        filters.level = req.query.level as "debug" | "info" | "warn" | "error";
+      }
+      if (req.query.component) {
+        filters.component = req.query.component as string;
+      }
+      if (req.query.since) {
+        filters.since = new Date(req.query.since as string);
+      }
+      if (req.query.requestId) {
+        filters.requestId = req.query.requestId as string;
+      }
+      if (req.query.userId) {
+        filters.userId = req.query.userId as string;
+      }
+      if (req.query.limit) {
+        filters.limit = parseInt(req.query.limit as string, 10);
+      }
+      
+      const logs = getLogs(filters);
+      
+      res.json({
+        success: true,
+        data: {
+          logs,
+          count: logs.length,
+        },
+      });
+    } catch (error: any) {
+      console.error("[Observability] Error getting logs:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get logs",
+      });
+    }
+  });
+
+  // GET /api/observability/health - Get all services health status
+  app.get("/api/observability/health", (_req: Request, res: Response) => {
+    try {
+      const services = getAllServicesHealth();
+      const overallStatus = getOverallStatus();
+      
+      res.json({
+        success: true,
+        data: {
+          overall: overallStatus,
+          services,
+        },
+      });
+    } catch (error: any) {
+      console.error("[Observability] Error getting health:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get health status",
+      });
+    }
+  });
+
+  // GET /api/observability/alerts - Get active alerts
+  app.get("/api/observability/alerts", (req: Request, res: Response) => {
+    try {
+      const includeHistory = req.query.history === "true";
+      const sinceParam = req.query.since as string | undefined;
+      
+      const activeAlerts = getActiveAlerts();
+      const alertStats = getAlertStats();
+      
+      const response: any = {
+        success: true,
+        data: {
+          active: activeAlerts,
+          stats: alertStats,
+        },
+      };
+      
+      if (includeHistory) {
+        const since = sinceParam ? new Date(sinceParam) : undefined;
+        response.data.history = getAlertHistory(since);
+      }
+      
+      res.json(response);
+    } catch (error: any) {
+      console.error("[Observability] Error getting alerts:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get alerts",
+      });
+    }
+  });
+
+  // POST /api/observability/alerts/:id/resolve - Resolve an alert
+  app.post("/api/observability/alerts/:id/resolve", (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const alert = resolveAlert(id);
+      
+      if (!alert) {
+        return res.status(404).json({
+          success: false,
+          error: "Alert not found",
+        });
+      }
+      
+      res.json({
+        success: true,
+        data: alert,
+      });
+    } catch (error: any) {
+      console.error("[Observability] Error resolving alert:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to resolve alert",
+      });
+    }
+  });
+
+  // GET /api/observability/stats - Get request and log stats
+  app.get("/api/observability/stats", (_req: Request, res: Response) => {
+    try {
+      const logStats = getLogStats();
+      const requestStats = getRequestStats();
+      const activeReqs = getActiveRequests();
+      
+      res.json({
+        success: true,
+        data: {
+          logs: logStats,
+          requests: {
+            ...requestStats,
+            activeDetails: activeReqs,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.error("[Observability] Error getting stats:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get stats",
       });
     }
   });
