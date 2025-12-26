@@ -648,15 +648,23 @@ export function SpreadsheetEditor({
             activeSheetId: prev.activeSheetId
           } as unknown as OrchestratorWorkbook);
           
-          return {
+          console.log('[Orchestrator] Updated sheets:', updated.sheets.map(s => ({ name: s.name, chartsCount: s.charts?.length || 0 })));
+          
+          const newWorkbook = {
             ...prev,
             sheets: updated.sheets.map(sheet => ({
-              ...sheet,
+              id: sheet.id,
+              name: sheet.name,
               data: convertFromSparseGrid(sheet.grid),
-              charts: sheet.charts,
+              charts: sheet.charts as ChartLayerConfig[],
               conditionalFormats: sheet.conditionalFormats
-            }))
+            })),
+            activeSheetId: updated.activeSheetId
           };
+          
+          console.log('[Orchestrator] New workbook sheets:', newWorkbook.sheets.map(s => ({ name: s.name, chartsCount: s.charts?.length || 0 })));
+          
+          return newWorkbook;
         });
       },
       streamingHook
