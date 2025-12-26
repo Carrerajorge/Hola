@@ -24,6 +24,7 @@ import { FormulaEngine } from '@/lib/formulaEngine';
 import { useExcelStreaming, STREAM_STATUS } from '@/hooks/useExcelStreaming';
 import { StreamingIndicator } from './excel-streaming-indicator';
 import { Sparkles } from 'lucide-react';
+import { ExcelOrchestrator, WorkbookData as OrchestratorWorkbook, SheetData as OrchestratorSheet, ChartConfig as OrchestratorChartConfig } from '@/lib/excelOrchestrator';
 
 interface SpreadsheetEditorProps {
   title: string;
@@ -59,6 +60,11 @@ interface SheetData {
   name: string;
   data: SpreadsheetData;
   chartConfig?: ChartConfig;
+  charts?: OrchestratorChartConfig[];
+  conditionalFormats?: Array<{
+    range: { startRow: number; endRow: number; startCol: number; endCol: number };
+    rules: Array<{ condition: string; value?: number; style: { backgroundColor?: string; color?: string; } }>;
+  }>;
 }
 
 interface WorkbookData {
@@ -320,6 +326,7 @@ export function SpreadsheetEditor({
   const [virtualEditingCell, setVirtualEditingCell] = useState<{ row: number; col: number } | null>(null);
   const [showAIPrompt, setShowAIPrompt] = useState(false);
   const [aiPrompt, setAIPrompt] = useState('');
+  const [orchestratorProgress, setOrchestratorProgress] = useState<{ current: number; total: number; task: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const initialContentRef = useRef(content);
@@ -423,6 +430,81 @@ export function SpreadsheetEditor({
     setShowAIPrompt(false);
     
     const lowerPrompt = aiPrompt.toLowerCase();
+    
+    // Detect complex prompts that need orchestration
+    const isComplexPrompt = /completo|análisis|análisis completo|4 hojas|gráficos?|chart|dashboard|resumen|fórmulas múltiples/i.test(lowerPrompt);
+    
+    if (isComplexPrompt) {
+      // Use the AI Orchestrator for complex multi-sheet workbooks
+      const streamingHook = {
+        queueCell: (row: number, col: number, value: string, delay?: number) => {
+          streaming.queueCell(row, col, String(value), delay);
+        },
+        processStreamQueue: () => streaming.processStreamQueue()
+      };
+      
+      // Convert current workbook to orchestrator format
+      const orchestratorWorkbook = {
+        sheets: workbook.sheets.map(sheet => ({
+          id: sheet.id,
+          name: sheet.name,
+          grid: convertToSparseGrid(sheet.data),
+          charts: sheet.charts || [],
+          conditionalFormats: sheet.conditionalFormats || []
+        })),
+        activeSheetId: workbook.activeSheetId
+      } as unknown as OrchestratorWorkbook;
+      
+      const orchestrator = new ExcelOrchestrator(
+        orchestratorWorkbook,
+        (updater) => {
+          setWorkbook(prev => {
+            const updated = updater({
+              sheets: prev.sheets.map(sheet => ({
+                id: sheet.id,
+                name: sheet.name,
+                grid: convertToSparseGrid(sheet.data),
+                charts: sheet.charts || [],
+                conditionalFormats: sheet.conditionalFormats || []
+              })),
+              activeSheetId: prev.activeSheetId
+            } as unknown as OrchestratorWorkbook);
+            
+            return {
+              ...prev,
+              sheets: updated.sheets.map(sheet => ({
+                ...sheet,
+                data: convertFromSparseGrid(sheet.grid),
+                charts: sheet.charts,
+                conditionalFormats: sheet.conditionalFormats
+              }))
+            };
+          });
+        },
+        streamingHook
+      );
+      
+      try {
+        await orchestrator.analyzeAndPlan(aiPrompt);
+        await orchestrator.executePlan((progress) => {
+          setOrchestratorProgress({
+            current: progress.current,
+            total: progress.total,
+            task: progress.task
+          });
+        });
+        setOrchestratorProgress(null);
+        setGridVersion(v => v + 1);
+      } catch (err) {
+        console.error('[Orchestrator] Error:', err);
+        setOrchestratorProgress(null);
+      }
+      
+      setAIPrompt('');
+      return;
+    }
+    
+    // Simple data generation for non-complex prompts
     let sampleData: (string | number | null)[][];
     
     if (lowerPrompt.includes('ventas') || lowerPrompt.includes('sales')) {
@@ -466,7 +548,7 @@ export function SpreadsheetEditor({
       console.error('[AI Generate] Error:', err);
     }
     setAIPrompt('');
-  }, [aiPrompt, virtualSelectedCell, streaming]);
+  }, [aiPrompt, virtualSelectedCell, streaming, workbook]);
 
   // Sheet management functions
   const addSheet = useCallback(() => {
