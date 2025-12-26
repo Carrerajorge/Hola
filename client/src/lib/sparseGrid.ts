@@ -16,6 +16,11 @@ export interface CellData {
   };
 }
 
+export interface ValidationResult {
+  valid: boolean;
+  error?: string;
+}
+
 export interface SparseGridConfig {
   maxRows: number;
   maxCols: number;
@@ -68,6 +73,48 @@ export class SparseGrid {
 
   deleteCell(row: number, col: number): void {
     this.cells.delete(this.key(row, col));
+  }
+
+  validateBounds(row: number, col: number): ValidationResult {
+    if (row < 0 || row >= this.maxRows) {
+      return { valid: false, error: `Row ${row} out of bounds (0-${this.maxRows - 1})` };
+    }
+    if (col < 0 || col >= this.maxCols) {
+      return { valid: false, error: `Column ${col} out of bounds (0-${this.maxCols - 1})` };
+    }
+    return { valid: true };
+  }
+
+  safeSetCell(row: number, col: number, data: Partial<CellData>): ValidationResult {
+    const bounds = this.validateBounds(row, col);
+    if (!bounds.valid) return bounds;
+    
+    try {
+      this.setCell(row, col, data);
+      return { valid: true };
+    } catch (e) {
+      return { valid: false, error: `Failed to set cell: ${e}` };
+    }
+  }
+
+  static validateCellRef(ref: string): ValidationResult {
+    const match = ref.match(/^([A-Z]+)(\d+)$/i);
+    if (!match) {
+      return { valid: false, error: `Invalid cell reference: ${ref}` };
+    }
+    return { valid: true };
+  }
+
+  static validateRange(range: string): ValidationResult {
+    const parts = range.split(':');
+    if (parts.length > 2) {
+      return { valid: false, error: `Invalid range format: ${range}` };
+    }
+    for (const part of parts) {
+      const result = SparseGrid.validateCellRef(part);
+      if (!result.valid) return result;
+    }
+    return { valid: true };
   }
 
   hasData(row: number, col: number): boolean {

@@ -284,7 +284,19 @@ export function VirtualizedExcel({
   }, [onEditCell]);
 
   const handleCellChange = useCallback((row: number, col: number, value: string) => {
-    updateCell(row, col, value);
+    if (typeof row !== 'number' || typeof col !== 'number' || isNaN(row) || isNaN(col)) {
+      console.warn('Invalid cell coordinates in handleCellChange:', row, col);
+      return;
+    }
+    if (row < 0 || row >= GRID_CONFIG.MAX_ROWS || col < 0 || col >= GRID_CONFIG.MAX_COLS) {
+      console.warn('Cell coordinates out of bounds:', row, col);
+      return;
+    }
+    try {
+      updateCell(row, col, value);
+    } catch (e) {
+      console.error('Failed to change cell:', e);
+    }
   }, [updateCell]);
 
   const handleCellKeyDown = useCallback((e: React.KeyboardEvent, row: number, col: number) => {
@@ -305,64 +317,78 @@ export function VirtualizedExcel({
     if (!selectedCell || editingCell) return;
 
     const { row, col } = selectedCell;
+    if (typeof row !== 'number' || typeof col !== 'number' || isNaN(row) || isNaN(col)) {
+      console.warn('Invalid selected cell coordinates:', selectedCell);
+      return;
+    }
+    
     let newRow = row;
     let newCol = col;
 
-    switch (e.key) {
-      case 'ArrowUp':
-        newRow = Math.max(0, row - 1);
-        e.preventDefault();
-        break;
-      case 'ArrowDown':
-        newRow = Math.min(GRID_CONFIG.MAX_ROWS - 1, row + 1);
-        e.preventDefault();
-        break;
-      case 'ArrowLeft':
-        newCol = Math.max(0, col - 1);
-        e.preventDefault();
-        break;
-      case 'ArrowRight':
-        newCol = Math.min(GRID_CONFIG.MAX_COLS - 1, col + 1);
-        e.preventDefault();
-        break;
-      case 'Enter':
-        onEditCell({ row, col });
-        e.preventDefault();
-        return;
-      case 'Delete':
-      case 'Backspace':
-        updateCell(row, col, '');
-        e.preventDefault();
-        return;
-      default:
-        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          onEditCell({ row, col });
-          grid.setCell(row, col, { value: e.key });
-          onGridChange(grid);
+    try {
+      switch (e.key) {
+        case 'ArrowUp':
+          newRow = Math.max(0, row - 1);
           e.preventDefault();
-        }
+          break;
+        case 'ArrowDown':
+          newRow = Math.min(GRID_CONFIG.MAX_ROWS - 1, row + 1);
+          e.preventDefault();
+          break;
+        case 'ArrowLeft':
+          newCol = Math.max(0, col - 1);
+          e.preventDefault();
+          break;
+        case 'ArrowRight':
+          newCol = Math.min(GRID_CONFIG.MAX_COLS - 1, col + 1);
+          e.preventDefault();
+          break;
+        case 'Enter':
+          onEditCell({ row, col });
+          e.preventDefault();
+          return;
+        case 'Delete':
+        case 'Backspace':
+          updateCell(row, col, '');
+          e.preventDefault();
+          return;
+        default:
+          if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            onEditCell({ row, col });
+            grid.setCell(row, col, { value: e.key });
+            onGridChange(grid);
+            e.preventDefault();
+          }
+          return;
+      }
+
+      if (newRow < 0 || newRow >= GRID_CONFIG.MAX_ROWS || newCol < 0 || newCol >= GRID_CONFIG.MAX_COLS) {
+        console.warn('Navigation target out of bounds:', newRow, newCol);
         return;
-    }
-
-    onSelectCell({ row: newRow, col: newCol });
-
-    if (viewportRef.current) {
-      const cellTop = newRow * GRID_CONFIG.ROW_HEIGHT;
-      const cellLeft = newCol * GRID_CONFIG.COL_WIDTH;
-      const viewportWidth = viewportRef.current.clientWidth - GRID_CONFIG.ROW_HEADER_WIDTH;
-      const viewportHeight = viewportRef.current.clientHeight - GRID_CONFIG.COL_HEADER_HEIGHT;
-
-      if (cellTop < scrollPos.top) {
-        viewportRef.current.scrollTop = cellTop;
-      } else if (cellTop + GRID_CONFIG.ROW_HEIGHT > scrollPos.top + viewportHeight) {
-        viewportRef.current.scrollTop = cellTop + GRID_CONFIG.ROW_HEIGHT - viewportHeight;
       }
 
-      if (cellLeft < scrollPos.left) {
-        viewportRef.current.scrollLeft = cellLeft;
-      } else if (cellLeft + GRID_CONFIG.COL_WIDTH > scrollPos.left + viewportWidth) {
-        viewportRef.current.scrollLeft = cellLeft + GRID_CONFIG.COL_WIDTH - viewportWidth;
+      onSelectCell({ row: newRow, col: newCol });
+
+      if (viewportRef.current) {
+        const cellTop = newRow * GRID_CONFIG.ROW_HEIGHT;
+        const cellLeft = newCol * GRID_CONFIG.COL_WIDTH;
+        const viewportWidth = viewportRef.current.clientWidth - GRID_CONFIG.ROW_HEADER_WIDTH;
+        const viewportHeight = viewportRef.current.clientHeight - GRID_CONFIG.COL_HEADER_HEIGHT;
+
+        if (cellTop < scrollPos.top) {
+          viewportRef.current.scrollTop = cellTop;
+        } else if (cellTop + GRID_CONFIG.ROW_HEIGHT > scrollPos.top + viewportHeight) {
+          viewportRef.current.scrollTop = cellTop + GRID_CONFIG.ROW_HEIGHT - viewportHeight;
+        }
+
+        if (cellLeft < scrollPos.left) {
+          viewportRef.current.scrollLeft = cellLeft;
+        } else if (cellLeft + GRID_CONFIG.COL_WIDTH > scrollPos.left + viewportWidth) {
+          viewportRef.current.scrollLeft = cellLeft + GRID_CONFIG.COL_WIDTH - viewportWidth;
+        }
       }
+    } catch (e) {
+      console.error('Error handling keyboard navigation:', e);
     }
   }, [selectedCell, editingCell, scrollPos, grid, onGridChange, onEditCell, onSelectCell, updateCell]);
 
@@ -468,20 +494,33 @@ export function VirtualizedExcel({
             >
               {visibleRows.map(row =>
                 visibleCols.map(col => {
-                  const cellData = grid.getCell(row, col);
+                  const cellData = grid.getCell(row, col) || { value: '' };
+                  const safeData = {
+                    value: cellData.value ?? '',
+                    formula: cellData.formula,
+                    bold: cellData.bold,
+                    italic: cellData.italic,
+                    underline: cellData.underline,
+                    align: cellData.align,
+                    fontFamily: cellData.fontFamily,
+                    fontSize: cellData.fontSize,
+                    color: cellData.color,
+                    backgroundColor: cellData.backgroundColor,
+                    format: cellData.format,
+                  };
                   const isSelected = selectedCell?.row === row && selectedCell?.col === col;
                   const isEditing = editingCell?.row === row && editingCell?.col === col;
 
                   const isStreamingCell = activeStreamingCell?.row === row && activeStreamingCell?.col === col;
                   const isRecentlyWritten = isRecentCell(row, col);
-                  const conditionalStyle = getConditionalStyle(row, col, cellData.value);
+                  const conditionalStyle = getConditionalStyle(row, col, safeData.value);
                   
                   return (
                     <VirtualCell
                       key={`${row}:${col}`}
                       row={row}
                       col={col}
-                      data={cellData}
+                      data={safeData}
                       isSelected={isSelected}
                       isEditing={isEditing}
                       isStreaming={isStreamingCell}

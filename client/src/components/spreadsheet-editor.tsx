@@ -277,45 +277,70 @@ const parseContent = (content: string): WorkbookData => {
 const convertToSparseGrid = (data: SpreadsheetData): SparseGrid => {
   const grid = new SparseGrid();
   Object.entries(data.cells).forEach(([key, cellData]) => {
-    const [row, col] = key.split('-').map(Number);
-    grid.setCell(row, col, {
-      value: cellData.value,
-      formula: cellData.formula,
-      bold: cellData.bold,
-      italic: cellData.italic,
-      underline: cellData.underline,
-      align: cellData.align,
-      fontFamily: cellData.fontFamily,
-      fontSize: cellData.fontSize,
-      color: cellData.color,
-      backgroundColor: cellData.backgroundColor,
-    });
+    const parts = key.split('-');
+    if (parts.length !== 2) {
+      console.warn(`Invalid cell key format: ${key}`);
+      return;
+    }
+    const [row, col] = parts.map(Number);
+    if (isNaN(row) || isNaN(col)) {
+      console.warn(`Invalid cell coordinates in key: ${key}`);
+      return;
+    }
+    try {
+      grid.setCell(row, col, {
+        value: cellData.value,
+        formula: cellData.formula,
+        bold: cellData.bold,
+        italic: cellData.italic,
+        underline: cellData.underline,
+        align: cellData.align,
+        fontFamily: cellData.fontFamily,
+        fontSize: cellData.fontSize,
+        color: cellData.color,
+        backgroundColor: cellData.backgroundColor,
+      });
+    } catch (e) {
+      console.warn(`Failed to set cell at ${key}:`, e);
+    }
   });
   return grid;
 };
 
 const convertFromSparseGrid = (grid: SparseGrid): SpreadsheetData => {
   const cells: { [key: string]: CellData } = {};
-  const allCells = grid.getAllCells();
   let maxRow = 0;
   let maxCol = 0;
   
-  allCells.forEach(({ row, col, data }) => {
-    cells[getCellKey(row, col)] = {
-      value: data.value,
-      formula: data.formula,
-      bold: data.bold,
-      italic: data.italic,
-      underline: data.underline,
-      align: data.align,
-      fontFamily: data.fontFamily,
-      fontSize: data.fontSize,
-      color: data.color,
-      backgroundColor: data.backgroundColor,
-    };
-    maxRow = Math.max(maxRow, row);
-    maxCol = Math.max(maxCol, col);
-  });
+  try {
+    const allCells = grid.getAllCells();
+    allCells.forEach(({ row, col, data }) => {
+      if (typeof row !== 'number' || typeof col !== 'number' || isNaN(row) || isNaN(col)) {
+        console.warn(`Invalid cell coordinates: row=${row}, col=${col}`);
+        return;
+      }
+      if (!data) {
+        console.warn(`Undefined cell data at row=${row}, col=${col}`);
+        return;
+      }
+      cells[getCellKey(row, col)] = {
+        value: data.value || '',
+        formula: data.formula,
+        bold: data.bold,
+        italic: data.italic,
+        underline: data.underline,
+        align: data.align,
+        fontFamily: data.fontFamily,
+        fontSize: data.fontSize,
+        color: data.color,
+        backgroundColor: data.backgroundColor,
+      };
+      maxRow = Math.max(maxRow, row);
+      maxCol = Math.max(maxCol, col);
+    });
+  } catch (e) {
+    console.error('Failed to convert from sparse grid:', e);
+  }
   
   return {
     cells,
@@ -1087,13 +1112,17 @@ export function SpreadsheetEditor({
   }, [onInsertContent, insertContentFn]);
 
   const updateCell = useCallback((key: string, updates: Partial<CellData>) => {
-    setData(prev => ({
-      ...prev,
-      cells: {
-        ...prev.cells,
-        [key]: { ...prev.cells[key], value: '', ...updates },
-      },
-    }));
+    try {
+      setData(prev => ({
+        ...prev,
+        cells: {
+          ...prev.cells,
+          [key]: { ...prev.cells[key], value: '', ...updates },
+        },
+      }));
+    } catch (e) {
+      console.error('Failed to update cell:', e);
+    }
   }, []);
 
   const handleCellClick = useCallback((key: string) => {
@@ -1174,47 +1203,87 @@ export function SpreadsheetEditor({
   }, [selectedCell, editingCell, data.rowCount, data.colCount, updateCell]);
 
   const addRow = useCallback(() => {
-    setData(prev => ({ ...prev, rowCount: prev.rowCount + 1 }));
+    try {
+      setData(prev => ({ ...prev, rowCount: prev.rowCount + 1 }));
+    } catch (e) {
+      console.error('Failed to add row:', e);
+    }
   }, []);
 
   const addColumn = useCallback(() => {
-    setData(prev => ({ ...prev, colCount: prev.colCount + 1 }));
+    try {
+      setData(prev => ({ ...prev, colCount: prev.colCount + 1 }));
+    } catch (e) {
+      console.error('Failed to add column:', e);
+    }
   }, []);
 
   const deleteRow = useCallback(() => {
-    if (!selectedCell) return;
-    const [row] = selectedCell.split('-').map(Number);
-    setData(prev => {
-      const newCells: { [key: string]: CellData } = {};
-      Object.entries(prev.cells).forEach(([key, cell]) => {
-        const [r, c] = key.split('-').map(Number);
-        if (r < row) {
-          newCells[key] = cell;
-        } else if (r > row) {
-          newCells[getCellKey(r - 1, c)] = cell;
-        }
+    try {
+      if (!selectedCell) return;
+      const parts = selectedCell.split('-');
+      if (parts.length !== 2) {
+        console.warn('Invalid selected cell format for delete row');
+        return;
+      }
+      const row = Number(parts[0]);
+      if (isNaN(row)) {
+        console.warn('Invalid row number for delete');
+        return;
+      }
+      setData(prev => {
+        const newCells: { [key: string]: CellData } = {};
+        Object.entries(prev.cells).forEach(([key, cell]) => {
+          const cellParts = key.split('-');
+          if (cellParts.length !== 2) return;
+          const [r, c] = cellParts.map(Number);
+          if (isNaN(r) || isNaN(c)) return;
+          if (r < row) {
+            newCells[key] = cell;
+          } else if (r > row) {
+            newCells[getCellKey(r - 1, c)] = cell;
+          }
+        });
+        return { ...prev, cells: newCells, rowCount: Math.max(1, prev.rowCount - 1) };
       });
-      return { ...prev, cells: newCells, rowCount: Math.max(1, prev.rowCount - 1) };
-    });
-    setSelectedCell(null);
+      setSelectedCell(null);
+    } catch (e) {
+      console.error('Failed to delete row:', e);
+    }
   }, [selectedCell]);
 
   const deleteColumn = useCallback(() => {
-    if (!selectedCell) return;
-    const [, col] = selectedCell.split('-').map(Number);
-    setData(prev => {
-      const newCells: { [key: string]: CellData } = {};
-      Object.entries(prev.cells).forEach(([key, cell]) => {
-        const [r, c] = key.split('-').map(Number);
-        if (c < col) {
-          newCells[key] = cell;
-        } else if (c > col) {
-          newCells[getCellKey(r, c - 1)] = cell;
-        }
+    try {
+      if (!selectedCell) return;
+      const parts = selectedCell.split('-');
+      if (parts.length !== 2) {
+        console.warn('Invalid selected cell format for delete column');
+        return;
+      }
+      const col = Number(parts[1]);
+      if (isNaN(col)) {
+        console.warn('Invalid column number for delete');
+        return;
+      }
+      setData(prev => {
+        const newCells: { [key: string]: CellData } = {};
+        Object.entries(prev.cells).forEach(([key, cell]) => {
+          const cellParts = key.split('-');
+          if (cellParts.length !== 2) return;
+          const [r, c] = cellParts.map(Number);
+          if (isNaN(r) || isNaN(c)) return;
+          if (c < col) {
+            newCells[key] = cell;
+          } else if (c > col) {
+            newCells[getCellKey(r, c - 1)] = cell;
+          }
+        });
+        return { ...prev, cells: newCells, colCount: Math.max(1, prev.colCount - 1) };
       });
-      return { ...prev, cells: newCells, colCount: Math.max(1, prev.colCount - 1) };
-    });
-    setSelectedCell(null);
+      setSelectedCell(null);
+    } catch (e) {
+      console.error('Failed to delete column:', e);
+    }
   }, [selectedCell]);
 
   const toggleBold = useCallback(() => {
