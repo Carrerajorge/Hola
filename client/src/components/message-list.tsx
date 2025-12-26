@@ -56,6 +56,7 @@ import { FigmaBlock } from "@/components/figma-block";
 import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
+import { SuggestedReplies, generateSuggestions } from "@/components/suggested-replies";
 import { getFileTheme, getFileCategory } from "@/lib/fileTypeTheme";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
@@ -1148,6 +1149,7 @@ export interface MessageListProps {
   handleReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
   minimizedDocument?: { type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null;
   onRestoreDocument?: () => void;
+  onSelectSuggestedReply?: (text: string) => void;
 }
 
 export function MessageList({
@@ -1179,8 +1181,13 @@ export function MessageList({
   setLightboxImage,
   handleReopenDocument,
   minimizedDocument,
-  onRestoreDocument
+  onRestoreDocument,
+  onSelectSuggestedReply
 }: MessageListProps) {
+  const lastAssistantMessage = messages.filter(m => m.role === "assistant").pop();
+  const isLastMessageAssistant = messages.length > 0 && messages[messages.length - 1].role === "assistant";
+  const showSuggestedReplies = variant === "default" && aiState === "idle" && isLastMessageAssistant && lastAssistantMessage && !streamingContent;
+  const suggestions = showSuggestedReplies ? generateSuggestions(lastAssistantMessage.content) : [];
   return (
     <>
       {messages.map((msg, msgIndex) => (
@@ -1272,6 +1279,20 @@ export function MessageList({
             </div>
           </div>
         </div>
+      )}
+
+      {showSuggestedReplies && suggestions.length > 0 && onSelectSuggestedReply && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="flex w-full max-w-3xl mx-auto gap-4 justify-start mt-2"
+        >
+          <SuggestedReplies
+            suggestions={suggestions}
+            onSelect={onSelectSuggestedReply}
+          />
+        </motion.div>
       )}
 
       {aiState !== "idle" && !streamingContent && variant === "default" && (

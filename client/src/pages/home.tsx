@@ -21,6 +21,7 @@ import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useChats, Message } from "@/hooks/use-chats";
+import { useChatFolders } from "@/hooks/use-chat-folders";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
@@ -73,6 +74,21 @@ export default function Home() {
     truncateAndReplaceMessage,
     truncateMessagesAt
   } = useChats();
+
+  const {
+    folders,
+    createFolder,
+    moveChatToFolder,
+    removeChatFromFolder
+  } = useChatFolders();
+
+  const handleMoveToFolder = useCallback((chatId: string, folderId: string | null) => {
+    if (folderId === null) {
+      removeChatFromFolder(chatId);
+    } else {
+      moveChatToFolder(chatId, folderId);
+    }
+  }, [moveChatToFolder, removeChatFromFolder]);
 
   // AI processing state - kept in parent to survive ChatInterface key changes
   const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
@@ -302,6 +318,9 @@ export default function Home() {
           processingChatIds={processingChatIds}
           pendingResponseCounts={pendingResponseCounts}
           onClearPendingCount={handleClearPendingCount}
+          folders={folders}
+          onCreateFolder={createFolder}
+          onMoveToFolder={handleMoveToFolder}
         />
       </div>
 
@@ -339,6 +358,9 @@ export default function Home() {
               processingChatIds={processingChatIds}
               pendingResponseCounts={pendingResponseCounts}
               onClearPendingCount={handleClearPendingCount}
+              folders={folders}
+              onCreateFolder={createFolder}
+              onMoveToFolder={handleMoveToFolder}
             />
           </SheetContent>
         </Sheet>

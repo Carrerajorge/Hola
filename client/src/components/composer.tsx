@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { SourceListItem } from "@/components/ui/source-list-item";
 import { RecordingPanel } from "@/components/recording-panel";
 import { useConnectedSources } from "@/hooks/use-connected-sources";
+import { useCommandHistory } from "@/hooks/use-command-history";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { getFileTheme } from "@/lib/fileTypeTheme";
 import "@/components/ui/glass-effects.css";
@@ -181,6 +182,7 @@ export function Composer({
   const [mentionIndex, setMentionIndex] = useState(0);
 
   const { connectedSources, getSourceActive, setSourceActive } = useConnectedSources();
+  const { addToHistory, navigateUp, navigateDown, resetNavigation } = useCommandHistory();
 
   const mentionSources = connectedSources.map(source => ({
     ...source,
@@ -196,6 +198,7 @@ export function Composer({
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setInput(value);
+    resetNavigation();
     
     const cursorPos = e.target.selectionStart || 0;
     const textBeforeCursor = value.slice(0, cursorPos);
@@ -208,6 +211,39 @@ export function Composer({
     } else {
       setShowMentionPopover(false);
       setMentionSearch("");
+    }
+  };
+
+  const handleSubmitWithHistory = () => {
+    if (input.trim()) {
+      addToHistory(input.trim());
+    }
+    handleSubmit();
+  };
+
+  const handleHistoryNavigation = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const textarea = e.currentTarget;
+    const cursorPosition = textarea.selectionStart;
+    const textLength = textarea.value.length;
+    
+    if (e.key === "ArrowUp" && cursorPosition === 0) {
+      const historyItem = navigateUp(input);
+      if (historyItem !== null) {
+        e.preventDefault();
+        setInput(historyItem);
+        setTimeout(() => {
+          textarea.setSelectionRange(historyItem.length, historyItem.length);
+        }, 0);
+      }
+    } else if (e.key === "ArrowDown" && cursorPosition === textLength) {
+      const historyItem = navigateDown();
+      if (historyItem !== null) {
+        e.preventDefault();
+        setInput(historyItem);
+        setTimeout(() => {
+          textarea.setSelectionRange(historyItem.length, historyItem.length);
+        }, 0);
+      }
     }
   };
 
@@ -882,18 +918,19 @@ export function Composer({
                 handleMentionKeyDown(e);
                 if (showMentionPopover) return;
                 
+                handleHistoryNavigation(e);
+                
                 const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
                 
-                // Cmd/Ctrl + Enter to send message (keyboard shortcut)
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
                   e.preventDefault();
-                  handleSubmit();
+                  handleSubmitWithHistory();
                   return;
                 }
                 
                 if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
                   e.preventDefault();
-                  handleSubmit();
+                  handleSubmitWithHistory();
                 }
               }}
               onPaste={handlePaste}

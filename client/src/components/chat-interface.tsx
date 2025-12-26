@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useDraft } from "@/hooks/use-draft";
 import { 
   Mic,
   MicOff,
@@ -735,7 +736,19 @@ export function ChatInterface({
   onTruncateMessagesAt
 }: ChatInterfaceProps) {
   const { user } = useAuth();
-  const [input, setInput] = useState("");
+  const { initialDraft, saveDraftDebounced, clearDraft, currentTextRef } = useDraft(chatId);
+  const [input, setInputRaw] = useState(initialDraft);
+  
+  const setInput = useCallback((value: string | ((prev: string) => string)) => {
+    setInputRaw((prev) => {
+      const newValue = typeof value === "function" ? value(prev) : value;
+      currentTextRef.current = newValue;
+      if (chatId) {
+        saveDraftDebounced(chatId, newValue);
+      }
+      return newValue;
+    });
+  }, [chatId, saveDraftDebounced, currentTextRef]);
   const [streamingContent, setStreamingContent] = useState("");
   const [isBrowserOpen, setIsBrowserOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
@@ -2117,6 +2130,9 @@ export function ChatInterface({
     if (selectedDocText && applyRewriteRef.current && input.trim()) {
       const rewritePrompt = input.trim();
       setInput("");
+      if (chatId) {
+        clearDraft(chatId);
+      }
       setAiState("thinking");
       
       try {
@@ -2188,6 +2204,9 @@ export function ChatInterface({
     initialSteps.push({ step: "Generando respuesta", status: "pending" });
     setAiProcessSteps(initialSteps);
     setInput("");
+    if (chatId) {
+      clearDraft(chatId);
+    }
     setUploadedFiles([]);
 
     // Generate unique IDs for idempotency
@@ -3238,6 +3257,7 @@ IMPORTANTE:
                 handleReopenDocument={handleReopenDocument}
                 minimizedDocument={minimizedDocument}
                 onRestoreDocument={restoreDocEditor}
+                onSelectSuggestedReply={(text) => setInput(text)}
               />
 
               {/* Agent Observer - Show when agent is running */}
@@ -3485,6 +3505,7 @@ IMPORTANTE:
                 handleReopenDocument={handleReopenDocument}
                 minimizedDocument={minimizedDocument}
                 onRestoreDocument={restoreDocEditor}
+                onSelectSuggestedReply={(text) => setInput(text)}
               />
               
               <div ref={messagesEndRef} />
