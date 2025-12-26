@@ -161,34 +161,30 @@ function WorkspaceContent() {
   }, []);
 
   const handleSelectChatWithClear = useCallback((id: string) => {
-    // Clear processing state for the previous chat before switching
-    if (processingChatIdRef.current && processingChatIdRef.current !== id) {
-      const prevChatId = processingChatIdRef.current;
-      setProcessingChatIds(prev => prev.filter(cid => cid !== prevChatId));
-      processingChatIdRef.current = null;
-      setAiState("idle");
-      setAiProcessSteps([]);
-    }
-    
+    // Keep processing state for background chats - don't clear processingChatIds
+    // This allows multiple chats to process simultaneously
     handleClearPendingCount(id);
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     setActiveChatId(id);
+    // Clear the ref BEFORE setting idle so useEffect doesn't clean up background chat
+    processingChatIdRef.current = null;
+    // Reset AI state for the new active chat (fresh start)
+    setAiState("idle");
+    setAiProcessSteps([]);
   }, [handleClearPendingCount, setActiveChatId, setAiState, setAiProcessSteps]);
 
   const handleNewChat = () => {
-    // Clear processing state for the previous chat before switching
-    if (processingChatIdRef.current) {
-      const prevChatId = processingChatIdRef.current;
-      setProcessingChatIds(prev => prev.filter(id => id !== prevChatId));
-      processingChatIdRef.current = null;
-    }
-    
+    // Keep processing state for background chats - don't clear processingChatIds
+    // The previous chat will continue streaming in the background
     const newKey = `new-chat-${Date.now()}`;
     setActiveChatId(null);
     setIsNewChatMode(true);
     setNewChatStableKey(newKey);
     pendingChatIdRef.current = null;
+    // Clear the ref BEFORE setting idle so useEffect doesn't clean up background chat
+    processingChatIdRef.current = null;
+    // Reset AI state for new chat (fresh start)
     setAiState("idle");
     setAiProcessSteps([]);
   };

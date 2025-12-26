@@ -1205,20 +1205,9 @@ export function ChatInterface({
     aiStateRef.current = aiState;
   }, [aiState]);
   
-  // Cleanup: abort any ongoing requests when component unmounts (chat switch)
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-      if (streamIntervalRef.current) {
-        clearInterval(streamIntervalRef.current);
-        streamIntervalRef.current = null;
-      }
-      streamingContentRef.current = "";
-    };
-  }, []);
+  // Note: We intentionally do NOT abort requests on unmount
+  // This allows streaming to continue in background when user switches chats
+  // The streaming will complete and update the correct chat via onSendMessage
   
   const agent = useAgent();
   const browserSession = useBrowserSession();
