@@ -28,7 +28,8 @@ import {
   LayoutGrid,
   FolderPlus,
   Folder,
-  FolderOpen
+  FolderOpen,
+  Zap
 } from "lucide-react";
 import { SiraLogo } from "@/components/sira-logo";
 import { cn } from "@/lib/utils";
@@ -63,6 +64,7 @@ interface SidebarProps {
   onHideChat?: (id: string, e: React.MouseEvent) => void;
   onOpenGpts?: () => void;
   onOpenApps?: () => void;
+  onOpenSkills?: () => void;
   onOpenLibrary?: () => void;
   processingChatIds?: string[];
   pendingResponseCounts?: Record<string, number>;
@@ -136,6 +138,7 @@ export function Sidebar({
   onHideChat,
   onOpenGpts,
   onOpenApps,
+  onOpenSkills,
   onOpenLibrary,
   processingChatIds = [],
   pendingResponseCounts = {},
@@ -429,6 +432,15 @@ export function Sidebar({
         >
           <Bot className="h-4 w-4" />
           GPTs
+        </Button>
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          onClick={onOpenSkills}
+          data-testid="button-skills"
+        >
+          <Zap className="h-4 w-4" />
+          Skills
         </Button>
         <Button 
           variant="ghost" 

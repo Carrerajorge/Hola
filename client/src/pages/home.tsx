@@ -187,6 +187,10 @@ export default function Home() {
     setIsAppsDialogOpen(true);
   };
 
+  const handleOpenSkills = () => {
+    toast.info("Skills - Próximamente");
+  };
+
   const handleOpenLibrary = () => {
     setIsLibraryOpen(true);
   };
@@ -289,6 +293,7 @@ export default function Home() {
           onHideChat={hideChat}
           onOpenGpts={handleOpenGpts}
           onOpenApps={handleOpenApps}
+          onOpenSkills={handleOpenSkills}
           onOpenLibrary={handleOpenLibrary}
           processingChatIds={processingChatIds}
           pendingResponseCounts={pendingResponseCounts}
@@ -329,6 +334,7 @@ export default function Home() {
               onHideChat={hideChat}
               onOpenGpts={handleOpenGpts}
               onOpenApps={handleOpenApps}
+              onOpenSkills={handleOpenSkills}
               onOpenLibrary={handleOpenLibrary}
               processingChatIds={processingChatIds}
               pendingResponseCounts={pendingResponseCounts}
