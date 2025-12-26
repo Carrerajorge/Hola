@@ -22,7 +22,10 @@ import {
   Image as ImageIcon,
   Check,
   Maximize2,
-  Minimize2
+  Minimize2,
+  ListPlus,
+  Minus,
+  ArrowUp
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,6 +42,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger
+} from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
 
 import { Message, storeGeneratedImage, getGeneratedImage } from "@/hooks/use-chats";
@@ -443,7 +452,7 @@ interface ActionToolbarProps {
   variant: "compact" | "default";
   onCopy: (content: string, id: string) => void;
   onFeedback: (id: string, type: "up" | "down") => void;
-  onRegenerate: (index: number) => void;
+  onRegenerate: (index: number, instruction?: string) => void;
   onShare: (content: string) => void;
   onReadAloud: (id: string, content: string) => void;
 }
@@ -465,6 +474,20 @@ const ActionToolbar = memo(function ActionToolbar({
   onReadAloud
 }: ActionToolbarProps) {
   const testIdSuffix = variant === "compact" ? messageId : `main-${messageId}`;
+  const [regenerateOpen, setRegenerateOpen] = useState(false);
+  const [customInstruction, setCustomInstruction] = useState("");
+
+  const handleRegenerateOption = (instruction?: string) => {
+    setRegenerateOpen(false);
+    setCustomInstruction("");
+    onRegenerate(msgIndex, instruction);
+  };
+
+  const handleCustomSubmit = () => {
+    if (customInstruction.trim()) {
+      handleRegenerateOption(customInstruction.trim());
+    }
+  };
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -543,25 +566,81 @@ const ActionToolbar = memo(function ActionToolbar({
           </TooltipContent>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              onClick={() => onRegenerate(msgIndex)}
-              disabled={aiState !== "idle"}
-              data-testid={`button-regenerate-${testIdSuffix}`}
-            >
-              <RefreshCw
-                className={cn("h-4 w-4", isRegenerating && "animate-spin")}
-              />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p>Regenerar</p>
-          </TooltipContent>
-        </Tooltip>
+        <Popover open={regenerateOpen} onOpenChange={setRegenerateOpen}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                  disabled={aiState !== "idle"}
+                  data-testid={`button-regenerate-${testIdSuffix}`}
+                >
+                  <RefreshCw
+                    className={cn("h-4 w-4", isRegenerating && "animate-spin")}
+                  />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>Regenerar</p>
+            </TooltipContent>
+          </Tooltip>
+          <PopoverContent 
+            className="w-56 p-2" 
+            align="start" 
+            side="top"
+            sideOffset={8}
+          >
+            <div className="space-y-1">
+              <div className="flex items-center gap-1 pb-1">
+                <Input
+                  placeholder="Pedir cambio de respuesta"
+                  value={customInstruction}
+                  onChange={(e) => setCustomInstruction(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCustomSubmit()}
+                  className="h-8 text-sm flex-1"
+                  data-testid={`input-custom-regenerate-${testIdSuffix}`}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={handleCustomSubmit}
+                  disabled={!customInstruction.trim()}
+                  data-testid={`button-submit-custom-${testIdSuffix}`}
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </div>
+              <button
+                className="w-full flex items-center gap-3 px-2 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors"
+                onClick={() => handleRegenerateOption()}
+                data-testid={`option-retry-${testIdSuffix}`}
+              >
+                <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                <span>Inténtalo nuevamente</span>
+              </button>
+              <button
+                className="w-full flex items-center gap-3 px-2 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors"
+                onClick={() => handleRegenerateOption("Agrega más detalles y explicaciones a tu respuesta")}
+                data-testid={`option-details-${testIdSuffix}`}
+              >
+                <ListPlus className="h-4 w-4 text-muted-foreground" />
+                <span>Agregar detalles</span>
+              </button>
+              <button
+                className="w-full flex items-center gap-3 px-2 py-2 text-sm text-left hover:bg-muted rounded-md transition-colors"
+                onClick={() => handleRegenerateOption("Hazlo más conciso y breve, elimina redundancias")}
+                data-testid={`option-concise-${testIdSuffix}`}
+              >
+                <Minus className="h-4 w-4 text-muted-foreground" />
+                <span>Más concisa</span>
+              </button>
+            </div>
+          </PopoverContent>
+        </Popover>
 
         <Tooltip>
           <TooltipTrigger asChild>

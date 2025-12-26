@@ -1613,7 +1613,7 @@ export function ChatInterface({
     }
   };
 
-  const handleRegenerate = async (msgIndex: number) => {
+  const handleRegenerate = async (msgIndex: number, instruction?: string) => {
     const prevMessages = messages.slice(0, msgIndex);
     const lastUserMsgIndex = [...prevMessages].reverse().findIndex(m => m.role === "user");
     if (lastUserMsgIndex === -1) return;
@@ -1628,10 +1628,17 @@ export function ChatInterface({
     try {
       abortControllerRef.current = new AbortController();
       
-      const chatHistory = contextUpToUser.map(m => ({
+      let chatHistory = contextUpToUser.map(m => ({
         role: m.role,
         content: m.content
       }));
+
+      if (instruction) {
+        chatHistory = [
+          ...chatHistory,
+          { role: "user" as const, content: `[Instrucción de regeneración: ${instruction}]` }
+        ];
+      }
 
       const response = await fetch("/api/chat", {
         method: "POST",
