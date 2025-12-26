@@ -825,6 +825,19 @@ export function ChatInterface({
     chatIdRef.current = chatId || null;
   }, [chatId]);
   
+  // Reset streaming state when chatId changes (switching chats)
+  // This ensures the new chat starts clean without interference from previous chat
+  const prevChatIdRef = useRef<string | null | undefined>(chatId);
+  useEffect(() => {
+    if (prevChatIdRef.current !== chatId) {
+      // Clear streaming content for this chat instance
+      setStreamingContent("");
+      streamingContentRef.current = "";
+      // Don't reset aiState here - parent handles it
+      prevChatIdRef.current = chatId;
+    }
+  }, [chatId]);
+  
   // Auto-save document when component unmounts (chat switch, new chat, etc.)
   useEffect(() => {
     return () => {
