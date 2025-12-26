@@ -3,7 +3,12 @@ export interface CellData {
   formula?: string;
   bold?: boolean;
   italic?: boolean;
+  underline?: boolean;
   align?: 'left' | 'center' | 'right';
+  fontFamily?: string;
+  fontSize?: number;
+  color?: string;
+  backgroundColor?: string;
   format?: {
     backgroundColor?: string;
     textColor?: string;
@@ -51,7 +56,10 @@ export class SparseGrid {
     const existing = this.cells.get(key) || { value: '' };
     const newData = { ...existing, ...data };
     
-    if (newData.value === '' && !newData.formula && !newData.bold && !newData.italic) {
+    const hasFormatting = newData.bold || newData.italic || newData.underline || 
+      newData.fontFamily || newData.fontSize || newData.color || newData.backgroundColor || newData.format;
+    
+    if (newData.value === '' && !newData.formula && !hasFormatting) {
       this.cells.delete(key);
     } else {
       this.cells.set(key, newData);

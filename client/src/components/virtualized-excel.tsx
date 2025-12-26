@@ -94,9 +94,12 @@ const VirtualCell = memo(function VirtualCell({
     ...style,
     fontWeight: data.bold ? 'bold' : 'normal',
     fontStyle: data.italic ? 'italic' : 'normal',
+    textDecoration: data.underline ? 'underline' : 'none',
+    fontFamily: data.fontFamily || 'inherit',
+    fontSize: data.fontSize ? `${data.fontSize}px` : 'inherit',
     textAlign: data.align || 'left',
-    backgroundColor: conditionalStyle?.backgroundColor || data.format?.backgroundColor,
-    color: conditionalStyle?.color || data.format?.textColor,
+    backgroundColor: conditionalStyle?.backgroundColor || data.backgroundColor || data.format?.backgroundColor,
+    color: conditionalStyle?.color || data.color || data.format?.textColor,
   };
 
   return (

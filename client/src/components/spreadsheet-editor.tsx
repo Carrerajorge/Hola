@@ -43,7 +43,12 @@ interface CellData {
   formula?: string;
   bold?: boolean;
   italic?: boolean;
+  underline?: boolean;
   align?: 'left' | 'center' | 'right';
+  fontFamily?: string;
+  fontSize?: number;
+  color?: string;
+  backgroundColor?: string;
 }
 
 interface ChartConfig {
@@ -277,7 +282,12 @@ const convertToSparseGrid = (data: SpreadsheetData): SparseGrid => {
       formula: cellData.formula,
       bold: cellData.bold,
       italic: cellData.italic,
+      underline: cellData.underline,
       align: cellData.align,
+      fontFamily: cellData.fontFamily,
+      fontSize: cellData.fontSize,
+      color: cellData.color,
+      backgroundColor: cellData.backgroundColor,
     });
   });
   return grid;
@@ -295,7 +305,12 @@ const convertFromSparseGrid = (grid: SparseGrid): SpreadsheetData => {
       formula: data.formula,
       bold: data.bold,
       italic: data.italic,
+      underline: data.underline,
       align: data.align,
+      fontFamily: data.fontFamily,
+      fontSize: data.fontSize,
+      color: data.color,
+      backgroundColor: data.backgroundColor,
     };
     maxRow = Math.max(maxRow, row);
     maxCol = Math.max(maxCol, col);
@@ -1206,10 +1221,40 @@ export function SpreadsheetEditor({
     updateCell(selectedCell, { ...cell, italic: !cell.italic });
   }, [selectedCell, data.cells, updateCell]);
 
+  const toggleUnderline = useCallback(() => {
+    if (!selectedCell) return;
+    const cell = data.cells[selectedCell] || { value: '' };
+    updateCell(selectedCell, { ...cell, underline: !cell.underline });
+  }, [selectedCell, data.cells, updateCell]);
+
   const setAlignment = useCallback((align: 'left' | 'center' | 'right') => {
     if (!selectedCell) return;
     const cell = data.cells[selectedCell] || { value: '' };
     updateCell(selectedCell, { ...cell, align });
+  }, [selectedCell, data.cells, updateCell]);
+
+  const setFontFamily = useCallback((fontFamily: string) => {
+    if (!selectedCell) return;
+    const cell = data.cells[selectedCell] || { value: '' };
+    updateCell(selectedCell, { ...cell, fontFamily });
+  }, [selectedCell, data.cells, updateCell]);
+
+  const setFontSize = useCallback((fontSize: number) => {
+    if (!selectedCell) return;
+    const cell = data.cells[selectedCell] || { value: '' };
+    updateCell(selectedCell, { ...cell, fontSize });
+  }, [selectedCell, data.cells, updateCell]);
+
+  const setFontColor = useCallback((color: string) => {
+    if (!selectedCell) return;
+    const cell = data.cells[selectedCell] || { value: '' };
+    updateCell(selectedCell, { ...cell, color });
+  }, [selectedCell, data.cells, updateCell]);
+
+  const setFillColor = useCallback((backgroundColor: string) => {
+    if (!selectedCell) return;
+    const cell = data.cells[selectedCell] || { value: '' };
+    updateCell(selectedCell, { ...cell, backgroundColor });
   }, [selectedCell, data.cells, updateCell]);
 
   const updateChartConfig = useCallback((type: 'bar' | 'line' | 'pie', visible: boolean) => {
@@ -1266,6 +1311,11 @@ export function SpreadsheetEditor({
     },
     toggleBold,
     toggleItalic,
+    toggleUnderline,
+    setFont: setFontFamily,
+    setFontSize,
+    setFontColor,
+    setFillColor,
     alignLeft: () => setAlignment('left'),
     alignCenter: () => setAlignment('center'),
     alignRight: () => setAlignment('right'),
@@ -1280,7 +1330,7 @@ export function SpreadsheetEditor({
     filter: () => {
       console.log('Filter toggle');
     },
-  }), [selectedCell, data.cells, updateCell, toggleBold, toggleItalic, setAlignment, addRow, addColumn, deleteRow, deleteColumn, updateChartConfig]);
+  }), [selectedCell, data.cells, updateCell, toggleBold, toggleItalic, toggleUnderline, setFontFamily, setFontSize, setFontColor, setFillColor, setAlignment, addRow, addColumn, deleteRow, deleteColumn, updateChartConfig]);
 
   const cellFormat: CellFormat = useMemo(() => {
     if (!selectedCell) return {};
@@ -1288,7 +1338,12 @@ export function SpreadsheetEditor({
     return {
       bold: cell?.bold,
       italic: cell?.italic,
+      underline: cell?.underline,
       align: cell?.align,
+      fontFamily: cell?.fontFamily,
+      fontSize: cell?.fontSize,
+      color: cell?.color,
+      backgroundColor: cell?.backgroundColor,
     };
   }, [selectedCell, data.cells]);
 
