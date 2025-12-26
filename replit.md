@@ -85,6 +85,23 @@ Preferred communication style: Simple, everyday language.
 ### UI Cleanup (STABLE)
 - Removed "Conectores" button from composer UI (`client/src/components/composer.tsx`)
 
+### Background Processing System (December 2024 - STABLE)
+- **Enterprise-grade Task Processing** that continues even when user changes tabs, minimizes browser, or closes/reopens page
+- **Files**:
+  - `client/src/hooks/use-background-processing.ts`: Main hook integrating all components
+  - `client/src/lib/taskPersistenceService.ts`: IndexedDB for task persistence and recovery
+  - `client/src/lib/tabCoordinator.ts`: BroadcastChannel for multi-tab coordination with leader election
+  - `client/src/lib/backgroundWorkerCode.ts`: Web Worker with embedded Blob code using MessageChannel
+  - `client/src/components/background-processing-status.tsx`: Visual status component
+- **Features**:
+  - Web Worker with MessageChannel (avoids setTimeout throttling in background)
+  - IndexedDB stores: pendingTasks, completedResults, processingState
+  - Tab coordination: heartbeat every 2s, leader election (oldest tab), dead tab cleanup (5s timeout)
+  - Page Visibility API: buffers updates when hidden, applies via requestAnimationFrame when visible
+  - Notification API: alerts when processing completes in background
+  - Formula evaluation: SUM, AVERAGE, COUNT, MAX, MIN + safe math expression evaluation
+- **Hook API**: status, progress, stats (rate/eta/elapsed), isPageVisible, isLeader, startProcessing(), addTasks(), pause(), resume(), cancel()
+
 ### Enterprise Features (December 2024 - STABLE)
 - **Offline Mode** (`client/src/hooks/use-offline-sync.ts`, `client/src/lib/offlineQueue.ts`):
   - IndexedDB queue for offline messages with auto-sync on reconnect
