@@ -48,7 +48,8 @@ export default function Home() {
     archiveChat,
     hideChat,
     updateMessageAttachments,
-    editMessageAndTruncate
+    editMessageAndTruncate,
+    truncateAndReplaceMessage
   } = useChats();
 
   // AI processing state - kept in parent to survive ChatInterface key changes
@@ -225,6 +226,7 @@ export default function Home() {
             onOpenApps={handleOpenApps}
             onUpdateMessageAttachments={updateMessageAttachments}
             onEditMessageAndTruncate={editMessageAndTruncate}
+            onTruncateAndReplaceMessage={truncateAndReplaceMessage}
           />
         )}
       </main>

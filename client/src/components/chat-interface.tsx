@@ -700,6 +700,7 @@ interface ChatInterfaceProps {
   onOpenApps?: () => void;
   onUpdateMessageAttachments?: (chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => void;
   onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
+  onTruncateAndReplaceMessage?: (chatId: string, messageIndex: number, newMessage: Message) => void;
 }
 
 interface UploadedFile {
@@ -728,7 +729,8 @@ export function ChatInterface({
   chatId,
   onOpenApps,
   onUpdateMessageAttachments,
-  onEditMessageAndTruncate
+  onEditMessageAndTruncate,
+  onTruncateAndReplaceMessage
 }: ChatInterfaceProps) {
   const { user } = useAuth();
   const [input, setInput] = useState("");
@@ -1672,7 +1674,11 @@ export function ChatInterface({
             content: fullContent,
             timestamp: new Date(),
           };
-          onSendMessage(aiMsg);
+          if (chatId && onTruncateAndReplaceMessage) {
+            onTruncateAndReplaceMessage(chatId, msgIndex, aiMsg);
+          } else {
+            onSendMessage(aiMsg);
+          }
           streamingContentRef.current = "";
           setStreamingContent("");
           setAiState("idle");
