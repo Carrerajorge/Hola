@@ -1706,9 +1706,6 @@ export function ChatInterface({
     streamingContentRef.current = "";
     setStreamingContent("");
     
-    const userMsgId = Date.now().toString();
-    const userRequestId = generateRequestId();
-    
     abortControllerRef.current = new AbortController();
     
     try {
@@ -1718,7 +1715,7 @@ export function ChatInterface({
       }));
       historyUpToEdit.push({ role: "user", content: editedContent });
       
-      const response = await fetch("/api/chat/stream", {
+      const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1733,52 +1730,19 @@ export function ChatInterface({
         throw new Error(`HTTP error: ${response.status}`);
       }
       
-      setAiState("responding");
+      const data = await response.json();
       
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No reader available");
-      
-      const decoder = new TextDecoder();
-      let fullContent = "";
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-        
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") continue;
-            
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.content) {
-                fullContent += parsed.content;
-                streamingContentRef.current = fullContent;
-                setStreamingContent(fullContent);
-              }
-            } catch {}
-          }
-        }
-      }
-      
-      if (fullContent) {
+      if (data.content) {
         const aiMsg: Message = {
           id: (Date.now() + 1).toString(),
           role: "assistant",
-          content: fullContent,
+          content: data.content,
           timestamp: new Date(),
           requestId: generateRequestId(),
-          userMessageId: userMsgId,
         };
         onSendMessage(aiMsg);
       }
       
-      streamingContentRef.current = "";
-      setStreamingContent("");
       setAiState("idle");
       abortControllerRef.current = null;
       
