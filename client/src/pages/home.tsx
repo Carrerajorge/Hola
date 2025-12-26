@@ -150,13 +150,29 @@ export default function Home() {
   
   // Clear pending count when selecting a chat
   const handleSelectChatWithClear = useCallback((id: string) => {
+    // Clear processing state for the previous chat before switching
+    if (processingChatIdRef.current && processingChatIdRef.current !== id) {
+      const prevChatId = processingChatIdRef.current;
+      setProcessingChatIds(prev => prev.filter(cid => cid !== prevChatId));
+      processingChatIdRef.current = null;
+      setAiState("idle");
+      setAiProcessSteps([]);
+    }
+    
     handleClearPendingCount(id);
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     setActiveChatId(id);
-  }, [handleClearPendingCount, setActiveChatId]);
+  }, [handleClearPendingCount, setActiveChatId, setAiState, setAiProcessSteps]);
 
   const handleNewChat = () => {
+    // Clear processing state for the previous chat before switching
+    if (processingChatIdRef.current) {
+      const prevChatId = processingChatIdRef.current;
+      setProcessingChatIds(prev => prev.filter(id => id !== prevChatId));
+      processingChatIdRef.current = null;
+    }
+    
     const newKey = `new-chat-${Date.now()}`;
     setActiveChatId(null);
     setIsNewChatMode(true);
