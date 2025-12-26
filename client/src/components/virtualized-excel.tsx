@@ -273,6 +273,30 @@ export function VirtualizedExcel({
   const getColumnLeft = positionCache.getColumnLeft;
   const getRowTop = positionCache.getRowTop;
 
+  const findRowAtPosition = useCallback((scrollTop: number): number => {
+    let cumulative = 0;
+    for (let r = 0; r < GRID_CONFIG.MAX_ROWS; r++) {
+      const height = rowHeights?.[r] ?? GRID_CONFIG.ROW_HEIGHT;
+      if (cumulative + height > scrollTop) {
+        return r;
+      }
+      cumulative += height;
+    }
+    return GRID_CONFIG.MAX_ROWS - 1;
+  }, [rowHeights]);
+
+  const findColAtPosition = useCallback((scrollLeft: number): number => {
+    let cumulative = 0;
+    for (let c = 0; c < GRID_CONFIG.MAX_COLS; c++) {
+      const width = columnWidths?.[c] ?? GRID_CONFIG.COL_WIDTH;
+      if (cumulative + width > scrollLeft) {
+        return c;
+      }
+      cumulative += width;
+    }
+    return GRID_CONFIG.MAX_COLS - 1;
+  }, [columnWidths]);
+
   const getConditionalStyle = useCallback((row: number, col: number, value: string | number): React.CSSProperties => {
     if (!conditionalFormats) return {};
     
@@ -310,8 +334,8 @@ export function VirtualizedExcel({
     return {};
   }, [conditionalFormats]);
 
-  const startRow = Math.max(0, Math.floor(scrollPos.top / GRID_CONFIG.ROW_HEIGHT) - GRID_CONFIG.BUFFER_ROWS);
-  const startCol = Math.max(0, Math.floor(scrollPos.left / GRID_CONFIG.COL_WIDTH) - GRID_CONFIG.BUFFER_COLS);
+  const startRow = Math.max(0, findRowAtPosition(scrollPos.top) - GRID_CONFIG.BUFFER_ROWS);
+  const startCol = Math.max(0, findColAtPosition(scrollPos.left) - GRID_CONFIG.BUFFER_COLS);
   const endRow = Math.min(GRID_CONFIG.MAX_ROWS, startRow + GRID_CONFIG.VISIBLE_ROWS + GRID_CONFIG.BUFFER_ROWS * 2);
   const endCol = Math.min(GRID_CONFIG.MAX_COLS, startCol + GRID_CONFIG.VISIBLE_COLS + GRID_CONFIG.BUFFER_COLS * 2);
 
