@@ -739,6 +739,7 @@ export function ChatInterface({
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
+  const [regeneratingMsgIndex, setRegeneratingMsgIndex] = useState<number | null>(null);
   const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -1619,6 +1620,7 @@ export function ChatInterface({
     
     const contextUpToUser = prevMessages.slice(0, prevMessages.length - lastUserMsgIndex);
     
+    setRegeneratingMsgIndex(msgIndex);
     setAiState("thinking");
     streamingContentRef.current = "";
     setStreamingContent("");
@@ -1667,6 +1669,7 @@ export function ChatInterface({
           streamingContentRef.current = "";
           setStreamingContent("");
           setAiState("idle");
+          setRegeneratingMsgIndex(null);
           abortControllerRef.current = null;
         }
       }, 15);
@@ -1674,6 +1677,7 @@ export function ChatInterface({
       if (error.name === "AbortError") return;
       console.error("Regenerate error:", error);
       setAiState("idle");
+      setRegeneratingMsgIndex(null);
       abortControllerRef.current = null;
     }
   };
@@ -3205,6 +3209,7 @@ IMPORTANTE:
                 latestGeneratedImageRef={latestGeneratedImageRef}
                 streamingContent={streamingContent}
                 aiState={aiState}
+                regeneratingMsgIndex={regeneratingMsgIndex}
                 handleCopyMessage={handleCopyMessage}
                 handleStartEdit={handleStartEdit}
                 handleCancelEdit={handleCancelEdit}
@@ -3451,6 +3456,7 @@ IMPORTANTE:
                 latestGeneratedImageRef={latestGeneratedImageRef}
                 streamingContent={streamingContent}
                 aiState={aiState}
+                regeneratingMsgIndex={regeneratingMsgIndex}
                 handleCopyMessage={handleCopyMessage}
                 handleStartEdit={handleStartEdit}
                 handleCancelEdit={handleCancelEdit}

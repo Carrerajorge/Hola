@@ -439,6 +439,7 @@ interface ActionToolbarProps {
   messageFeedback: Record<string, "up" | "down">;
   speakingMessageId: string | null;
   aiState: "idle" | "thinking" | "responding";
+  isRegenerating: boolean;
   variant: "compact" | "default";
   onCopy: (content: string, id: string) => void;
   onFeedback: (id: string, type: "up" | "down") => void;
@@ -455,6 +456,7 @@ const ActionToolbar = memo(function ActionToolbar({
   messageFeedback,
   speakingMessageId,
   aiState,
+  isRegenerating,
   variant,
   onCopy,
   onFeedback,
@@ -552,7 +554,7 @@ const ActionToolbar = memo(function ActionToolbar({
               data-testid={`button-regenerate-${testIdSuffix}`}
             >
               <RefreshCw
-                className={cn("h-4 w-4", aiState !== "idle" && "animate-spin")}
+                className={cn("h-4 w-4", isRegenerating && "animate-spin")}
               />
             </Button>
           </TooltipTrigger>
@@ -758,6 +760,7 @@ interface AssistantMessageProps {
   messageFeedback: Record<string, "up" | "down">;
   speakingMessageId: string | null;
   aiState: "idle" | "thinking" | "responding";
+  isRegenerating: boolean;
   isGeneratingImage: boolean;
   pendingGeneratedImage: { messageId: string; imageData: string } | null;
   latestGeneratedImageRef: React.RefObject<{ messageId: string; imageData: string } | null>;
@@ -783,6 +786,7 @@ const AssistantMessage = memo(function AssistantMessage({
   messageFeedback,
   speakingMessageId,
   aiState,
+  isRegenerating,
   isGeneratingImage,
   pendingGeneratedImage,
   latestGeneratedImageRef,
@@ -992,6 +996,7 @@ const AssistantMessage = memo(function AssistantMessage({
             messageFeedback={messageFeedback}
             speakingMessageId={speakingMessageId}
             aiState={aiState}
+            isRegenerating={isRegenerating}
             variant={variant}
             onCopy={onCopyMessage}
             onFeedback={onFeedback}
@@ -1055,6 +1060,7 @@ export interface MessageListProps {
   latestGeneratedImageRef: React.RefObject<{ messageId: string; imageData: string } | null>;
   streamingContent: string;
   aiState: "idle" | "thinking" | "responding";
+  regeneratingMsgIndex: number | null;
   handleCopyMessage: (content: string, id: string) => void;
   handleStartEdit: (msg: Message) => void;
   handleCancelEdit: () => void;
@@ -1086,6 +1092,7 @@ export function MessageList({
   latestGeneratedImageRef,
   streamingContent,
   aiState,
+  regeneratingMsgIndex,
   handleCopyMessage,
   handleStartEdit,
   handleCancelEdit,
@@ -1160,6 +1167,7 @@ export function MessageList({
                 messageFeedback={messageFeedback}
                 speakingMessageId={speakingMessageId}
                 aiState={aiState}
+                isRegenerating={regeneratingMsgIndex === msgIndex}
                 isGeneratingImage={isGeneratingImage}
                 pendingGeneratedImage={pendingGeneratedImage}
                 latestGeneratedImageRef={latestGeneratedImageRef}
