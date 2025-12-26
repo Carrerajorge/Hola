@@ -17,6 +17,24 @@ const GRID_CONFIG = {
   BUFFER_COLS: 3,
 };
 
+const RESIZE_CONFIG = {
+  MIN_COL_WIDTH: 30,
+  MAX_COL_WIDTH: 500,
+  MIN_ROW_HEIGHT: 20,
+  MAX_ROW_HEIGHT: 300,
+  RESIZE_HANDLE_SIZE: 5,
+  DOUBLE_CLICK_DELAY: 300,
+};
+
+interface ResizeState {
+  isResizing: boolean;
+  type: 'column' | 'row' | null;
+  index: number | null;
+  startPos: number;
+  startSize: number;
+  currentSize: number;
+}
+
 interface ConditionalFormatRule {
   condition: 'greaterThan' | 'lessThan' | 'equals' | 'between';
   value?: number;
@@ -151,17 +169,69 @@ const VirtualCell = memo(function VirtualCell({
 const ColumnHeader = memo(function ColumnHeader({
   col,
   style,
+  width,
+  onResizeStart,
+  onAutoFit,
+  isResizing,
 }: {
   col: number;
   style: React.CSSProperties;
+  width: number;
+  onResizeStart: (col: number, startX: number, startWidth: number) => void;
+  onAutoFit: (col: number) => void;
+  isResizing: boolean;
 }) {
+  const [isHoveringResize, setIsHoveringResize] = useState(false);
+  const lastClickRef = useRef(0);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const isNearEdge = e.clientX >= rect.right - RESIZE_CONFIG.RESIZE_HANDLE_SIZE;
+    setIsHoveringResize(isNearEdge);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    if (!isResizing) setIsHoveringResize(false);
+  }, [isResizing]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const isNearEdge = e.clientX >= rect.right - RESIZE_CONFIG.RESIZE_HANDLE_SIZE;
+    
+    if (isNearEdge) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const now = Date.now();
+      if (now - lastClickRef.current < RESIZE_CONFIG.DOUBLE_CLICK_DELAY) {
+        onAutoFit(col);
+        lastClickRef.current = 0;
+      } else {
+        lastClickRef.current = now;
+        onResizeStart(col, e.clientX, width);
+      }
+    }
+  }, [col, width, onResizeStart, onAutoFit]);
+
   return (
     <div
-      className="absolute flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-r border-b border-gray-200 dark:border-gray-700 select-none"
+      className={cn(
+        "absolute flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-r border-b border-gray-200 dark:border-gray-700 select-none",
+        isHoveringResize && "cursor-col-resize"
+      )}
       style={style}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      onMouseDown={handleMouseDown}
       data-testid={`col-header-${col}`}
     >
       {getColumnName(col)}
+      <div 
+        className={cn(
+          "absolute right-0 top-0 bottom-0 w-1 transition-colors",
+          isHoveringResize && "bg-blue-500"
+        )}
+      />
     </div>
   );
 });
@@ -169,19 +239,71 @@ const ColumnHeader = memo(function ColumnHeader({
 const RowHeader = memo(function RowHeader({
   row,
   style,
+  height,
+  onResizeStart,
+  onAutoFit,
+  isResizing,
 }: {
   row: number;
   style: React.CSSProperties;
+  height: number;
+  onResizeStart: (row: number, startY: number, startHeight: number) => void;
+  onAutoFit: (row: number) => void;
+  isResizing: boolean;
 }) {
   const displayNumber = row + 1;
+  const [isHoveringResize, setIsHoveringResize] = useState(false);
+  const lastClickRef = useRef(0);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const isNearEdge = e.clientY >= rect.bottom - RESIZE_CONFIG.RESIZE_HANDLE_SIZE;
+    setIsHoveringResize(isNearEdge);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    if (!isResizing) setIsHoveringResize(false);
+  }, [isResizing]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const isNearEdge = e.clientY >= rect.bottom - RESIZE_CONFIG.RESIZE_HANDLE_SIZE;
+    
+    if (isNearEdge) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const now = Date.now();
+      if (now - lastClickRef.current < RESIZE_CONFIG.DOUBLE_CLICK_DELAY) {
+        onAutoFit(row);
+        lastClickRef.current = 0;
+      } else {
+        lastClickRef.current = now;
+        onResizeStart(row, e.clientY, height);
+      }
+    }
+  }, [row, height, onResizeStart, onAutoFit]);
+
   return (
     <div
-      className="absolute flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-r border-b border-gray-200 dark:border-gray-700 select-none"
+      className={cn(
+        "absolute flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-r border-b border-gray-200 dark:border-gray-700 select-none",
+        isHoveringResize && "cursor-row-resize"
+      )}
       style={style}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      onMouseDown={handleMouseDown}
       data-testid={`row-header-${row}`}
       title={`Fila ${displayNumber}`}
     >
       {displayNumber}
+      <div 
+        className={cn(
+          "absolute left-0 right-0 bottom-0 h-1 transition-colors",
+          isHoveringResize && "bg-blue-500"
+        )}
+      />
     </div>
   );
 });
@@ -208,12 +330,161 @@ export function VirtualizedExcel({
   onRowHeightChange,
 }: VirtualizedExcelProps) {
   void version;
-  void onColumnWidthChange;
-  void onRowHeightChange;
   const [scrollPos, setScrollPos] = useState({ top: 0, left: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
   const scrollRAF = useRef<number | null>(null);
   const formulaEngine = useRef(new FormulaEngine(grid));
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  const [resizeState, setResizeState] = useState<ResizeState>({
+    isResizing: false,
+    type: null,
+    index: null,
+    startPos: 0,
+    startSize: 0,
+    currentSize: 0,
+  });
+
+  const handleColumnResizeStart = useCallback((col: number, startX: number, startWidth: number) => {
+    setResizeState({
+      isResizing: true,
+      type: 'column',
+      index: col,
+      startPos: startX,
+      startSize: startWidth,
+      currentSize: startWidth,
+    });
+  }, []);
+
+  const handleRowResizeStart = useCallback((row: number, startY: number, startHeight: number) => {
+    setResizeState({
+      isResizing: true,
+      type: 'row',
+      index: row,
+      startPos: startY,
+      startSize: startHeight,
+      currentSize: startHeight,
+    });
+  }, []);
+
+  const handleAutoFitColumn = useCallback((col: number) => {
+    if (!grid) return;
+    
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    let maxWidth = 50;
+    const headerText = getColumnName(col);
+    ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    maxWidth = Math.max(maxWidth, ctx.measureText(headerText).width + 20);
+    
+    const cells = grid.getAllCells();
+    for (const { row: r, col: c, data: cell } of cells) {
+      if (c === col && cell.value) {
+        const fontWeight = cell.bold ? 'bold' : 'normal';
+        const fontStyle = cell.italic ? 'italic' : 'normal';
+        const fontSize = cell.fontSize || 13;
+        const fontFamily = cell.fontFamily || '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+        ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+        const textWidth = ctx.measureText(String(cell.value)).width + 16;
+        maxWidth = Math.max(maxWidth, textWidth);
+      }
+    }
+    
+    const clampedWidth = Math.max(RESIZE_CONFIG.MIN_COL_WIDTH, Math.min(RESIZE_CONFIG.MAX_COL_WIDTH, Math.ceil(maxWidth)));
+    onColumnWidthChange?.(col, clampedWidth);
+  }, [grid, onColumnWidthChange]);
+
+  const handleAutoFitRow = useCallback((row: number) => {
+    if (!grid) return;
+    
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    let maxHeight = GRID_CONFIG.ROW_HEIGHT;
+    
+    const cells = grid.getAllCells();
+    for (const { row: r, col: c, data: cell } of cells) {
+      if (r === row && cell.value) {
+        const fontSize = cell.fontSize || 13;
+        const lineHeight = fontSize * 1.4;
+        const fontWeight = cell.bold ? 'bold' : 'normal';
+        const fontStyle = cell.italic ? 'italic' : 'normal';
+        const fontFamily = cell.fontFamily || '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+        ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+        
+        const text = String(cell.value);
+        const colWidth = columnWidths?.[c] || GRID_CONFIG.COL_WIDTH;
+        const availableWidth = colWidth - 12;
+        
+        let totalLines = 0;
+        const paragraphs = text.split('\n');
+        for (const paragraph of paragraphs) {
+          if (!paragraph) {
+            totalLines += 1;
+            continue;
+          }
+          const textWidth = ctx.measureText(paragraph).width;
+          const wrappedLines = Math.ceil(textWidth / availableWidth);
+          totalLines += Math.max(1, wrappedLines);
+        }
+        
+        const estimatedHeight = totalLines * lineHeight + 8;
+        maxHeight = Math.max(maxHeight, estimatedHeight);
+      }
+    }
+    
+    const clampedHeight = Math.max(RESIZE_CONFIG.MIN_ROW_HEIGHT, Math.min(RESIZE_CONFIG.MAX_ROW_HEIGHT, Math.ceil(maxHeight)));
+    onRowHeightChange?.(row, clampedHeight);
+  }, [grid, columnWidths, onRowHeightChange]);
+
+  useEffect(() => {
+    if (!resizeState.isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = resizeState.type === 'column'
+        ? e.clientX - resizeState.startPos
+        : e.clientY - resizeState.startPos;
+      
+      const minSize = resizeState.type === 'column' ? RESIZE_CONFIG.MIN_COL_WIDTH : RESIZE_CONFIG.MIN_ROW_HEIGHT;
+      const maxSize = resizeState.type === 'column' ? RESIZE_CONFIG.MAX_COL_WIDTH : RESIZE_CONFIG.MAX_ROW_HEIGHT;
+      const newSize = Math.max(minSize, Math.min(maxSize, resizeState.startSize + delta));
+      
+      setResizeState(prev => ({ ...prev, currentSize: newSize }));
+    };
+
+    const handleMouseUp = () => {
+      if (resizeState.index !== null) {
+        if (resizeState.type === 'column') {
+          onColumnWidthChange?.(resizeState.index, resizeState.currentSize);
+        } else {
+          onRowHeightChange?.(resizeState.index, resizeState.currentSize);
+        }
+      }
+      setResizeState({
+        isResizing: false,
+        type: null,
+        index: null,
+        startPos: 0,
+        startSize: 0,
+        currentSize: 0,
+      });
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = resizeState.type === 'column' ? 'col-resize' : 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [resizeState, onColumnWidthChange, onRowHeightChange]);
 
   useEffect(() => {
     formulaEngine.current.setGrid(grid);
@@ -341,19 +612,6 @@ export function VirtualizedExcel({
   const startCol = Math.max(0, findColAtPosition(scrollPos.left) - GRID_CONFIG.BUFFER_COLS);
   const endRow = Math.min(GRID_CONFIG.MAX_ROWS, startRow + GRID_CONFIG.VISIBLE_ROWS + GRID_CONFIG.BUFFER_ROWS * 2);
   const endCol = Math.min(GRID_CONFIG.MAX_COLS, startCol + GRID_CONFIG.VISIBLE_COLS + GRID_CONFIG.BUFFER_COLS * 2);
-  
-  // Debug logging
-  useEffect(() => {
-    console.log('VirtualizedExcel Debug:', {
-      scrollTop: scrollPos.top,
-      calculatedStartRow,
-      startRow,
-      endRow,
-      visibleRowsCount: endRow - startRow,
-      firstVisibleRow: startRow,
-      lastVisibleRow: endRow - 1
-    });
-  }, [scrollPos.top, calculatedStartRow, startRow, endRow]);
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
@@ -563,12 +821,18 @@ export function VirtualizedExcel({
                 <RowHeader
                   key={row}
                   row={row}
+                  height={getRowHeight(row)}
+                  onResizeStart={handleRowResizeStart}
+                  onAutoFit={handleAutoFitRow}
+                  isResizing={resizeState.isResizing && resizeState.type === 'row'}
                   style={{
                     position: 'absolute',
                     top: getRowTop(row),
                     left: 0,
                     width: GRID_CONFIG.ROW_HEADER_WIDTH,
-                    height: getRowHeight(row),
+                    height: resizeState.isResizing && resizeState.type === 'row' && resizeState.index === row 
+                      ? resizeState.currentSize 
+                      : getRowHeight(row),
                   }}
                 />
               ))}
@@ -593,10 +857,16 @@ export function VirtualizedExcel({
                 <ColumnHeader
                   key={col}
                   col={col}
+                  width={getColumnWidth(col)}
+                  onResizeStart={handleColumnResizeStart}
+                  onAutoFit={handleAutoFitColumn}
+                  isResizing={resizeState.isResizing && resizeState.type === 'column'}
                   style={{
                     top: 0,
                     left: getColumnLeft(col),
-                    width: getColumnWidth(col),
+                    width: resizeState.isResizing && resizeState.type === 'column' && resizeState.index === col
+                      ? resizeState.currentSize
+                      : getColumnWidth(col),
                     height: GRID_CONFIG.COL_HEADER_HEIGHT,
                   }}
                 />
@@ -693,6 +963,39 @@ export function VirtualizedExcel({
           Capacidad: {(GRID_CONFIG.MAX_ROWS * GRID_CONFIG.MAX_COLS).toLocaleString()} celdas
         </span>
       </div>
+
+      {resizeState.isResizing && (
+        <div 
+          className="fixed bg-blue-500 pointer-events-none z-50"
+          style={resizeState.type === 'column' ? {
+            width: 2,
+            top: 0,
+            bottom: 0,
+            left: resizeState.startPos + (resizeState.currentSize - resizeState.startSize),
+          } : {
+            height: 2,
+            left: 0,
+            right: 0,
+            top: resizeState.startPos + (resizeState.currentSize - resizeState.startSize),
+          }}
+        />
+      )}
+
+      {resizeState.isResizing && (
+        <div 
+          className="fixed bg-gray-900 text-white text-xs px-2 py-1 rounded shadow-lg pointer-events-none z-50"
+          style={{
+            left: resizeState.type === 'column' 
+              ? resizeState.startPos + (resizeState.currentSize - resizeState.startSize) + 10 
+              : 80,
+            top: resizeState.type === 'column' 
+              ? 80 
+              : resizeState.startPos + (resizeState.currentSize - resizeState.startSize) + 10,
+          }}
+        >
+          {resizeState.type === 'column' ? 'Ancho' : 'Alto'}: {Math.round(resizeState.currentSize)}px
+        </div>
+      )}
     </div>
   );
 }
