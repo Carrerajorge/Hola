@@ -326,6 +326,7 @@ export function SpreadsheetEditor({
   const insertFnRegisteredRef = useRef(false);
   
   const streaming = useExcelStreaming(sparseGrid);
+  const { STREAM_STATUS } = streaming;
   
   const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
@@ -413,7 +414,8 @@ export function SpreadsheetEditor({
 
   useEffect(() => {
     streaming.setOnGridChange(handleSparseGridChange);
-  }, [handleSparseGridChange, streaming.setOnGridChange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSparseGridChange]);
 
   const handleAIGenerate = useCallback(async () => {
     if (!aiPrompt.trim()) return;
