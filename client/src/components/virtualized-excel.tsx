@@ -72,6 +72,112 @@ function getBorderStyle(borders?: CellBorders): React.CSSProperties {
   return style;
 }
 
+// Autofill pattern detection
+interface AutofillPattern {
+  type: 'arithmetic' | 'geometric' | 'text' | 'copy';
+  values: (string | number)[];
+  start?: number;
+  step?: number;
+  ratio?: number;
+}
+
+function detectNumericPattern(values: number[]): AutofillPattern {
+  if (values.length === 0) {
+    return { type: 'copy', values: [] };
+  }
+  
+  if (values.length === 1) {
+    return { type: 'arithmetic', values, start: values[0], step: 1 };
+  }
+  
+  // Check for arithmetic progression (constant difference)
+  const diffs: number[] = [];
+  for (let i = 1; i < values.length; i++) {
+    diffs.push(values[i] - values[i - 1]);
+  }
+  
+  const allSameDiff = diffs.every(d => Math.abs(d - diffs[0]) < 0.0001);
+  if (allSameDiff) {
+    return {
+      type: 'arithmetic',
+      values,
+      start: values[values.length - 1],
+      step: diffs[0]
+    };
+  }
+  
+  // Check for geometric progression (constant ratio)
+  if (values.every(v => v !== 0)) {
+    const ratios: number[] = [];
+    for (let i = 1; i < values.length; i++) {
+      ratios.push(values[i] / values[i - 1]);
+    }
+    const allSameRatio = ratios.every(r => Math.abs(r - ratios[0]) < 0.0001);
+    if (allSameRatio && ratios[0] !== 1) {
+      return {
+        type: 'geometric',
+        values,
+        start: values[values.length - 1],
+        ratio: ratios[0]
+      };
+    }
+  }
+  
+  return { type: 'copy', values };
+}
+
+function detectPattern(cellValues: (string | undefined)[]): AutofillPattern {
+  const values = cellValues.filter(v => v !== undefined && v !== '') as string[];
+  
+  if (values.length === 0) {
+    return { type: 'copy', values: [] };
+  }
+  
+  // Try to parse as numbers
+  const numbers = values.map(v => parseFloat(v));
+  const allNumbers = numbers.every(n => !isNaN(n));
+  
+  if (allNumbers) {
+    return detectNumericPattern(numbers);
+  }
+  
+  // Text pattern - just copy
+  return { type: 'copy', values };
+}
+
+function generateFillValues(pattern: AutofillPattern, count: number): (string | number)[] {
+  const result: (string | number)[] = [];
+  
+  switch (pattern.type) {
+    case 'arithmetic':
+      for (let i = 0; i < count; i++) {
+        const value = (pattern.start || 0) + (pattern.step || 1) * (i + 1);
+        // Keep as integer if step is integer
+        result.push(Number.isInteger(pattern.step) && Number.isInteger(pattern.start || 0) 
+          ? Math.round(value) 
+          : Math.round(value * 100) / 100);
+      }
+      break;
+      
+    case 'geometric':
+      for (let i = 0; i < count; i++) {
+        const value = (pattern.start || 1) * Math.pow(pattern.ratio || 2, i + 1);
+        result.push(Math.round(value * 100) / 100);
+      }
+      break;
+      
+    case 'copy':
+    default:
+      for (let i = 0; i < count; i++) {
+        const index = i % pattern.values.length;
+        result.push(pattern.values[index]);
+      }
+      break;
+  }
+  
+  return result;
+}
+
 const GRID_CONFIG = {
   MAX_ROWS: 10000,
   MAX_COLS: 10000,
@@ -460,6 +566,11 @@ export function VirtualizedExcel({
   
   const [editingValue, setEditingValue] = useState<string | undefined>(undefined);
   
+  // Fill handle state
+  const [isFillDragging, setIsFillDragging] = useState(false);
+  const [fillTargetRow, setFillTargetRow] = useState<number | null>(null);
+  const [fillSourceRange, setFillSourceRange] = useState<{ startRow: number; endRow: number; col: number } | null>(null);
+  
   const isInSelectionRange = useCallback((row: number, col: number): boolean => {
     if (!selectionRange) return false;
     const minRow = Math.min(selectionRange.startRow, selectionRange.endRow);
@@ -847,6 +958,107 @@ export function VirtualizedExcel({
     });
   }, [onSelectCell, setSelectionRange]);
 
+  // Fill handle handlers
+  const handleFillHandleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!selectedCell && !selectionRange) return;
+    
+    const startRow = selectionRange ? Math.min(selectionRange.startRow, selectionRange.endRow) : selectedCell!.row;
+    const endRow = selectionRange ? Math.max(selectionRange.startRow, selectionRange.endRow) : selectedCell!.row;
+    const col = selectionRange ? selectionRange.startCol : selectedCell!.col;
+    
+    setIsFillDragging(true);
+    setFillSourceRange({ startRow, endRow, col });
+    setFillTargetRow(endRow);
+  }, [selectedCell, selectionRange]);
+
+  const handleFillMouseMove = useCallback((e: MouseEvent) => {
+    if (!isFillDragging || !fillSourceRange) return;
+    
+    const viewportElement = viewportRef.current;
+    if (!viewportElement) return;
+    
+    const rect = viewportElement.getBoundingClientRect();
+    const relativeY = e.clientY - rect.top + scrollPos.top - GRID_CONFIG.COL_HEADER_HEIGHT;
+    
+    // Find which row the mouse is over
+    const row = findRowAtPosition(relativeY);
+    if (row > fillSourceRange.endRow) {
+      setFillTargetRow(row);
+    } else {
+      setFillTargetRow(fillSourceRange.endRow);
+    }
+  }, [isFillDragging, fillSourceRange, scrollPos.top, findRowAtPosition]);
+
+  const handleFillMouseUp = useCallback(() => {
+    if (!isFillDragging || !fillSourceRange || fillTargetRow === null) {
+      setIsFillDragging(false);
+      setFillSourceRange(null);
+      setFillTargetRow(null);
+      return;
+    }
+    
+    const { startRow, endRow, col } = fillSourceRange;
+    const targetEnd = fillTargetRow;
+    
+    if (targetEnd > endRow) {
+      // Collect source values
+      const sourceValues: (string | undefined)[] = [];
+      for (let r = startRow; r <= endRow; r++) {
+        const cell = grid.getCell(r, col);
+        sourceValues.push(cell?.value);
+      }
+      
+      // Detect pattern and generate fill values
+      const pattern = detectPattern(sourceValues);
+      const fillCount = targetEnd - endRow;
+      const fillValues = generateFillValues(pattern, fillCount);
+      
+      // Apply fill values
+      for (let i = 0; i < fillValues.length; i++) {
+        const targetRow = endRow + 1 + i;
+        grid.setCell(targetRow, col, { value: String(fillValues[i]) });
+      }
+      
+      onGridChange(grid);
+      
+      // Update selection to include filled range
+      setSelectionRange({
+        startRow,
+        startCol: col,
+        endRow: targetEnd,
+        endCol: col,
+      });
+    }
+    
+    setIsFillDragging(false);
+    setFillSourceRange(null);
+    setFillTargetRow(null);
+  }, [isFillDragging, fillSourceRange, fillTargetRow, grid, onGridChange, setSelectionRange]);
+
+  // Fill handle mouse event listeners
+  useEffect(() => {
+    if (isFillDragging) {
+      document.addEventListener('mousemove', handleFillMouseMove);
+      document.addEventListener('mouseup', handleFillMouseUp);
+      document.body.style.cursor = 'crosshair';
+      
+      return () => {
+        document.removeEventListener('mousemove', handleFillMouseMove);
+        document.removeEventListener('mouseup', handleFillMouseUp);
+        document.body.style.cursor = '';
+      };
+    }
+  }, [isFillDragging, handleFillMouseMove, handleFillMouseUp]);
+
+  // Check if a cell is in the fill preview range
+  const isInFillRange = useCallback((row: number, col: number): boolean => {
+    if (!isFillDragging || !fillSourceRange || fillTargetRow === null) return false;
+    return col === fillSourceRange.col && row > fillSourceRange.endRow && row <= fillTargetRow;
+  }, [isFillDragging, fillSourceRange, fillTargetRow]);
+
   const handleCellEdit = useCallback((row: number, col: number) => {
     const cellData = grid.getCell(row, col);
     setEditingValue(cellData?.formula || cellData?.value || '');
@@ -1161,6 +1373,45 @@ export function VirtualizedExcel({
                     />
                   );
                 })
+              )}
+              
+              {/* Fill Handle - small square at bottom-right of selection */}
+              {selectedCell && !editingCell && !isFillDragging && (() => {
+                const targetRow = selectionRange 
+                  ? Math.max(selectionRange.startRow, selectionRange.endRow) 
+                  : selectedCell.row;
+                const targetCol = selectionRange 
+                  ? Math.max(selectionRange.startCol, selectionRange.endCol) 
+                  : selectedCell.col;
+                
+                const cellBottom = getRowTop(targetRow) + getRowHeight(targetRow);
+                const cellRight = getColumnLeft(targetCol) + getColumnWidth(targetCol);
+                
+                return (
+                  <div
+                    className="absolute w-3 h-3 bg-blue-600 border-2 border-white cursor-crosshair z-30 shadow-sm hover:scale-125 transition-transform"
+                    style={{
+                      top: cellBottom - 6,
+                      left: cellRight - 6,
+                    }}
+                    onMouseDown={handleFillHandleMouseDown}
+                    data-testid="fill-handle"
+                    title="Arrastra para rellenar serie"
+                  />
+                );
+              })()}
+              
+              {/* Fill preview range indicator */}
+              {isFillDragging && fillSourceRange && fillTargetRow !== null && fillTargetRow > fillSourceRange.endRow && (
+                <div
+                  className="absolute border-2 border-dashed border-blue-500 bg-blue-100/30 pointer-events-none z-20"
+                  style={{
+                    top: getRowTop(fillSourceRange.endRow + 1),
+                    left: getColumnLeft(fillSourceRange.col),
+                    width: getColumnWidth(fillSourceRange.col),
+                    height: getRowTop(fillTargetRow) + getRowHeight(fillTargetRow) - getRowTop(fillSourceRange.endRow + 1),
+                  }}
+                />
               )}
               
               {charts && charts.length > 0 && onUpdateChart && onDeleteChart && (
