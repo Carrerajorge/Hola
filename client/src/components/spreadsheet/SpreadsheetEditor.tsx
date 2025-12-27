@@ -102,8 +102,14 @@ export function SpreadsheetEditor({
     }
   }, [initialData, initialSheets]);
 
+  const formattingAppliedRef = useRef<string | null>(null);
+  
   useEffect(() => {
     if (!hotRef.current?.hotInstance || !sheets[activeSheet]?.metadata?.formatting) return;
+    
+    const formatKey = `${activeSheet}-${JSON.stringify(sheets[activeSheet].metadata.formatting)}`;
+    if (formattingAppliedRef.current === formatKey) return;
+    formattingAppliedRef.current = formatKey;
     
     const hot = hotRef.current.hotInstance;
     const formatting = sheets[activeSheet].metadata.formatting;
@@ -118,7 +124,7 @@ export function SpreadsheetEditor({
     });
     
     hot.render();
-  }, [sheets, activeSheet]);
+  }, [activeSheet]);
 
   const updateFormatState = useCallback(() => {
     if (!hotRef.current?.hotInstance) return;

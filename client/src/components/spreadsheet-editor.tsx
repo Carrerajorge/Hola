@@ -403,6 +403,15 @@ export function SpreadsheetEditor({
   const [showAIPrompt, setShowAIPrompt] = useState(false);
   const [aiPrompt, setAIPrompt] = useState('');
   const [orchestratorProgress, setOrchestratorProgress] = useState<{ current: number; total: number; task: string } | null>(null);
+  const [showAICommandBar, setShowAICommandBar] = useState(true);
+  const [aiCommand, setAICommand] = useState('');
+  const [isAIProcessing, setIsAIProcessing] = useState(false);
+  const [showAISuggestions, setShowAISuggestions] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates] = useState<{ [category: string]: Array<{ id: string; name: string; sheets: number; }> }>({});
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const aiCommandRef = useRef<HTMLInputElement>(null);
+  const aiSuggestionsRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const initialContentRef = useRef(content);
@@ -807,6 +816,112 @@ export function SpreadsheetEditor({
       onOrchestratorReady({ runOrchestrator });
     }
   }, [onOrchestratorReady, runOrchestrator]);
+
+  // AI Command Bar suggestions
+  const aiSuggestions = useMemo(() => [
+    { icon: Table, text: 'Llena con nombres de ciudades', type: 'fill' },
+    { icon: Calculator, text: 'Calcula el total de esta columna', type: 'formula' },
+    { icon: BarChart3, text: 'Genera datos de ventas mensuales', type: 'generate' },
+    { icon: Wand2, text: 'Formatea como tabla', type: 'format' },
+    { icon: CheckCircle2, text: 'Completa los datos faltantes', type: 'complete' },
+    { icon: Table, text: 'Genera tabla de inventario', type: 'generate' },
+    { icon: FileSpreadsheet, text: 'Llena con fechas secuenciales', type: 'fill' },
+    { icon: Calculator, text: 'Calcula promedio del rango', type: 'formula' }
+  ], []);
+
+  // Handle AI Command submission
+  const handleAICommand = useCallback(async (command: string) => {
+    if (!command.trim() || isAIProcessing) return;
+    
+    setIsAIProcessing(true);
+    setShowAISuggestions(false);
+    
+    const startRow = virtualSelectedCell?.row || 0;
+    const startCol = virtualSelectedCell?.col || 0;
+    const rowCount = 6;
+    const colCount = 5;
+    
+    try {
+      const response = await fetch('/api/ai/excel-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command,
+          type: 'custom',
+          range: { startRow, startCol, endRow: startRow + rowCount - 1, endCol: startCol + colCount - 1 }
+        })
+      });
+
+      if (!response.ok) throw new Error('AI command failed');
+
+      const result = await response.json();
+      
+      if (result.columnData && Array.isArray(result.columnData)) {
+        const data = result.columnData.map((v: string) => [v]);
+        await streaming.simulateStreaming(data, startRow, startCol);
+      } else if (result.rangeData && Array.isArray(result.rangeData)) {
+        await streaming.simulateStreaming(result.rangeData, startRow, startCol);
+      } else if (result.cell) {
+        sparseGrid.setCell(startRow, startCol, { value: result.cell });
+        setGridVersion(v => v + 1);
+      }
+      
+      setAICommand('');
+    } catch (error) {
+      console.error('AI command error:', error);
+    } finally {
+      setIsAIProcessing(false);
+    }
+  }, [virtualSelectedCell, streaming, sparseGrid, isAIProcessing]);
+
+  // Load templates
+  const loadTemplates = useCallback(async () => {
+    setLoadingTemplates(true);
+    try {
+      const response = await fetch('/api/admin/excel/templates');
+      if (response.ok) {
+        const data = await response.json();
+        setTemplates(data.templates || {});
+      }
+    } catch (error) {
+      console.error('Failed to load templates:', error);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  }, []);
+
+  // Apply template
+  const applyTemplate = useCallback(async (templateId: string) => {
+    try {
+      const response = await fetch(`/api/admin/excel/${templateId}`);
+      if (response.ok) {
+        const templateDoc = await response.json();
+        if (templateDoc.sheets && templateDoc.sheets.length > 0) {
+          const templateSheet = templateDoc.sheets[0];
+          const templateData = templateSheet.data;
+          
+          if (Array.isArray(templateData)) {
+            await streaming.simulateStreaming(templateData, 0, 0);
+          }
+        }
+        setShowTemplates(false);
+      }
+    } catch (error) {
+      console.error('Failed to apply template:', error);
+    }
+  }, [streaming]);
+
+  // Close suggestions on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (aiSuggestionsRef.current && !aiSuggestionsRef.current.contains(e.target as Node) &&
+          aiCommandRef.current && !aiCommandRef.current.contains(e.target as Node)) {
+        setShowAISuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Sheet management functions
   const addSheet = useCallback(() => {
@@ -1720,6 +1835,90 @@ export function SpreadsheetEditor({
         </div>
       )}
 
+      {/* AI Command Bar */}
+      {showAICommandBar && (
+        <div className="relative px-3 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-gray-800/50 dark:to-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+          <form 
+            onSubmit={(e) => { e.preventDefault(); handleAICommand(aiCommand); }} 
+            className="flex items-center gap-2"
+          >
+            <button
+              type="button"
+              onClick={() => { setShowTemplates(true); loadTemplates(); }}
+              className="flex items-center gap-1 px-3 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white text-xs font-medium transition-colors"
+              data-testid="button-templates"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              Plantillas
+            </button>
+            
+            <div className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 rounded-lg flex-1 border border-gray-200 dark:border-gray-600 focus-within:border-indigo-500 focus-within:ring-1 focus-within:ring-indigo-500 transition-all">
+              <Sparkles className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+              <input
+                ref={aiCommandRef}
+                type="text"
+                value={aiCommand}
+                onChange={(e) => setAICommand(e.target.value)}
+                onFocus={() => setShowAISuggestions(true)}
+                placeholder="Escribe un comando de IA... (ej: llena con ciudades, genera tabla de ventas)"
+                className="flex-1 bg-transparent text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none"
+                disabled={isAIProcessing}
+                data-testid="input-ai-command"
+              />
+              {virtualSelectedCell && (
+                <span className="text-xs text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded" data-testid="text-selected-cell">
+                  {getSparseColumnName(virtualSelectedCell.col)}{virtualSelectedCell.row + 1}
+                </span>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={isAIProcessing || !aiCommand.trim()}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg text-white text-sm font-medium transition-colors"
+              data-testid="button-send-ai-command"
+            >
+              {isAIProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Procesando...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  <span>Enviar</span>
+                </>
+              )}
+            </button>
+          </form>
+          
+          {showAISuggestions && !isAIProcessing && (
+            <div 
+              ref={aiSuggestionsRef}
+              className="absolute top-full left-3 right-3 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl z-50 overflow-hidden"
+              data-testid="dropdown-ai-suggestions"
+            >
+              <div className="p-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Sugerencias de comandos</span>
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {aiSuggestions.map((suggestion, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => { setAICommand(suggestion.text); handleAICommand(suggestion.text); }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-indigo-50 dark:hover:bg-gray-700 transition-colors text-left"
+                    data-testid={`button-suggestion-${index}`}
+                  >
+                    <suggestion.icon className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+                    <span className="text-sm text-gray-700 dark:text-gray-200">{suggestion.text}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Spreadsheet Grid */}
       {useVirtualized ? (
         <div className="flex-1 overflow-hidden relative">
@@ -1880,6 +2079,71 @@ export function SpreadsheetEditor({
                 Generar
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Templates Modal */}
+      {showTemplates && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]" onClick={() => setShowTemplates(false)}>
+          <div 
+            className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl p-6 w-[500px] max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-green-500" />
+                Plantillas de Excel
+              </h3>
+              <button 
+                onClick={() => setShowTemplates(false)}
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            
+            {loadingTemplates ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-green-500" />
+              </div>
+            ) : Object.keys(templates).length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                No hay plantillas disponibles
+              </div>
+            ) : (
+              <div className="overflow-y-auto flex-1 space-y-4">
+                {Object.entries(templates).map(([category, categoryTemplates]) => (
+                  <div key={category}>
+                    <h4 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 px-1">
+                      {category}
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      {categoryTemplates.map((template) => (
+                        <button
+                          key={template.id}
+                          onClick={() => applyTemplate(template.id)}
+                          className="flex items-center gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/20 hover:border-green-300 dark:hover:border-green-700 transition-all text-left group"
+                          data-testid={`template-${template.id}`}
+                        >
+                          <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center group-hover:bg-green-200 dark:group-hover:bg-green-800/40 transition-colors">
+                            <FileSpreadsheet className="w-5 h-5 text-green-600 dark:text-green-400" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                              {template.name}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {template.sheets} hoja{template.sheets !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
