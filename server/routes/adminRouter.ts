@@ -1029,6 +1029,36 @@ export function createAdminRouter() {
   // Analytics Engine Endpoints
   // ========================================
 
+  // Frontend-compatible endpoint (singular 'kpi')
+  router.get("/analytics/kpi", async (req, res) => {
+    try {
+      const latestSnapshot = await storage.getLatestKpiSnapshot();
+      const [userStats, paymentStats] = await Promise.all([
+        storage.getUserStats(),
+        storage.getPaymentStats()
+      ]);
+      
+      // Map to frontend expected structure
+      res.json({
+        activeUsers: latestSnapshot?.activeUsersNow ?? userStats.active ?? 0,
+        queriesPerMinute: latestSnapshot?.queriesPerMinute ?? 0,
+        tokensConsumed: latestSnapshot?.tokensConsumedToday ?? 0,
+        revenueToday: latestSnapshot?.revenueToday ?? paymentStats.thisMonth ?? 0,
+        avgLatency: latestSnapshot?.avgLatencyMs ?? 0,
+        errorRate: parseFloat(latestSnapshot?.errorRatePercentage?.toString() ?? "0"),
+        activeUsersTrend: latestSnapshot?.activeUsersNow ? (latestSnapshot.activeUsersNow > 0 ? "up" : "neutral") : "neutral",
+        queriesTrend: latestSnapshot?.queriesPerMinute ? (latestSnapshot.queriesPerMinute > 5 ? "up" : "neutral") : "neutral",
+        tokensTrend: "up",
+        revenueTrend: "up",
+        latencyTrend: latestSnapshot?.avgLatencyMs ? (latestSnapshot.avgLatencyMs > 1000 ? "down" : "up") : "neutral",
+        errorRateTrend: latestSnapshot?.errorRatePercentage ? (parseFloat(latestSnapshot.errorRatePercentage.toString()) > 5 ? "down" : "up") : "up",
+        updatedAt: latestSnapshot?.createdAt ?? new Date()
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   router.get("/analytics/kpis", async (req, res) => {
     try {
       const latestSnapshot = await storage.getLatestKpiSnapshot();
@@ -1051,6 +1081,98 @@ export function createAdminRouter() {
       }
       
       res.json(latestSnapshot);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Combined charts endpoint (all charts at once)
+  router.get("/analytics/charts", async (req, res) => {
+    try {
+      const granularity = (req.query.granularity as string) || "24h";
+      const validGranularities = ["1h", "24h", "7d", "30d", "90d", "1y"];
+      if (!validGranularities.includes(granularity)) {
+        return res.status(400).json({ error: `Invalid granularity. Valid values: ${validGranularities.join(", ")}` });
+      }
+
+      const intervalMap: Record<string, number> = {
+        "1h": 1 * 60 * 60 * 1000,
+        "24h": 24 * 60 * 60 * 1000,
+        "7d": 7 * 24 * 60 * 60 * 1000,
+        "30d": 30 * 24 * 60 * 60 * 1000,
+        "90d": 90 * 24 * 60 * 60 * 1000,
+        "1y": 365 * 24 * 60 * 60 * 1000,
+      };
+      
+      const startDate = new Date(Date.now() - intervalMap[granularity]);
+      const endDate = new Date();
+
+      // Fetch data for all charts in parallel
+      const [userGrowthData, payments, providerMetrics] = await Promise.all([
+        storage.getUserGrowthData(granularity as '1h' | '24h' | '7d' | '30d' | '90d' | '1y'),
+        storage.getPayments(),
+        storage.getProviderMetrics(undefined, startDate, endDate)
+      ]);
+
+      // Revenue trend
+      const revenueByDate = payments
+        .filter(p => new Date(p.createdAt!) >= startDate)
+        .reduce((acc: Record<string, number>, p) => {
+          const dateKey = new Date(p.createdAt!).toISOString().split("T")[0];
+          acc[dateKey] = (acc[dateKey] || 0) + parseFloat(p.amount || "0");
+          return acc;
+        }, {});
+      const revenueTrend = Object.entries(revenueByDate).map(([date, amount]) => ({ date, amount }));
+
+      // Model usage grouped by date
+      const modelUsageMap = new Map<string, Record<string, number>>();
+      providerMetrics.forEach(m => {
+        const dateKey = new Date(m.windowStart).toISOString().split("T")[0];
+        if (!modelUsageMap.has(dateKey)) {
+          modelUsageMap.set(dateKey, {});
+        }
+        const entry = modelUsageMap.get(dateKey)!;
+        entry[m.provider] = (entry[m.provider] || 0) + (m.totalRequests || 0);
+      });
+      const modelUsage = Array.from(modelUsageMap.entries()).map(([date, providers]) => ({ date, ...providers }));
+
+      // Latency by provider
+      const latencyByProvider = providerMetrics.map(m => ({
+        provider: m.provider,
+        date: new Date(m.windowStart).toISOString().split("T")[0],
+        avgLatency: m.avgLatency || 0,
+        p95Latency: m.p95Latency || 0
+      }));
+
+      // Error rate
+      const errorRate = providerMetrics.map(m => ({
+        provider: m.provider,
+        date: new Date(m.windowStart).toISOString().split("T")[0],
+        errorCount: m.errorCount || 0,
+        totalRequests: m.totalRequests || 0,
+        errorRate: m.totalRequests ? ((m.errorCount || 0) / m.totalRequests * 100) : 0
+      }));
+
+      // Token consumption grouped by date
+      const tokenMap = new Map<string, Record<string, number>>();
+      providerMetrics.forEach(m => {
+        const dateKey = new Date(m.windowStart).toISOString().split("T")[0];
+        if (!tokenMap.has(dateKey)) {
+          tokenMap.set(dateKey, {});
+        }
+        const entry = tokenMap.get(dateKey)!;
+        entry[m.provider] = (entry[m.provider] || 0) + ((m.tokensIn || 0) + (m.tokensOut || 0));
+      });
+      const tokenConsumption = Array.from(tokenMap.entries()).map(([date, providers]) => ({ date, ...providers }));
+
+      res.json({
+        userGrowth: userGrowthData,
+        revenueTrend,
+        modelUsage,
+        latencyByProvider,
+        errorRate,
+        tokenConsumption
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

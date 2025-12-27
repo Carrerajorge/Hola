@@ -581,32 +581,36 @@ function PerformanceTable({ data }: { data: any[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {(data || []).map((provider: any) => (
-              <TableRow key={provider.name} data-testid={`row-provider-${provider.name}`}>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: PROVIDER_COLORS[provider.name.toLowerCase()] || PROVIDER_COLORS.default }}
-                    />
-                    <span className="font-medium">{provider.name}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="text-right font-mono">{provider.avgLatency}ms</TableCell>
-                <TableCell className="text-right font-mono">{provider.p50}ms</TableCell>
-                <TableCell className="text-right font-mono">{provider.p95}ms</TableCell>
-                <TableCell className="text-right font-mono">{provider.p99}ms</TableCell>
-                <TableCell className={cn("text-right font-mono", getSuccessRateColor(provider.successRate))}>
-                  {provider.successRate.toFixed(2)}%
-                </TableCell>
-                <TableCell className="text-right font-mono">{provider.totalRequests.toLocaleString()}</TableCell>
-                <TableCell className="text-center">
-                  <Badge variant={getStatusColor(provider.status)}>
-                    {provider.status}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
+            {(data || []).map((item: any) => {
+              const providerName = item.name || item.provider || "unknown";
+              const successRate = typeof item.successRate === 'number' ? item.successRate : parseFloat(item.successRate || "100");
+              return (
+                <TableRow key={providerName} data-testid={`row-provider-${providerName}`}>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: PROVIDER_COLORS[providerName.toLowerCase()] || PROVIDER_COLORS.default }}
+                      />
+                      <span className="font-medium">{providerName}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right font-mono">{item.avgLatency || 0}ms</TableCell>
+                  <TableCell className="text-right font-mono">{item.p50 || 0}ms</TableCell>
+                  <TableCell className="text-right font-mono">{item.p95 || 0}ms</TableCell>
+                  <TableCell className="text-right font-mono">{item.p99 || 0}ms</TableCell>
+                  <TableCell className={cn("text-right font-mono", getSuccessRateColor(successRate))}>
+                    {successRate.toFixed(2)}%
+                  </TableCell>
+                  <TableCell className="text-right font-mono">{(item.totalRequests || 0).toLocaleString()}</TableCell>
+                  <TableCell className="text-center">
+                    <Badge variant={getStatusColor(item.status || "healthy")}>
+                      {item.status || "healthy"}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </CardContent>
@@ -625,20 +629,23 @@ function CostTrackingPanel({ data }: { data: any[] }) {
     <div className="space-y-4" data-testid="panel-cost-tracking">
       <h3 className="text-lg font-medium">Cost Tracking</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {(data || []).map((provider: any) => {
-          const percentage = (provider.currentSpend / provider.budgetLimit) * 100;
+        {(data || []).map((item: any) => {
+          const providerName = item.name || item.provider || "unknown";
+          const currentSpend = parseFloat(item.currentSpend || "0");
+          const budgetLimit = parseFloat(item.budgetLimit || "100");
+          const percentage = budgetLimit > 0 ? (currentSpend / budgetLimit) * 100 : 0;
           const isOverThreshold = percentage > 80;
 
           return (
-            <Card key={provider.name} data-testid={`card-cost-${provider.name}`}>
+            <Card key={providerName} data-testid={`card-cost-${providerName}`}>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div
                       className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: PROVIDER_COLORS[provider.name.toLowerCase()] || PROVIDER_COLORS.default }}
+                      style={{ backgroundColor: PROVIDER_COLORS[providerName.toLowerCase()] || PROVIDER_COLORS.default }}
                     />
-                    <CardTitle className="text-sm font-medium">{provider.name}</CardTitle>
+                    <CardTitle className="text-sm font-medium">{providerName}</CardTitle>
                   </div>
                   {isOverThreshold && (
                     <Badge variant="destructive" className="text-xs">
@@ -651,12 +658,12 @@ function CostTrackingPanel({ data }: { data: any[] }) {
               <CardContent className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Current Spend</span>
-                  <span className="font-medium">€{provider.currentSpend.toLocaleString()}</span>
+                  <span className="font-medium">€{currentSpend.toFixed(4)}</span>
                 </div>
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-muted-foreground">
                     <span>{percentage.toFixed(0)}% of budget</span>
-                    <span>€{provider.budgetLimit.toLocaleString()}</span>
+                    <span>€{budgetLimit.toFixed(2)}</span>
                   </div>
                   <div className="relative h-2 w-full overflow-hidden rounded-full bg-primary/20">
                     <div
@@ -667,11 +674,11 @@ function CostTrackingPanel({ data }: { data: any[] }) {
                 </div>
                 <div className="flex justify-between text-sm pt-2 border-t">
                   <span className="text-muted-foreground">Projected Monthly</span>
-                  <span className="font-medium">€{provider.projectedMonthly.toLocaleString()}</span>
+                  <span className="font-medium">€{parseFloat(item.projectedMonthly || "0").toFixed(2)}</span>
                 </div>
                 {isOverThreshold && (
                   <div className="bg-red-500/10 border border-red-500/20 rounded-md p-2 text-xs text-red-500">
-                    ⚠️ Budget threshold exceeded. Consider reviewing usage or increasing limits.
+                    Budget threshold exceeded. Consider reviewing usage or increasing limits.
                   </div>
                 )}
               </CardContent>
@@ -1050,8 +1057,8 @@ export default function AnalyticsDashboard() {
             <>
               <KPICardsSection data={kpiData} />
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {!perfLoading && <PerformanceTable data={performanceData?.providers || []} />}
-                {!heatmapLoading && <UsageHeatmap data={heatmapData?.heatmap || []} />}
+                {!perfLoading && <PerformanceTable data={Array.isArray(performanceData) ? performanceData : []} />}
+                {!heatmapLoading && <UsageHeatmap data={heatmapData?.data || heatmapData?.heatmap || []} />}
               </div>
             </>
           )}
@@ -1067,7 +1074,7 @@ export default function AnalyticsDashboard() {
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
           ) : (
-            <PerformanceTable data={performanceData?.providers || []} />
+            <PerformanceTable data={Array.isArray(performanceData) ? performanceData : []} />
           )}
         </TabsContent>
 
@@ -1077,7 +1084,7 @@ export default function AnalyticsDashboard() {
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
           ) : (
-            <CostTrackingPanel data={costData?.providers || []} />
+            <CostTrackingPanel data={Array.isArray(costData) ? costData : []} />
           )}
         </TabsContent>
 
