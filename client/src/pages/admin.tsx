@@ -58,82 +58,212 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
 ];
 
 function DashboardSection() {
-  const { data: dashboardData, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/dashboard"],
     queryFn: async () => {
       const res = await fetch("/api/admin/dashboard");
       return res.json();
-    }
+    },
+    refetchInterval: 30000
   });
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
-  const metrics = dashboardData?.metrics || { users: 0, queries: 0, revenue: "0", uptime: 99.9 };
-  const recentActivity = dashboardData?.recentActivity || [];
+  const d = data || {};
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-medium">Dashboard</h2>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="rounded-lg border p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Usuarios</span>
-            <Users className="h-4 w-4 text-muted-foreground" />
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-medium">Dashboard</h2>
+        <Button variant="ghost" size="sm" onClick={() => refetch()} data-testid="button-refresh-dashboard">
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-users">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-md bg-blue-500/10">
+              <Users className="h-4 w-4 text-blue-500" />
+            </div>
+            <span className="text-sm font-medium">Users</span>
           </div>
-          <p className="text-2xl font-semibold" data-testid="text-total-users">{metrics.users.toLocaleString()}</p>
-          <div className="flex items-center text-xs text-green-600">
-            <TrendingUp className="h-3 w-3 mr-1" />
-            Activos
-          </div>
-        </div>
-        <div className="rounded-lg border p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Consultas</span>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <p className="text-2xl font-semibold" data-testid="text-total-queries">{metrics.queries.toLocaleString()}</p>
-          <div className="flex items-center text-xs text-green-600">
-            <TrendingUp className="h-3 w-3 mr-1" />
-            Total
+          <p className="text-2xl font-bold">{d.users?.total || 0}</p>
+          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+            <span>{d.users?.active || 0} activos</span>
+            <span className="text-green-600">+{d.users?.newThisMonth || 0} este mes</span>
           </div>
         </div>
-        <div className="rounded-lg border p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Ingresos</span>
-            <CreditCard className="h-4 w-4 text-muted-foreground" />
+
+        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-ai-models">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-md bg-purple-500/10">
+              <Bot className="h-4 w-4 text-purple-500" />
+            </div>
+            <span className="text-sm font-medium">AI Models</span>
           </div>
-          <p className="text-2xl font-semibold" data-testid="text-total-revenue">€{parseFloat(metrics.revenue).toLocaleString()}</p>
-          <div className="flex items-center text-xs text-green-600">
-            <TrendingUp className="h-3 w-3 mr-1" />
-            Total
+          <p className="text-2xl font-bold">{d.aiModels?.active || 0}<span className="text-sm font-normal text-muted-foreground">/{d.aiModels?.total || 0}</span></p>
+          <div className="flex items-center gap-2 mt-2">
+            <span className={cn("inline-flex items-center gap-1 text-xs", d.systemHealth?.xai ? "text-green-600" : "text-red-500")}>
+              <span className={cn("w-1.5 h-1.5 rounded-full", d.systemHealth?.xai ? "bg-green-500" : "bg-red-500")} />
+              xAI
+            </span>
+            <span className={cn("inline-flex items-center gap-1 text-xs", d.systemHealth?.gemini ? "text-green-600" : "text-red-500")}>
+              <span className={cn("w-1.5 h-1.5 rounded-full", d.systemHealth?.gemini ? "bg-green-500" : "bg-red-500")} />
+              Gemini
+            </span>
           </div>
         </div>
-        <div className="rounded-lg border p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Uptime</span>
-            <CheckCircle className="h-4 w-4 text-green-500" />
+
+        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-payments">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-md bg-green-500/10">
+              <CreditCard className="h-4 w-4 text-green-500" />
+            </div>
+            <span className="text-sm font-medium">Payments</span>
           </div>
-          <p className="text-2xl font-semibold" data-testid="text-uptime">{metrics.uptime}%</p>
-          <span className="text-xs text-muted-foreground">Últimos 30 días</span>
+          <p className="text-2xl font-bold">€{parseFloat(d.payments?.total || "0").toLocaleString()}</p>
+          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+            <span>€{parseFloat(d.payments?.thisMonth || "0").toLocaleString()} este mes</span>
+            <span>{d.payments?.count || 0} transacciones</span>
+          </div>
+        </div>
+
+        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-invoices">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-md bg-orange-500/10">
+              <FileText className="h-4 w-4 text-orange-500" />
+            </div>
+            <span className="text-sm font-medium">Invoices</span>
+          </div>
+          <p className="text-2xl font-bold">{d.invoices?.total || 0}</p>
+          <div className="flex items-center gap-4 mt-2 text-xs">
+            <span className="text-yellow-600">{d.invoices?.pending || 0} pendientes</span>
+            <span className="text-green-600">{d.invoices?.paid || 0} pagadas</span>
+          </div>
+        </div>
+
+        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-analytics">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-md bg-cyan-500/10">
+              <BarChart3 className="h-4 w-4 text-cyan-500" />
+            </div>
+            <span className="text-sm font-medium">Analytics</span>
+          </div>
+          <p className="text-2xl font-bold">{(d.analytics?.totalQueries || 0).toLocaleString()}</p>
+          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+            <span>~{d.analytics?.avgQueriesPerUser || 0} consultas/usuario</span>
+          </div>
+        </div>
+
+        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-database">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-md bg-slate-500/10">
+              <Database className="h-4 w-4 text-slate-500" />
+            </div>
+            <span className="text-sm font-medium">Database</span>
+          </div>
+          <p className="text-2xl font-bold">{d.database?.tables || 0} <span className="text-sm font-normal text-muted-foreground">tablas</span></p>
+          <div className="flex items-center gap-2 mt-2">
+            <span className={cn("inline-flex items-center gap-1 text-xs", d.database?.status === "healthy" ? "text-green-600" : "text-red-500")}>
+              <CheckCircle className="h-3 w-3" />
+              {d.database?.status === "healthy" ? "Operativo" : "Error"}
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-security">
+          <div className="flex items-center gap-3 mb-3">
+            <div className={cn("p-2 rounded-md", d.security?.status === "healthy" ? "bg-green-500/10" : "bg-yellow-500/10")}>
+              <Shield className={cn("h-4 w-4", d.security?.status === "healthy" ? "text-green-500" : "text-yellow-500")} />
+            </div>
+            <span className="text-sm font-medium">Security</span>
+          </div>
+          <p className="text-2xl font-bold">{d.security?.alerts || 0} <span className="text-sm font-normal text-muted-foreground">alertas</span></p>
+          <div className="flex items-center gap-2 mt-2">
+            <span className={cn("inline-flex items-center gap-1 text-xs", d.security?.status === "healthy" ? "text-green-600" : "text-yellow-600")}>
+              <span className={cn("w-1.5 h-1.5 rounded-full", d.security?.status === "healthy" ? "bg-green-500" : "bg-yellow-500")} />
+              {d.security?.status === "healthy" ? "Sin incidentes" : "Revisar"}
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-reports">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-md bg-indigo-500/10">
+              <FileBarChart className="h-4 w-4 text-indigo-500" />
+            </div>
+            <span className="text-sm font-medium">Reports</span>
+          </div>
+          <p className="text-2xl font-bold">{d.reports?.total || 0}</p>
+          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+            <span>{d.reports?.scheduled || 0} programados</span>
+          </div>
+        </div>
+
+        <div className="rounded-lg border p-4 hover:border-primary/50 transition-colors cursor-pointer" data-testid="card-settings">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 rounded-md bg-gray-500/10">
+              <Settings className="h-4 w-4 text-gray-500" />
+            </div>
+            <span className="text-sm font-medium">Settings</span>
+          </div>
+          <p className="text-2xl font-bold">{d.settings?.total || 0} <span className="text-sm font-normal text-muted-foreground">config</span></p>
+          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+            <span>{d.settings?.categories || 0} categorías</span>
+          </div>
         </div>
       </div>
-      <div className="rounded-lg border p-4">
-        <h3 className="text-sm font-medium mb-4">Actividad reciente</h3>
-        <div className="space-y-3">
-          {recentActivity.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No hay actividad reciente</p>
-          ) : (
-            recentActivity.slice(0, 5).map((item: any, i: number) => (
-              <div key={i} className="flex items-center justify-between py-2 text-sm">
-                <span>{item.action} - {item.resource}</span>
-                <span className="text-xs text-muted-foreground">
-                  {item.createdAt ? format(new Date(item.createdAt), "dd/MM HH:mm") : ""}
-                </span>
-              </div>
-            ))
-          )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="rounded-lg border p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-medium">System Health</h3>
+            <span className="text-xs text-muted-foreground">{d.systemHealth?.uptime || 99.9}% uptime</span>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm">xAI Grok</span>
+              <Badge variant={d.systemHealth?.xai ? "default" : "destructive"} className="text-xs">
+                {d.systemHealth?.xai ? "Online" : "Offline"}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Google Gemini</span>
+              <Badge variant={d.systemHealth?.gemini ? "default" : "destructive"} className="text-xs">
+                {d.systemHealth?.gemini ? "Online" : "Offline"}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm">Database</span>
+              <Badge variant={d.database?.status === "healthy" ? "default" : "destructive"} className="text-xs">
+                {d.database?.status === "healthy" ? "Healthy" : "Error"}
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border p-4">
+          <h3 className="text-sm font-medium mb-4">Actividad reciente</h3>
+          <div className="space-y-2">
+            {(d.recentActivity || []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No hay actividad reciente</p>
+            ) : (
+              (d.recentActivity || []).slice(0, 5).map((item: any, i: number) => (
+                <div key={i} className="flex items-center justify-between py-1.5 text-sm border-b last:border-0">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-3 w-3 text-muted-foreground" />
+                    <span className="truncate max-w-[200px]">{item.action}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {item.createdAt ? format(new Date(item.createdAt), "dd/MM HH:mm") : ""}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>
