@@ -399,6 +399,8 @@ export function SpreadsheetEditor({
   }, []);
 
   const handleAICommand = useCallback(async (command: string) => {
+    if (!selectedRange) return;
+    
     setIsAIProcessing(true);
     try {
       const response = await fetch('/api/ai/excel-command', {
@@ -406,7 +408,8 @@ export function SpreadsheetEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           command,
-          selectedRange,
+          type: 'custom',
+          range: selectedRange,
           currentData: data
         })
       });
@@ -417,22 +420,22 @@ export function SpreadsheetEditor({
 
       const result = await response.json();
       
-      if (result.cells && result.cells.length > 0) {
+      if (result.cells && Array.isArray(result.cells) && result.cells.length > 0) {
         await streamToCells(result.cells);
-      } else if (result.columnData) {
+      } else if (result.columnData && Array.isArray(result.columnData)) {
         await streamFillColumn(
-          result.columnData.col, 
-          result.columnData.values, 
-          result.columnData.startRow || 0
+          selectedRange.startCol, 
+          result.columnData, 
+          selectedRange.startRow
         );
-      } else if (result.rangeData) {
+      } else if (result.rangeData && Array.isArray(result.rangeData)) {
         await streamFillRange(
-          result.rangeData.startRow,
-          result.rangeData.startCol,
-          result.rangeData.data
+          selectedRange.startRow,
+          selectedRange.startCol,
+          result.rangeData
         );
-      } else if (result.cell) {
-        await streamToCell(result.cell.row, result.cell.col, result.cell.value);
+      } else if (result.cell && typeof result.cell === 'string') {
+        await streamToCell(selectedRange.startRow, selectedRange.startCol, result.cell);
       }
     } catch (error) {
       console.error('AI command error:', error);
