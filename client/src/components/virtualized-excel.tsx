@@ -797,6 +797,7 @@ export function VirtualizedExcel({
       setIsDragging(true);
       setSelectionRange(null);
     }
+    containerRef.current?.focus();
   }, [onSelectCell, selectedCell, setSelectionRange]);
 
   const handleCellMouseEnter = useCallback((row: number, col: number) => {
@@ -1000,6 +1001,7 @@ export function VirtualizedExcel({
 
   return (
     <div
+      ref={containerRef}
       className={cn("flex flex-col h-full w-full overflow-hidden bg-white dark:bg-gray-900 outline-none", className)}
       onKeyDown={handleKeyDown}
       tabIndex={0}
