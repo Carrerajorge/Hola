@@ -1,4 +1,4 @@
-import { Plus, Search, Library, Bot, User } from "lucide-react";
+import { SquarePen, Search, Library, Bot, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -51,7 +51,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
                 onClick={onNewChat}
                 data-testid="mini-button-new-chat"
               >
-                <Plus className="h-5 w-5 text-foreground" />
+                <SquarePen className="h-5 w-5 text-foreground" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
