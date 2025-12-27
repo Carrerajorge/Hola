@@ -45,7 +45,7 @@ export function NewChatButton({
 
   const buttonContent = (
     <button
-      className="overflow-hidden group font-medium transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 fixed bottom-6 right-6 z-50 flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-xl hover:shadow-2xl hover:scale-110 active:scale-95 md:hidden mt-[587px] mb-[587px] pt-[0px] pb-[0px] ml-[-15px] mr-[-15px]"
+      className={cn(baseClasses, variantClasses[variant], successClasses, className)}
       onClick={handleClick}
       disabled={isCreating}
       onMouseEnter={() => setIsHovered(true)}
