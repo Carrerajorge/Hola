@@ -1532,3 +1532,58 @@ export const insertSecurityPolicySchema = createInsertSchema(securityPolicies).o
 
 export type InsertSecurityPolicy = z.infer<typeof insertSecurityPolicySchema>;
 export type SecurityPolicy = typeof securityPolicies.$inferSelect;
+
+// ========================================
+// Reports Center - Templates and Generated Reports
+// ========================================
+
+// Report Templates
+export const reportTemplates = pgTable("report_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  description: text("description"),
+  columns: jsonb("columns").notNull().$type<{ key: string; label: string; type?: string }[]>(),
+  filters: jsonb("filters").$type<{ key: string; label: string; type: string }[]>(),
+  groupBy: jsonb("group_by").$type<string[]>(),
+  isSystem: text("is_system").default("false"),
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("report_templates_type_idx").on(table.type),
+]);
+
+export const insertReportTemplateSchema = createInsertSchema(reportTemplates).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertReportTemplate = z.infer<typeof insertReportTemplateSchema>;
+export type ReportTemplate = typeof reportTemplates.$inferSelect;
+
+// Generated Reports
+export const generatedReports = pgTable("generated_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  templateId: varchar("template_id"),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  status: text("status").default("pending"),
+  parameters: jsonb("parameters").$type<Record<string, any>>(),
+  resultSummary: jsonb("result_summary").$type<{ rowCount?: number; aggregates?: Record<string, any> }>(),
+  filePath: text("file_path"),
+  format: text("format").default("json"),
+  generatedBy: varchar("generated_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+}, (table) => [
+  index("generated_reports_status_idx").on(table.status),
+  index("generated_reports_created_idx").on(table.createdAt),
+]);
+
+export const insertGeneratedReportSchema = createInsertSchema(generatedReports).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertGeneratedReport = z.infer<typeof insertGeneratedReportSchema>;
+export type GeneratedReport = typeof generatedReports.$inferSelect;

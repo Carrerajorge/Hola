@@ -42,6 +42,8 @@ import {
   type KpiSnapshot, type InsertKpiSnapshot,
   type AnalyticsEvent, type InsertAnalyticsEvent,
   type SecurityPolicy, type InsertSecurityPolicy,
+  type ReportTemplate, type InsertReportTemplate,
+  type GeneratedReport, type InsertGeneratedReport,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
   gpts, gptCategories, gptVersions, users,
@@ -50,7 +52,8 @@ import {
   integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs,
   consentLogs, sharedLinks, companyKnowledge, gmailOAuthTokens,
   responseQualityMetrics, connectorUsageHourly, offlineMessageQueue,
-  providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents, securityPolicies
+  providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents, securityPolicies,
+  reportTemplates, generatedReports
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
@@ -281,6 +284,16 @@ export interface IStorage {
   updateSecurityPolicy(id: string, updates: Partial<InsertSecurityPolicy>): Promise<SecurityPolicy | undefined>;
   deleteSecurityPolicy(id: string): Promise<void>;
   toggleSecurityPolicy(id: string, isEnabled: boolean): Promise<SecurityPolicy | undefined>;
+  // Report Templates
+  getReportTemplates(): Promise<ReportTemplate[]>;
+  getReportTemplate(id: string): Promise<ReportTemplate | undefined>;
+  createReportTemplate(template: InsertReportTemplate): Promise<ReportTemplate>;
+  // Generated Reports
+  getGeneratedReports(limit?: number): Promise<GeneratedReport[]>;
+  getGeneratedReport(id: string): Promise<GeneratedReport | undefined>;
+  createGeneratedReport(report: InsertGeneratedReport): Promise<GeneratedReport>;
+  updateGeneratedReport(id: string, updates: Partial<InsertGeneratedReport>): Promise<GeneratedReport | undefined>;
+  deleteGeneratedReport(id: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -1922,6 +1935,50 @@ export class MemStorage implements IStorage {
       .where(eq(securityPolicies.id, id))
       .returning();
     return result;
+  }
+
+  // Report Templates CRUD
+  async getReportTemplates(): Promise<ReportTemplate[]> {
+    return db.select().from(reportTemplates).orderBy(desc(reportTemplates.createdAt));
+  }
+
+  async getReportTemplate(id: string): Promise<ReportTemplate | undefined> {
+    const [result] = await db.select().from(reportTemplates).where(eq(reportTemplates.id, id));
+    return result;
+  }
+
+  async createReportTemplate(template: InsertReportTemplate): Promise<ReportTemplate> {
+    const [result] = await db.insert(reportTemplates).values(template).returning();
+    return result;
+  }
+
+  // Generated Reports CRUD
+  async getGeneratedReports(limit: number = 100): Promise<GeneratedReport[]> {
+    return db.select().from(generatedReports)
+      .orderBy(desc(generatedReports.createdAt))
+      .limit(limit);
+  }
+
+  async getGeneratedReport(id: string): Promise<GeneratedReport | undefined> {
+    const [result] = await db.select().from(generatedReports).where(eq(generatedReports.id, id));
+    return result;
+  }
+
+  async createGeneratedReport(report: InsertGeneratedReport): Promise<GeneratedReport> {
+    const [result] = await db.insert(generatedReports).values(report).returning();
+    return result;
+  }
+
+  async updateGeneratedReport(id: string, updates: Partial<InsertGeneratedReport>): Promise<GeneratedReport | undefined> {
+    const [result] = await db.update(generatedReports)
+      .set(updates)
+      .where(eq(generatedReports.id, id))
+      .returning();
+    return result;
+  }
+
+  async deleteGeneratedReport(id: string): Promise<void> {
+    await db.delete(generatedReports).where(eq(generatedReports.id, id));
   }
 }
 

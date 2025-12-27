@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ArrowLeft,
   LayoutDashboard,
@@ -61,7 +62,8 @@ import {
   ShieldCheck,
   ShieldAlert,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  DollarSign
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
@@ -3236,111 +3238,353 @@ function SecuritySection() {
 
 function ReportsSection() {
   const queryClient = useQueryClient();
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newReport, setNewReport] = useState({ name: "", type: "usage" });
+  const [activeTab, setActiveTab] = useState("templates");
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+  const [reportFormat, setReportFormat] = useState<string>("json");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [historyPage, setHistoryPage] = useState(1);
 
-  const { data: reports = [], isLoading } = useQuery({
-    queryKey: ["/api/admin/reports"],
+  const { data: templates = [], isLoading: templatesLoading } = useQuery({
+    queryKey: ["/api/admin/reports/templates"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/reports");
+      const res = await fetch("/api/admin/reports/templates");
       return res.json();
     }
   });
 
-  const createReportMutation = useMutation({
-    mutationFn: async (report: any) => {
-      const res = await fetch("/api/admin/reports", {
+  const { data: generatedReportsData, isLoading: reportsLoading, refetch: refetchReports } = useQuery({
+    queryKey: ["/api/admin/reports/generated", historyPage],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/reports/generated?page=${historyPage}&limit=20`);
+      return res.json();
+    },
+    refetchInterval: 5000
+  });
+
+  const generateReportMutation = useMutation({
+    mutationFn: async (data: { templateId: string; format: string; parameters?: any }) => {
+      const res = await fetch("/api/admin/reports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(report)
+        body: JSON.stringify(data)
       });
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports"] });
-      setShowAddModal(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated"] });
+      setActiveTab("history");
     }
   });
 
-  if (isLoading) {
+  const deleteReportMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/admin/reports/generated/${id}`, { method: "DELETE" });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reports/generated"] });
+    }
+  });
+
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case "user_report": return <Users className="h-5 w-5" />;
+      case "ai_models_report": return <Bot className="h-5 w-5" />;
+      case "security_report": return <Shield className="h-5 w-5" />;
+      case "financial_report": return <DollarSign className="h-5 w-5" />;
+      default: return <FileText className="h-5 w-5" />;
+    }
+  };
+
+  const getTypeBadgeVariant = (type: string): "default" | "secondary" | "destructive" | "outline" => {
+    switch (type) {
+      case "user_report": return "default";
+      case "ai_models_report": return "secondary";
+      case "security_report": return "destructive";
+      case "financial_report": return "outline";
+      default: return "secondary";
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "pending": return <Badge variant="outline" className="bg-yellow-100 text-yellow-800">Pending</Badge>;
+      case "processing": return <Badge variant="outline" className="bg-blue-100 text-blue-800">Processing</Badge>;
+      case "completed": return <Badge variant="outline" className="bg-green-100 text-green-800">Completed</Badge>;
+      case "failed": return <Badge variant="destructive">Failed</Badge>;
+      default: return <Badge variant="secondary">{status}</Badge>;
+    }
+  };
+
+  const handleGenerateFromTemplate = (templateId: string) => {
+    setSelectedTemplate(templateId);
+    setActiveTab("generate");
+  };
+
+  const handleSubmitGenerate = () => {
+    if (!selectedTemplate) return;
+    generateReportMutation.mutate({
+      templateId: selectedTemplate,
+      format: reportFormat,
+      parameters: { dateFrom, dateTo }
+    });
+  };
+
+  const handleDownload = (reportId: string) => {
+    window.open(`/api/admin/reports/download/${reportId}`, "_blank");
+  };
+
+  if (templatesLoading) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
+
+  const generatedReports = generatedReportsData?.data || [];
+  const pagination = generatedReportsData?.pagination || { page: 1, totalPages: 1, total: 0 };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Reports ({reports.length})</h2>
-        <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-          <DialogTrigger asChild>
-            <Button size="sm" data-testid="button-create-report">
-              <Plus className="h-4 w-4 mr-2" />
-              Generar reporte
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Generar reporte</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
+        <h2 className="text-lg font-medium">Reports Center</h2>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="templates" data-testid="tab-templates">Templates</TabsTrigger>
+          <TabsTrigger value="generate" data-testid="tab-generate">Generate Report</TabsTrigger>
+          <TabsTrigger value="history" data-testid="tab-history">History</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="templates" className="mt-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {templates.map((template: any) => (
+              <Card key={template.id} className="flex flex-col" data-testid={`card-template-${template.id}`}>
+                <CardHeader className="flex flex-row items-start gap-4 space-y-0">
+                  <div className="p-2 rounded-lg bg-muted">
+                    {getTypeIcon(template.type)}
+                  </div>
+                  <div className="flex-1">
+                    <CardTitle className="text-base">{template.name}</CardTitle>
+                    <Badge variant={getTypeBadgeVariant(template.type)} className="mt-1 text-xs">
+                      {template.type.replace(/_/g, " ")}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex-1">
+                  <p className="text-sm text-muted-foreground">{template.description || "No description"}</p>
+                  {template.isSystem === "true" && (
+                    <Badge variant="outline" className="mt-2 text-xs">System Template</Badge>
+                  )}
+                </CardContent>
+                <CardFooter>
+                  <Button 
+                    className="w-full" 
+                    size="sm"
+                    onClick={() => handleGenerateFromTemplate(template.id)}
+                    data-testid={`button-generate-${template.id}`}
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    Generate
+                  </Button>
+                </CardFooter>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="generate" className="mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Generate New Report</CardTitle>
+              <CardDescription>Configure and generate a report from a template</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Nombre</Label>
-                <Input 
-                  placeholder="Reporte mensual" 
-                  value={newReport.name}
-                  onChange={(e) => setNewReport({ ...newReport, name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Tipo</Label>
-                <Select value={newReport.type} onValueChange={(value) => setNewReport({ ...newReport, type: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
+                <Label>Report Template</Label>
+                <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
+                  <SelectTrigger data-testid="select-template">
+                    <SelectValue placeholder="Select a template..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="usage">Uso</SelectItem>
-                    <SelectItem value="revenue">Ingresos</SelectItem>
-                    <SelectItem value="users">Usuarios</SelectItem>
-                    <SelectItem value="performance">Rendimiento</SelectItem>
+                    {templates.map((t: any) => (
+                      <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Date From (Optional)</Label>
+                  <Input 
+                    type="date" 
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    data-testid="input-date-from"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Date To (Optional)</Label>
+                  <Input 
+                    type="date" 
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    data-testid="input-date-to"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Export Format</Label>
+                <Select value={reportFormat} onValueChange={setReportFormat}>
+                  <SelectTrigger data-testid="select-format">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="json">JSON</SelectItem>
+                    <SelectItem value="csv">CSV</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+            <CardFooter>
               <Button 
                 className="w-full" 
-                onClick={() => createReportMutation.mutate(newReport)}
-                disabled={!newReport.name}
+                onClick={handleSubmitGenerate}
+                disabled={!selectedTemplate || generateReportMutation.isPending}
+                data-testid="button-submit-generate"
               >
-                Generar
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-      <div className="rounded-lg border">
-        {reports.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground text-center">No hay reportes generados</div>
-        ) : (
-          reports.map((report: any) => (
-            <div key={report.id} className="flex items-center justify-between p-3 border-b last:border-0">
-              <div>
-                <p className="font-medium">{report.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {report.type} - {report.createdAt ? format(new Date(report.createdAt), "dd/MM/yyyy") : ""}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={report.status === "completed" ? "default" : "secondary"}>
-                  {report.status === "completed" ? "Completado" : "Pendiente"}
-                </Badge>
-                {report.filePath && (
-                  <Button variant="ghost" size="sm" className="h-7 px-2">
-                    <Download className="h-3 w-3" />
-                  </Button>
+                {generateReportMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Generate Report
+                  </>
                 )}
+              </Button>
+            </CardFooter>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="history" className="mt-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Generated Reports</CardTitle>
+                <CardDescription>View and download previously generated reports</CardDescription>
               </div>
-            </div>
-          ))
-        )}
-      </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => refetchReports()}
+                data-testid="button-refresh-history"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {reportsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : generatedReports.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  No reports generated yet. Generate your first report from the Templates tab.
+                </div>
+              ) : (
+                <div className="rounded-lg border">
+                  <table className="w-full">
+                    <thead className="border-b bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Name</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Type</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Status</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Format</th>
+                        <th className="px-4 py-3 text-left text-sm font-medium">Created</th>
+                        <th className="px-4 py-3 text-right text-sm font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {generatedReports.map((report: any) => (
+                        <tr key={report.id} className="border-b last:border-0" data-testid={`row-report-${report.id}`}>
+                          <td className="px-4 py-3 text-sm font-medium">{report.name}</td>
+                          <td className="px-4 py-3 text-sm">
+                            <Badge variant={getTypeBadgeVariant(report.type)} className="text-xs">
+                              {report.type.replace(/_/g, " ")}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-sm">{getStatusBadge(report.status)}</td>
+                          <td className="px-4 py-3 text-sm uppercase">{report.format}</td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground">
+                            {report.createdAt ? format(new Date(report.createdAt), "MMM dd, yyyy HH:mm") : "-"}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              {report.status === "completed" && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-8 px-2"
+                                  onClick={() => handleDownload(report.id)}
+                                  data-testid={`button-download-${report.id}`}
+                                >
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="h-8 px-2 text-destructive hover:text-destructive"
+                                onClick={() => deleteReportMutation.mutate(report.id)}
+                                data-testid={`button-delete-${report.id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between mt-4">
+                  <span className="text-sm text-muted-foreground">
+                    Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      disabled={historyPage <= 1}
+                      onClick={() => setHistoryPage(p => p - 1)}
+                      data-testid="button-prev-history"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      disabled={historyPage >= pagination.totalPages}
+                      onClick={() => setHistoryPage(p => p + 1)}
+                      data-testid="button-next-history"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
