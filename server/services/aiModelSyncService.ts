@@ -128,7 +128,7 @@ export async function syncModelsForProvider(provider: string): Promise<{ added: 
           description: model.description,
           isDeprecated: model.isDeprecated ? "true" : "false",
           releaseDate: model.releaseDate,
-          status: "active",
+          status: "inactive",
           lastSyncAt: new Date(),
         });
         result.added++;
