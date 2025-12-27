@@ -24,8 +24,9 @@ const KNOWN_MODELS: Record<string, KnownModel[]> = {
     { modelId: "claude-3-opus", name: "Claude 3 Opus", contextWindow: 200000, maxOutput: 4096, type: "TEXT", inputCost: "0.015", outputCost: "0.075", description: "Claude 3 flagship model", isDeprecated: true },
   ],
   google: [
-    { modelId: "gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 2000000, maxOutput: 65536, type: "MULTIMODAL", inputCost: "0.0025", outputCost: "0.01", description: "Most capable Gemini model with 2M context" },
-    { modelId: "gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000, maxOutput: 65536, type: "MULTIMODAL", inputCost: "0.00015", outputCost: "0.0006", description: "Fast and efficient Gemini model" },
+    { modelId: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", contextWindow: 1000000, maxOutput: 65536, type: "MULTIMODAL", inputCost: "0.0001", outputCost: "0.0004", description: "Más nuevo y rápido (predeterminado)" },
+    { modelId: "gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 2000000, maxOutput: 65536, type: "MULTIMODAL", inputCost: "0.0025", outputCost: "0.01", description: "Más capaz y avanzado" },
+    { modelId: "gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000, maxOutput: 65536, type: "MULTIMODAL", inputCost: "0.00015", outputCost: "0.0006", description: "Rápido y eficiente" },
     { modelId: "gemini-2.0-flash", name: "Gemini 2.0 Flash", contextWindow: 1000000, maxOutput: 8192, type: "MULTIMODAL", inputCost: "0.0001", outputCost: "0.0004", description: "Previous generation Flash" },
     { modelId: "gemini-1.5-pro", name: "Gemini 1.5 Pro", contextWindow: 2000000, maxOutput: 8192, type: "MULTIMODAL", inputCost: "0.00125", outputCost: "0.005", description: "Gemini 1.5 flagship", isDeprecated: true },
     { modelId: "gemini-1.5-flash", name: "Gemini 1.5 Flash", contextWindow: 1000000, maxOutput: 8192, type: "MULTIMODAL", inputCost: "0.000075", outputCost: "0.0003", description: "Fast Gemini 1.5 model", isDeprecated: true },
@@ -38,7 +39,7 @@ const KNOWN_MODELS: Record<string, KnownModel[]> = {
     { modelId: "grok-3-mini", name: "Grok 3 Mini", contextWindow: 131072, maxOutput: 16384, type: "TEXT", inputCost: "0.0003", outputCost: "0.0005", description: "Smaller, faster Grok model" },
     { modelId: "grok-3-mini-fast", name: "Grok 3 Mini Fast", contextWindow: 131072, maxOutput: 16384, type: "TEXT", inputCost: "0.0001", outputCost: "0.0004", description: "Fastest Grok variant" },
     { modelId: "grok-2", name: "Grok 2", contextWindow: 131072, maxOutput: 8192, type: "TEXT", inputCost: "0.002", outputCost: "0.01", description: "Previous generation Grok", isDeprecated: true },
-    { modelId: "grok-vision-beta", name: "Grok Vision Beta", contextWindow: 8192, maxOutput: 4096, type: "MULTIMODAL", inputCost: "0.003", outputCost: "0.015", description: "Vision-enabled Grok" },
+    { modelId: "grok-2-vision", name: "Grok 2 Vision", contextWindow: 32768, maxOutput: 8192, type: "MULTIMODAL", inputCost: "0.002", outputCost: "0.01", description: "Análisis de imágenes" },
   ],
   openai: [
     { modelId: "gpt-5", name: "GPT-5", contextWindow: 128000, maxOutput: 16384, type: "TEXT", inputCost: "0.01", outputCost: "0.03", description: "Latest OpenAI flagship model" },
