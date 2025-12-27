@@ -1393,3 +1393,112 @@ export const insertAnalyticsEventSchema = createInsertSchema(analyticsEvents).om
 
 export type InsertAnalyticsEvent = z.infer<typeof insertAnalyticsEventSchema>;
 export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
+
+// Provider Metrics - Performance tracking per AI provider
+export const providerMetrics = pgTable("provider_metrics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  provider: text("provider").notNull(),
+  windowStart: timestamp("window_start").notNull(),
+  windowEnd: timestamp("window_end").notNull(),
+  avgLatency: integer("avg_latency").default(0),
+  p50Latency: integer("p50_latency").default(0),
+  p95Latency: integer("p95_latency").default(0),
+  p99Latency: integer("p99_latency").default(0),
+  successRate: text("success_rate").default("100"),
+  totalRequests: integer("total_requests").default(0),
+  errorCount: integer("error_count").default(0),
+  tokensIn: integer("tokens_in").default(0),
+  tokensOut: integer("tokens_out").default(0),
+  totalCost: text("total_cost").default("0.00"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("provider_metrics_provider_idx").on(table.provider),
+  index("provider_metrics_window_idx").on(table.windowStart, table.windowEnd),
+]);
+
+export const insertProviderMetricsSchema = createInsertSchema(providerMetrics).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertProviderMetrics = z.infer<typeof insertProviderMetricsSchema>;
+export type ProviderMetrics = typeof providerMetrics.$inferSelect;
+
+// Cost Budgets - Budget tracking and alerts per provider
+export const costBudgets = pgTable("cost_budgets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  provider: text("provider").notNull().unique(),
+  budgetLimit: text("budget_limit").notNull().default("100.00"),
+  alertThreshold: integer("alert_threshold").default(80),
+  currentSpend: text("current_spend").default("0.00"),
+  projectedMonthly: text("projected_monthly").default("0.00"),
+  periodStart: timestamp("period_start").defaultNow().notNull(),
+  periodEnd: timestamp("period_end"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("cost_budgets_provider_idx").on(table.provider),
+]);
+
+export const insertCostBudgetSchema = createInsertSchema(costBudgets).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type InsertCostBudget = z.infer<typeof insertCostBudgetSchema>;
+export type CostBudget = typeof costBudgets.$inferSelect;
+
+// API Logs - Detailed request/response logging
+export const apiLogs = pgTable("api_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  endpoint: text("endpoint").notNull(),
+  method: text("method").notNull(),
+  statusCode: integer("status_code"),
+  latencyMs: integer("latency_ms"),
+  tokensIn: integer("tokens_in"),
+  tokensOut: integer("tokens_out"),
+  model: text("model"),
+  provider: text("provider"),
+  requestPreview: text("request_preview"),
+  responsePreview: text("response_preview"),
+  errorMessage: text("error_message"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("api_logs_user_idx").on(table.userId),
+  index("api_logs_endpoint_idx").on(table.endpoint),
+  index("api_logs_created_idx").on(table.createdAt),
+  index("api_logs_status_idx").on(table.statusCode),
+  index("api_logs_provider_idx").on(table.provider),
+]);
+
+export const insertApiLogSchema = createInsertSchema(apiLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertApiLog = z.infer<typeof insertApiLogSchema>;
+export type ApiLog = typeof apiLogs.$inferSelect;
+
+// Real-time KPI Snapshots - For dashboard metrics
+export const kpiSnapshots = pgTable("kpi_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  activeUsersNow: integer("active_users_now").default(0),
+  queriesPerMinute: integer("queries_per_minute").default(0),
+  tokensConsumedToday: integer("tokens_consumed_today").default(0),
+  revenueToday: text("revenue_today").default("0.00"),
+  avgLatencyMs: integer("avg_latency_ms").default(0),
+  errorRatePercentage: text("error_rate_percentage").default("0.00"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("kpi_snapshots_created_idx").on(table.createdAt),
+]);
+
+export const insertKpiSnapshotSchema = createInsertSchema(kpiSnapshots).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertKpiSnapshot = z.infer<typeof insertKpiSnapshotSchema>;
+export type KpiSnapshot = typeof kpiSnapshots.$inferSelect;

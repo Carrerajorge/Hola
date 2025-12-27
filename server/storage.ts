@@ -36,6 +36,11 @@ import {
   type ResponseQualityMetric, type InsertResponseQualityMetric,
   type ConnectorUsageHourly, type InsertConnectorUsageHourly,
   type OfflineMessageQueue, type InsertOfflineMessageQueue,
+  type ProviderMetrics, type InsertProviderMetrics,
+  type CostBudget, type InsertCostBudget,
+  type ApiLog, type InsertApiLog,
+  type KpiSnapshot, type InsertKpiSnapshot,
+  type AnalyticsEvent, type InsertAnalyticsEvent,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
   gpts, gptCategories, gptVersions, users,
@@ -43,7 +48,8 @@ import {
   notificationEventTypes, notificationPreferences, userSettings,
   integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs,
   consentLogs, sharedLinks, companyKnowledge, gmailOAuthTokens,
-  responseQualityMetrics, connectorUsageHourly, offlineMessageQueue
+  responseQualityMetrics, connectorUsageHourly, offlineMessageQueue,
+  providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
@@ -247,6 +253,26 @@ export interface IStorage {
   syncOfflineMessage(id: string): Promise<OfflineMessageQueue | null>;
   // Chat Stats
   updateChatMessageStats(chatId: string): Promise<Chat | undefined>;
+  // Provider Metrics
+  createProviderMetrics(metrics: InsertProviderMetrics): Promise<ProviderMetrics>;
+  getProviderMetrics(provider?: string, startDate?: Date, endDate?: Date): Promise<ProviderMetrics[]>;
+  getLatestProviderMetrics(): Promise<ProviderMetrics[]>;
+  // Cost Budgets
+  getCostBudgets(): Promise<CostBudget[]>;
+  getCostBudget(provider: string): Promise<CostBudget | undefined>;
+  upsertCostBudget(budget: InsertCostBudget): Promise<CostBudget>;
+  // API Logs
+  createApiLog(log: InsertApiLog): Promise<ApiLog>;
+  getApiLogs(filters: { page?: number; limit?: number; provider?: string; statusCode?: number; startDate?: Date; endDate?: Date }): Promise<{ logs: ApiLog[]; total: number }>;
+  getApiLogStats(): Promise<{ byStatusCode: Record<number, number>; byProvider: Record<string, number> }>;
+  // KPI Snapshots
+  createKpiSnapshot(snapshot: InsertKpiSnapshot): Promise<KpiSnapshot>;
+  getLatestKpiSnapshot(): Promise<KpiSnapshot | undefined>;
+  getKpiSnapshots(limit?: number): Promise<KpiSnapshot[]>;
+  // Analytics Events (extended)
+  createAnalyticsEvent(event: InsertAnalyticsEvent): Promise<AnalyticsEvent>;
+  getAnalyticsEventStats(startDate?: Date, endDate?: Date): Promise<Record<string, number>>;
+  getUserGrowthData(granularity: '1h' | '24h' | '7d' | '30d' | '90d' | '1y'): Promise<{ date: Date; count: number }[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -1624,6 +1650,235 @@ export class MemStorage implements IStorage {
       .where(eq(chats.id, chatId))
       .returning();
     return result;
+  }
+
+  // Provider Metrics
+  async createProviderMetrics(metrics: InsertProviderMetrics): Promise<ProviderMetrics> {
+    const [result] = await db.insert(providerMetrics).values(metrics).returning();
+    return result;
+  }
+
+  async getProviderMetrics(provider?: string, startDate?: Date, endDate?: Date): Promise<ProviderMetrics[]> {
+    let query = db.select().from(providerMetrics);
+    const conditions: any[] = [];
+    
+    if (provider) {
+      conditions.push(eq(providerMetrics.provider, provider));
+    }
+    if (startDate) {
+      conditions.push(sql`${providerMetrics.windowStart} >= ${startDate}`);
+    }
+    if (endDate) {
+      conditions.push(sql`${providerMetrics.windowEnd} <= ${endDate}`);
+    }
+    
+    if (conditions.length > 0) {
+      return db.select().from(providerMetrics)
+        .where(and(...conditions))
+        .orderBy(desc(providerMetrics.windowStart));
+    }
+    return db.select().from(providerMetrics).orderBy(desc(providerMetrics.windowStart));
+  }
+
+  async getLatestProviderMetrics(): Promise<ProviderMetrics[]> {
+    const result = await db.execute(sql`
+      SELECT DISTINCT ON (provider) *
+      FROM provider_metrics
+      ORDER BY provider, window_start DESC
+    `);
+    return result.rows as ProviderMetrics[];
+  }
+
+  // Cost Budgets
+  async getCostBudgets(): Promise<CostBudget[]> {
+    return db.select().from(costBudgets).orderBy(costBudgets.provider);
+  }
+
+  async getCostBudget(provider: string): Promise<CostBudget | undefined> {
+    const [result] = await db.select().from(costBudgets).where(eq(costBudgets.provider, provider));
+    return result;
+  }
+
+  async upsertCostBudget(budget: InsertCostBudget): Promise<CostBudget> {
+    const existing = await this.getCostBudget(budget.provider);
+    if (existing) {
+      const [updated] = await db.update(costBudgets)
+        .set({ ...budget, updatedAt: new Date() })
+        .where(eq(costBudgets.provider, budget.provider))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(costBudgets).values(budget).returning();
+    return created;
+  }
+
+  // API Logs
+  async createApiLog(log: InsertApiLog): Promise<ApiLog> {
+    const [result] = await db.insert(apiLogs).values(log).returning();
+    return result;
+  }
+
+  async getApiLogs(filters: { page?: number; limit?: number; provider?: string; statusCode?: number; startDate?: Date; endDate?: Date }): Promise<{ logs: ApiLog[]; total: number }> {
+    const { page = 1, limit = 50, provider, statusCode, startDate, endDate } = filters;
+    const offset = (page - 1) * limit;
+    const conditions: any[] = [];
+
+    if (provider) {
+      conditions.push(eq(apiLogs.provider, provider));
+    }
+    if (statusCode) {
+      conditions.push(eq(apiLogs.statusCode, statusCode));
+    }
+    if (startDate) {
+      conditions.push(sql`${apiLogs.createdAt} >= ${startDate}`);
+    }
+    if (endDate) {
+      conditions.push(sql`${apiLogs.createdAt} <= ${endDate}`);
+    }
+
+    let logs: ApiLog[];
+    let countResult: any;
+
+    if (conditions.length > 0) {
+      logs = await db.select().from(apiLogs)
+        .where(and(...conditions))
+        .orderBy(desc(apiLogs.createdAt))
+        .limit(limit)
+        .offset(offset);
+      countResult = await db.select({ count: sql<number>`count(*)` }).from(apiLogs).where(and(...conditions));
+    } else {
+      logs = await db.select().from(apiLogs)
+        .orderBy(desc(apiLogs.createdAt))
+        .limit(limit)
+        .offset(offset);
+      countResult = await db.select({ count: sql<number>`count(*)` }).from(apiLogs);
+    }
+
+    return { logs, total: Number(countResult[0]?.count || 0) };
+  }
+
+  async getApiLogStats(): Promise<{ byStatusCode: Record<number, number>; byProvider: Record<string, number> }> {
+    const statusCodeStats = await db.execute(sql`
+      SELECT status_code, COUNT(*) as count
+      FROM api_logs
+      WHERE status_code IS NOT NULL
+      GROUP BY status_code
+    `);
+    
+    const providerStats = await db.execute(sql`
+      SELECT provider, COUNT(*) as count
+      FROM api_logs
+      WHERE provider IS NOT NULL
+      GROUP BY provider
+    `);
+
+    const byStatusCode: Record<number, number> = {};
+    for (const row of statusCodeStats.rows as any[]) {
+      byStatusCode[row.status_code] = Number(row.count);
+    }
+
+    const byProvider: Record<string, number> = {};
+    for (const row of providerStats.rows as any[]) {
+      byProvider[row.provider] = Number(row.count);
+    }
+
+    return { byStatusCode, byProvider };
+  }
+
+  // KPI Snapshots
+  async createKpiSnapshot(snapshot: InsertKpiSnapshot): Promise<KpiSnapshot> {
+    const [result] = await db.insert(kpiSnapshots).values(snapshot).returning();
+    return result;
+  }
+
+  async getLatestKpiSnapshot(): Promise<KpiSnapshot | undefined> {
+    const [result] = await db.select().from(kpiSnapshots)
+      .orderBy(desc(kpiSnapshots.createdAt))
+      .limit(1);
+    return result;
+  }
+
+  async getKpiSnapshots(limit: number = 100): Promise<KpiSnapshot[]> {
+    return db.select().from(kpiSnapshots)
+      .orderBy(desc(kpiSnapshots.createdAt))
+      .limit(limit);
+  }
+
+  // Analytics Events (extended)
+  async createAnalyticsEvent(event: InsertAnalyticsEvent): Promise<AnalyticsEvent> {
+    const [result] = await db.insert(analyticsEvents).values(event).returning();
+    return result;
+  }
+
+  async getAnalyticsEventStats(startDate?: Date, endDate?: Date): Promise<Record<string, number>> {
+    let query;
+    const conditions: any[] = [];
+    
+    if (startDate) {
+      conditions.push(sql`${analyticsEvents.createdAt} >= ${startDate}`);
+    }
+    if (endDate) {
+      conditions.push(sql`${analyticsEvents.createdAt} <= ${endDate}`);
+    }
+
+    if (conditions.length > 0) {
+      query = await db.execute(sql`
+        SELECT event_name, COUNT(*) as count
+        FROM analytics_events
+        WHERE ${sql.join(conditions, sql` AND `)}
+        GROUP BY event_name
+        ORDER BY count DESC
+      `);
+    } else {
+      query = await db.execute(sql`
+        SELECT event_name, COUNT(*) as count
+        FROM analytics_events
+        GROUP BY event_name
+        ORDER BY count DESC
+      `);
+    }
+
+    const stats: Record<string, number> = {};
+    for (const row of query.rows as any[]) {
+      stats[row.event_name] = Number(row.count);
+    }
+    return stats;
+  }
+
+  async getUserGrowthData(granularity: '1h' | '24h' | '7d' | '30d' | '90d' | '1y'): Promise<{ date: Date; count: number }[]> {
+    const intervalMap: Record<string, string> = {
+      '1h': '1 hour',
+      '24h': '1 day',
+      '7d': '7 days',
+      '30d': '30 days',
+      '90d': '90 days',
+      '1y': '1 year',
+    };
+    
+    const truncMap: Record<string, string> = {
+      '1h': 'hour',
+      '24h': 'hour',
+      '7d': 'day',
+      '30d': 'day',
+      '90d': 'week',
+      '1y': 'month',
+    };
+
+    const interval = intervalMap[granularity];
+    const trunc = truncMap[granularity];
+
+    const result = await db.execute(sql`
+      SELECT date_trunc(${sql.raw(`'${trunc}'`)}, created_at) as date, COUNT(*) as count
+      FROM users
+      WHERE created_at >= NOW() - ${sql.raw(`INTERVAL '${interval}'`)}
+      GROUP BY date_trunc(${sql.raw(`'${trunc}'`)}, created_at)
+      ORDER BY date ASC
+    `);
+
+    return (result.rows as any[]).map(row => ({
+      date: new Date(row.date),
+      count: Number(row.count),
+    }));
   }
 }
 
