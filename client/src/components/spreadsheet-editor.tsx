@@ -16,6 +16,13 @@ import {
   PieChart,
   Maximize2,
   Minimize2,
+  FileSpreadsheet,
+  Loader2,
+  Send,
+  Table,
+  Calculator,
+  Wand2,
+  CheckCircle2,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart as RechartsLineChart, Line, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
 import { VirtualizedExcel, GRID_CONFIG } from './virtualized-excel';
