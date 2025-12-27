@@ -12,6 +12,8 @@ import { orchestrationEngine } from "../services/orchestrationEngine";
 import { compressedMemory } from "../services/compressedMemory";
 import { progressTracker } from "../services/progressTracker";
 import { errorRecovery } from "../services/errorRecovery";
+import { FEATURES, setFeatureFlag } from "../config/features";
+import { chatAgenticCircuit } from "../services/chatAgenticCircuit";
 
 export function createAdminRouter() {
   const router = Router();
@@ -2492,6 +2494,45 @@ export function createAdminRouter() {
   router.post("/agent/circuits/:name/failure", (req, res) => {
     errorRecovery.recordFailure(req.params.name);
     res.json(errorRecovery.getOrCreateCircuit(req.params.name));
+  });
+
+  router.post("/agent/emergency-disable", (req, res) => {
+    setFeatureFlag('AGENTIC_CHAT_ENABLED', false);
+    setFeatureFlag('AGENTIC_AUTONOMOUS_MODE', false);
+    setFeatureFlag('AGENTIC_SUGGESTIONS_ENABLED', false);
+    console.warn('[Agentic] EMERGENCY DISABLE activated');
+    res.json({ 
+      status: 'disabled', 
+      timestamp: Date.now(),
+      message: 'All agentic features have been disabled'
+    });
+  });
+
+  router.get("/agent/features", (req, res) => {
+    res.json(FEATURES);
+  });
+
+  router.post("/agent/features/:flag", (req, res) => {
+    const { flag } = req.params;
+    const { enabled } = req.body;
+    if (flag in FEATURES) {
+      setFeatureFlag(flag as keyof typeof FEATURES, enabled);
+      res.json({ flag, enabled, message: 'Feature flag updated' });
+    } else {
+      res.status(400).json({ error: 'Unknown feature flag' });
+    }
+  });
+
+  router.get("/agent/chat-health", (req, res) => {
+    const circuitStatus = chatAgenticCircuit.getStatus();
+    res.json({
+      enabled: FEATURES.AGENTIC_CHAT_ENABLED,
+      suggestionsEnabled: FEATURES.AGENTIC_SUGGESTIONS_ENABLED,
+      autonomousModeEnabled: FEATURES.AGENTIC_AUTONOMOUS_MODE,
+      circuit: circuitStatus,
+      status: !FEATURES.AGENTIC_CHAT_ENABLED ? 'disabled' : 
+              circuitStatus.isOpen ? 'circuit_open' : 'healthy'
+    });
   });
 
   return router;

@@ -67,7 +67,10 @@ import {
   Palette,
   Bell,
   Code,
-  RotateCcw
+  RotateCcw,
+  Brain,
+  Wrench,
+  Zap
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
@@ -76,7 +79,7 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 
-type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings";
+type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -90,6 +93,7 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
   { id: "security", label: "Security", icon: Shield },
   { id: "reports", label: "Reports", icon: FileBarChart },
   { id: "settings", label: "Settings", icon: Settings },
+  { id: "agentic", label: "Agentic Engine", icon: Bot },
 ];
 
 function DashboardSection() {
@@ -4100,6 +4104,511 @@ function SettingsSection() {
   );
 }
 
+function AgenticEngineSection() {
+  const [activeTab, setActiveTab] = useState("overview");
+  
+  const { data: toolsData, isLoading: toolsLoading, refetch: refetchTools } = useQuery({
+    queryKey: ["/api/admin/agent/tools"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/agent/tools");
+      return res.json();
+    }
+  });
+
+  const { data: gapsData, refetch: refetchGaps } = useQuery({
+    queryKey: ["/api/admin/agent/gaps"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/agent/gaps");
+      return res.json();
+    }
+  });
+
+  const { data: memoryData, refetch: refetchMemory } = useQuery({
+    queryKey: ["/api/admin/agent/memory/stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/agent/memory/stats");
+      return res.json();
+    }
+  });
+
+  const { data: circuitsData, refetch: refetchCircuits } = useQuery({
+    queryKey: ["/api/admin/agent/circuits"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/agent/circuits");
+      return res.json();
+    }
+  });
+
+  const [analyzerPrompt, setAnalyzerPrompt] = useState("");
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisHistory, setAnalysisHistory] = useState<any[]>([]);
+
+  const analyzePrompt = async () => {
+    if (!analyzerPrompt.trim()) return;
+    setAnalyzing(true);
+    try {
+      const res = await fetch("/api/admin/agent/complexity/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: analyzerPrompt })
+      });
+      const result = await res.json();
+      setAnalysisResult(result);
+      setAnalysisHistory(prev => [{ prompt: analyzerPrompt, ...result, timestamp: Date.now() }, ...prev].slice(0, 10));
+    } catch (error) {
+      toast.error("Error analyzing prompt");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const tools = toolsData?.tools || [];
+  const gaps = gapsData?.gaps || [];
+  const memory = memoryData || { totalAtoms: 0, storageBytes: 0, avgWeight: 0, byType: {} };
+  const circuits = circuitsData || [];
+  const openCircuits = circuits.filter((c: any) => c.status === 'open').length;
+
+  const getCategoryColor = (cat: string) => {
+    if (cat === 'trivial') return 'bg-green-500';
+    if (cat === 'simple') return 'bg-blue-500';
+    if (cat === 'moderate') return 'bg-yellow-500';
+    if (cat === 'complex') return 'bg-orange-500';
+    return 'bg-red-500';
+  };
+
+  const getPathIcon = (path: string) => {
+    if (path === 'fast') return '⚡';
+    if (path === 'standard') return '🔄';
+    if (path === 'orchestrated') return '🎯';
+    return '🏛️';
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-primary/10">
+            <Bot className="h-6 w-6 text-primary" />
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold">Agentic Engine</h2>
+            <p className="text-sm text-muted-foreground">Enterprise AI Orchestration System</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant={openCircuits > 0 ? "destructive" : "default"} className="gap-1">
+            <div className={`w-2 h-2 rounded-full ${openCircuits > 0 ? 'bg-red-400' : 'bg-green-400'}`} />
+            {openCircuits > 0 ? 'Degraded' : 'Healthy'}
+          </Badge>
+        </div>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid grid-cols-7 w-full max-w-4xl">
+          <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
+          <TabsTrigger value="tools" data-testid="tab-tools">Tools</TabsTrigger>
+          <TabsTrigger value="analyzer" data-testid="tab-analyzer">Analyzer</TabsTrigger>
+          <TabsTrigger value="orchestration" data-testid="tab-orchestration">Orchestration</TabsTrigger>
+          <TabsTrigger value="gaps" data-testid="tab-gaps">
+            Gaps {gaps.length > 0 && <Badge variant="secondary" className="ml-1 text-xs">{gaps.length}</Badge>}
+          </TabsTrigger>
+          <TabsTrigger value="memory" data-testid="tab-memory">Memory</TabsTrigger>
+          <TabsTrigger value="circuits" data-testid="tab-circuits">Circuits</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="mt-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-blue-500/10">
+                    <Wrench className="h-5 w-5 text-blue-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{tools.length}</p>
+                    <p className="text-sm text-muted-foreground">Tools Active</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-green-500/10">
+                    <CheckCircle className="h-5 w-5 text-green-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">94.2%</p>
+                    <p className="text-sm text-muted-foreground">Success Rate</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-purple-500/10">
+                    <Brain className="h-5 w-5 text-purple-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{memory.totalAtoms}</p>
+                    <p className="text-sm text-muted-foreground">Memory Atoms</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-yellow-500/10">
+                    <AlertTriangle className="h-5 w-5 text-yellow-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{gaps.length}</p>
+                    <p className="text-sm text-muted-foreground">Pending Gaps</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-red-500/10">
+                    <Zap className="h-5 w-5 text-red-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{openCircuits}</p>
+                    <p className="text-sm text-muted-foreground">Open Circuits</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-indigo-500/10">
+                    <Database className="h-5 w-5 text-indigo-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{(memory.storageBytes / 1024).toFixed(1)} KB</p>
+                    <p className="text-sm text-muted-foreground">Memory Used</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="tools" className="mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Registered Tools</CardTitle>
+                <Button variant="outline" size="sm" onClick={() => refetchTools()}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {toolsLoading ? (
+                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+              ) : (
+                <div className="space-y-2">
+                  {tools.map((tool: any) => (
+                    <div key={tool.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <Badge variant="outline">{tool.category}</Badge>
+                        <span className="font-medium">{tool.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={tool.isEnabled ? "default" : "secondary"}>
+                          {tool.isEnabled ? 'Active' : 'Disabled'}
+                        </Badge>
+                        <span className="text-sm text-muted-foreground">{tool.usageCount} uses</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="analyzer" className="mt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Complexity Analyzer</CardTitle>
+                  <CardDescription>Test prompt complexity scoring</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Textarea
+                    placeholder="Enter a prompt to analyze its complexity..."
+                    value={analyzerPrompt}
+                    onChange={(e) => setAnalyzerPrompt(e.target.value)}
+                    className="min-h-[120px]"
+                    data-testid="input-analyzer-prompt"
+                  />
+                  <Button onClick={analyzePrompt} disabled={analyzing || !analyzerPrompt.trim()} data-testid="button-analyze">
+                    {analyzing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Analyze
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {analysisResult && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Analysis Result</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="text-center p-4 rounded-lg bg-muted">
+                        <p className="text-5xl font-bold">{analysisResult.score}</p>
+                        <p className="text-sm text-muted-foreground mt-1">Complexity Score</p>
+                      </div>
+                      <div className="text-center p-4 rounded-lg bg-muted">
+                        <Badge className={`text-lg px-4 py-2 ${getCategoryColor(analysisResult.category)}`}>
+                          {analysisResult.category?.toUpperCase()}
+                        </Badge>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          {getPathIcon(analysisResult.recommended_path)} {analysisResult.recommended_path}
+                        </p>
+                      </div>
+                    </div>
+                    {analysisResult.signals?.length > 0 && (
+                      <div className="mt-4">
+                        <p className="text-sm font-medium mb-2">Signals Detected:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {analysisResult.signals.map((s: string) => (
+                            <Badge key={s} variant="outline">{s}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {analysisResult.dimensions && (
+                      <div className="mt-4 space-y-2">
+                        <p className="text-sm font-medium">Dimensions:</p>
+                        {Object.entries(analysisResult.dimensions).map(([key, value]: [string, any]) => (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className="text-sm w-32 text-muted-foreground">{key.replace('_', ' ')}</span>
+                            <Progress value={value * 10} className="flex-1" />
+                            <span className="text-sm w-8 text-right">{value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            <div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>History</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-[400px]">
+                    {analysisHistory.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-4">No analysis yet</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {analysisHistory.map((h, i) => (
+                          <div key={i} className="p-2 rounded border text-sm cursor-pointer hover:bg-muted/50" onClick={() => {
+                            setAnalyzerPrompt(h.prompt);
+                            setAnalysisResult(h);
+                          }}>
+                            <p className="truncate font-medium">{h.prompt}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <Badge variant="outline" className="text-xs">{h.score}</Badge>
+                              <span className="text-xs text-muted-foreground">{h.category}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="orchestration" className="mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Orchestration Monitor</CardTitle>
+              <CardDescription>Track task execution and parallel processing</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-8 text-muted-foreground">
+                <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No active orchestrations</p>
+                <p className="text-sm">Orchestrations will appear here when tasks are being processed</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="gaps" className="mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Capability Gaps</CardTitle>
+                  <CardDescription>Requests for missing functionality</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => refetchGaps()}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {gaps.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No pending gaps</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {gaps.map((gap: any) => (
+                    <div key={gap.id} className="p-4 rounded-lg border">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <p className="font-medium">{gap.userPrompt}</p>
+                          <p className="text-sm text-muted-foreground mt-1">{gap.gapReason}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={gap.status === 'pending' ? 'secondary' : 'default'}>
+                            {gap.status}
+                          </Badge>
+                          {gap.frequencyCount > 1 && (
+                            <Badge variant="outline">{gap.frequencyCount}x</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="memory" className="mt-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Memory Statistics</CardTitle>
+                  <Button variant="outline" size="sm" onClick={() => refetchMemory()}>
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 rounded-lg bg-muted text-center">
+                    <p className="text-3xl font-bold">{memory.totalAtoms}</p>
+                    <p className="text-sm text-muted-foreground">Total Atoms</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-muted text-center">
+                    <p className="text-3xl font-bold">{(memory.storageBytes / 1024).toFixed(2)}</p>
+                    <p className="text-sm text-muted-foreground">KB Used</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-muted text-center">
+                    <p className="text-3xl font-bold">{memory.avgWeight?.toFixed(2) || 0}</p>
+                    <p className="text-sm text-muted-foreground">Avg Weight</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-muted text-center">
+                    <p className="text-3xl font-bold">{Object.keys(memory.byType || {}).length}</p>
+                    <p className="text-sm text-muted-foreground">Types</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Atoms by Type</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {Object.keys(memory.byType || {}).length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Database className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No atoms stored</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {Object.entries(memory.byType || {}).map(([type, count]: [string, any]) => (
+                      <div key={type} className="flex items-center justify-between p-2 rounded border">
+                        <Badge variant="outline">{type}</Badge>
+                        <span className="font-medium">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="circuits" className="mt-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Circuit Breakers</CardTitle>
+                  <CardDescription>Automatic failure protection for tools</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => refetchCircuits()}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {circuits.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle className="h-12 w-12 mx-auto mb-4 text-green-500 opacity-70" />
+                  <p className="font-medium">All circuits operating normally</p>
+                  <p className="text-sm">No circuit breakers have been triggered</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {circuits.map((circuit: any) => (
+                    <Card key={circuit.name} className={circuit.status === 'open' ? 'border-red-500' : ''}>
+                      <CardContent className="pt-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium">{circuit.name}</span>
+                          <Badge variant={circuit.status === 'closed' ? 'default' : circuit.status === 'open' ? 'destructive' : 'secondary'}>
+                            {circuit.status.toUpperCase()}
+                          </Badge>
+                        </div>
+                        <div className="text-sm text-muted-foreground space-y-1">
+                          <p>Failures: {circuit.failures}</p>
+                          {circuit.lastFailure && (
+                            <p>Last failure: {format(new Date(circuit.lastFailure), 'HH:mm:ss')}</p>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [, setLocation] = useLocation();
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
@@ -4128,6 +4637,8 @@ export default function AdminPage() {
         return <ReportsSection />;
       case "settings":
         return <SettingsSection />;
+      case "agentic":
+        return <AgenticEngineSection />;
       default:
         return <DashboardSection />;
     }
