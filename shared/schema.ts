@@ -322,7 +322,9 @@ export const files = pgTable("files", {
   totalChunks: integer("total_chunks"),
   uploadedChunks: integer("uploaded_chunks").default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("files_user_created_idx").on(table.userId, table.createdAt),
+]);
 
 export const insertFileSchema = createInsertSchema(files).omit({
   id: true,
@@ -394,6 +396,7 @@ export const agentRuns = pgTable("agent_runs", {
 }, (table) => [
   index("agent_runs_conversation_idx").on(table.conversationId),
   index("agent_runs_status_idx").on(table.status),
+  index("agent_runs_conversation_started_idx").on(table.conversationId, table.startedAt),
 ]);
 
 export const insertAgentRunSchema = createInsertSchema(agentRuns).omit({
@@ -509,6 +512,7 @@ export const chats = pgTable("chats", {
   index("chats_user_idx").on(table.userId),
   index("chats_status_idx").on(table.conversationStatus),
   index("chats_flag_idx").on(table.flagStatus),
+  index("chats_user_updated_idx").on(table.userId, table.updatedAt),
 ]);
 
 export const insertChatSchema = createInsertSchema(chats).omit({
@@ -601,6 +605,7 @@ export const toolInvocations = pgTable("tool_invocations", {
 }, (table) => [
   index("tool_invocations_run_idx").on(table.runId),
   uniqueIndex("tool_invocations_unique").on(table.runId, table.toolCallId),
+  index("tool_invocations_run_created_idx").on(table.runId, table.createdAt),
 ]);
 
 export const insertToolInvocationSchema = createInsertSchema(toolInvocations).omit({
@@ -1384,6 +1389,7 @@ export const analyticsEvents = pgTable("analytics_events", {
   index("analytics_events_user_idx").on(table.userId),
   index("analytics_events_event_idx").on(table.eventName),
   index("analytics_events_created_idx").on(table.createdAt),
+  index("analytics_events_user_created_idx").on(table.userId, table.createdAt),
 ]);
 
 export const insertAnalyticsEventSchema = createInsertSchema(analyticsEvents).omit({
@@ -1471,6 +1477,7 @@ export const apiLogs = pgTable("api_logs", {
   index("api_logs_created_idx").on(table.createdAt),
   index("api_logs_status_idx").on(table.statusCode),
   index("api_logs_provider_idx").on(table.provider),
+  index("api_logs_user_created_idx").on(table.userId, table.createdAt),
 ]);
 
 export const insertApiLogSchema = createInsertSchema(apiLogs).omit({

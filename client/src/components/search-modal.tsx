@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { Chat } from "@/hooks/use-chats";
 import { format, isToday, isYesterday, isThisWeek } from "date-fns";
 import { es } from "date-fns/locale";
-import Fuse from "fuse.js";
+import Fuse, { FuseResultMatch, IFuseOptions, RangeTuple } from "fuse.js";
 
 interface SearchModalProps {
   open: boolean;
@@ -27,16 +27,16 @@ interface ChatSearchItem {
   id: string;
   title: string;
   lastMessage: string;
-  timestamp: string;
+  timestamp: number;
 }
 
 interface SearchResult {
   item: ChatSearchItem;
   score?: number;
-  matches?: Fuse.FuseResultMatch[];
+  matches?: readonly FuseResultMatch[];
 }
 
-const FUSE_OPTIONS: Fuse.IFuseOptions<ChatSearchItem> = {
+const FUSE_OPTIONS: IFuseOptions<ChatSearchItem> = {
   keys: [
     { name: "title", weight: 0.7 },
     { name: "lastMessage", weight: 0.3 },
@@ -61,7 +61,7 @@ function getLastMessage(chat: Chat): string {
   return lastMsg.content.slice(0, 120);
 }
 
-function HighlightedText({ text, indices }: { text: string; indices?: readonly Fuse.RangeTuple[] }) {
+function HighlightedText({ text, indices }: { text: string; indices?: readonly RangeTuple[] }) {
   if (!indices || indices.length === 0) {
     return <>{text}</>;
   }
@@ -190,7 +190,7 @@ export function SearchModal({
     onOpenChange(false);
   };
 
-  const getMatchIndices = (result: SearchResult, key: string): readonly Fuse.RangeTuple[] | undefined => {
+  const getMatchIndices = (result: SearchResult, key: string): readonly RangeTuple[] | undefined => {
     return result.matches?.find(m => m.key === key)?.indices;
   };
 

@@ -1,11 +1,14 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { SettingsProvider } from "@/contexts/SettingsContext";
 import { ModelAvailabilityProvider } from "@/contexts/ModelAvailabilityContext";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { useChats } from "@/hooks/use-chats";
+import { SearchModal } from "@/components/search-modal";
 import Home from "@/pages/home";
 import ProfilePage from "@/pages/profile";
 import BillingPage from "@/pages/billing";
@@ -29,6 +32,50 @@ function AuthCallbackHandler() {
     }
   }, []);
   return null;
+}
+
+function GlobalKeyboardShortcuts() {
+  const [, setLocation] = useLocation();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const { chats } = useChats();
+
+  const handleNewChat = useCallback(() => {
+    setLocation("/");
+    window.dispatchEvent(new CustomEvent("new-chat-requested"));
+  }, [setLocation]);
+
+  const handleOpenSearch = useCallback(() => {
+    setSearchOpen(true);
+  }, []);
+
+  const handleCloseSearch = useCallback(() => {
+    setSearchOpen(false);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setLocation("/settings");
+  }, [setLocation]);
+
+  const handleSelectChat = useCallback((chatId: string) => {
+    setSearchOpen(false);
+    window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId } }));
+  }, []);
+
+  useKeyboardShortcuts([
+    { key: "n", ctrl: true, action: handleNewChat, description: "Nuevo chat" },
+    { key: "k", ctrl: true, action: handleOpenSearch, description: "Búsqueda rápida" },
+    { key: "Escape", action: handleCloseSearch, description: "Cerrar diálogo" },
+    { key: ",", ctrl: true, action: handleOpenSettings, description: "Configuración" },
+  ]);
+
+  return (
+    <SearchModal
+      open={searchOpen}
+      onOpenChange={setSearchOpen}
+      chats={chats}
+      onSelectChat={handleSelectChat}
+    />
+  );
 }
 
 function Router() {
@@ -58,6 +105,7 @@ function App() {
         <ModelAvailabilityProvider>
           <TooltipProvider>
             <AuthCallbackHandler />
+            <GlobalKeyboardShortcuts />
             <Toaster />
             <Router />
           </TooltipProvider>
