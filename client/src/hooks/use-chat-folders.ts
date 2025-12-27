@@ -25,7 +25,14 @@ export function useChatFolders() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
-        setFolders(JSON.parse(saved));
+        const parsedFolders = JSON.parse(saved) as Folder[];
+        // Filter out test folder "luis0"
+        const filteredFolders = parsedFolders.filter(f => f.name !== "luis0");
+        setFolders(filteredFolders);
+        // If we filtered something, save the cleaned data back
+        if (filteredFolders.length !== parsedFolders.length) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(filteredFolders));
+        }
       } catch (e) {
         console.error("Failed to parse folders", e);
       }
