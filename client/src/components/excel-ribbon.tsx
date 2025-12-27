@@ -1022,33 +1022,91 @@ const HomeTabContent: React.FC<{
 const InsertTabContent: React.FC<{ commands: Partial<RibbonCommands> }> = ({ commands }) => {
   return (
     <div className="flex items-start gap-0.5 px-1 py-0.5 min-h-[72px]">
+      <RibbonGroup title="Hoja">
+        <SplitButton 
+          icon={<span className="text-[16px]">📊</span>} 
+          label="Hoja de tabla" 
+          onClick={() => {}} 
+          tooltip="Insertar tabla dinámica" 
+        />
+      </RibbonGroup>
+      <RibbonSeparator />
       <RibbonGroup title="Tablas">
         <SplitButton icon={Icons.formatTable} label="Tabla" onClick={() => {}} tooltip="Insertar tabla" />
       </RibbonGroup>
       <RibbonSeparator />
-      <RibbonGroup title="Ilustraciones">
-        <div className="flex items-start gap-0.5">
-          <SplitButton icon={Icons.image} label="Imágenes" onClick={() => {}} tooltip="Insertar imagen" />
-          <SplitButton icon={Icons.shapes} label="Formas" onClick={() => {}} tooltip="Insertar forma" />
+      <RibbonGroup title="Gráfico">
+        <div className="flex items-start gap-1">
+          <div className="flex flex-col items-center">
+            <SplitButton 
+              icon={<span className="text-[18px]">📊</span>} 
+              label="Gráfico" 
+              onClick={() => commands.insertChart?.('bar')} 
+              tooltip="Insertar gráfico" 
+            />
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-0.5">
+              <RibbonButton icon={Icons.chart} onClick={() => commands.insertChart?.('bar')} tooltip="Gráfico de columnas" />
+              <RibbonButton icon={Icons.lineChart} onClick={() => commands.insertChart?.('line')} tooltip="Gráfico de líneas" />
+              <RibbonButton icon={Icons.pieChart} onClick={() => commands.insertChart?.('pie')} tooltip="Gráfico circular" />
+            </div>
+            <div className="flex items-center gap-0.5">
+              <RibbonButton icon={<span className="text-[10px]">📈</span>} onClick={() => commands.insertChart?.('area')} tooltip="Gráfico de área" />
+              <RibbonButton icon={<span className="text-[10px]">⬤</span>} onClick={() => commands.insertChart?.('scatter')} tooltip="Gráfico de dispersión" />
+              <RibbonButton icon={<span className="text-[10px]">🗺️</span>} onClick={() => commands.insertChart?.('map')} tooltip="Gráfico de mapa" />
+            </div>
+          </div>
+          <SplitButton 
+            icon={<span className="text-[14px]">▌▌▌</span>} 
+            label="Código de barras" 
+            onClick={() => {}} 
+            tooltip="Insertar código de barras" 
+          />
+          <SplitButton 
+            icon={<span className="text-[14px]">📉</span>} 
+            label="Minigráficos" 
+            onClick={() => {}} 
+            tooltip="Insertar minigráficos (sparklines)" 
+          />
         </div>
       </RibbonGroup>
       <RibbonSeparator />
-      <RibbonGroup title="Gráficos">
+      <RibbonGroup title="Ilustraciones">
         <div className="flex items-start gap-0.5">
-          <SplitButton icon={Icons.chart} label="Barras" onClick={() => commands.insertChart?.('bar')} tooltip="Gráfico de barras" />
-          <SplitButton icon={Icons.lineChart} label="Líneas" onClick={() => commands.insertChart?.('line')} tooltip="Gráfico de líneas" />
-          <SplitButton icon={Icons.pieChart} label="Circular" onClick={() => commands.insertChart?.('pie')} tooltip="Gráfico circular" />
+          <SplitButton icon={Icons.image} label="Imagen" onClick={() => {}} tooltip="Insertar imagen" />
+          <SplitButton icon={Icons.shapes} label="Formas" onClick={() => {}} tooltip="Insertar forma" />
+          <SplitButton 
+            icon={<span className="text-[14px]">📷</span>} 
+            label="Instantánea de rango" 
+            onClick={() => {}} 
+            tooltip="Captura de pantalla de rango" 
+          />
+          <SplitButton 
+            icon={<span className="text-[14px]">🎛️</span>} 
+            label="Controles" 
+            onClick={() => {}} 
+            tooltip="Insertar controles de formulario" 
+          />
         </div>
       </RibbonGroup>
       <RibbonSeparator />
       <RibbonGroup title="Vínculos">
-        <SplitButton icon={Icons.macro} label="Vínculo" onClick={() => {}} tooltip="Insertar hipervínculo" />
+        <SplitButton 
+          icon={<span className="text-[16px]">🔗</span>} 
+          label="Hipervínculo" 
+          onClick={() => {}} 
+          tooltip="Insertar hipervínculo (Ctrl+K)" 
+        />
       </RibbonGroup>
       <RibbonSeparator />
       <RibbonGroup title="Texto">
-        <div className="flex items-start gap-0.5">
-          <SplitButton icon={Icons.comment} label="Comentario" onClick={() => {}} tooltip="Insertar comentario" />
-        </div>
+        <SplitButton 
+          icon={<span className="text-[16px] font-serif">A</span>} 
+          label="Cuadro de texto" 
+          onClick={() => {}} 
+          tooltip="Insertar cuadro de texto" 
+        />
       </RibbonGroup>
     </div>
   );
