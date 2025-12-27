@@ -1657,10 +1657,17 @@ export function SpreadsheetEditor({
   }, [applyToSelection]);
 
   const toggleBold = useCallback(() => {
+    console.log('[toggleBold] Called');
     const active = getActiveCell();
-    if (!active) return;
+    console.log('[toggleBold] Active cell:', active);
+    if (!active) {
+      console.log('[toggleBold] No active cell, returning');
+      return;
+    }
     const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
+    console.log('[toggleBold] First cell:', firstCell);
     const newBold = !(firstCell?.bold);
+    console.log('[toggleBold] Setting bold to:', newBold);
     applyToSelection(() => ({ bold: newBold }));
   }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
