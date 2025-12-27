@@ -205,8 +205,6 @@ class LLMGateway {
     statusCode: number;
     tokensIn?: number;
     tokensOut?: number;
-    requestPreview?: string;
-    responsePreview?: string;
     errorMessage?: string;
     userId?: string;
   }): void {
@@ -220,9 +218,9 @@ class LLMGateway {
       tokensOut: logData.tokensOut || null,
       model: logData.model,
       provider: logData.provider,
-      requestPreview: logData.requestPreview?.slice(0, 500) || null,
-      responsePreview: logData.responsePreview?.slice(0, 500) || null,
-      errorMessage: logData.errorMessage || null,
+      requestPreview: null,
+      responsePreview: null,
+      errorMessage: logData.errorMessage ? logData.errorMessage.slice(0, 200) : null,
       ipAddress: null,
       userAgent: null,
     };
@@ -726,8 +724,6 @@ class LLMGateway {
         statusCode: 200,
         tokensIn: usage?.prompt_tokens,
         tokensOut: usage?.completion_tokens,
-        requestPreview: JSON.stringify(messages.slice(-1)),
-        responsePreview: content.slice(0, 500),
         userId: options.userId,
       });
 
@@ -857,8 +853,6 @@ class LLMGateway {
       statusCode: 200,
       tokensIn: usageRecord.promptTokens,
       tokensOut: usageRecord.completionTokens,
-      requestPreview: JSON.stringify(messages.slice(-1)),
-      responsePreview: response.content.slice(0, 500),
       userId: options.userId,
     });
 
