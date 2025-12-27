@@ -9,7 +9,11 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:agentic": "vitest run tests/agentic"
   },
   "dependencies": {
     "@aarkue/tiptap-math-extension": "^1.4.0",
@@ -80,6 +84,7 @@
     "@uppy/core": "^5.2.0",
     "@uppy/dashboard": "^5.1.0",
     "@uppy/react": "^5.1.1",
+    "@vitest/coverage-v8": "^4.0.16",
     "asciimath2tex": "^1.5.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -155,6 +160,7 @@
     "unified": "^11.0.5",
     "unist-util-visit": "^5.0.0",
     "vaul": "^1.1.2",
+    "vitest": "^4.0.16",
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
     "xlsx-chart": "^0.4.3",
