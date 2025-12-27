@@ -909,30 +909,35 @@ const HomeTabContent: React.FC<{
       <RibbonGroup title="Fuente">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-0.5">
-            <Dropdown value={currentFont} options={fonts} onChange={(f) => commands.setFont?.(f)} width={110} />
-            <Dropdown value={currentFontSize} options={sizes} onChange={(s) => commands.setFontSize?.(parseInt(s))} width={40} />
+            <Dropdown value={currentFont} options={fonts} onChange={(f) => commands.setFont?.(f)} width={140} />
+            <Dropdown value={currentFontSize} options={sizes} onChange={(s) => commands.setFontSize?.(parseInt(s))} width={50} />
+            <RibbonButton 
+              icon={<span className="text-[12px] font-semibold">A<sup className="text-[7px] ml-[-1px]">▲</sup></span>} 
+              onClick={() => commands.setFontSize?.(parseInt(currentFontSize) + 2)} 
+              tooltip="Aumentar tamaño de fuente" 
+            />
+            <RibbonButton 
+              icon={<span className="text-[10px] font-semibold">A<sup className="text-[7px] ml-[-1px]">▼</sup></span>} 
+              onClick={() => commands.setFontSize?.(Math.max(6, parseInt(currentFontSize) - 2))} 
+              tooltip="Reducir tamaño de fuente" 
+            />
           </div>
           <div className="flex items-center gap-px">
-            <RibbonButton icon={Icons.bold} active={cellFormat?.bold} onClick={() => commands.toggleBold?.()} tooltip="Negrita (Ctrl+B)" />
-            <RibbonButton icon={Icons.italic} active={cellFormat?.italic} onClick={() => commands.toggleItalic?.()} tooltip="Cursiva (Ctrl+I)" />
-            <RibbonButton icon={Icons.underline} active={cellFormat?.underline} onClick={() => commands.toggleUnderline?.()} tooltip="Subrayado (Ctrl+U)" />
-            <RibbonButton 
-              icon={<span className="text-[11px] line-through">S</span>} 
-              onClick={() => commands.toggleStrikethrough?.()} 
-              tooltip="Tachado" 
-            />
+            <RibbonButton icon={<span className="text-[13px] font-bold">N</span>} active={cellFormat?.bold} onClick={() => commands.toggleBold?.()} tooltip="Negrita (Ctrl+B)" />
+            <RibbonButton icon={<span className="text-[13px] italic font-medium">K</span>} active={cellFormat?.italic} onClick={() => commands.toggleItalic?.()} tooltip="Cursiva (Ctrl+I)" />
+            <RibbonButton icon={<span className="text-[13px] underline font-medium">S</span>} active={cellFormat?.underline} onClick={() => commands.toggleUnderline?.()} tooltip="Subrayado (Ctrl+U)" />
             <div className="w-px h-5 bg-gray-200 mx-0.5" />
             <BorderPicker onSelect={(type, style) => commands.setBorders?.(type, style)} />
             <ColorPicker
               color={fillColor}
               onChange={(c) => { setFillColor(c); commands.setFillColor?.(c); }}
-              icon={<span className="text-[11px] font-bold">A</span>}
+              icon={<span className="text-[11px]">🪣</span>}
               tooltip="Color de relleno"
             />
             <ColorPicker
               color={fontColor}
               onChange={(c) => { setFontColor(c); commands.setFontColor?.(c); }}
-              icon={<span className="text-[11px] font-bold text-red-600">A</span>}
+              icon={<span className="text-[12px] font-bold" style={{ borderBottom: `3px solid ${fontColor}` }}>A</span>}
               tooltip="Color de fuente"
             />
           </div>
