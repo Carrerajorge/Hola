@@ -11,19 +11,48 @@ export interface ToolDefinition {
   isEnabled: boolean;
   usageCount: number;
   successRate: number;
+  healthStatus: 'healthy' | 'degraded' | 'disabled';
+  failureCount: number;
+  lastFailure?: Date;
 }
 
 export class ToolRegistryService {
   private tools: Map<string, ToolDefinition>;
+  private capabilityIndex: Map<string, string[]> = new Map();
+
+  private readonly FAILURE_THRESHOLD = 0.2;
+  private readonly MIN_CALLS_FOR_DISABLE = 10;
 
   constructor() {
     this.tools = new Map();
     this.initializeTools();
+    this.buildCapabilityIndex();
+  }
+
+  private buildCapabilityIndex(): void {
+    this.capabilityIndex.clear();
+    for (const tool of this.tools.values()) {
+      for (const capability of tool.capabilities) {
+        const keywords = capability.toLowerCase().split(/\s+/);
+        for (const keyword of keywords) {
+          const existing = this.capabilityIndex.get(keyword) || [];
+          if (!existing.includes(tool.id)) {
+            existing.push(tool.id);
+          }
+          this.capabilityIndex.set(keyword, existing);
+        }
+      }
+    }
+  }
+
+  searchByCapability(keyword: string): ToolDefinition[] {
+    const normalizedKeyword = keyword.toLowerCase().trim();
+    const toolIds = this.capabilityIndex.get(normalizedKeyword) || [];
+    return toolIds.map(id => this.tools.get(id)!).filter(Boolean);
   }
 
   private initializeTools(): void {
     const toolDefinitions: ToolDefinition[] = [
-      // USERS
       {
         id: 'list_users',
         name: 'List Users',
@@ -34,7 +63,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'get_user',
@@ -46,7 +77,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'create_user',
@@ -58,7 +91,9 @@ export class ToolRegistryService {
         method: 'POST',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'update_user',
@@ -70,7 +105,9 @@ export class ToolRegistryService {
         method: 'PATCH',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'delete_user',
@@ -82,9 +119,10 @@ export class ToolRegistryService {
         method: 'DELETE',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
-      // AI_MODELS
       {
         id: 'list_models',
         name: 'List AI Models',
@@ -95,7 +133,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'enable_model',
@@ -107,7 +147,9 @@ export class ToolRegistryService {
         method: 'PATCH',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'disable_model',
@@ -119,7 +161,9 @@ export class ToolRegistryService {
         method: 'PATCH',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'sync_models',
@@ -131,9 +175,10 @@ export class ToolRegistryService {
         method: 'POST',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
-      // ANALYTICS
       {
         id: 'get_dashboard',
         name: 'Get Dashboard',
@@ -144,7 +189,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'get_realtime_metrics',
@@ -156,9 +203,10 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
-      // DATABASE
       {
         id: 'health_check',
         name: 'Database Health Check',
@@ -169,7 +217,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'list_tables',
@@ -181,7 +231,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'execute_query',
@@ -193,7 +245,9 @@ export class ToolRegistryService {
         method: 'POST',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'get_indexes',
@@ -205,9 +259,10 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
-      // SECURITY
       {
         id: 'list_policies',
         name: 'List Security Policies',
@@ -218,7 +273,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'create_policy',
@@ -230,7 +287,9 @@ export class ToolRegistryService {
         method: 'POST',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'update_policy',
@@ -242,7 +301,9 @@ export class ToolRegistryService {
         method: 'PUT',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'delete_policy',
@@ -254,7 +315,9 @@ export class ToolRegistryService {
         method: 'DELETE',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'get_audit_logs',
@@ -266,7 +329,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'get_security_stats',
@@ -278,9 +343,10 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
-      // REPORTS
       {
         id: 'list_templates',
         name: 'List Report Templates',
@@ -291,7 +357,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'generate_report',
@@ -303,7 +371,9 @@ export class ToolRegistryService {
         method: 'POST',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'list_generated',
@@ -315,7 +385,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'download_report',
@@ -327,9 +399,10 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
-      // SETTINGS
       {
         id: 'get_settings',
         name: 'Get Settings',
@@ -340,7 +413,9 @@ export class ToolRegistryService {
         method: 'GET',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'update_setting',
@@ -352,7 +427,9 @@ export class ToolRegistryService {
         method: 'PUT',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       },
       {
         id: 'bulk_update',
@@ -364,7 +441,9 @@ export class ToolRegistryService {
         method: 'POST',
         isEnabled: true,
         usageCount: 0,
-        successRate: 100
+        successRate: 100,
+        healthStatus: 'healthy',
+        failureCount: 0
       }
     ];
 
@@ -389,13 +468,37 @@ export class ToolRegistryService {
 
   incrementUsage(toolId: string, success: boolean): void {
     const tool = this.tools.get(toolId);
-    if (tool) {
-      tool.usageCount++;
-      const totalCalls = tool.usageCount;
-      const currentSuccessful = Math.round((tool.successRate / 100) * (totalCalls - 1));
-      const newSuccessful = currentSuccessful + (success ? 1 : 0);
-      tool.successRate = Math.round((newSuccessful / totalCalls) * 100);
+    if (!tool) return;
+
+    tool.usageCount++;
+    if (!success) {
+      tool.failureCount = (tool.failureCount || 0) + 1;
+      tool.lastFailure = new Date();
     }
+
+    const failureRate = tool.failureCount / tool.usageCount;
+    tool.successRate = Math.round((1 - failureRate) * 100);
+
+    if (tool.usageCount >= this.MIN_CALLS_FOR_DISABLE && failureRate > this.FAILURE_THRESHOLD) {
+      tool.healthStatus = 'disabled';
+      tool.isEnabled = false;
+      console.warn(`[ToolRegistry] Auto-disabled tool ${toolId} due to high failure rate: ${(failureRate * 100).toFixed(1)}%`);
+    } else if (failureRate > 0.1) {
+      tool.healthStatus = 'degraded';
+    } else {
+      tool.healthStatus = 'healthy';
+    }
+  }
+
+  enableTool(toolId: string): boolean {
+    const tool = this.tools.get(toolId);
+    if (tool) {
+      tool.isEnabled = true;
+      tool.healthStatus = 'healthy';
+      tool.failureCount = 0;
+      return true;
+    }
+    return false;
   }
 
   searchTools(query: string): ToolDefinition[] {

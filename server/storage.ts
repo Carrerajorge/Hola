@@ -2058,8 +2058,44 @@ export class MemStorage implements IStorage {
   }
 
   // Agent Gap Logs CRUD
+  private generateGapSignature(prompt: string, intent: string | null): string {
+    const normalized = (prompt.toLowerCase().trim() + '|' + (intent || 'unknown')).substring(0, 200);
+    let hash = 0;
+    for (let i = 0; i < normalized.length; i++) {
+      const char = normalized.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return 'gap_' + Math.abs(hash).toString(16);
+  }
+
   async createAgentGapLog(log: InsertAgentGapLog): Promise<AgentGapLog> {
-    const [result] = await db.insert(agentGapLogs).values(log).returning();
+    const signature = this.generateGapSignature(log.userPrompt, log.detectedIntent || null);
+
+    const existing = await db.select()
+      .from(agentGapLogs)
+      .where(
+        and(
+          eq(agentGapLogs.gapSignature, signature),
+          eq(agentGapLogs.status, 'pending')
+        )
+      )
+      .limit(1);
+
+    if (existing.length > 0) {
+      const updated = await db.update(agentGapLogs)
+        .set({ 
+          frequencyCount: sql`${agentGapLogs.frequencyCount} + 1`,
+          updatedAt: new Date()
+        })
+        .where(eq(agentGapLogs.id, existing[0].id))
+        .returning();
+      return updated[0];
+    }
+
+    const [result] = await db.insert(agentGapLogs)
+      .values({ ...log, gapSignature: signature, frequencyCount: 1 })
+      .returning();
     return result;
   }
 
@@ -2074,7 +2110,7 @@ export class MemStorage implements IStorage {
 
   async updateAgentGapLog(id: string, updates: Partial<InsertAgentGapLog>): Promise<AgentGapLog | undefined> {
     const [result] = await db.update(agentGapLogs)
-      .set(updates)
+      .set({ ...updates, updatedAt: new Date() })
       .where(eq(agentGapLogs.id, id))
       .returning();
     return result;

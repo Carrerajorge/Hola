@@ -1627,15 +1627,20 @@ export const agentGapLogs = pgTable("agent_gap_logs", {
   suggestedCapability: text("suggested_capability"),
   status: text("status").default("pending"),
   reviewedBy: varchar("reviewed_by"),
+  gapSignature: varchar("gap_signature"),
+  frequencyCount: integer("frequency_count").default(1),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
   index("agent_gap_logs_status_idx").on(table.status),
   index("agent_gap_logs_created_idx").on(table.createdAt),
+  index("agent_gap_logs_signature_idx").on(table.gapSignature),
 ]);
 
 export const insertAgentGapLogSchema = createInsertSchema(agentGapLogs).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
 });
 
 export type InsertAgentGapLog = z.infer<typeof insertAgentGapLogSchema>;

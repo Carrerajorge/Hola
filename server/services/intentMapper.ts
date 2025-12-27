@@ -11,12 +11,18 @@ export interface IntentResult {
   matches: IntentMatch[];
   hasGap: boolean;
   gapReason?: string;
+  complexity?: 'trivial' | 'simple' | 'complex';
 }
 
 interface KeywordMapping {
   keywords: string[];
   category: ToolCategory;
   intentDescription: string;
+}
+
+interface CachedAnalysis {
+  result: IntentResult;
+  timestamp: number;
 }
 
 const KEYWORD_MAPPINGS: KeywordMapping[] = [
@@ -76,11 +82,72 @@ const ACTION_KEYWORDS: Record<string, string[]> = {
 export class IntentToolMapper {
   private toolRegistry: ToolRegistryService;
 
+  private static readonly TRIVIAL_PATTERNS = /^(hola|gracias|ok|sí|si|no|bye|adios|chao)$/i;
+  private static readonly SIMPLE_PATTERNS = /(qué es|define|traduce|cuánto es|what is|how to)/i;
+  private static readonly ADMIN_PATTERNS = /(crear|delete|update|list|enable|disable|generar|export)/i;
+
+  private analysisCache: Map<string, CachedAnalysis> = new Map();
+  private readonly CACHE_TTL_MS = 5 * 60 * 1000;
+
   constructor(toolRegistry: ToolRegistryService) {
     this.toolRegistry = toolRegistry;
   }
 
+  private fastPath(prompt: string): { skip: boolean; complexity: 'trivial' | 'simple' | 'complex' } {
+    if (IntentToolMapper.TRIVIAL_PATTERNS.test(prompt)) {
+      return { skip: true, complexity: 'trivial' };
+    }
+    if (IntentToolMapper.SIMPLE_PATTERNS.test(prompt) && !IntentToolMapper.ADMIN_PATTERNS.test(prompt)) {
+      return { skip: true, complexity: 'simple' };
+    }
+    return { skip: false, complexity: 'complex' };
+  }
+
+  private getCacheKey(prompt: string): string {
+    let hash = 0;
+    for (let i = 0; i < prompt.length; i++) {
+      const char = prompt.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return `intent_${hash}`;
+  }
+
+  private getFromCache(prompt: string): IntentResult | null {
+    const key = this.getCacheKey(prompt);
+    const cached = this.analysisCache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
+      return cached.result;
+    }
+    if (cached) {
+      this.analysisCache.delete(key);
+    }
+    return null;
+  }
+
+  private setCache(prompt: string, result: IntentResult): void {
+    const key = this.getCacheKey(prompt);
+    this.analysisCache.set(key, { result, timestamp: Date.now() });
+    if (this.analysisCache.size > 1000) {
+      const firstKey = this.analysisCache.keys().next().value;
+      if (firstKey) this.analysisCache.delete(firstKey);
+    }
+  }
+
   map(userPrompt: string): IntentResult {
+    const fastResult = this.fastPath(userPrompt);
+    if (fastResult.skip) {
+      return {
+        intent: 'Conversational',
+        matches: [],
+        hasGap: false,
+        complexity: fastResult.complexity
+      };
+    }
+
+    const cached = this.getFromCache(userPrompt);
+    if (cached) return cached;
+
     const normalizedPrompt = userPrompt.toLowerCase().trim();
     const matches: IntentMatch[] = [];
     let detectedCategory: ToolCategory | null = null;
@@ -118,14 +185,18 @@ export class IntentToolMapper {
     const bestMatch = matches[0];
     const hasGap = !bestMatch || bestMatch.confidence < 0.3;
 
-    return {
+    const result: IntentResult = {
       intent: intentDescription,
       matches,
       hasGap,
       gapReason: hasGap 
         ? this.generateGapReason(normalizedPrompt, detectedCategory) 
-        : undefined
+        : undefined,
+      complexity: 'complex'
     };
+
+    this.setCache(userPrompt, result);
+    return result;
   }
 
   private detectAction(prompt: string): string | null {
