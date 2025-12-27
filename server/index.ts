@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { requestTracerMiddleware } from "./lib/requestTracer";
+import { startAggregator } from "./services/analyticsAggregator";
 
 const app = express();
 const httpServer = createServer(app);
@@ -98,6 +99,7 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
+      startAggregator();
     },
   );
 })();
