@@ -1672,24 +1672,46 @@ export function SpreadsheetEditor({
   }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
   const toggleItalic = useCallback(() => {
+    console.log('[toggleItalic] Called');
     const active = getActiveCell();
-    if (!active) return;
+    console.log('[toggleItalic] Active cell:', active);
+    if (!active) {
+      console.log('[toggleItalic] No active cell, returning');
+      return;
+    }
     const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
+    console.log('[toggleItalic] First cell:', firstCell);
     const newItalic = !(firstCell?.italic);
+    console.log('[toggleItalic] Setting italic to:', newItalic);
     applyToSelection(() => ({ italic: newItalic }));
   }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
   const toggleUnderline = useCallback(() => {
+    console.log('[toggleUnderline] Called');
     const active = getActiveCell();
-    if (!active) return;
+    console.log('[toggleUnderline] Active cell:', active);
+    if (!active) {
+      console.log('[toggleUnderline] No active cell, returning');
+      return;
+    }
     const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
+    console.log('[toggleUnderline] First cell:', firstCell);
     const newUnderline = !(firstCell?.underline);
+    console.log('[toggleUnderline] Setting underline to:', newUnderline);
     applyToSelection(() => ({ underline: newUnderline }));
   }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
   const setAlignment = useCallback((align: 'left' | 'center' | 'right') => {
+    console.log('[setAlignment] Called with:', align);
+    const active = getActiveCell();
+    console.log('[setAlignment] Active cell:', active);
+    if (!active) {
+      console.log('[setAlignment] No active cell, returning');
+      return;
+    }
+    console.log('[setAlignment] Applying alignment');
     applyToSelection(() => ({ align }));
-  }, [applyToSelection]);
+  }, [getActiveCell, applyToSelection]);
 
   const setFontFamily = useCallback((fontFamily: string) => {
     applyToSelection(() => ({ fontFamily }));
