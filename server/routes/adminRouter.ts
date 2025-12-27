@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { db } from "../db";
-import { users } from "@shared/schema";
+import { users, chats, chatMessages } from "@shared/schema";
 import { llmGateway } from "../lib/llmGateway";
+import { eq, desc, and, gte, lte, ilike, sql, inArray } from "drizzle-orm";
 
 export function createAdminRouter() {
   const router = Router();
@@ -457,6 +458,299 @@ export function createAdminRouter() {
         status: "healthy",
         lastBackup: new Date().toISOString()
       });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ========================================
+  // Conversations / Chat Logs Management
+  // ========================================
+
+  router.get("/conversations", async (req, res) => {
+    try {
+      const { 
+        page = "1", 
+        limit = "20", 
+        userId, 
+        status, 
+        flagStatus, 
+        aiModel,
+        dateFrom,
+        dateTo,
+        minTokens,
+        maxTokens,
+        sortBy = "createdAt",
+        sortOrder = "desc"
+      } = req.query;
+
+      const pageNum = parseInt(page as string);
+      const limitNum = Math.min(parseInt(limit as string), 100);
+      const offset = (pageNum - 1) * limitNum;
+
+      const conditions: any[] = [];
+      
+      if (userId) conditions.push(eq(chats.userId, userId as string));
+      if (status) conditions.push(eq(chats.conversationStatus, status as string));
+      if (flagStatus) conditions.push(eq(chats.flagStatus, flagStatus as string));
+      if (aiModel) conditions.push(eq(chats.aiModelUsed, aiModel as string));
+      if (dateFrom) conditions.push(gte(chats.createdAt, new Date(dateFrom as string)));
+      if (dateTo) conditions.push(lte(chats.createdAt, new Date(dateTo as string)));
+      if (minTokens) conditions.push(gte(chats.tokensUsed, parseInt(minTokens as string)));
+      if (maxTokens) conditions.push(lte(chats.tokensUsed, parseInt(maxTokens as string)));
+
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [conversationsResult, totalResult] = await Promise.all([
+        db.select({
+          id: chats.id,
+          userId: chats.userId,
+          title: chats.title,
+          messageCount: chats.messageCount,
+          tokensUsed: chats.tokensUsed,
+          aiModelUsed: chats.aiModelUsed,
+          conversationStatus: chats.conversationStatus,
+          flagStatus: chats.flagStatus,
+          createdAt: chats.createdAt,
+          lastMessageAt: chats.lastMessageAt,
+          endedAt: chats.endedAt
+        })
+          .from(chats)
+          .where(whereClause)
+          .orderBy(sortOrder === "asc" ? chats.createdAt : desc(chats.createdAt))
+          .limit(limitNum)
+          .offset(offset),
+        db.select({ count: sql<number>`count(*)` }).from(chats).where(whereClause)
+      ]);
+
+      const userIds = [...new Set(conversationsResult.map(c => c.userId).filter(Boolean))];
+      const usersMap: Record<string, any> = {};
+      if (userIds.length > 0) {
+        const usersData = await db.select({ id: users.id, email: users.email, fullName: users.fullName, firstName: users.firstName, lastName: users.lastName })
+          .from(users)
+          .where(inArray(users.id, userIds as string[]));
+        usersData.forEach(u => { usersMap[u.id] = u; });
+      }
+
+      const conversationsWithUsers = conversationsResult.map(c => ({
+        ...c,
+        user: c.userId ? usersMap[c.userId] : null
+      }));
+
+      res.json({
+        data: conversationsWithUsers,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: Number(totalResult[0]?.count || 0),
+          totalPages: Math.ceil(Number(totalResult[0]?.count || 0) / limitNum)
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/conversations/:id", async (req, res) => {
+    try {
+      const [conversation] = await db.select().from(chats).where(eq(chats.id, req.params.id));
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+
+      const messages = await db.select({
+        id: chatMessages.id,
+        role: chatMessages.role,
+        content: chatMessages.content,
+        createdAt: chatMessages.createdAt,
+        metadata: chatMessages.metadata
+      })
+        .from(chatMessages)
+        .where(eq(chatMessages.chatId, req.params.id))
+        .orderBy(chatMessages.createdAt);
+
+      let user = null;
+      if (conversation.userId) {
+        const [userData] = await db.select().from(users).where(eq(users.id, conversation.userId));
+        user = userData;
+      }
+
+      res.json({
+        ...conversation,
+        user,
+        messages
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.patch("/conversations/:id/flag", async (req, res) => {
+    try {
+      const { flagStatus } = req.body;
+      const validFlags = ["reviewed", "needs_attention", "spam", "vip_support", null];
+      if (!validFlags.includes(flagStatus)) {
+        return res.status(400).json({ error: "Invalid flag status" });
+      }
+
+      const [updated] = await db.update(chats)
+        .set({ 
+          flagStatus, 
+          conversationStatus: flagStatus ? "flagged" : "active",
+          updatedAt: new Date() 
+        })
+        .where(eq(chats.id, req.params.id))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+
+      await storage.createAuditLog({
+        action: "conversation_flag",
+        resource: "chats",
+        resourceId: req.params.id,
+        details: { flagStatus }
+      });
+
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/conversations/stats/summary", async (req, res) => {
+    try {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const [
+        totalConversations,
+        activeToday,
+        flaggedConversations,
+        tokensToday,
+        allConversations
+      ] = await Promise.all([
+        db.select({ count: sql<number>`count(*)` }).from(chats),
+        db.select({ count: sql<number>`count(*)` })
+          .from(chats)
+          .where(gte(chats.lastMessageAt, todayStart)),
+        db.select({ count: sql<number>`count(*)` })
+          .from(chats)
+          .where(eq(chats.conversationStatus, "flagged")),
+        db.select({ sum: sql<number>`coalesce(sum(tokens_used), 0)` })
+          .from(chats)
+          .where(gte(chats.createdAt, todayStart)),
+        db.select({ 
+          messageCount: chats.messageCount 
+        }).from(chats)
+      ]);
+
+      const allUsers = await storage.getAllUsers();
+      const totalMessages = allConversations.reduce((sum, c) => sum + (c.messageCount || 0), 0);
+      const avgMessagesPerUser = allUsers.length > 0 ? Math.round(totalMessages / allUsers.length) : 0;
+
+      res.json({
+        activeToday: Number(activeToday[0]?.count || 0),
+        avgMessagesPerUser,
+        tokensConsumedToday: Number(tokensToday[0]?.sum || 0),
+        flaggedConversations: Number(flaggedConversations[0]?.count || 0),
+        totalConversations: Number(totalConversations[0]?.count || 0)
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ========================================
+  // Export Endpoints
+  // ========================================
+
+  router.get("/users/export", async (req, res) => {
+    try {
+      const { format = "json" } = req.query;
+      const allUsers = await storage.getAllUsers();
+
+      if (format === "csv") {
+        const headers = ["id", "email", "fullName", "plan", "role", "status", "queryCount", "tokensConsumed", "createdAt", "lastLoginAt"];
+        const csvRows = [headers.join(",")];
+        allUsers.forEach(u => {
+          csvRows.push([
+            u.id,
+            u.email || "",
+            u.fullName || `${u.firstName || ""} ${u.lastName || ""}`.trim(),
+            u.plan || "",
+            u.role || "",
+            u.status || "",
+            u.queryCount || 0,
+            u.tokensConsumed || 0,
+            u.createdAt?.toISOString() || "",
+            u.lastLoginAt?.toISOString() || ""
+          ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+        });
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.csv`);
+        res.send(csvRows.join("\n"));
+      } else {
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Content-Disposition", `attachment; filename=users_${Date.now()}.json`);
+        res.json(allUsers);
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/conversations/export", async (req, res) => {
+    try {
+      const { format = "json", includeMessages = "false" } = req.query;
+      
+      const allConversations = await db.select().from(chats).orderBy(desc(chats.createdAt)).limit(1000);
+
+      let result: any[] = allConversations;
+
+      if (includeMessages === "true") {
+        const conversationsWithMessages = await Promise.all(
+          allConversations.map(async (conv) => {
+            const messages = await db.select({
+              role: chatMessages.role,
+              content: chatMessages.content,
+              createdAt: chatMessages.createdAt
+            })
+              .from(chatMessages)
+              .where(eq(chatMessages.chatId, conv.id))
+              .orderBy(chatMessages.createdAt);
+            return { ...conv, messages };
+          })
+        );
+        result = conversationsWithMessages;
+      }
+
+      if (format === "csv") {
+        const headers = ["id", "userId", "title", "messageCount", "tokensUsed", "aiModelUsed", "conversationStatus", "flagStatus", "createdAt"];
+        const csvRows = [headers.join(",")];
+        result.forEach(c => {
+          csvRows.push([
+            c.id,
+            c.userId || "",
+            c.title || "",
+            c.messageCount || 0,
+            c.tokensUsed || 0,
+            c.aiModelUsed || "",
+            c.conversationStatus || "",
+            c.flagStatus || "",
+            c.createdAt?.toISOString() || ""
+          ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+        });
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", `attachment; filename=conversations_${Date.now()}.csv`);
+        res.send(csvRows.join("\n"));
+      } else {
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Content-Disposition", `attachment; filename=conversations_${Date.now()}.json`);
+        res.json(result);
+      }
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

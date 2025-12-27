@@ -26,7 +26,7 @@ export const sessions = pgTable(
   (table) => [index("IDX_session_expire").on(table.expire)]
 );
 
-// Users table (compatible with Replit Auth)
+// Users table (compatible with Replit Auth) - Enterprise-grade
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username"),
@@ -34,13 +34,29 @@ export const users = pgTable("users", {
   email: text("email").unique(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
+  fullName: varchar("full_name"),
   profileImageUrl: varchar("profile_image_url"),
   phone: varchar("phone"),
   company: varchar("company"),
-  role: text("role").default("user"),
-  plan: text("plan").default("free"),
-  status: text("status").default("active"),
+  role: text("role").default("user"), // admin, editor, viewer, api_only, user
+  plan: text("plan").default("free"), // free, pro, enterprise
+  status: text("status").default("active"), // active, inactive, suspended, pending_verification
   queryCount: integer("query_count").default(0),
+  tokensConsumed: integer("tokens_consumed").default(0),
+  tokensLimit: integer("tokens_limit").default(100000),
+  creditsBalance: integer("credits_balance").default(0),
+  lastLoginAt: timestamp("last_login_at"),
+  lastIp: varchar("last_ip"),
+  userAgent: text("user_agent"),
+  countryCode: varchar("country_code", { length: 2 }),
+  authProvider: text("auth_provider").default("email"), // email, google, sso
+  is2faEnabled: text("is_2fa_enabled").default("false"),
+  emailVerified: text("email_verified").default("false"),
+  referralCode: varchar("referral_code"),
+  referredBy: varchar("referred_by"),
+  internalNotes: text("internal_notes"),
+  tags: text("tags").array(),
+  subscriptionExpiresAt: timestamp("subscription_expires_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -482,10 +498,17 @@ export const chats = pgTable("chats", {
   deletedAt: timestamp("deleted_at"),
   lastMessageAt: timestamp("last_message_at"),
   messageCount: integer("message_count").default(0),
+  tokensUsed: integer("tokens_used").default(0),
+  aiModelUsed: text("ai_model_used"),
+  conversationStatus: text("conversation_status").default("active"), // active, completed, flagged
+  flagStatus: text("flag_status"), // reviewed, needs_attention, spam, vip_support
+  endedAt: timestamp("ended_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [
   index("chats_user_idx").on(table.userId),
+  index("chats_status_idx").on(table.conversationStatus),
+  index("chats_flag_idx").on(table.flagStatus),
 ]);
 
 export const insertChatSchema = createInsertSchema(chats).omit({

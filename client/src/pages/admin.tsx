@@ -37,16 +37,27 @@ import {
   RefreshCw,
   Trash2,
   Edit,
-  Loader2
+  Loader2,
+  Filter,
+  Eye,
+  MessageSquare,
+  Flag,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  X
 } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 
-type AdminSection = "dashboard" | "users" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings";
+type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "users", label: "Users", icon: Users },
+  { id: "conversations", label: "Conversations", icon: MessageSquare },
   { id: "ai-models", label: "AI Models", icon: Bot },
   { id: "payments", label: "Payments", icon: CreditCard },
   { id: "invoices", label: "Invoices", icon: FileText },
@@ -274,7 +285,13 @@ function UsersSection() {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [editingUser, setEditingUser] = useState<any>(null);
+  const [viewingUser, setViewingUser] = useState<any>(null);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({ plan: "", status: "", role: "" });
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" }>({ key: "createdAt", direction: "desc" });
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
   const [newUser, setNewUser] = useState({ email: "", password: "", plan: "free", role: "user" });
 
   const { data: users = [], isLoading } = useQuery({
@@ -329,216 +346,627 @@ function UsersSection() {
     }
   });
 
-  const filteredUsers = users.filter((u: any) => 
-    u.username?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    u.email?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const handleExport = (format: "csv" | "json") => {
+    window.open(`/api/admin/users/export?format=${format}`, "_blank");
+  };
+
+  const filteredAndSortedUsers = users
+    .filter((u: any) => {
+      const matchesSearch = u.username?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+        u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        u.fullName?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesPlan = !filters.plan || u.plan === filters.plan;
+      const matchesStatus = !filters.status || u.status === filters.status;
+      const matchesRole = !filters.role || u.role === filters.role;
+      return matchesSearch && matchesPlan && matchesStatus && matchesRole;
+    })
+    .sort((a: any, b: any) => {
+      const aVal = a[sortConfig.key] || "";
+      const bVal = b[sortConfig.key] || "";
+      if (sortConfig.direction === "asc") return aVal > bVal ? 1 : -1;
+      return aVal < bVal ? 1 : -1;
+    });
+
+  const totalPages = Math.ceil(filteredAndSortedUsers.length / itemsPerPage);
+  const paginatedUsers = filteredAndSortedUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc"
+    }));
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Users ({users.length})</h2>
-        <Dialog open={showAddUserModal} onOpenChange={setShowAddUserModal}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="gap-1" data-testid="button-add-user">
-              <Plus className="h-4 w-4" />
-              Agregar usuario
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Agregar nuevo usuario</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input 
-                  type="email"
-                  placeholder="usuario@ejemplo.com"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  data-testid="input-new-user-email"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Contraseña</Label>
-                <Input 
-                  type="password"
-                  placeholder="••••••••"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                  data-testid="input-new-user-password"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Plan</Label>
-                <Select 
-                  value={newUser.plan}
-                  onValueChange={(value) => setNewUser({ ...newUser, plan: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="free">Free</SelectItem>
-                    <SelectItem value="go">Go</SelectItem>
-                    <SelectItem value="plus">Plus</SelectItem>
-                    <SelectItem value="pro">Pro</SelectItem>
-                    <SelectItem value="business">Business</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Rol</Label>
-                <Select 
-                  value={newUser.role}
-                  onValueChange={(value) => setNewUser({ ...newUser, role: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="user">Usuario</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button 
-                className="w-full" 
-                onClick={() => createUserMutation.mutate(newUser)}
-                disabled={!newUser.email || !newUser.password || createUserMutation.isPending}
-                data-testid="button-submit-new-user"
-              >
-                {createUserMutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Creando...
-                  </>
-                ) : (
-                  "Crear usuario"
-                )}
+        <h2 className="text-lg font-medium">Users ({filteredAndSortedUsers.length})</h2>
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1" data-testid="button-export-users">
+                <Download className="h-4 w-4" />
+                Export
               </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Buscar usuarios..." 
-            className="pl-9 h-9"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            data-testid="input-search-users"
-          />
-        </div>
-      </div>
-      <div className="rounded-lg border">
-        <div className="grid grid-cols-6 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
-          <span>Usuario</span>
-          <span>Plan</span>
-          <span>Rol</span>
-          <span>Estado</span>
-          <span>Consultas</span>
-          <span>Acciones</span>
-        </div>
-        {filteredUsers.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground text-center">No hay usuarios</div>
-        ) : (
-          filteredUsers.map((user: any) => (
-            <div key={user.id} className="grid grid-cols-6 gap-4 p-3 border-b last:border-0 items-center text-sm">
-              <div>
-                <p className="font-medium">{user.username}</p>
-                <p className="text-xs text-muted-foreground">{user.email || "-"}</p>
-              </div>
-              <Badge variant="secondary" className="w-fit">{user.plan || "free"}</Badge>
-              <Badge variant="outline" className="w-fit">{user.role || "user"}</Badge>
-              <Badge variant={user.status === "active" ? "default" : "outline"} className="w-fit">
-                {user.status === "active" ? "Activo" : "Inactivo"}
-              </Badge>
-              <span>{(user.queryCount || 0).toLocaleString()}</span>
-              <div className="flex gap-1">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditingUser(user)}>
-                      <Edit className="h-3 w-3" />
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Editar usuario</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div className="space-y-2">
-                        <Label>Plan</Label>
-                        <Select 
-                          defaultValue={user.plan || "free"}
-                          onValueChange={(value) => updateUserMutation.mutate({ id: user.id, updates: { plan: value } })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="free">Free</SelectItem>
-                            <SelectItem value="basic">Basic</SelectItem>
-                            <SelectItem value="pro">Pro</SelectItem>
-                            <SelectItem value="enterprise">Enterprise</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Estado</Label>
-                        <Select 
-                          defaultValue={user.status || "active"}
-                          onValueChange={(value) => updateUserMutation.mutate({ id: user.id, updates: { status: value } })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="active">Activo</SelectItem>
-                            <SelectItem value="inactive">Inactivo</SelectItem>
-                            <SelectItem value="suspended">Suspendido</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Rol</Label>
-                        <Select 
-                          defaultValue={user.role || "user"}
-                          onValueChange={(value) => updateUserMutation.mutate({ id: user.id, updates: { role: value } })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="user">Usuario</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="h-7 w-7 p-0 text-destructive" 
-                  onClick={() => deleteUserMutation.mutate(user.id)}
-                  data-testid={`button-delete-user-${user.id}`}
-                >
-                  <Trash2 className="h-3 w-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => handleExport("csv")}>Export CSV</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport("json")}>Export JSON</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Dialog open={showAddUserModal} onOpenChange={setShowAddUserModal}>
+            <DialogTrigger asChild>
+              <Button size="sm" className="gap-1" data-testid="button-add-user">
+                <Plus className="h-4 w-4" />
+                Add User
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add New User</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Email</Label>
+                  <Input type="email" placeholder="user@example.com" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} data-testid="input-new-user-email" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Password</Label>
+                  <Input type="password" placeholder="••••••••" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} data-testid="input-new-user-password" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Plan</Label>
+                    <Select value={newUser.plan} onValueChange={(value) => setNewUser({ ...newUser, plan: value })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="free">Free</SelectItem>
+                        <SelectItem value="pro">Pro</SelectItem>
+                        <SelectItem value="enterprise">Enterprise</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Role</Label>
+                    <Select value={newUser.role} onValueChange={(value) => setNewUser({ ...newUser, role: value })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="user">User</SelectItem>
+                        <SelectItem value="viewer">Viewer</SelectItem>
+                        <SelectItem value="editor">Editor</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="api_only">API Only</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button className="w-full" onClick={() => createUserMutation.mutate(newUser)} disabled={!newUser.email || !newUser.password || createUserMutation.isPending} data-testid="button-submit-new-user">
+                  {createUserMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Creating...</> : "Create User"}
                 </Button>
               </div>
-            </div>
-          ))
-        )}
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search users..." className="pl-9 h-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} data-testid="input-search-users" />
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} className="gap-1">
+          <Filter className="h-4 w-4" />
+          Filters
+        </Button>
+      </div>
+
+      {showFilters && (
+        <div className="flex items-center gap-2 p-3 rounded-lg border bg-muted/30">
+          <Select value={filters.plan} onValueChange={(v) => setFilters({ ...filters, plan: v })}>
+            <SelectTrigger className="w-[130px] h-8"><SelectValue placeholder="Plan" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All Plans</SelectItem>
+              <SelectItem value="free">Free</SelectItem>
+              <SelectItem value="pro">Pro</SelectItem>
+              <SelectItem value="enterprise">Enterprise</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filters.status} onValueChange={(v) => setFilters({ ...filters, status: v })}>
+            <SelectTrigger className="w-[140px] h-8"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All Status</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+              <SelectItem value="suspended">Suspended</SelectItem>
+              <SelectItem value="pending_verification">Pending</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filters.role} onValueChange={(v) => setFilters({ ...filters, role: v })}>
+            <SelectTrigger className="w-[130px] h-8"><SelectValue placeholder="Role" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All Roles</SelectItem>
+              <SelectItem value="user">User</SelectItem>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="editor">Editor</SelectItem>
+              <SelectItem value="viewer">Viewer</SelectItem>
+              <SelectItem value="api_only">API Only</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="ghost" size="sm" onClick={() => setFilters({ plan: "", status: "", role: "" })}>Clear</Button>
+        </div>
+      )}
+
+      <div className="rounded-lg border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 border-b">
+              <tr>
+                <th className="text-left p-3 font-medium cursor-pointer hover:bg-muted/70" onClick={() => handleSort("email")}>
+                  <div className="flex items-center gap-1">User {sortConfig.key === "email" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
+                </th>
+                <th className="text-left p-3 font-medium">Plan</th>
+                <th className="text-left p-3 font-medium">Role</th>
+                <th className="text-left p-3 font-medium">Status</th>
+                <th className="text-left p-3 font-medium cursor-pointer hover:bg-muted/70" onClick={() => handleSort("queryCount")}>
+                  <div className="flex items-center gap-1">Queries {sortConfig.key === "queryCount" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
+                </th>
+                <th className="text-left p-3 font-medium cursor-pointer hover:bg-muted/70" onClick={() => handleSort("tokensConsumed")}>
+                  <div className="flex items-center gap-1">Tokens {sortConfig.key === "tokensConsumed" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
+                </th>
+                <th className="text-left p-3 font-medium">Auth</th>
+                <th className="text-left p-3 font-medium cursor-pointer hover:bg-muted/70" onClick={() => handleSort("createdAt")}>
+                  <div className="flex items-center gap-1">Created {sortConfig.key === "createdAt" && (sortConfig.direction === "asc" ? "↑" : "↓")}</div>
+                </th>
+                <th className="text-right p-3 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedUsers.length === 0 ? (
+                <tr><td colSpan={9} className="p-4 text-center text-muted-foreground">No users found</td></tr>
+              ) : paginatedUsers.map((user: any) => (
+                <tr key={user.id} className="border-b last:border-0 hover:bg-muted/30">
+                  <td className="p-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium">
+                        {(user.fullName || user.email || "?")[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-medium truncate max-w-[150px]">{user.fullName || user.username || user.email?.split("@")[0] || "-"}</p>
+                        <p className="text-xs text-muted-foreground truncate max-w-[150px]">{user.email || "-"}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="p-3"><Badge variant="secondary" className="text-xs">{user.plan || "free"}</Badge></td>
+                  <td className="p-3"><Badge variant="outline" className="text-xs">{user.role || "user"}</Badge></td>
+                  <td className="p-3">
+                    <Badge variant={user.status === "active" ? "default" : user.status === "suspended" ? "destructive" : "outline"} className="text-xs">
+                      {user.status || "active"}
+                    </Badge>
+                  </td>
+                  <td className="p-3 text-muted-foreground">{(user.queryCount || 0).toLocaleString()}</td>
+                  <td className="p-3 text-muted-foreground">{(user.tokensConsumed || 0).toLocaleString()}</td>
+                  <td className="p-3">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground">{user.authProvider || "email"}</span>
+                      {user.emailVerified === "true" && <CheckCircle className="h-3 w-3 text-green-500" />}
+                      {user.is2faEnabled === "true" && <Shield className="h-3 w-3 text-blue-500" />}
+                    </div>
+                  </td>
+                  <td className="p-3 text-xs text-muted-foreground">{user.createdAt ? format(new Date(user.createdAt), "dd/MM/yy") : "-"}</td>
+                  <td className="p-3">
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setViewingUser(user)} data-testid={`button-view-user-${user.id}`}>
+                        <Eye className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditingUser(user)}>
+                        <Edit className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => deleteUserMutation.mutate(user.id)} data-testid={`button-delete-user-${user.id}`}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
+          <div className="flex gap-1">
+            <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Previous</Button>
+            <Button variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Next</Button>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={!!viewingUser} onOpenChange={() => setViewingUser(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>User Details</DialogTitle>
+          </DialogHeader>
+          {viewingUser && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div><span className="text-muted-foreground">ID:</span> <span className="font-mono text-xs">{viewingUser.id}</span></div>
+                <div><span className="text-muted-foreground">Email:</span> {viewingUser.email || "-"}</div>
+                <div><span className="text-muted-foreground">Full Name:</span> {viewingUser.fullName || `${viewingUser.firstName || ""} ${viewingUser.lastName || ""}`.trim() || "-"}</div>
+                <div><span className="text-muted-foreground">Plan:</span> <Badge variant="secondary">{viewingUser.plan || "free"}</Badge></div>
+                <div><span className="text-muted-foreground">Role:</span> <Badge variant="outline">{viewingUser.role || "user"}</Badge></div>
+                <div><span className="text-muted-foreground">Status:</span> <Badge variant={viewingUser.status === "active" ? "default" : "outline"}>{viewingUser.status || "active"}</Badge></div>
+                <div><span className="text-muted-foreground">Queries:</span> {(viewingUser.queryCount || 0).toLocaleString()}</div>
+                <div><span className="text-muted-foreground">Tokens Used:</span> {(viewingUser.tokensConsumed || 0).toLocaleString()} / {(viewingUser.tokensLimit || 100000).toLocaleString()}</div>
+                <div><span className="text-muted-foreground">Credits:</span> {(viewingUser.creditsBalance || 0).toLocaleString()}</div>
+                <div><span className="text-muted-foreground">Auth Provider:</span> {viewingUser.authProvider || "email"}</div>
+                <div><span className="text-muted-foreground">Email Verified:</span> {viewingUser.emailVerified === "true" ? "Yes" : "No"}</div>
+                <div><span className="text-muted-foreground">2FA Enabled:</span> {viewingUser.is2faEnabled === "true" ? "Yes" : "No"}</div>
+                <div><span className="text-muted-foreground">Last IP:</span> {viewingUser.lastIp || "-"}</div>
+                <div><span className="text-muted-foreground">Country:</span> {viewingUser.countryCode || "-"}</div>
+                <div><span className="text-muted-foreground">Last Login:</span> {viewingUser.lastLoginAt ? format(new Date(viewingUser.lastLoginAt), "dd/MM/yyyy HH:mm") : "-"}</div>
+                <div><span className="text-muted-foreground">Created:</span> {viewingUser.createdAt ? format(new Date(viewingUser.createdAt), "dd/MM/yyyy HH:mm") : "-"}</div>
+                <div><span className="text-muted-foreground">Referral Code:</span> {viewingUser.referralCode || "-"}</div>
+                <div><span className="text-muted-foreground">Referred By:</span> {viewingUser.referredBy || "-"}</div>
+                <div className="col-span-2"><span className="text-muted-foreground">Tags:</span> {viewingUser.tags?.length ? viewingUser.tags.map((t: string) => <Badge key={t} variant="secondary" className="mr-1">{t}</Badge>) : "-"}</div>
+                <div className="col-span-2"><span className="text-muted-foreground">Internal Notes:</span> <p className="mt-1 text-xs">{viewingUser.internalNotes || "-"}</p></div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+          </DialogHeader>
+          {editingUser && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Plan</Label>
+                  <Select defaultValue={editingUser.plan || "free"} onValueChange={(value) => updateUserMutation.mutate({ id: editingUser.id, updates: { plan: value } })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="free">Free</SelectItem>
+                      <SelectItem value="pro">Pro</SelectItem>
+                      <SelectItem value="enterprise">Enterprise</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Role</Label>
+                  <Select defaultValue={editingUser.role || "user"} onValueChange={(value) => updateUserMutation.mutate({ id: editingUser.id, updates: { role: value } })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                      <SelectItem value="editor">Editor</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="api_only">API Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select defaultValue={editingUser.status || "active"} onValueChange={(value) => updateUserMutation.mutate({ id: editingUser.id, updates: { status: value } })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="suspended">Suspended</SelectItem>
+                    <SelectItem value="pending_verification">Pending Verification</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Tokens Limit</Label>
+                <Input type="number" defaultValue={editingUser.tokensLimit || 100000} onBlur={(e) => updateUserMutation.mutate({ id: editingUser.id, updates: { tokensLimit: parseInt(e.target.value) } })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Internal Notes</Label>
+                <Textarea defaultValue={editingUser.internalNotes || ""} onBlur={(e) => updateUserMutation.mutate({ id: editingUser.id, updates: { internalNotes: e.target.value } })} />
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ConversationsSection() {
+  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState({ status: "", flagStatus: "", userId: "", aiModel: "" });
+  const [showFilters, setShowFilters] = useState(false);
+  const [viewingConversation, setViewingConversation] = useState<any>(null);
+
+  const updateFilters = (newFilters: Partial<typeof filters>) => {
+    setFilters(prev => ({ ...prev, ...newFilters }));
+    setPage(1);
+  };
+
+  const { data: statsData } = useQuery({
+    queryKey: ["/api/admin/conversations/stats/summary"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/conversations/stats/summary");
+      return res.json();
+    }
+  });
+
+  const { data: conversationsData, isLoading, refetch } = useQuery({
+    queryKey: ["/api/admin/conversations", page, filters],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), limit: "20" });
+      if (filters.status) params.set("status", filters.status);
+      if (filters.flagStatus) params.set("flagStatus", filters.flagStatus);
+      if (filters.userId) params.set("userId", filters.userId);
+      if (filters.aiModel) params.set("aiModel", filters.aiModel);
+      const res = await fetch(`/api/admin/conversations?${params}`);
+      return res.json();
+    }
+  });
+
+  const { data: conversationDetail, isLoading: loadingDetail } = useQuery({
+    queryKey: ["/api/admin/conversations", viewingConversation?.id],
+    queryFn: async () => {
+      if (!viewingConversation?.id) return null;
+      const res = await fetch(`/api/admin/conversations/${viewingConversation.id}`);
+      return res.json();
+    },
+    enabled: !!viewingConversation?.id
+  });
+
+  const flagMutation = useMutation({
+    mutationFn: async ({ id, flagStatus }: { id: string; flagStatus: string | null }) => {
+      const res = await fetch(`/api/admin/conversations/${id}/flag`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flagStatus })
+      });
+      return res.json();
+    },
+    onSuccess: () => refetch()
+  });
+
+  const handleExport = (format: "csv" | "json") => {
+    window.open(`/api/admin/conversations/export?format=${format}`, "_blank");
+  };
+
+  const stats = statsData || { activeToday: 0, avgMessagesPerUser: 0, tokensConsumedToday: 0, flaggedConversations: 0 };
+  const conversations = conversationsData?.data || [];
+  const pagination = conversationsData?.pagination || { page: 1, totalPages: 1, total: 0 };
+
+  const flagColors: Record<string, string> = {
+    reviewed: "bg-green-500/10 text-green-600",
+    needs_attention: "bg-yellow-500/10 text-yellow-600",
+    spam: "bg-red-500/10 text-red-600",
+    vip_support: "bg-purple-500/10 text-purple-600"
+  };
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-medium">Conversations ({pagination.total})</h2>
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1" data-testid="button-export-conversations">
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => handleExport("csv")}>Export CSV</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport("json")}>Export JSON</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button variant="ghost" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="rounded-lg border p-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+            <Activity className="h-3 w-3" />
+            Active Today
+          </div>
+          <p className="text-xl font-bold">{stats.activeToday}</p>
+        </div>
+        <div className="rounded-lg border p-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+            <MessageSquare className="h-3 w-3" />
+            Avg Msgs/User
+          </div>
+          <p className="text-xl font-bold">{stats.avgMessagesPerUser}</p>
+        </div>
+        <div className="rounded-lg border p-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+            <BarChart3 className="h-3 w-3" />
+            Tokens Today
+          </div>
+          <p className="text-xl font-bold">{stats.tokensConsumedToday.toLocaleString()}</p>
+        </div>
+        <div className="rounded-lg border p-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+            <Flag className="h-3 w-3" />
+            Flagged
+          </div>
+          <p className="text-xl font-bold text-yellow-600">{stats.flaggedConversations}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} className="gap-1" data-testid="button-toggle-filters">
+          <Filter className="h-4 w-4" />
+          Filters
+        </Button>
+      </div>
+
+      {showFilters && (
+        <div className="flex items-center gap-2 p-3 rounded-lg border bg-muted/30 flex-wrap">
+          <Select value={filters.status} onValueChange={(v) => updateFilters({ status: v })}>
+            <SelectTrigger className="w-[130px] h-8" data-testid="select-conv-status"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All Status</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="flagged">Flagged</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filters.flagStatus} onValueChange={(v) => updateFilters({ flagStatus: v })}>
+            <SelectTrigger className="w-[150px] h-8" data-testid="select-conv-flag"><SelectValue placeholder="Flag Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All Flags</SelectItem>
+              <SelectItem value="reviewed">Reviewed</SelectItem>
+              <SelectItem value="needs_attention">Needs Attention</SelectItem>
+              <SelectItem value="spam">Spam</SelectItem>
+              <SelectItem value="vip_support">VIP Support</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input placeholder="User ID" className="w-[180px] h-8" value={filters.userId} onChange={(e) => updateFilters({ userId: e.target.value })} data-testid="input-conv-userid" />
+          <Button variant="ghost" size="sm" onClick={() => { setFilters({ status: "", flagStatus: "", userId: "", aiModel: "" }); setPage(1); }} data-testid="button-clear-filters">Clear</Button>
+        </div>
+      )}
+
+      <div className="rounded-lg border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 border-b">
+              <tr>
+                <th className="text-left p-3 font-medium">Conversation</th>
+                <th className="text-left p-3 font-medium">User</th>
+                <th className="text-left p-3 font-medium">Messages</th>
+                <th className="text-left p-3 font-medium">Tokens</th>
+                <th className="text-left p-3 font-medium">Model</th>
+                <th className="text-left p-3 font-medium">Status</th>
+                <th className="text-left p-3 font-medium">Flag</th>
+                <th className="text-left p-3 font-medium">Started</th>
+                <th className="text-right p-3 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {conversations.length === 0 ? (
+                <tr><td colSpan={9} className="p-4 text-center text-muted-foreground">No conversations found</td></tr>
+              ) : conversations.map((conv: any) => (
+                <tr key={conv.id} className="border-b last:border-0 hover:bg-muted/30">
+                  <td className="p-3">
+                    <p className="font-medium truncate max-w-[200px]">{conv.title || "Untitled"}</p>
+                    <p className="text-xs text-muted-foreground font-mono">{conv.id.slice(0, 8)}...</p>
+                  </td>
+                  <td className="p-3">
+                    {conv.user ? (
+                      <div>
+                        <p className="text-xs truncate max-w-[120px]">{conv.user.email || conv.user.fullName || "-"}</p>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Anonymous</span>
+                    )}
+                  </td>
+                  <td className="p-3 text-muted-foreground">{conv.messageCount || 0}</td>
+                  <td className="p-3 text-muted-foreground">{(conv.tokensUsed || 0).toLocaleString()}</td>
+                  <td className="p-3"><span className="text-xs">{conv.aiModelUsed || "-"}</span></td>
+                  <td className="p-3">
+                    <Badge variant={conv.conversationStatus === "active" ? "default" : conv.conversationStatus === "flagged" ? "destructive" : "secondary"} className="text-xs">
+                      {conv.conversationStatus || "active"}
+                    </Badge>
+                  </td>
+                  <td className="p-3">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" className={cn("h-6 px-2 text-xs", conv.flagStatus && flagColors[conv.flagStatus])}>
+                          {conv.flagStatus || "Set Flag"}
+                          <ChevronDown className="h-3 w-3 ml-1" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent>
+                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: null })}>Clear Flag</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: "reviewed" })}>Reviewed</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: "needs_attention" })}>Needs Attention</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: "spam" })}>Spam</DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: "vip_support" })}>VIP Support</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </td>
+                  <td className="p-3 text-xs text-muted-foreground">{conv.createdAt ? format(new Date(conv.createdAt), "dd/MM/yy HH:mm") : "-"}</td>
+                  <td className="p-3">
+                    <div className="flex justify-end">
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setViewingConversation(conv)} data-testid={`button-view-conversation-${conv.id}`}>
+                        <Eye className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">Page {pagination.page} of {pagination.totalPages}</span>
+          <div className="flex gap-1">
+            <Button variant="outline" size="sm" disabled={pagination.page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button>
+            <Button variant="outline" size="sm" disabled={pagination.page === pagination.totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={!!viewingConversation} onOpenChange={() => setViewingConversation(null)}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              Conversation Details
+            </DialogTitle>
+          </DialogHeader>
+          {loadingDetail ? (
+            <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>
+          ) : conversationDetail && (
+            <div className="flex-1 overflow-hidden flex flex-col gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div><span className="text-muted-foreground">ID:</span> <span className="font-mono text-xs">{conversationDetail.id}</span></div>
+                <div><span className="text-muted-foreground">User:</span> {conversationDetail.user?.email || "Anonymous"}</div>
+                <div><span className="text-muted-foreground">Messages:</span> {conversationDetail.messageCount || 0}</div>
+                <div><span className="text-muted-foreground">Tokens:</span> {(conversationDetail.tokensUsed || 0).toLocaleString()}</div>
+                <div><span className="text-muted-foreground">Model:</span> {conversationDetail.aiModelUsed || "-"}</div>
+                <div><span className="text-muted-foreground">Status:</span> <Badge variant="secondary">{conversationDetail.conversationStatus}</Badge></div>
+                <div><span className="text-muted-foreground">Flag:</span> {conversationDetail.flagStatus ? <Badge className={flagColors[conversationDetail.flagStatus]}>{conversationDetail.flagStatus}</Badge> : "-"}</div>
+                <div><span className="text-muted-foreground">Started:</span> {conversationDetail.createdAt ? format(new Date(conversationDetail.createdAt), "dd/MM/yyyy HH:mm") : "-"}</div>
+              </div>
+
+              <Separator />
+
+              <div className="flex-1 overflow-y-auto space-y-3">
+                <h4 className="text-sm font-medium sticky top-0 bg-background py-2">Message History ({conversationDetail.messages?.length || 0})</h4>
+                {(conversationDetail.messages || []).map((msg: any, idx: number) => (
+                  <div key={msg.id || idx} className={cn("rounded-lg p-3 text-sm", msg.role === "user" ? "bg-primary/5 ml-8" : "bg-muted/50 mr-8")}>
+                    <div className="flex items-center justify-between mb-2">
+                      <Badge variant={msg.role === "user" ? "default" : "secondary"} className="text-xs">{msg.role}</Badge>
+                      <span className="text-xs text-muted-foreground">{msg.createdAt ? format(new Date(msg.createdAt), "HH:mm:ss") : ""}</span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-xs leading-relaxed">{msg.content?.slice(0, 500)}{msg.content?.length > 500 ? "..." : ""}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1385,6 +1813,8 @@ export default function AdminPage() {
         return <DashboardSection />;
       case "users":
         return <UsersSection />;
+      case "conversations":
+        return <ConversationsSection />;
       case "ai-models":
         return <AIModelsSection />;
       case "payments":
