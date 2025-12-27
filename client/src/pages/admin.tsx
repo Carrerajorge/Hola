@@ -51,6 +51,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
+import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 
 type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings";
 
@@ -2050,64 +2051,7 @@ function InvoicesSection() {
 }
 
 function AnalyticsSection() {
-  const { data: snapshots = [], isLoading } = useQuery({
-    queryKey: ["/api/admin/analytics"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/analytics?days=30");
-      return res.json();
-    }
-  });
-
-  return (
-    <div className="space-y-6">
-      <h2 className="text-lg font-medium">Analytics</h2>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-lg border p-4 space-y-4">
-          <h3 className="text-sm font-medium">Actividad reciente</h3>
-          <div className="h-32 flex items-end justify-between gap-1">
-            {(snapshots.length > 0 ? snapshots.slice(-7) : [1,2,3,4,5,6,7].map(() => ({ totalQueries: Math.random() * 100 }))).map((s: any, i: number) => (
-              <div key={i} className="flex-1 bg-primary/20 rounded-t" style={{ height: `${Math.max(10, (s.totalQueries || 0) % 100)}%` }} />
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground text-center">Últimos 7 días</p>
-        </div>
-        <div className="rounded-lg border p-4 space-y-4">
-          <h3 className="text-sm font-medium">Resumen</h3>
-          <div className="space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">Registros de analytics</span>
-              <span className="font-medium">{snapshots.length}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">Período</span>
-              <span className="font-medium">30 días</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="rounded-lg border p-4">
-        <h3 className="text-sm font-medium mb-4">Métricas clave</h3>
-        <div className="grid grid-cols-4 gap-4">
-          <div>
-            <p className="text-2xl font-semibold">2.3s</p>
-            <p className="text-xs text-muted-foreground">Tiempo respuesta</p>
-          </div>
-          <div>
-            <p className="text-2xl font-semibold">94%</p>
-            <p className="text-xs text-muted-foreground">Satisfacción</p>
-          </div>
-          <div>
-            <p className="text-2xl font-semibold">{snapshots.reduce((sum: number, s: any) => sum + (s.totalQueries || 0), 0).toLocaleString()}</p>
-            <p className="text-xs text-muted-foreground">Consultas totales</p>
-          </div>
-          <div>
-            <p className="text-2xl font-semibold">€{snapshots.reduce((sum: number, s: any) => sum + parseFloat(s.revenue || "0"), 0).toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground">Ingresos período</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <AnalyticsDashboard />;
 }
 
 function DatabaseSection() {
