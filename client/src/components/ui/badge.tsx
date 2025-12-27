@@ -38,15 +38,35 @@ const badgeVariants = cva(
 
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
+    VariantProps<typeof badgeVariants> {
+  pulse?: boolean;
+  dot?: boolean;
+}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
+function Badge({ className, variant, pulse = false, dot = false, children, ...props }: BadgeProps) {
   return (
     <div 
-      className={cn(badgeVariants({ variant }), className)} 
+      className={cn(
+        badgeVariants({ variant }), 
+        pulse && "animate-pulse",
+        className
+      )} 
       data-testid={`badge-${variant || 'default'}`}
       {...props} 
-    />
+    >
+      {dot && (
+        <span className={cn(
+          "w-1.5 h-1.5 rounded-full mr-1.5",
+          variant === "success" && "bg-green-400",
+          variant === "warning" && "bg-amber-400",
+          variant === "destructive" && "bg-red-400",
+          variant === "info" && "bg-blue-400",
+          (!variant || variant === "default") && "bg-primary-foreground/70",
+          pulse && "animate-ping"
+        )} />
+      )}
+      {children}
+    </div>
   )
 }
 

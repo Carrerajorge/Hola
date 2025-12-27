@@ -1,6 +1,7 @@
 import { Sidebar } from "@/components/sidebar";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
+import { NewChatFab } from "@/components/chat/NewChatButton";
 import { GptExplorer, Gpt } from "@/components/gpt-explorer";
 import { GptBuilder } from "@/components/gpt-builder";
 import { UserLibrary } from "@/components/user-library";
@@ -467,6 +468,9 @@ export default function Home() {
         onSelect={setPendingPrompt}
         onIncrementUsage={incrementUsage}
       />
+
+      {/* Mobile FAB for new chat */}
+      <NewChatFab onNewChat={handleNewChat} />
     </div>
   );
 }
