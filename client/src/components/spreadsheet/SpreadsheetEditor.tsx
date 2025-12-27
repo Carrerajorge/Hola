@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import Handsontable from 'handsontable';
@@ -15,8 +15,300 @@ import '../../styles/spreadsheet.css';
 import { useSpreadsheetStreaming } from './useSpreadsheetStreaming';
 import { AICommandBar } from './AICommandBar';
 import { StreamingIndicator } from './StreamingIndicator';
+import { ExcelContextMenu } from './ExcelContextMenu';
 
 registerAllModules();
+
+type AutofillPattern = {
+  type: 'arithmetic' | 'geometric' | 'date' | 'list' | 'alphanumeric' | 'repeat_sequence' | 'copy';
+  values: any[];
+  start?: number;
+  step?: number;
+  ratio?: number;
+  lastDate?: Date;
+  dayStep?: number;
+  format?: string;
+  list?: string[];
+  lastIndex?: number;
+  originalCase?: string;
+  prefix?: string;
+  lastNumber?: number;
+};
+
+function parseDate(value: any): Date | null {
+  const str = String(value);
+  const formats = [
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+    /^(\d{1,2})-(\d{1,2})-(\d{4})$/,
+    /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/,
+    /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
+  ];
+  
+  for (const regex of formats) {
+    const match = str.match(regex);
+    if (match) {
+      let day: string, month: string, year: string;
+      if (regex.source.startsWith('^(\\d{4})')) {
+        [, year, month, day] = match;
+      } else {
+        [, day, month, year] = match;
+      }
+      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+  return null;
+}
+
+function detectDateFormat(value: any): string {
+  const str = String(value);
+  if (str.includes('/')) {
+    if (str.match(/^\d{4}\//)) return 'YYYY/MM/DD';
+    return 'DD/MM/YYYY';
+  }
+  if (str.includes('-')) {
+    if (str.match(/^\d{4}-/)) return 'YYYY-MM-DD';
+    return 'DD-MM-YYYY';
+  }
+  return 'DD/MM/YYYY';
+}
+
+function formatDate(date: Date, format: string): string {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  
+  switch (format) {
+    case 'YYYY/MM/DD': return `${year}/${month}/${day}`;
+    case 'YYYY-MM-DD': return `${year}-${month}-${day}`;
+    case 'DD-MM-YYYY': return `${day}-${month}-${year}`;
+    case 'DD/MM/YYYY':
+    default: return `${day}/${month}/${year}`;
+  }
+}
+
+function detectCase(str: string): string {
+  if (str === str.toUpperCase()) return 'upper';
+  if (str === str.toLowerCase()) return 'lower';
+  if (str[0] === str[0].toUpperCase()) return 'capitalize';
+  return 'mixed';
+}
+
+function applyCase(str: string, caseType: string): string {
+  switch (caseType) {
+    case 'upper': return str.toUpperCase();
+    case 'lower': return str.toLowerCase();
+    case 'capitalize': return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+    default: return str;
+  }
+}
+
+function detectTextPattern(values: any[]): AutofillPattern | null {
+  const daysES = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+  const daysEN = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const daysShortES = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
+  const daysShortEN = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const monthsES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const monthsEN = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  const monthsShortES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const monthsShortEN = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const quarters = ['q1', 'q2', 'q3', 'q4', 't1', 't2', 't3', 't4'];
+
+  const lowerValues = values.map(v => String(v).toLowerCase().trim());
+
+  const lists = [
+    { name: 'days', list: daysES },
+    { name: 'days', list: daysEN },
+    { name: 'days', list: daysShortES },
+    { name: 'days', list: daysShortEN },
+    { name: 'months', list: monthsES },
+    { name: 'months', list: monthsEN },
+    { name: 'months', list: monthsShortES },
+    { name: 'months', list: monthsShortEN },
+    { name: 'quarters', list: quarters }
+  ];
+
+  for (const { list } of lists) {
+    const indices = lowerValues.map(v => list.indexOf(v));
+    if (indices.every(i => i !== -1)) {
+      let isConsecutive = true;
+      for (let i = 1; i < indices.length; i++) {
+        const expectedNext = (indices[i - 1] + 1) % list.length;
+        if (indices[i] !== expectedNext) {
+          isConsecutive = false;
+          break;
+        }
+      }
+      if (isConsecutive || indices.length === 1) {
+        return {
+          type: 'list',
+          values,
+          list,
+          lastIndex: indices[indices.length - 1],
+          originalCase: detectCase(String(values[0]))
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function detectAlphanumericPattern(values: any[]): AutofillPattern | null {
+  const regex = /^(.+?)(\d+)$/;
+  const parsed = values.map(v => {
+    const match = String(v).match(regex);
+    if (match) {
+      return { prefix: match[1], number: parseInt(match[2]) };
+    }
+    return null;
+  });
+
+  if (parsed.every(p => p !== null)) {
+    const prefix = parsed[0]!.prefix;
+    if (parsed.every(p => p!.prefix === prefix)) {
+      const numbers = parsed.map(p => p!.number);
+      const diffs: number[] = [];
+      for (let i = 1; i < numbers.length; i++) {
+        diffs.push(numbers[i] - numbers[i - 1]);
+      }
+      if (diffs.length === 0 || diffs.every(d => d === diffs[0])) {
+        return {
+          type: 'alphanumeric',
+          values,
+          prefix,
+          lastNumber: numbers[numbers.length - 1],
+          step: diffs.length > 0 ? diffs[0] : 1
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function detectPattern(data: any[][], direction: string): AutofillPattern {
+  const values = direction === 'down' || direction === 'up'
+    ? data.map(row => row[0])
+    : data[0];
+
+  if (values.length === 0) return { type: 'copy', values };
+  if (values.length === 1) return { type: 'copy', values };
+
+  const numbers = values.map(v => parseFloat(v)).filter(n => !isNaN(n));
+
+  if (numbers.length === values.length) {
+    const diffs: number[] = [];
+    for (let i = 1; i < numbers.length; i++) {
+      diffs.push(numbers[i] - numbers[i - 1]);
+    }
+    const allSameDiff = diffs.every(d => d === diffs[0]);
+    if (allSameDiff) {
+      return {
+        type: 'arithmetic',
+        values: numbers,
+        start: numbers[numbers.length - 1],
+        step: diffs[0]
+      };
+    }
+
+    if (numbers[0] !== 0) {
+      const ratios: number[] = [];
+      for (let i = 1; i < numbers.length; i++) {
+        ratios.push(numbers[i] / numbers[i - 1]);
+      }
+      const allSameRatio = ratios.every(r => Math.abs(r - ratios[0]) < 0.0001);
+      if (allSameRatio && ratios[0] !== 1) {
+        return {
+          type: 'geometric',
+          values: numbers,
+          start: numbers[numbers.length - 1],
+          ratio: ratios[0]
+        };
+      }
+    }
+    return { type: 'repeat_sequence', values: numbers };
+  }
+
+  const dates = values.map(v => parseDate(v)).filter(d => d !== null) as Date[];
+  if (dates.length === values.length) {
+    const dayDiffs: number[] = [];
+    for (let i = 1; i < dates.length; i++) {
+      dayDiffs.push(Math.round((dates[i].getTime() - dates[i - 1].getTime()) / (1000 * 60 * 60 * 24)));
+    }
+    const allSameDayDiff = dayDiffs.every(d => d === dayDiffs[0]);
+    if (allSameDayDiff) {
+      return {
+        type: 'date',
+        values: dates,
+        lastDate: dates[dates.length - 1],
+        dayStep: dayDiffs[0],
+        format: detectDateFormat(values[0])
+      };
+    }
+  }
+
+  const textPattern = detectTextPattern(values);
+  if (textPattern) return textPattern;
+
+  const alphanumPattern = detectAlphanumericPattern(values);
+  if (alphanumPattern) return alphanumPattern;
+
+  return { type: 'repeat_sequence', values };
+}
+
+function generateFillData(pattern: AutofillPattern, targetCount: number): any[] {
+  const result: any[] = [];
+
+  switch (pattern.type) {
+    case 'arithmetic':
+      for (let i = 0; i < targetCount; i++) {
+        const value = (pattern.start || 0) + (pattern.step || 1) * (i + 1);
+        result.push(value);
+      }
+      break;
+
+    case 'geometric':
+      for (let i = 0; i < targetCount; i++) {
+        const value = (pattern.start || 1) * Math.pow(pattern.ratio || 2, i + 1);
+        result.push(Math.round(value * 100) / 100);
+      }
+      break;
+
+    case 'date':
+      for (let i = 0; i < targetCount; i++) {
+        const newDate = new Date(pattern.lastDate!);
+        newDate.setDate(newDate.getDate() + (pattern.dayStep || 1) * (i + 1));
+        result.push(formatDate(newDate, pattern.format || 'DD/MM/YYYY'));
+      }
+      break;
+
+    case 'list':
+      for (let i = 0; i < targetCount; i++) {
+        const index = ((pattern.lastIndex || 0) + i + 1) % pattern.list!.length;
+        let value = pattern.list![index];
+        value = applyCase(value, pattern.originalCase || 'lower');
+        result.push(value);
+      }
+      break;
+
+    case 'alphanumeric':
+      for (let i = 0; i < targetCount; i++) {
+        const num = (pattern.lastNumber || 0) + (pattern.step || 1) * (i + 1);
+        result.push(`${pattern.prefix}${num}`);
+      }
+      break;
+
+    case 'repeat_sequence':
+    case 'copy':
+    default:
+      for (let i = 0; i < targetCount; i++) {
+        const index = i % pattern.values.length;
+        result.push(pattern.values[index]);
+      }
+      break;
+  }
+
+  return result;
+}
 
 interface SpreadsheetEditorProps {
   initialData?: any[][];
@@ -80,6 +372,10 @@ export function SpreadsheetEditor({
   });
   const [selectedRange, setSelectedRange] = useState<{ startRow: number; startCol: number; endRow: number; endCol: number } | null>(null);
   const [isAIProcessing, setIsAIProcessing] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; isOpen: boolean }>({
+    x: 0, y: 0, isOpen: false
+  });
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const { 
     isStreaming, 
@@ -355,14 +651,154 @@ export function SpreadsheetEditor({
 
   const handleDataChange = useCallback((changes: any, source: string) => {
     if (source === 'loadData') return;
+    if (!changes || changes.length === 0) return;
     
-    setIsModified(true);
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
     
-    const newHistory = history.slice(0, historyIndex + 1);
-    newHistory.push(JSON.parse(JSON.stringify(data)));
-    setHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
+    debounceTimeoutRef.current = setTimeout(() => {
+      setIsModified(true);
+      
+      const newHistory = history.slice(0, historyIndex + 1);
+      newHistory.push(JSON.parse(JSON.stringify(data)));
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+    }, 100);
   }, [data, history, historyIndex]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      isOpen: true
+    });
+  }, []);
+
+  const handleContextAction = useCallback((action: string) => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot) return;
+    
+    const selected = hot.getSelected();
+    if (!selected) return;
+
+    const [r1, c1, r2, c2] = selected[0];
+    const minRow = Math.min(r1, r2);
+    const maxRow = Math.max(r1, r2);
+    const minCol = Math.min(c1, c2);
+    const maxCol = Math.max(c1, c2);
+
+    switch (action) {
+      case 'cut':
+        handleCut();
+        break;
+      case 'copy':
+        handleCopy();
+        break;
+      case 'paste':
+        handlePaste();
+        break;
+      case 'insert_row_above':
+        hot.alter('insert_row_above', minRow);
+        break;
+      case 'insert_row_below':
+        hot.alter('insert_row_below', maxRow);
+        break;
+      case 'insert_col_left':
+        hot.alter('insert_col_start', minCol);
+        break;
+      case 'insert_col_right':
+        hot.alter('insert_col_end', maxCol);
+        break;
+      case 'delete_rows':
+        hot.alter('remove_row', minRow, maxRow - minRow + 1);
+        break;
+      case 'delete_cols':
+        hot.alter('remove_col', minCol, maxCol - minCol + 1);
+        break;
+      case 'clear_contents':
+        for (let r = minRow; r <= maxRow; r++) {
+          for (let c = minCol; c <= maxCol; c++) {
+            hot.setDataAtCell(r, c, '');
+          }
+        }
+        break;
+      case 'sort_asc':
+        hot.getPlugin('columnSorting').sort({ column: minCol, sortOrder: 'asc' });
+        break;
+      case 'sort_desc':
+        hot.getPlugin('columnSorting').sort({ column: minCol, sortOrder: 'desc' });
+        break;
+      case 'add_comment':
+        const comment = prompt('Escribe un comentario:');
+        if (comment) {
+          hot.setCellMeta(minRow, minCol, 'comment', { value: comment });
+          hot.render();
+        }
+        break;
+      case 'hyperlink':
+        const url = prompt('URL del hipervínculo:');
+        if (url) {
+          hot.setCellMeta(minRow, minCol, 'hyperlink', url);
+          hot.render();
+        }
+        break;
+      case 'merge_all':
+        hot.getPlugin('mergeCells').merge(minRow, minCol, maxRow, maxCol);
+        break;
+      case 'unmerge':
+        hot.getPlugin('mergeCells').unmerge(minRow, minCol, maxRow, maxCol);
+        break;
+      case 'fill_down':
+      case 'fill_right':
+      case 'fill_up':
+      case 'fill_left':
+        break;
+      default:
+        console.log('Action not implemented:', action);
+    }
+    setIsModified(true);
+  }, [handleCut, handleCopy, handlePaste]);
+
+  const handleSmartAutofill = useCallback((selectionData: any[][], sourceRange: any, targetRange: any, direction: string) => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot) return;
+
+    const { startRow: sr, startCol: sc, endRow: er, endCol: ec } = sourceRange;
+
+    const sourceData: any[][] = [];
+    for (let r = sr; r <= er; r++) {
+      const row: any[] = [];
+      for (let c = sc; c <= ec; c++) {
+        row.push(hot.getDataAtCell(r, c));
+      }
+      sourceData.push(row);
+    }
+
+    const pattern = detectPattern(sourceData, direction);
+
+    const { startRow: tr, endRow: ter, startCol: tc, endCol: tec } = targetRange;
+    const targetCount = direction === 'down' || direction === 'up'
+      ? ter - tr + 1
+      : tec - tc + 1;
+
+    const fillData = generateFillData(pattern, targetCount);
+
+    if (direction === 'down' || direction === 'up') {
+      for (let i = 0; i < fillData.length; i++) {
+        const row = direction === 'down' ? tr + i : ter - i;
+        hot.setDataAtCell(row, sc, fillData[i]);
+      }
+    } else {
+      for (let i = 0; i < fillData.length; i++) {
+        const col = direction === 'right' ? tc + i : tec - i;
+        hot.setDataAtCell(sr, col, fillData[i]);
+      }
+    }
+
+    return false;
+  }, []);
 
   const handleUndo = useCallback(() => {
     if (hotRef.current?.hotInstance) {
@@ -574,8 +1010,15 @@ export function SpreadsheetEditor({
     width: '100%',
     licenseKey: 'non-commercial-and-evaluation',
     
+    renderAllRows: false,
+    viewportRowRenderingOffset: 20,
+    viewportColumnRenderingOffset: 5,
+    
     selectionMode: 'multiple' as const,
-    fillHandle: true,
+    fillHandle: {
+      autoInsertRow: true,
+      direction: 'vertical' as const,
+    },
     outsideClickDeselects: false,
     fragmentSelection: true,
     
@@ -584,8 +1027,9 @@ export function SpreadsheetEditor({
     tabMoves: { row: 0, col: 1 },
     autoWrapRow: true,
     autoWrapCol: true,
+    editor: 'text' as const,
     
-    contextMenu: true,
+    contextMenu: false,
     manualColumnResize: true,
     manualRowResize: true,
     manualColumnMove: true,
@@ -602,6 +1046,7 @@ export function SpreadsheetEditor({
     
     filters: true,
     dropdownMenu: true,
+    columnSorting: true,
     multiColumnSorting: true,
     mergeCells: true,
     comments: true,
@@ -616,6 +1061,7 @@ export function SpreadsheetEditor({
     afterChange: handleDataChange,
     afterSelection: handleSelection,
     afterSelectionEnd: handleSelectionEnd,
+    beforeAutofill: handleSmartAutofill,
     renderer: customRendererRef.current,
     className: 'spreadsheet-dark-theme',
   };
@@ -815,7 +1261,7 @@ export function SpreadsheetEditor({
         selectedRange={selectedRange}
       />
 
-      <div className="flex-1 overflow-hidden spreadsheet-container">
+      <div className="flex-1 overflow-hidden spreadsheet-container" onContextMenu={handleContextMenu}>
         <HotTable ref={hotRef} settings={hotSettings} />
       </div>
 
@@ -858,6 +1304,15 @@ export function SpreadsheetEditor({
         isStreaming={isStreaming}
         cell={streamingCell}
         onCancel={cancelStreaming}
+      />
+
+      <ExcelContextMenu
+        x={contextMenu.x}
+        y={contextMenu.y}
+        isOpen={contextMenu.isOpen}
+        onClose={() => setContextMenu(prev => ({ ...prev, isOpen: false }))}
+        onAction={handleContextAction}
+        selectedRange={selectedRange}
       />
     </div>
   );
