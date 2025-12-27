@@ -15,6 +15,8 @@ import { errorRecovery } from "../services/errorRecovery";
 import { FEATURES, setFeatureFlag } from "../config/features";
 import { chatAgenticCircuit } from "../services/chatAgenticCircuit";
 
+const gapsStore: any[] = [];
+
 export function createAdminRouter() {
   const router = Router();
 
@@ -2483,7 +2485,17 @@ export function createAdminRouter() {
   });
 
   router.get("/agent/circuits", (req, res) => {
-    res.json(errorRecovery.getAllCircuits());
+    try {
+      const chatCircuit = chatAgenticCircuit.getStatus();
+      const toolCircuits = errorRecovery.getAllCircuits();
+      const circuits = [
+        { name: 'chat_integration', ...chatCircuit, status: chatCircuit.isOpen ? 'open' : 'closed' },
+        ...toolCircuits
+      ];
+      res.json(circuits);
+    } catch (error) {
+      res.json([]);
+    }
   });
 
   router.post("/agent/circuits/:name/reset", (req, res) => {
@@ -2533,6 +2545,28 @@ export function createAdminRouter() {
       status: !FEATURES.AGENTIC_CHAT_ENABLED ? 'disabled' : 
               circuitStatus.isOpen ? 'circuit_open' : 'healthy'
     });
+  });
+
+  router.get("/agent/tools", (req, res) => {
+    try {
+      const tools = toolRegistry.listAllTools();
+      res.json({ tools });
+    } catch (error) {
+      res.json({ tools: [] });
+    }
+  });
+
+  router.get("/agent/gaps", (req, res) => {
+    res.json({ gaps: gapsStore });
+  });
+
+  router.get("/agent/memory/stats", (req, res) => {
+    try {
+      const stats = compressedMemory.getStats();
+      res.json(stats);
+    } catch (error) {
+      res.json({ totalAtoms: 0, storageBytes: 0, avgWeight: 0, byType: {} });
+    }
   });
 
   return router;
