@@ -62,7 +62,7 @@ router.post('/excel-command', async (req, res) => {
       });
       res.json({ columnData: emails });
     }
-    else if (commandLower.includes('número') || commandLower.includes('number') || commandLower.includes('venta') || commandLower.includes('sales')) {
+    else if ((commandLower.includes('número') || commandLower.includes('number') || commandLower.includes('venta') || commandLower.includes('sales')) && !commandLower.includes('tabla') && !commandLower.includes('inventario') && !commandLower.includes('registro')) {
       const numbers = Array.from({ length: rowCount }, () => 
         Math.floor(Math.random() * 9000 + 1000)
       );

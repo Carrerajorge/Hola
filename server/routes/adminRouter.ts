@@ -45,6 +45,110 @@ async function seedDefaultExcelDocuments() {
         size: 67000,
         isTemplate: false,
         version: 1
+      },
+      {
+        uuid: nanoid(),
+        name: 'Factura',
+        sheets: [{ name: 'Factura', data: [
+          ['FACTURA', '', '', '', ''],
+          ['', '', '', '', ''],
+          ['Cliente:', '', '', 'Fecha:', ''],
+          ['Dirección:', '', '', 'No. Factura:', ''],
+          ['', '', '', '', ''],
+          ['Descripción', 'Cantidad', 'Precio Unit.', 'Total', ''],
+          ['', '', '', '', ''],
+          ['', '', '', '', ''],
+          ['', '', '', '', ''],
+          ['', '', '', '', ''],
+          ['', '', 'Subtotal:', '', ''],
+          ['', '', 'IVA (16%):', '', ''],
+          ['', '', 'TOTAL:', '', '']
+        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 18 }, '5-0': { bold: true }, '5-1': { bold: true }, '5-2': { bold: true }, '5-3': { bold: true }, '12-2': { bold: true }, '12-3': { bold: true } } } }],
+        size: 5000,
+        isTemplate: true,
+        templateCategory: 'Finanzas',
+        version: 1
+      },
+      {
+        uuid: nanoid(),
+        name: 'Presupuesto Mensual',
+        sheets: [{ name: 'Presupuesto', data: [
+          ['PRESUPUESTO MENSUAL', '', '', ''],
+          ['', '', '', ''],
+          ['Categoría', 'Presupuestado', 'Real', 'Diferencia'],
+          ['Ingresos', '', '', ''],
+          ['Salario', '', '', ''],
+          ['Otros', '', '', ''],
+          ['', '', '', ''],
+          ['Gastos', '', '', ''],
+          ['Vivienda', '', '', ''],
+          ['Alimentación', '', '', ''],
+          ['Transporte', '', '', ''],
+          ['Servicios', '', '', ''],
+          ['Entretenimiento', '', '', ''],
+          ['Ahorros', '', '', ''],
+          ['', '', '', ''],
+          ['TOTAL', '', '', '']
+        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '15-0': { bold: true } } } }],
+        size: 4000,
+        isTemplate: true,
+        templateCategory: 'Finanzas',
+        version: 1
+      },
+      {
+        uuid: nanoid(),
+        name: 'Lista de Tareas',
+        sheets: [{ name: 'Tareas', data: [
+          ['LISTA DE TAREAS', '', '', '', ''],
+          ['', '', '', '', ''],
+          ['#', 'Tarea', 'Prioridad', 'Estado', 'Fecha Límite'],
+          ['1', '', '', 'Pendiente', ''],
+          ['2', '', '', 'Pendiente', ''],
+          ['3', '', '', 'Pendiente', ''],
+          ['4', '', '', 'Pendiente', ''],
+          ['5', '', '', 'Pendiente', '']
+        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '2-4': { bold: true } } } }],
+        size: 2500,
+        isTemplate: true,
+        templateCategory: 'Productividad',
+        version: 1
+      },
+      {
+        uuid: nanoid(),
+        name: 'Inventario de Productos',
+        sheets: [{ name: 'Inventario', data: [
+          ['INVENTARIO DE PRODUCTOS', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['Código', 'Producto', 'Categoría', 'Stock', 'Precio', 'Valor Total'],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['', '', '', 'TOTAL:', '', '']
+        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '2-4': { bold: true }, '2-5': { bold: true } } } }],
+        size: 3500,
+        isTemplate: true,
+        templateCategory: 'Negocio',
+        version: 1
+      },
+      {
+        uuid: nanoid(),
+        name: 'Registro de Ventas',
+        sheets: [{ name: 'Ventas', data: [
+          ['REGISTRO DE VENTAS', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['Fecha', 'Cliente', 'Producto', 'Cantidad', 'Precio', 'Total'],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', '', ''],
+          ['', '', '', '', 'TOTAL:', '']
+        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '2-4': { bold: true }, '2-5': { bold: true } } } }],
+        size: 3000,
+        isTemplate: true,
+        templateCategory: 'Negocio',
+        version: 1
       }
     ]);
   }
@@ -2609,8 +2713,9 @@ export function createAdminRouter() {
   router.get("/excel/list", async (req, res) => {
     try {
       await seedDefaultExcelDocuments();
+      const { search, template } = req.query;
       
-      const documents = await db.select({
+      let query = db.select({
         id: excelDocuments.uuid,
         name: excelDocuments.name,
         sheets: excelDocuments.sheets,
@@ -2621,8 +2726,21 @@ export function createAdminRouter() {
         isTemplate: excelDocuments.isTemplate,
         templateCategory: excelDocuments.templateCategory
       })
-      .from(excelDocuments)
-      .orderBy(desc(excelDocuments.createdAt));
+      .from(excelDocuments);
+      
+      const conditions = [];
+      if (search && typeof search === 'string') {
+        conditions.push(ilike(excelDocuments.name, `%${search}%`));
+      }
+      if (template === 'true') {
+        conditions.push(eq(excelDocuments.isTemplate, true));
+      } else if (template === 'false') {
+        conditions.push(eq(excelDocuments.isTemplate, false));
+      }
+      
+      const documents = conditions.length > 0
+        ? await query.where(and(...conditions)).orderBy(desc(excelDocuments.createdAt))
+        : await query.orderBy(desc(excelDocuments.createdAt));
       
       const formattedDocuments = documents.map(doc => ({
         ...doc,
@@ -2631,6 +2749,75 @@ export function createAdminRouter() {
       }));
       
       res.json(formattedDocuments);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/excel/templates", async (req, res) => {
+    try {
+      const templates = await db.select({
+        id: excelDocuments.uuid,
+        name: excelDocuments.name,
+        sheets: excelDocuments.sheets,
+        size: excelDocuments.size,
+        templateCategory: excelDocuments.templateCategory,
+        createdAt: excelDocuments.createdAt
+      })
+      .from(excelDocuments)
+      .where(eq(excelDocuments.isTemplate, true))
+      .orderBy(excelDocuments.templateCategory);
+      
+      const byCategory: Record<string, any[]> = {};
+      templates.forEach(t => {
+        const cat = t.templateCategory || 'General';
+        if (!byCategory[cat]) byCategory[cat] = [];
+        byCategory[cat].push({
+          ...t,
+          sheets: Array.isArray(t.sheets) ? (t.sheets as any[]).length : 1
+        });
+      });
+      
+      res.json({ templates: byCategory });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/excel/template/create-from", async (req, res) => {
+    try {
+      const { templateId, newName } = req.body;
+      
+      const [template] = await db.select()
+        .from(excelDocuments)
+        .where(and(eq(excelDocuments.uuid, templateId), eq(excelDocuments.isTemplate, true)))
+        .limit(1);
+      
+      if (!template) {
+        return res.status(404).json({ error: "Template not found" });
+      }
+      
+      const newDoc = await db.insert(excelDocuments)
+        .values({
+          uuid: nanoid(),
+          name: newName || `Copia de ${template.name}`,
+          data: template.data,
+          sheets: template.sheets,
+          metadata: template.metadata,
+          size: template.size,
+          isTemplate: false,
+          version: 1
+        })
+        .returning();
+      
+      res.json({ 
+        success: true, 
+        document: {
+          id: newDoc[0].uuid,
+          name: newDoc[0].name,
+          sheets: Array.isArray(newDoc[0].sheets) ? (newDoc[0].sheets as any[]).length : 1
+        }
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

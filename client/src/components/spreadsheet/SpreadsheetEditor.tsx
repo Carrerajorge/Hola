@@ -20,8 +20,10 @@ registerAllModules();
 
 interface SpreadsheetEditorProps {
   initialData?: any[][];
+  initialSheets?: { name: string; data: any[][]; metadata?: any }[];
   fileName?: string;
-  onSave?: (data: any[][], fileName: string) => void;
+  documentId?: string;
+  onSave?: (data: any[][], fileName: string, sheets?: { name: string; data: any[][]; metadata?: any }[]) => void;
   readOnly?: boolean;
   height?: number;
 }
@@ -46,17 +48,22 @@ function getColumnHeaders(count: number): string[] {
 
 export function SpreadsheetEditor({ 
   initialData, 
+  initialSheets,
   fileName = 'spreadsheet.xlsx',
+  documentId,
   onSave,
   readOnly = false,
   height = 600 
 }: SpreadsheetEditorProps) {
   const hotRef = useRef<any>(null);
-  const [data, setData] = useState<any[][]>(initialData || generateEmptySheet(50, 26));
+  const [data, setData] = useState<any[][]>(
+    initialSheets?.[0]?.data || initialData || generateEmptySheet(50, 26)
+  );
   const [currentFileName, setCurrentFileName] = useState(fileName);
-  const [sheets, setSheets] = useState<{ name: string; data: any[][] }[]>([
-    { name: 'Hoja 1', data: initialData || generateEmptySheet(50, 26) }
-  ]);
+  const [docId, setDocId] = useState(documentId);
+  const [sheets, setSheets] = useState<{ name: string; data: any[][]; metadata?: any }[]>(
+    initialSheets || [{ name: 'Hoja 1', data: initialData || generateEmptySheet(50, 26) }]
+  );
   const [activeSheet, setActiveSheet] = useState(0);
   const [history, setHistory] = useState<any[][][]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -85,11 +92,33 @@ export function SpreadsheetEditor({
   } = useSpreadsheetStreaming(hotRef, setIsModified);
 
   useEffect(() => {
-    if (initialData) {
+    if (initialSheets && initialSheets.length > 0) {
+      setSheets(initialSheets);
+      setData(initialSheets[0].data || generateEmptySheet(50, 26));
+      setActiveSheet(0);
+    } else if (initialData) {
       setData(initialData);
       setSheets([{ name: 'Hoja 1', data: initialData }]);
     }
-  }, [initialData]);
+  }, [initialData, initialSheets]);
+
+  useEffect(() => {
+    if (!hotRef.current?.hotInstance || !sheets[activeSheet]?.metadata?.formatting) return;
+    
+    const hot = hotRef.current.hotInstance;
+    const formatting = sheets[activeSheet].metadata.formatting;
+    
+    Object.entries(formatting).forEach(([key, format]: [string, any]) => {
+      const [row, col] = key.split('-').map(Number);
+      if (format.bold) hot.setCellMeta(row, col, 'bold', true);
+      if (format.italic) hot.setCellMeta(row, col, 'italic', true);
+      if (format.alignment) hot.setCellMeta(row, col, 'alignment', format.alignment);
+      if (format.backgroundColor) hot.setCellMeta(row, col, 'backgroundColor', format.backgroundColor);
+      if (format.textColor) hot.setCellMeta(row, col, 'textColor', format.textColor);
+    });
+    
+    hot.render();
+  }, [sheets, activeSheet]);
 
   const updateFormatState = useCallback(() => {
     if (!hotRef.current?.hotInstance) return;
@@ -278,12 +307,43 @@ export function SpreadsheetEditor({
     }
   }, [sheets, activeSheet, currentFileName]);
 
+  const extractFormatMetadata = useCallback(() => {
+    if (!hotRef.current?.hotInstance) return {};
+    const hot = hotRef.current.hotInstance;
+    const formatting: Record<string, any> = {};
+    const rowCount = hot.countRows();
+    const colCount = hot.countCols();
+    
+    for (let row = 0; row < rowCount; row++) {
+      for (let col = 0; col < colCount; col++) {
+        const meta = hot.getCellMeta(row, col);
+        if (meta.bold || meta.italic || meta.alignment || meta.backgroundColor || meta.textColor) {
+          formatting[`${row}-${col}`] = {
+            bold: meta.bold || false,
+            italic: meta.italic || false,
+            alignment: meta.alignment || 'left',
+            backgroundColor: meta.backgroundColor || '',
+            textColor: meta.textColor || ''
+          };
+        }
+      }
+    }
+    return formatting;
+  }, []);
+
   const handleSave = useCallback(() => {
+    const updatedSheets = [...sheets];
+    updatedSheets[activeSheet] = { 
+      ...updatedSheets[activeSheet], 
+      data,
+      metadata: { formatting: extractFormatMetadata() }
+    };
+    
     if (onSave) {
-      onSave(data, currentFileName);
+      onSave(data, currentFileName, updatedSheets);
     }
     setIsModified(false);
-  }, [data, currentFileName, onSave]);
+  }, [data, currentFileName, onSave, sheets, activeSheet, extractFormatMetadata]);
 
   const handleDataChange = useCallback((changes: any, source: string) => {
     if (source === 'loadData') return;
