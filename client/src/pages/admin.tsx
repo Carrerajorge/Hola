@@ -11,6 +11,8 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   ArrowLeft,
   LayoutDashboard,
@@ -49,7 +51,17 @@ import {
   Terminal,
   Play,
   Layers,
-  Server
+  Server,
+  Globe,
+  Network,
+  Lock,
+  Timer,
+  FileCode,
+  Archive,
+  ShieldCheck,
+  ShieldAlert,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
@@ -2447,10 +2459,37 @@ function DatabaseSection() {
   );
 }
 
+const POLICY_TYPES = [
+  { value: "cors", label: "CORS", icon: Globe, color: "bg-blue-500" },
+  { value: "csp", label: "CSP", icon: FileCode, color: "bg-purple-500" },
+  { value: "rate_limit", label: "Rate Limit", icon: Timer, color: "bg-orange-500" },
+  { value: "ip_restriction", label: "IP Restriction", icon: Network, color: "bg-red-500" },
+  { value: "auth_requirement", label: "Auth Requirement", icon: Lock, color: "bg-green-500" },
+  { value: "data_retention", label: "Data Retention", icon: Archive, color: "bg-yellow-500" },
+];
+
+const APPLIED_TO_OPTIONS = [
+  { value: "global", label: "Global" },
+  { value: "api", label: "API" },
+  { value: "dashboard", label: "Dashboard" },
+  { value: "public", label: "Public" },
+];
+
 function SecuritySection() {
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState("overview");
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newPolicy, setNewPolicy] = useState({ domain: "", allowNavigation: "true", rateLimit: 10 });
+  const [editingPolicy, setEditingPolicy] = useState<any>(null);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditFilters, setAuditFilters] = useState({ action: "", dateFrom: "", dateTo: "" });
+
+  const [newPolicy, setNewPolicy] = useState({
+    policyName: "",
+    policyType: "cors",
+    appliedTo: "global",
+    priority: 0,
+    rules: {} as Record<string, any>
+  });
 
   const { data: policies = [], isLoading } = useQuery({
     queryKey: ["/api/admin/security/policies"],
@@ -2460,10 +2499,33 @@ function SecuritySection() {
     }
   });
 
-  const { data: auditLogs = [] } = useQuery({
+  const { data: stats } = useQuery({
+    queryKey: ["/api/admin/security/stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/security/stats");
+      return res.json();
+    }
+  });
+
+  const { data: auditLogsData } = useQuery({
+    queryKey: ["/api/admin/security/audit-logs", auditPage, auditFilters],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: auditPage.toString(),
+        limit: "20",
+        ...(auditFilters.action && { action: auditFilters.action }),
+        ...(auditFilters.dateFrom && { date_from: auditFilters.dateFrom }),
+        ...(auditFilters.dateTo && { date_to: auditFilters.dateTo }),
+      });
+      const res = await fetch(`/api/admin/security/audit-logs?${params}`);
+      return res.json();
+    }
+  });
+
+  const { data: recentLogs = [] } = useQuery({
     queryKey: ["/api/admin/security/logs"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/security/logs?limit=20");
+      const res = await fetch("/api/admin/security/logs?limit=10");
       return res.json();
     }
   });
@@ -2475,22 +2537,330 @@ function SecuritySection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(policy)
       });
+      if (!res.ok) throw new Error("Failed to create policy");
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/security/policies"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/stats"] });
+      setShowAddModal(false);
+      resetPolicyForm();
+    }
+  });
+
+  const updatePolicyMutation = useMutation({
+    mutationFn: async ({ id, ...data }: any) => {
+      const res = await fetch(`/api/admin/security/policies/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) throw new Error("Failed to update policy");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/policies"] });
+      setEditingPolicy(null);
       setShowAddModal(false);
     }
   });
 
   const deletePolicyMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/security/policies/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/security/policies/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete policy");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/security/policies"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/stats"] });
     }
   });
+
+  const togglePolicyMutation = useMutation({
+    mutationFn: async ({ id, isEnabled }: { id: string; isEnabled: boolean }) => {
+      const res = await fetch(`/api/admin/security/policies/${id}/toggle`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isEnabled })
+      });
+      if (!res.ok) throw new Error("Failed to toggle policy");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/policies"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/security/stats"] });
+    }
+  });
+
+  const resetPolicyForm = () => {
+    setNewPolicy({
+      policyName: "",
+      policyType: "cors",
+      appliedTo: "global",
+      priority: 0,
+      rules: {}
+    });
+  };
+
+  const handleEditPolicy = (policy: any) => {
+    setEditingPolicy(policy);
+    setNewPolicy({
+      policyName: policy.policyName,
+      policyType: policy.policyType,
+      appliedTo: policy.appliedTo,
+      priority: policy.priority || 0,
+      rules: policy.rules || {}
+    });
+    setShowAddModal(true);
+  };
+
+  const handleSavePolicy = () => {
+    const policyData = {
+      policyName: newPolicy.policyName,
+      policyType: newPolicy.policyType,
+      appliedTo: newPolicy.appliedTo,
+      priority: newPolicy.priority,
+      rules: newPolicy.rules
+    };
+    
+    if (editingPolicy) {
+      updatePolicyMutation.mutate({ id: editingPolicy.id, ...policyData });
+    } else {
+      createPolicyMutation.mutate(policyData);
+    }
+  };
+
+  const getPolicyTypeInfo = (type: string) => {
+    return POLICY_TYPES.find(t => t.value === type) || POLICY_TYPES[0];
+  };
+
+  const getSeverityBadge = (action: string) => {
+    const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied"];
+    const warningActions = ["warning", "update", "delete"];
+    
+    if (criticalActions.some(a => action?.includes(a))) {
+      return <Badge variant="destructive" className="text-xs">Critical</Badge>;
+    }
+    if (warningActions.some(a => action?.includes(a))) {
+      return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 text-xs">Warning</Badge>;
+    }
+    return <Badge variant="outline" className="text-xs">Info</Badge>;
+  };
+
+  const renderPolicyRulesForm = () => {
+    switch (newPolicy.policyType) {
+      case "cors":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Allowed Origins (one per line)</Label>
+              <Textarea 
+                data-testid="input-cors-origins"
+                placeholder="https://example.com&#10;https://api.example.com"
+                value={newPolicy.rules.allowed_origins || ""}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, allowed_origins: e.target.value } })}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Allowed Methods</Label>
+              <div className="flex flex-wrap gap-3">
+                {["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"].map(method => (
+                  <label key={method} className="flex items-center gap-2">
+                    <Checkbox 
+                      data-testid={`checkbox-method-${method.toLowerCase()}`}
+                      checked={(newPolicy.rules.allowed_methods || []).includes(method)}
+                      onCheckedChange={(checked) => {
+                        const methods = newPolicy.rules.allowed_methods || [];
+                        setNewPolicy({
+                          ...newPolicy,
+                          rules: {
+                            ...newPolicy.rules,
+                            allowed_methods: checked ? [...methods, method] : methods.filter((m: string) => m !== method)
+                          }
+                        });
+                      }}
+                    />
+                    <span className="text-sm">{method}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Max Age (seconds)</Label>
+              <Input 
+                data-testid="input-cors-max-age"
+                type="number"
+                value={newPolicy.rules.max_age || 86400}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, max_age: parseInt(e.target.value) } })}
+              />
+            </div>
+          </div>
+        );
+      case "rate_limit":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Requests per Minute</Label>
+              <Input 
+                data-testid="input-rate-requests"
+                type="number"
+                value={newPolicy.rules.requests_per_minute || 60}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, requests_per_minute: parseInt(e.target.value) } })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Burst Limit</Label>
+              <Input 
+                data-testid="input-rate-burst"
+                type="number"
+                value={newPolicy.rules.burst_limit || 10}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, burst_limit: parseInt(e.target.value) } })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Scope</Label>
+              <Select 
+                value={newPolicy.rules.scope || "ip"}
+                onValueChange={(v) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, scope: v } })}
+              >
+                <SelectTrigger data-testid="select-rate-scope">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ip">Per IP</SelectItem>
+                  <SelectItem value="user">Per User</SelectItem>
+                  <SelectItem value="api_key">Per API Key</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        );
+      case "ip_restriction":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Whitelist CIDRs (one per line)</Label>
+              <Textarea 
+                data-testid="input-ip-whitelist"
+                placeholder="192.168.1.0/24&#10;10.0.0.0/8"
+                value={newPolicy.rules.whitelist_cidrs || ""}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, whitelist_cidrs: e.target.value } })}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Blacklist CIDRs (one per line)</Label>
+              <Textarea 
+                data-testid="input-ip-blacklist"
+                placeholder="0.0.0.0/0"
+                value={newPolicy.rules.blacklist_cidrs || ""}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, blacklist_cidrs: e.target.value } })}
+                rows={3}
+              />
+            </div>
+          </div>
+        );
+      case "csp":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>default-src</Label>
+              <Input 
+                data-testid="input-csp-default"
+                placeholder="'self'"
+                value={newPolicy.rules.default_src || ""}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, default_src: e.target.value } })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>script-src</Label>
+              <Input 
+                data-testid="input-csp-script"
+                placeholder="'self' 'unsafe-inline'"
+                value={newPolicy.rules.script_src || ""}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, script_src: e.target.value } })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>style-src</Label>
+              <Input 
+                data-testid="input-csp-style"
+                placeholder="'self' 'unsafe-inline'"
+                value={newPolicy.rules.style_src || ""}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, style_src: e.target.value } })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>img-src</Label>
+              <Input 
+                data-testid="input-csp-img"
+                placeholder="'self' data: https:"
+                value={newPolicy.rules.img_src || ""}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, img_src: e.target.value } })}
+              />
+            </div>
+          </div>
+        );
+      case "auth_requirement":
+        return (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Checkbox 
+                id="require_2fa"
+                data-testid="checkbox-require-2fa"
+                checked={newPolicy.rules.require_2fa || false}
+                onCheckedChange={(checked) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, require_2fa: checked } })}
+              />
+              <Label htmlFor="require_2fa">Require Two-Factor Authentication</Label>
+            </div>
+            <div className="space-y-2">
+              <Label>Session Timeout (minutes)</Label>
+              <Input 
+                data-testid="input-session-timeout"
+                type="number"
+                value={newPolicy.rules.session_timeout_minutes || 60}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, session_timeout_minutes: parseInt(e.target.value) } })}
+              />
+            </div>
+          </div>
+        );
+      case "data_retention":
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Audit Logs Retention (days)</Label>
+              <Input 
+                data-testid="input-retention-audit"
+                type="number"
+                value={newPolicy.rules.audit_logs_days || 365}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, audit_logs_days: parseInt(e.target.value) } })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>User Data Retention (days)</Label>
+              <Input 
+                data-testid="input-retention-user"
+                type="number"
+                value={newPolicy.rules.user_data_days || 730}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, user_data_days: parseInt(e.target.value) } })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Chat History Retention (days)</Label>
+              <Input 
+                data-testid="input-retention-chat"
+                type="number"
+                value={newPolicy.rules.chat_history_days || 90}
+                onChange={(e) => setNewPolicy({ ...newPolicy, rules: { ...newPolicy.rules, chat_history_days: parseInt(e.target.value) } })}
+              />
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
@@ -2498,100 +2868,368 @@ function SecuritySection() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-medium">Security</h2>
-      
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">Políticas de dominio</h3>
-          <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-            <DialogTrigger asChild>
-              <Button size="sm" variant="outline">
-                <Plus className="h-4 w-4 mr-2" />
-                Añadir política
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Nueva política de dominio</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label>Dominio</Label>
-                  <Input 
-                    placeholder="ejemplo.com" 
-                    value={newPolicy.domain}
-                    onChange={(e) => setNewPolicy({ ...newPolicy, domain: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Límite de peticiones/min</Label>
-                  <Input 
-                    type="number"
-                    value={newPolicy.rateLimit}
-                    onChange={(e) => setNewPolicy({ ...newPolicy, rateLimit: parseInt(e.target.value) })}
-                  />
-                </div>
-                <Button 
-                  className="w-full" 
-                  onClick={() => createPolicyMutation.mutate(newPolicy)}
-                  disabled={!newPolicy.domain}
-                >
-                  Crear política
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
-        
-        <div className="rounded-lg border">
-          {policies.length === 0 ? (
-            <div className="p-4 text-sm text-muted-foreground text-center">No hay políticas configuradas</div>
-          ) : (
-            policies.map((policy: any) => (
-              <div key={policy.id} className="flex items-center justify-between p-3 border-b last:border-0">
-                <div>
-                  <p className="font-medium">{policy.domain}</p>
-                  <p className="text-xs text-muted-foreground">Límite: {policy.rateLimit} req/min</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={policy.allowNavigation === "true" ? "default" : "secondary"}>
-                    {policy.allowNavigation === "true" ? "Permitido" : "Bloqueado"}
-                  </Badge>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-7 w-7 p-0 text-destructive"
-                    onClick={() => deletePolicyMutation.mutate(policy.id)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-medium flex items-center gap-2">
+          <Shield className="h-5 w-5" />
+          Security Center
+        </h2>
       </div>
 
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium">Registro de auditoría</h3>
-        <div className="rounded-lg border max-h-64 overflow-auto">
-          {auditLogs.length === 0 ? (
-            <div className="p-4 text-sm text-muted-foreground text-center">No hay registros</div>
-          ) : (
-            auditLogs.map((log: any) => (
-              <div key={log.id} className="flex items-center justify-between p-3 border-b last:border-0 text-sm">
-                <div>
-                  <span className="font-medium">{log.action}</span>
-                  <span className="text-muted-foreground"> - {log.resource}</span>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
+          <TabsTrigger value="policies" data-testid="tab-policies">Policies</TabsTrigger>
+          <TabsTrigger value="audit-logs" data-testid="tab-audit-logs">Audit Logs</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-lg border p-4" data-testid="kpi-total-policies">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-md bg-blue-500/10">
+                  <Shield className="h-4 w-4 text-blue-500" />
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  {log.createdAt ? format(new Date(log.createdAt), "dd/MM HH:mm") : ""}
-                </span>
+                <span className="text-sm text-muted-foreground">Total Policies</span>
               </div>
-            ))
+              <p className="text-2xl font-bold">{stats?.totalPolicies || 0}</p>
+            </div>
+            <div className="rounded-lg border p-4" data-testid="kpi-active-policies">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-md bg-green-500/10">
+                  <ShieldCheck className="h-4 w-4 text-green-500" />
+                </div>
+                <span className="text-sm text-muted-foreground">Active Policies</span>
+              </div>
+              <p className="text-2xl font-bold">{stats?.activePolicies || 0}</p>
+            </div>
+            <div className="rounded-lg border p-4" data-testid="kpi-critical-alerts">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-md bg-red-500/10">
+                  <ShieldAlert className="h-4 w-4 text-red-500" />
+                </div>
+                <span className="text-sm text-muted-foreground">Critical Alerts (24h)</span>
+              </div>
+              <p className="text-2xl font-bold">{stats?.criticalAlerts24h || 0}</p>
+            </div>
+            <div className="rounded-lg border p-4" data-testid="kpi-audit-today">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-md bg-purple-500/10">
+                  <Activity className="h-4 w-4 text-purple-500" />
+                </div>
+                <span className="text-sm text-muted-foreground">Audit Events Today</span>
+              </div>
+              <p className="text-2xl font-bold">{stats?.auditEventsToday || 0}</p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border">
+            <div className="p-4 border-b">
+              <h3 className="font-medium">Recent Security Events</h3>
+            </div>
+            <ScrollArea className="h-[300px]">
+              {recentLogs.length === 0 ? (
+                <div className="p-4 text-sm text-muted-foreground text-center">No recent events</div>
+              ) : (
+                recentLogs.map((log: any) => (
+                  <div key={log.id} className="flex items-center justify-between p-3 border-b last:border-0">
+                    <div className="flex items-center gap-3">
+                      {getSeverityBadge(log.action)}
+                      <div>
+                        <span className="font-medium text-sm">{log.action}</span>
+                        <span className="text-muted-foreground text-sm"> - {log.resource}</span>
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {log.createdAt ? format(new Date(log.createdAt), "dd/MM HH:mm") : ""}
+                    </span>
+                  </div>
+                ))
+              )}
+            </ScrollArea>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="policies" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">{policies.length} policies configured</span>
+            <Dialog open={showAddModal} onOpenChange={(open) => {
+              setShowAddModal(open);
+              if (!open) {
+                setEditingPolicy(null);
+                resetPolicyForm();
+              }
+            }}>
+              <DialogTrigger asChild>
+                <Button size="sm" data-testid="button-add-policy">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Policy
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>{editingPolicy ? "Edit Policy" : "Create Security Policy"}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Policy Name</Label>
+                    <Input 
+                      data-testid="input-policy-name"
+                      placeholder="My Security Policy"
+                      value={newPolicy.policyName}
+                      onChange={(e) => setNewPolicy({ ...newPolicy, policyName: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Policy Type</Label>
+                    <Select 
+                      value={newPolicy.policyType}
+                      onValueChange={(v) => setNewPolicy({ ...newPolicy, policyType: v, rules: {} })}
+                    >
+                      <SelectTrigger data-testid="select-policy-type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {POLICY_TYPES.map(type => (
+                          <SelectItem key={type.value} value={type.value}>
+                            <span className="flex items-center gap-2">
+                              <type.icon className="h-4 w-4" />
+                              {type.label}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Applied To</Label>
+                      <Select 
+                        value={newPolicy.appliedTo}
+                        onValueChange={(v) => setNewPolicy({ ...newPolicy, appliedTo: v })}
+                      >
+                        <SelectTrigger data-testid="select-applied-to">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {APPLIED_TO_OPTIONS.map(opt => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Priority</Label>
+                      <Input 
+                        data-testid="input-priority"
+                        type="number"
+                        value={newPolicy.priority}
+                        onChange={(e) => setNewPolicy({ ...newPolicy, priority: parseInt(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </div>
+                  
+                  <Separator />
+                  <h4 className="font-medium">Policy Rules</h4>
+                  {renderPolicyRulesForm()}
+                  
+                  <Button 
+                    className="w-full" 
+                    onClick={handleSavePolicy}
+                    disabled={!newPolicy.policyName || createPolicyMutation.isPending || updatePolicyMutation.isPending}
+                    data-testid="button-save-policy"
+                  >
+                    {(createPolicyMutation.isPending || updatePolicyMutation.isPending) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    {editingPolicy ? "Update Policy" : "Create Policy"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          <div className="rounded-lg border">
+            <table className="w-full">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Name</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Type</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Applied To</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Priority</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Status</th>
+                  <th className="text-right p-3 text-xs font-medium text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {policies.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-sm text-muted-foreground">
+                      No security policies configured. Click "Add Policy" to create one.
+                    </td>
+                  </tr>
+                ) : (
+                  policies.map((policy: any) => {
+                    const typeInfo = getPolicyTypeInfo(policy.policyType);
+                    return (
+                      <tr key={policy.id} className="border-t" data-testid={`row-policy-${policy.id}`}>
+                        <td className="p-3">
+                          <span className="font-medium">{policy.policyName}</span>
+                        </td>
+                        <td className="p-3">
+                          <Badge className={cn("text-white", typeInfo.color)}>
+                            <typeInfo.icon className="h-3 w-3 mr-1" />
+                            {typeInfo.label}
+                          </Badge>
+                        </td>
+                        <td className="p-3">
+                          <Badge variant="outline">{policy.appliedTo}</Badge>
+                        </td>
+                        <td className="p-3 text-sm">{policy.priority}</td>
+                        <td className="p-3">
+                          <Switch 
+                            checked={policy.isEnabled === "true"}
+                            onCheckedChange={(checked) => togglePolicyMutation.mutate({ id: policy.id, isEnabled: checked })}
+                            data-testid={`toggle-policy-${policy.id}`}
+                          />
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-8 w-8 p-0"
+                              onClick={() => handleEditPolicy(policy)}
+                              data-testid={`button-edit-${policy.id}`}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                              onClick={() => deletePolicyMutation.mutate(policy.id)}
+                              data-testid={`button-delete-${policy.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="audit-logs" className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">Action:</Label>
+              <Input 
+                data-testid="filter-action"
+                placeholder="Filter by action..."
+                className="h-8 w-40"
+                value={auditFilters.action}
+                onChange={(e) => setAuditFilters({ ...auditFilters, action: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">From:</Label>
+              <Input 
+                data-testid="filter-date-from"
+                type="date"
+                className="h-8 w-36"
+                value={auditFilters.dateFrom}
+                onChange={(e) => setAuditFilters({ ...auditFilters, dateFrom: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">To:</Label>
+              <Input 
+                data-testid="filter-date-to"
+                type="date"
+                className="h-8 w-36"
+                value={auditFilters.dateTo}
+                onChange={(e) => setAuditFilters({ ...auditFilters, dateTo: e.target.value })}
+              />
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => {
+                setAuditFilters({ action: "", dateFrom: "", dateTo: "" });
+                setAuditPage(1);
+              }}
+              data-testid="button-clear-filters"
+            >
+              Clear
+            </Button>
+          </div>
+
+          <div className="rounded-lg border">
+            <table className="w-full">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Timestamp</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Action</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Resource</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">IP Address</th>
+                  <th className="text-left p-3 text-xs font-medium text-muted-foreground">Severity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditLogsData?.data?.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="p-8 text-center text-sm text-muted-foreground">
+                      No audit logs found matching your filters.
+                    </td>
+                  </tr>
+                ) : (
+                  auditLogsData?.data?.map((log: any) => (
+                    <tr key={log.id} className="border-t" data-testid={`row-audit-${log.id}`}>
+                      <td className="p-3 text-sm">
+                        {log.createdAt ? format(new Date(log.createdAt), "yyyy-MM-dd HH:mm:ss") : "-"}
+                      </td>
+                      <td className="p-3 font-medium text-sm">{log.action}</td>
+                      <td className="p-3 text-sm">{log.resource || "-"}</td>
+                      <td className="p-3 text-sm font-mono">{log.ipAddress || "-"}</td>
+                      <td className="p-3">{getSeverityBadge(log.action)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {auditLogsData?.pagination && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">
+                Page {auditLogsData.pagination.page} of {auditLogsData.pagination.totalPages} ({auditLogsData.pagination.total} total)
+              </span>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  disabled={auditPage <= 1}
+                  onClick={() => setAuditPage(p => p - 1)}
+                  data-testid="button-prev-page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  disabled={auditPage >= auditLogsData.pagination.totalPages}
+                  onClick={() => setAuditPage(p => p + 1)}
+                  data-testid="button-next-page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           )}
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

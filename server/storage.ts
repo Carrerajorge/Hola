@@ -41,6 +41,7 @@ import {
   type ApiLog, type InsertApiLog,
   type KpiSnapshot, type InsertKpiSnapshot,
   type AnalyticsEvent, type InsertAnalyticsEvent,
+  type SecurityPolicy, type InsertSecurityPolicy,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
   gpts, gptCategories, gptVersions, users,
@@ -49,7 +50,7 @@ import {
   integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs,
   consentLogs, sharedLinks, companyKnowledge, gmailOAuthTokens,
   responseQualityMetrics, connectorUsageHourly, offlineMessageQueue,
-  providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents
+  providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents, securityPolicies
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
@@ -273,6 +274,13 @@ export interface IStorage {
   createAnalyticsEvent(event: InsertAnalyticsEvent): Promise<AnalyticsEvent>;
   getAnalyticsEventStats(startDate?: Date, endDate?: Date): Promise<Record<string, number>>;
   getUserGrowthData(granularity: '1h' | '24h' | '7d' | '30d' | '90d' | '1y'): Promise<{ date: Date; count: number }[]>;
+  // Security Policies CRUD
+  getSecurityPolicies(): Promise<SecurityPolicy[]>;
+  getSecurityPolicy(id: string): Promise<SecurityPolicy | undefined>;
+  createSecurityPolicy(policy: InsertSecurityPolicy): Promise<SecurityPolicy>;
+  updateSecurityPolicy(id: string, updates: Partial<InsertSecurityPolicy>): Promise<SecurityPolicy | undefined>;
+  deleteSecurityPolicy(id: string): Promise<void>;
+  toggleSecurityPolicy(id: string, isEnabled: boolean): Promise<SecurityPolicy | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -1879,6 +1887,41 @@ export class MemStorage implements IStorage {
       date: new Date(row.date),
       count: Number(row.count),
     }));
+  }
+
+  // Security Policies CRUD
+  async getSecurityPolicies(): Promise<SecurityPolicy[]> {
+    return db.select().from(securityPolicies).orderBy(desc(securityPolicies.priority));
+  }
+
+  async getSecurityPolicy(id: string): Promise<SecurityPolicy | undefined> {
+    const [result] = await db.select().from(securityPolicies).where(eq(securityPolicies.id, id));
+    return result;
+  }
+
+  async createSecurityPolicy(policy: InsertSecurityPolicy): Promise<SecurityPolicy> {
+    const [result] = await db.insert(securityPolicies).values(policy).returning();
+    return result;
+  }
+
+  async updateSecurityPolicy(id: string, updates: Partial<InsertSecurityPolicy>): Promise<SecurityPolicy | undefined> {
+    const [result] = await db.update(securityPolicies)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(securityPolicies.id, id))
+      .returning();
+    return result;
+  }
+
+  async deleteSecurityPolicy(id: string): Promise<void> {
+    await db.delete(securityPolicies).where(eq(securityPolicies.id, id));
+  }
+
+  async toggleSecurityPolicy(id: string, isEnabled: boolean): Promise<SecurityPolicy | undefined> {
+    const [result] = await db.update(securityPolicies)
+      .set({ isEnabled: isEnabled ? "true" : "false", updatedAt: new Date() })
+      .where(eq(securityPolicies.id, id))
+      .returning();
+    return result;
   }
 }
 

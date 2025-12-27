@@ -1502,3 +1502,33 @@ export const insertKpiSnapshotSchema = createInsertSchema(kpiSnapshots).omit({
 
 export type InsertKpiSnapshot = z.infer<typeof insertKpiSnapshotSchema>;
 export type KpiSnapshot = typeof kpiSnapshots.$inferSelect;
+
+// ========================================
+// Security Center - Enterprise Security Policies
+// ========================================
+
+export const securityPolicies = pgTable("security_policies", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  policyName: text("policy_name").notNull().unique(),
+  policyType: text("policy_type").notNull(), // cors, csp, rate_limit, ip_restriction, auth_requirement, data_retention
+  rules: jsonb("rules").notNull().$type<Record<string, any>>(),
+  priority: integer("priority").default(0),
+  isEnabled: text("is_enabled").default("true"),
+  appliedTo: text("applied_to").notNull().default("global"), // global, api, dashboard, public
+  createdBy: varchar("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("security_policies_type_idx").on(table.policyType),
+  index("security_policies_enabled_idx").on(table.isEnabled),
+  index("security_policies_applied_idx").on(table.appliedTo),
+]);
+
+export const insertSecurityPolicySchema = createInsertSchema(securityPolicies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertSecurityPolicy = z.infer<typeof insertSecurityPolicySchema>;
+export type SecurityPolicy = typeof securityPolicies.$inferSelect;
