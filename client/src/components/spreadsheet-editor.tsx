@@ -23,7 +23,14 @@ import {
   Calculator,
   Wand2,
   CheckCircle2,
+  Undo,
+  Redo,
+  Copy,
+  Scissors,
+  Clipboard,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { colToName, makeRef } from '@/lib/spreadsheet-utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart as RechartsLineChart, Line, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
 import { VirtualizedExcel, GRID_CONFIG } from './virtualized-excel';
 import { SparseGrid, getColumnName as getSparseColumnName, formatCellRef, CellData as SparseCellData } from '@/lib/sparseGrid';
@@ -1385,6 +1392,80 @@ export function SpreadsheetEditor({
   }, []);
 
   const handleNavigationKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Handle Ctrl+Z (Undo) and Ctrl+Y (Redo) globally
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+      e.preventDefault();
+      if (undoRedo.canUndo) {
+        undoRedo.undo();
+        toast.success('Deshacer', { description: 'Cambio revertido', duration: 1500 });
+      }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+      e.preventDefault();
+      if (undoRedo.canRedo) {
+        undoRedo.redo();
+        toast.success('Rehacer', { description: 'Cambio restaurado', duration: 1500 });
+      }
+      return;
+    }
+    // Handle Ctrl+C (Copy) with toast feedback
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+      const active = getActiveCell();
+      if (active) {
+        if (useVirtualized) {
+          const cell = sparseGrid.getCell(active.row, active.col);
+          if (cell?.value) {
+            navigator.clipboard.writeText(String(cell.value));
+            const cellRef = colToName(active.col + 1) + (active.row + 1);
+            toast.success('Copiado', { 
+              description: `Celda ${cellRef} copiada`,
+              duration: 2000,
+              icon: <Copy className="h-4 w-4" />
+            });
+          }
+        } else if (data.cells[active.key]?.value) {
+          navigator.clipboard.writeText(data.cells[active.key].value);
+          toast.success('Copiado', { 
+            description: 'Contenido copiado',
+            duration: 2000,
+            icon: <Copy className="h-4 w-4" />
+          });
+        }
+      }
+      return;
+    }
+    // Handle Ctrl+X (Cut) with toast feedback
+    if ((e.ctrlKey || e.metaKey) && e.key === 'x') {
+      e.preventDefault();
+      const active = getActiveCell();
+      if (active) {
+        if (useVirtualized) {
+          const cell = sparseGrid.getCell(active.row, active.col);
+          if (cell?.value) {
+            navigator.clipboard.writeText(String(cell.value));
+            sparseGrid.setCell(active.row, active.col, { ...cell, value: '' });
+            setGridVersion(v => v + 1);
+            const cellRef = colToName(active.col + 1) + (active.row + 1);
+            toast.success('Cortado', { 
+              description: `Celda ${cellRef} cortada`,
+              duration: 2000,
+              icon: <Scissors className="h-4 w-4" />
+            });
+          }
+        } else if (data.cells[active.key]?.value) {
+          navigator.clipboard.writeText(data.cells[active.key].value);
+          updateCell(active.key, { ...data.cells[active.key], value: '' });
+          toast.success('Cortado', { 
+            description: 'Contenido cortado',
+            duration: 2000,
+            icon: <Scissors className="h-4 w-4" />
+          });
+        }
+      }
+      return;
+    }
+    
     if (!selectedCell || editingCell) return;
     
     const [row, col] = selectedCell.split('-').map(Number);
@@ -1418,7 +1499,7 @@ export function SpreadsheetEditor({
 
     e.preventDefault();
     setSelectedCell(getCellKey(newRow, newCol));
-  }, [selectedCell, editingCell, data.rowCount, data.colCount, updateCell]);
+  }, [selectedCell, editingCell, data.rowCount, data.colCount, data.cells, updateCell, undoRedo, getActiveCell, useVirtualized, sparseGrid]);
 
   const addRow = useCallback(() => {
     try {
@@ -1966,10 +2047,25 @@ export function SpreadsheetEditor({
       
       if (useVirtualized) {
         const cell = sparseGrid.getCell(active.row, active.col);
-        if (cell?.value) navigator.clipboard.writeText(String(cell.value));
+        if (cell?.value) {
+          navigator.clipboard.writeText(String(cell.value));
+          const cellRef = colToName(active.col + 1) + (active.row + 1);
+          toast.success('Copiado', { 
+            description: `Celda ${cellRef} copiada al portapapeles`,
+            duration: 2000,
+            icon: <Copy className="h-4 w-4" />
+          });
+        }
       } else {
         const cell = data.cells[active.key];
-        if (cell?.value) navigator.clipboard.writeText(cell.value);
+        if (cell?.value) {
+          navigator.clipboard.writeText(cell.value);
+          toast.success('Copiado', { 
+            description: 'Contenido copiado al portapapeles',
+            duration: 2000,
+            icon: <Copy className="h-4 w-4" />
+          });
+        }
       }
     },
     cut: () => {
@@ -1982,12 +2078,23 @@ export function SpreadsheetEditor({
           navigator.clipboard.writeText(String(cell.value));
           sparseGrid.setCell(active.row, active.col, { ...cell, value: '' });
           setGridVersion(v => v + 1);
+          const cellRef = colToName(active.col + 1) + (active.row + 1);
+          toast.success('Cortado', { 
+            description: `Celda ${cellRef} cortada`,
+            duration: 2000,
+            icon: <Scissors className="h-4 w-4" />
+          });
         }
       } else {
         const cell = data.cells[active.key];
         if (cell?.value) {
           navigator.clipboard.writeText(cell.value);
           updateCell(active.key, { ...cell, value: '' });
+          toast.success('Cortado', { 
+            description: 'Contenido cortado al portapapeles',
+            duration: 2000,
+            icon: <Scissors className="h-4 w-4" />
+          });
         }
       }
     },
@@ -2001,12 +2108,24 @@ export function SpreadsheetEditor({
           const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
           sparseGrid.setCell(active.row, active.col, { ...cell, value: text });
           setGridVersion(v => v + 1);
+          const cellRef = colToName(active.col + 1) + (active.row + 1);
+          toast.success('Pegado', { 
+            description: `Contenido pegado en ${cellRef}`,
+            duration: 2000,
+            icon: <Clipboard className="h-4 w-4" />
+          });
         } else {
           const cell = data.cells[active.key] || { value: '' };
           updateCell(active.key, { ...cell, value: text });
+          toast.success('Pegado', { 
+            description: 'Contenido pegado',
+            duration: 2000,
+            icon: <Clipboard className="h-4 w-4" />
+          });
         }
       } catch (e) {
         console.error('Paste failed:', e);
+        toast.error('Error al pegar', { description: 'No se pudo acceder al portapapeles' });
       }
     },
     toggleBold,
@@ -2152,19 +2271,77 @@ export function SpreadsheetEditor({
         }}
       />
 
-      {/* Formula Bar */}
+      {/* Formula Bar with Undo/Redo */}
       <div className="flex items-center gap-1 px-4 py-1.5 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
-        <div className="w-16 px-2 py-1 text-xs font-mono bg-white dark:bg-black border rounded text-center">
-          {selectedCellLabel}
+        {/* Cell Reference (A1 notation) */}
+        <div className="w-20 px-2 py-1 text-xs font-mono bg-white dark:bg-black border rounded text-center font-semibold text-green-700 dark:text-green-400" data-testid="cell-reference-display">
+          {(() => {
+            if (useVirtualized && virtualSelectionRange) {
+              const { startRow, startCol, endRow, endCol } = virtualSelectionRange;
+              const start = colToName(startCol + 1) + (startRow + 1);
+              const end = colToName(endCol + 1) + (endRow + 1);
+              return start === end ? start : `${start}:${end}`;
+            } else if (useVirtualized && virtualSelectedCell) {
+              return colToName(virtualSelectedCell.col + 1) + (virtualSelectedCell.row + 1);
+            } else if (selectedCell) {
+              const parts = selectedCell.split('-');
+              if (parts.length === 2) {
+                const row = parseInt(parts[0], 10);
+                const col = parseInt(parts[1], 10);
+                return colToName(col + 1) + (row + 1);
+              }
+            }
+            return 'A1';
+          })()}
         </div>
-        <span className="text-gray-400 text-sm mx-1">fx</span>
+        
+        {/* Undo/Redo Buttons */}
+        <div className="flex items-center gap-0.5 mx-1 border-l border-r border-gray-300 dark:border-gray-700 px-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "h-7 w-7 p-0",
+              !undoRedo.canUndo && "opacity-40 cursor-not-allowed"
+            )}
+            onClick={() => {
+              undoRedo.undo();
+              toast.success('Deshacer', { description: 'Cambio revertido', duration: 1500 });
+            }}
+            disabled={!undoRedo.canUndo}
+            title="Deshacer (Ctrl+Z)"
+            data-testid="btn-undo"
+          >
+            <Undo className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "h-7 w-7 p-0",
+              !undoRedo.canRedo && "opacity-40 cursor-not-allowed"
+            )}
+            onClick={() => {
+              undoRedo.redo();
+              toast.success('Rehacer', { description: 'Cambio restaurado', duration: 1500 });
+            }}
+            disabled={!undoRedo.canRedo}
+            title="Rehacer (Ctrl+Y)"
+            data-testid="btn-redo"
+          >
+            <Redo className="h-4 w-4" />
+          </Button>
+        </div>
+        
+        <span className="text-gray-400 text-sm mx-1 font-medium">fx</span>
         <input
           ref={formulaInputRef}
           type="text"
-          className="flex-1 px-3 py-1 text-sm border rounded bg-white dark:bg-black focus:outline-none focus:ring-1 focus:ring-green-500"
+          className="flex-1 px-3 py-1 text-sm border rounded bg-white dark:bg-black focus:outline-none focus:ring-2 focus:ring-green-500"
           placeholder="Ingresa un valor o fórmula"
           value={selectedCellData?.formula || selectedCellData?.value || ''}
           onChange={(e) => selectedCell && handleCellChange(selectedCell, e.target.value)}
+          data-testid="formula-input"
         />
         <Button
           variant={useVirtualized ? 'default' : 'ghost'}
@@ -2364,7 +2541,7 @@ export function SpreadsheetEditor({
         </div>
       )}
 
-      {/* Sheet Tabs */}
+      {/* Sheet Tabs & Status Bar */}
       <div className="flex items-center border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950">
         <div className="flex items-center gap-1 px-2 py-1 overflow-x-auto flex-1">
           {workbook.sheets.map(sheet => (
@@ -2397,7 +2574,46 @@ export function SpreadsheetEditor({
             <Plus className="h-4 w-4" />
           </button>
         </div>
-        <div className="px-4 py-1 text-xs text-gray-500 border-l border-gray-200 dark:border-gray-800">
+        
+        {/* Selection Info */}
+        <div className="px-3 py-1 text-xs text-gray-600 dark:text-gray-400 border-l border-gray-200 dark:border-gray-800 font-medium" data-testid="selection-info">
+          {(() => {
+            if (useVirtualized && virtualSelectionRange) {
+              const { startRow, startCol, endRow, endCol } = virtualSelectionRange;
+              const minR = Math.min(startRow, endRow);
+              const maxR = Math.max(startRow, endRow);
+              const minC = Math.min(startCol, endCol);
+              const maxC = Math.max(startCol, endCol);
+              const cellCount = (maxR - minR + 1) * (maxC - minC + 1);
+              const start = colToName(minC + 1) + (minR + 1);
+              const end = colToName(maxC + 1) + (maxR + 1);
+              if (cellCount > 1) {
+                return `Rango: ${start}:${end} (${cellCount} celdas)`;
+              }
+              return start;
+            } else if (useVirtualized && virtualSelectedCell) {
+              return colToName(virtualSelectedCell.col + 1) + (virtualSelectedCell.row + 1);
+            } else if (selectionRange) {
+              const startParts = selectionRange.start.split('-').map(Number);
+              const endParts = selectionRange.end.split('-').map(Number);
+              if (startParts.length === 2 && endParts.length === 2) {
+                const minR = Math.min(startParts[0], endParts[0]);
+                const maxR = Math.max(startParts[0], endParts[0]);
+                const minC = Math.min(startParts[1], endParts[1]);
+                const maxC = Math.max(startParts[1], endParts[1]);
+                const cellCount = (maxR - minR + 1) * (maxC - minC + 1);
+                const start = colToName(minC + 1) + (minR + 1);
+                const end = colToName(maxC + 1) + (maxR + 1);
+                if (cellCount > 1) {
+                  return `Rango: ${start}:${end} (${cellCount} celdas)`;
+                }
+              }
+            }
+            return '';
+          })()}
+        </div>
+        
+        <div className="px-3 py-1 text-xs text-gray-500 border-l border-gray-200 dark:border-gray-800">
           {data.rowCount} × {data.colCount}
         </div>
       </div>
