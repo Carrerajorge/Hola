@@ -1097,20 +1097,39 @@ export function VirtualizedExcel({
       if (editingValue !== undefined) {
         updateCell(row, col, editingValue);
       }
+      const nextRow = Math.min(row + 1, GRID_CONFIG.MAX_ROWS - 1);
       setEditingValue(undefined);
       onEditCell(null);
-      onSelectCell({ row: Math.min(row + 1, GRID_CONFIG.MAX_ROWS - 1), col });
+      onSelectCell({ row: nextRow, col });
+      // Refocus container and auto-enter edit mode on next cell
+      requestAnimationFrame(() => {
+        containerRef.current?.focus();
+        // Auto-enter edit mode on the new cell for continuous typing
+        setEditingValue('');
+        onEditCell({ row: nextRow, col });
+      });
     } else if (e.key === 'Tab') {
       e.preventDefault();
       if (editingValue !== undefined) {
         updateCell(row, col, editingValue);
       }
+      const nextCol = Math.min(col + 1, GRID_CONFIG.MAX_COLS - 1);
       setEditingValue(undefined);
       onEditCell(null);
-      onSelectCell({ row, col: Math.min(col + 1, GRID_CONFIG.MAX_COLS - 1) });
+      onSelectCell({ row, col: nextCol });
+      // Refocus container and auto-enter edit mode on next cell
+      requestAnimationFrame(() => {
+        containerRef.current?.focus();
+        setEditingValue('');
+        onEditCell({ row, col: nextCol });
+      });
     } else if (e.key === 'Escape') {
       setEditingValue(undefined);
       onEditCell(null);
+      // Refocus container after escaping edit mode
+      requestAnimationFrame(() => {
+        containerRef.current?.focus();
+      });
     }
   }, [onEditCell, onSelectCell, editingValue, updateCell]);
 
