@@ -260,6 +260,7 @@ const ColumnHeader = memo(function ColumnHeader({
   onResizeStart,
   onAutoFit,
   isResizing,
+  onSelectColumn,
 }: {
   col: number;
   style: React.CSSProperties;
@@ -267,6 +268,7 @@ const ColumnHeader = memo(function ColumnHeader({
   onResizeStart: (col: number, startX: number, startWidth: number) => void;
   onAutoFit: (col: number) => void;
   isResizing: boolean;
+  onSelectColumn?: (col: number) => void;
 }) {
   const [isHoveringResize, setIsHoveringResize] = useState(false);
   const lastClickRef = useRef(0);
@@ -297,13 +299,15 @@ const ColumnHeader = memo(function ColumnHeader({
         lastClickRef.current = now;
         onResizeStart(col, e.clientX, width);
       }
+    } else {
+      onSelectColumn?.(col);
     }
-  }, [col, width, onResizeStart, onAutoFit]);
+  }, [col, width, onResizeStart, onAutoFit, onSelectColumn]);
 
   return (
     <div
       className={cn(
-        "absolute flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-r border-b border-gray-200 dark:border-gray-700 select-none",
+        "absolute flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-r border-b border-gray-200 dark:border-gray-700 select-none cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700",
         isHoveringResize && "cursor-col-resize"
       )}
       style={style}
@@ -330,6 +334,7 @@ const RowHeader = memo(function RowHeader({
   onResizeStart,
   onAutoFit,
   isResizing,
+  onSelectRow,
 }: {
   row: number;
   style: React.CSSProperties;
@@ -337,6 +342,7 @@ const RowHeader = memo(function RowHeader({
   onResizeStart: (row: number, startY: number, startHeight: number) => void;
   onAutoFit: (row: number) => void;
   isResizing: boolean;
+  onSelectRow?: (row: number) => void;
 }) {
   const displayNumber = row + 1;
   const [isHoveringResize, setIsHoveringResize] = useState(false);
@@ -368,13 +374,15 @@ const RowHeader = memo(function RowHeader({
         lastClickRef.current = now;
         onResizeStart(row, e.clientY, height);
       }
+    } else {
+      onSelectRow?.(row);
     }
-  }, [row, height, onResizeStart, onAutoFit]);
+  }, [row, height, onResizeStart, onAutoFit, onSelectRow]);
 
   return (
     <div
       className={cn(
-        "absolute flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-r border-b border-gray-200 dark:border-gray-700 select-none",
+        "absolute flex items-center justify-center text-xs font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border-r border-b border-gray-200 dark:border-gray-700 select-none cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700",
         isHoveringResize && "cursor-row-resize"
       )}
       style={style}
@@ -808,6 +816,26 @@ export function VirtualizedExcel({
     onSelectCell({ row, col });
   }, [onSelectCell]);
 
+  const handleSelectColumn = useCallback((col: number) => {
+    onSelectCell({ row: 0, col });
+    setSelectionRange({
+      startRow: 0,
+      startCol: col,
+      endRow: GRID_CONFIG.MAX_ROWS - 1,
+      endCol: col,
+    });
+  }, [onSelectCell, setSelectionRange]);
+
+  const handleSelectRow = useCallback((row: number) => {
+    onSelectCell({ row, col: 0 });
+    setSelectionRange({
+      startRow: row,
+      startCol: 0,
+      endRow: row,
+      endCol: GRID_CONFIG.MAX_COLS - 1,
+    });
+  }, [onSelectCell, setSelectionRange]);
+
   const handleCellEdit = useCallback((row: number, col: number) => {
     onEditCell({ row, col });
     onSelectCell({ row, col });
@@ -982,6 +1010,7 @@ export function VirtualizedExcel({
                   onResizeStart={handleRowResizeStart}
                   onAutoFit={handleAutoFitRow}
                   isResizing={resizeState.isResizing && resizeState.type === 'row'}
+                  onSelectRow={handleSelectRow}
                   style={{
                     position: 'absolute',
                     top: getRowTop(row),
@@ -1018,6 +1047,7 @@ export function VirtualizedExcel({
                   onResizeStart={handleColumnResizeStart}
                   onAutoFit={handleAutoFitColumn}
                   isResizing={resizeState.isResizing && resizeState.type === 'column'}
+                  onSelectColumn={handleSelectColumn}
                   style={{
                     top: 0,
                     left: getColumnLeft(col),
