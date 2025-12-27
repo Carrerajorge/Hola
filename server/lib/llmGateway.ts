@@ -6,6 +6,8 @@ import crypto from "crypto";
 import { analyzeResponseQuality, calculateQualityScore } from "../services/responseQuality";
 import { recordQualityMetric, getQualityStats, type QualityMetric, type QualityStats } from "./qualityMetrics";
 import { recordConnectorUsage } from "./connectorMetrics";
+import { storage } from "../storage";
+import type { InsertApiLog } from "@shared/schema";
 
 // ===== Types =====
 interface CircuitBreakerState {
@@ -192,6 +194,42 @@ class LLMGateway {
       halfOpenAt: 0,
       halfOpenAttempts: 0,
     };
+  }
+
+  // ===== API Log Persistence =====
+  private persistApiLog(logData: {
+    provider: string;
+    model: string;
+    endpoint: string;
+    latencyMs: number;
+    statusCode: number;
+    tokensIn?: number;
+    tokensOut?: number;
+    requestPreview?: string;
+    responsePreview?: string;
+    errorMessage?: string;
+    userId?: string;
+  }): void {
+    const apiLog: InsertApiLog = {
+      userId: logData.userId || null,
+      endpoint: logData.endpoint,
+      method: "POST",
+      statusCode: logData.statusCode,
+      latencyMs: logData.latencyMs,
+      tokensIn: logData.tokensIn || null,
+      tokensOut: logData.tokensOut || null,
+      model: logData.model,
+      provider: logData.provider,
+      requestPreview: logData.requestPreview?.slice(0, 500) || null,
+      responsePreview: logData.responsePreview?.slice(0, 500) || null,
+      errorMessage: logData.errorMessage || null,
+      ipAddress: null,
+      userAgent: null,
+    };
+
+    storage.createApiLog(apiLog).catch((err) => {
+      console.error("[LLMGateway] Failed to persist API log:", err.message);
+    });
   }
 
   // ===== Request Deduplication =====
@@ -679,6 +717,20 @@ class LLMGateway {
       // Record connector usage for xai
       recordConnectorUsage("xai", latencyMs, true);
 
+      // Persist API log to database asynchronously
+      this.persistApiLog({
+        provider: "xai",
+        model,
+        endpoint: "/chat/completions",
+        latencyMs,
+        statusCode: 200,
+        tokensIn: usage?.prompt_tokens,
+        tokensOut: usage?.completion_tokens,
+        requestPreview: JSON.stringify(messages.slice(-1)),
+        responsePreview: content.slice(0, 500),
+        userId: options.userId,
+      });
+
       // Analyze response quality and record metrics
       const qualityAnalysis = analyzeResponseQuality(content);
       const qualityScore = calculateQualityScore(content, usage?.total_tokens || 0, latencyMs);
@@ -713,6 +765,18 @@ class LLMGateway {
       const latencyMs = Date.now() - startTime;
       // Record connector failure for xai
       recordConnectorUsage("xai", latencyMs, false);
+
+      // Persist API error log to database asynchronously
+      this.persistApiLog({
+        provider: "xai",
+        model,
+        endpoint: "/chat/completions",
+        latencyMs,
+        statusCode: error.status || 500,
+        errorMessage: error.message,
+        userId: options.userId,
+      });
+
       if (error.name === "AbortError") {
         throw new Error(`Request timeout after ${options.timeout}ms`);
       }
@@ -741,6 +805,18 @@ class LLMGateway {
       const latencyMs = Date.now() - startTime;
       // Record connector failure for gemini
       recordConnectorUsage("gemini", latencyMs, false);
+
+      // Persist API error log to database asynchronously
+      this.persistApiLog({
+        provider: "gemini",
+        model,
+        endpoint: "/generateContent",
+        latencyMs,
+        statusCode: error.status || 500,
+        errorMessage: error.message,
+        userId: options.userId,
+      });
+
       throw error;
     }
 
@@ -771,6 +847,20 @@ class LLMGateway {
 
     // Record connector usage for gemini
     recordConnectorUsage("gemini", latencyMs, true);
+
+    // Persist API log to database asynchronously
+    this.persistApiLog({
+      provider: "gemini",
+      model,
+      endpoint: "/generateContent",
+      latencyMs,
+      statusCode: 200,
+      tokensIn: usageRecord.promptTokens,
+      tokensOut: usageRecord.completionTokens,
+      requestPreview: JSON.stringify(messages.slice(-1)),
+      responsePreview: response.content.slice(0, 500),
+      userId: options.userId,
+    });
 
     // Analyze response quality and record metrics
     const qualityAnalysis = analyzeResponseQuality(response.content);
