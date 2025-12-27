@@ -356,6 +356,7 @@ export interface RibbonCommands {
   toggleBold: () => void;
   toggleItalic: () => void;
   toggleUnderline: () => void;
+  toggleStrikethrough: () => void;
   setFont: (font: string) => void;
   setFontSize: (size: number) => void;
   setFontColor: (color: string) => void;
@@ -363,9 +364,14 @@ export interface RibbonCommands {
   alignLeft: () => void;
   alignCenter: () => void;
   alignRight: () => void;
+  alignTop: () => void;
+  alignMiddle: () => void;
+  alignBottom: () => void;
   mergeCells: () => void;
+  unmergeCells: () => void;
   wrapText: () => void;
   setNumberFormat: (format: string) => void;
+  setBorders: (type: 'all' | 'outside' | 'inside' | 'none' | 'top' | 'bottom' | 'left' | 'right', style?: 'thin' | 'medium' | 'thick') => void;
   insertRow: () => void;
   insertColumn: () => void;
   deleteRow: () => void;
@@ -376,6 +382,10 @@ export interface RibbonCommands {
   filter: () => void;
   freezePanes: () => void;
   toggleGridlines: () => void;
+  insertFormula: (formula: 'SUM' | 'AVERAGE' | 'COUNT' | 'MAX' | 'MIN' | 'IF' | 'VLOOKUP') => void;
+  findReplace: () => void;
+  increaseIndent: () => void;
+  decreaseIndent: () => void;
 }
 
 interface ExcelRibbonProps {
@@ -522,6 +532,256 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ color, onChange, icon, toolti
   );
 };
 
+interface BorderPickerProps {
+  onSelect: (type: 'all' | 'outside' | 'inside' | 'none' | 'top' | 'bottom' | 'left' | 'right', style?: 'thin' | 'medium' | 'thick') => void;
+}
+
+const BorderPicker: React.FC<BorderPickerProps> = ({ onSelect }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const borderOptions = [
+    { type: 'all' as const, label: 'Todos los bordes', icon: (
+      <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"/><line x1="10" y1="2" x2="10" y2="18" stroke="currentColor" strokeWidth="1"/><line x1="2" y1="10" x2="18" y2="10" stroke="currentColor" strokeWidth="1"/></svg>
+    )},
+    { type: 'outside' as const, label: 'Borde exterior', icon: (
+      <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2"/></svg>
+    )},
+    { type: 'inside' as const, label: 'Bordes interiores', icon: (
+      <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2"/><line x1="10" y1="2" x2="10" y2="18" stroke="currentColor" strokeWidth="1.5"/><line x1="2" y1="10" x2="18" y2="10" stroke="currentColor" strokeWidth="1.5"/></svg>
+    )},
+    { type: 'none' as const, label: 'Sin borde', icon: (
+      <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2"/></svg>
+    )},
+    { type: 'top' as const, label: 'Borde superior', icon: (
+      <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2"/><line x1="2" y1="2" x2="18" y2="2" stroke="currentColor" strokeWidth="2"/></svg>
+    )},
+    { type: 'bottom' as const, label: 'Borde inferior', icon: (
+      <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2"/><line x1="2" y1="18" x2="18" y2="18" stroke="currentColor" strokeWidth="2"/></svg>
+    )},
+    { type: 'left' as const, label: 'Borde izquierdo', icon: (
+      <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2"/><line x1="2" y1="2" x2="2" y2="18" stroke="currentColor" strokeWidth="2"/></svg>
+    )},
+    { type: 'right' as const, label: 'Borde derecho', icon: (
+      <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2"/><line x1="18" y1="2" x2="18" y2="18" stroke="currentColor" strokeWidth="2"/></svg>
+    )},
+  ];
+
+  return (
+    <div className="relative" ref={pickerRef}>
+      <button
+        className="flex flex-col items-center justify-center w-7 h-7 p-0.5 border border-transparent rounded cursor-pointer transition-all text-gray-700 hover:bg-gray-200 hover:border-gray-300"
+        onClick={() => setIsOpen(!isOpen)}
+        title="Bordes"
+        aria-label="Bordes"
+        aria-haspopup="true"
+        aria-expanded={isOpen}
+      >
+        <span className="w-4 h-4">{Icons.borders}</span>
+        <span className="w-2.5 h-2.5 text-gray-500">{Icons.dropdown}</span>
+      </button>
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-1 p-2 bg-white border border-gray-300 rounded-lg shadow-xl z-50 min-w-[160px]">
+          <div className="text-[10px] text-gray-500 mb-1.5 font-medium uppercase tracking-wide">Bordes</div>
+          <div className="grid grid-cols-4 gap-1 mb-2">
+            {borderOptions.map((opt) => (
+              <button
+                key={opt.type}
+                className="flex items-center justify-center w-8 h-8 rounded border border-gray-200 hover:bg-gray-100 hover:border-gray-400 transition-colors"
+                onClick={() => { onSelect(opt.type); setIsOpen(false); }}
+                title={opt.label}
+              >
+                {opt.icon}
+              </button>
+            ))}
+          </div>
+          <div className="border-t border-gray-200 pt-2">
+            <div className="text-[9px] text-gray-500 mb-1">Estilos de línea</div>
+            <div className="flex gap-1">
+              <button
+                className="flex-1 h-6 border border-gray-300 rounded hover:bg-gray-100 flex items-center justify-center"
+                onClick={() => { onSelect('all', 'thin'); setIsOpen(false); }}
+                title="Línea delgada"
+              >
+                <div className="w-8 h-px bg-gray-800" />
+              </button>
+              <button
+                className="flex-1 h-6 border border-gray-300 rounded hover:bg-gray-100 flex items-center justify-center"
+                onClick={() => { onSelect('all', 'medium'); setIsOpen(false); }}
+                title="Línea media"
+              >
+                <div className="w-8 h-0.5 bg-gray-800" />
+              </button>
+              <button
+                className="flex-1 h-6 border border-gray-300 rounded hover:bg-gray-100 flex items-center justify-center"
+                onClick={() => { onSelect('all', 'thick'); setIsOpen(false); }}
+                title="Línea gruesa"
+              >
+                <div className="w-8 h-1 bg-gray-800" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface NumberFormatPickerProps {
+  value: string;
+  onChange: (format: string) => void;
+}
+
+const NumberFormatPicker: React.FC<NumberFormatPickerProps> = ({ value, onChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const formats = [
+    { id: 'General', label: 'General', example: '1234.56', icon: 'Aa' },
+    { id: 'Número', label: 'Número', example: '1,234.56', icon: '#' },
+    { id: 'Moneda', label: 'Moneda ($)', example: '$1,234.56', icon: '$' },
+    { id: 'Contabilidad', label: 'Contabilidad', example: '$ 1,234.56', icon: '¢' },
+    { id: 'Porcentaje', label: 'Porcentaje', example: '12.35%', icon: '%' },
+    { id: 'Científico', label: 'Científico', example: '1.23E+03', icon: 'E' },
+    { id: 'Fecha', label: 'Fecha corta', example: '27/12/2025', icon: '📅' },
+    { id: 'FechaLarga', label: 'Fecha larga', example: '27 dic 2025', icon: '📆' },
+    { id: 'Hora', label: 'Hora', example: '14:30:00', icon: '⏰' },
+    { id: 'Texto', label: 'Texto', example: '1234', icon: 'T' },
+  ];
+
+  return (
+    <div className="relative" ref={pickerRef}>
+      <button
+        className="flex items-center justify-between w-[100px] h-[22px] px-2 border rounded text-[11px] transition-colors bg-white border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+        onClick={() => setIsOpen(!isOpen)}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+      >
+        <span className="flex-1 text-left truncate font-medium">{value}</span>
+        <span className="w-3 h-3 ml-1 text-gray-500">{Icons.dropdown}</span>
+      </button>
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-0.5 bg-white border border-gray-300 rounded-lg shadow-xl z-50 w-[200px] overflow-hidden">
+          <div className="text-[10px] text-gray-500 px-3 py-1.5 bg-gray-50 font-medium uppercase tracking-wide border-b">
+            Formatos de número
+          </div>
+          <div className="max-h-64 overflow-y-auto">
+            {formats.map((fmt) => (
+              <button
+                key={fmt.id}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-100 ${value === fmt.id ? 'bg-green-50 text-green-700' : ''}`}
+                onClick={() => { onChange(fmt.id); setIsOpen(false); }}
+              >
+                <span className="w-6 h-6 flex items-center justify-center bg-gray-100 rounded text-[11px] font-bold">
+                  {fmt.icon}
+                </span>
+                <div className="flex-1">
+                  <div className="text-[11px] font-medium">{fmt.label}</div>
+                  <div className="text-[9px] text-gray-400">{fmt.example}</div>
+                </div>
+                {value === fmt.id && (
+                  <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface MergePickerProps {
+  onMerge: () => void;
+  onUnmerge: () => void;
+}
+
+const MergePicker: React.FC<MergePickerProps> = ({ onMerge, onUnmerge }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={pickerRef}>
+      <button
+        className="flex flex-col items-center justify-center w-7 h-7 p-0.5 border border-transparent rounded cursor-pointer transition-all text-gray-700 hover:bg-gray-200 hover:border-gray-300"
+        onClick={() => setIsOpen(!isOpen)}
+        title="Combinar celdas"
+        aria-label="Combinar celdas"
+        aria-haspopup="true"
+        aria-expanded={isOpen}
+      >
+        <span className="w-4 h-4">{Icons.merge}</span>
+        <span className="w-2.5 h-2.5 text-gray-500">{Icons.dropdown}</span>
+      </button>
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-1 p-1 bg-white border border-gray-300 rounded-lg shadow-xl z-50 min-w-[140px]">
+          <button
+            className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[11px] rounded hover:bg-gray-100"
+            onClick={() => { onMerge(); setIsOpen(false); }}
+          >
+            <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"/><path d="M6 10h8M10 6l4 4-4 4" stroke="currentColor" strokeWidth="1.5"/></svg>
+            Combinar y centrar
+          </button>
+          <button
+            className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[11px] rounded hover:bg-gray-100"
+            onClick={() => { onMerge(); setIsOpen(false); }}
+          >
+            <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="6" fill="none" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="12" width="16" height="6" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg>
+            Combinar horizontalmente
+          </button>
+          <button
+            className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[11px] rounded hover:bg-gray-100"
+            onClick={() => { onMerge(); setIsOpen(false); }}
+          >
+            <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="6" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="2" width="6" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg>
+            Combinar verticalmente
+          </button>
+          <div className="border-t border-gray-200 my-1" />
+          <button
+            className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[11px] rounded hover:bg-gray-100 text-red-600"
+            onClick={() => { onUnmerge(); setIsOpen(false); }}
+          >
+            <svg viewBox="0 0 20 20" className="w-4 h-4"><rect x="2" y="2" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"/><line x1="6" y1="10" x2="14" y2="10" stroke="currentColor" strokeWidth="1.5"/></svg>
+            Separar celdas
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface RibbonButtonProps {
   icon: React.ReactNode;
   label?: string;
@@ -627,7 +887,6 @@ const HomeTabContent: React.FC<{
 }> = ({ commands, cellFormat, currentFont, currentFontSize, currentNumberFormat }) => {
   const fonts = ['Arial', 'Calibri', 'Cambria', 'Consolas', 'Courier New', 'Georgia', 'Segoe UI', 'Tahoma', 'Times New Roman', 'Verdana'];
   const sizes = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '36', '48', '72'];
-  const numberFormats = ['General', 'Número', 'Moneda', 'Porcentaje', 'Fecha', 'Texto'];
 
   const [fontColor, setFontColor] = useState(cellFormat?.color || '#000000');
   const [fillColor, setFillColor] = useState(cellFormat?.backgroundColor || '#ffffff');
@@ -657,8 +916,13 @@ const HomeTabContent: React.FC<{
             <RibbonButton icon={Icons.bold} active={cellFormat?.bold} onClick={() => commands.toggleBold?.()} tooltip="Negrita (Ctrl+B)" />
             <RibbonButton icon={Icons.italic} active={cellFormat?.italic} onClick={() => commands.toggleItalic?.()} tooltip="Cursiva (Ctrl+I)" />
             <RibbonButton icon={Icons.underline} active={cellFormat?.underline} onClick={() => commands.toggleUnderline?.()} tooltip="Subrayado (Ctrl+U)" />
+            <RibbonButton 
+              icon={<span className="text-[11px] line-through">S</span>} 
+              onClick={() => commands.toggleStrikethrough?.()} 
+              tooltip="Tachado" 
+            />
             <div className="w-px h-5 bg-gray-200 mx-0.5" />
-            <RibbonButton icon={Icons.borders} hasDropdown tooltip="Bordes" />
+            <BorderPicker onSelect={(type, style) => commands.setBorders?.(type, style)} />
             <ColorPicker
               color={fillColor}
               onChange={(c) => { setFillColor(c); commands.setFillColor?.(c); }}
@@ -685,8 +949,8 @@ const HomeTabContent: React.FC<{
             <RibbonButton icon={Icons.alignRight} onClick={() => commands.alignRight?.()} active={cellFormat?.align === 'right'} tooltip="Alinear derecha" />
           </div>
           <div className="flex items-center gap-px">
-            <RibbonButton icon={Icons.wrapText} hasDropdown onClick={() => commands.wrapText?.()} tooltip="Ajustar texto" />
-            <RibbonButton icon={Icons.merge} hasDropdown onClick={() => commands.mergeCells?.()} tooltip="Combinar y centrar" />
+            <RibbonButton icon={Icons.wrapText} onClick={() => commands.wrapText?.()} tooltip="Ajustar texto" />
+            <MergePicker onMerge={() => commands.mergeCells?.()} onUnmerge={() => commands.unmergeCells?.()} />
           </div>
         </div>
       </RibbonGroup>
@@ -695,14 +959,23 @@ const HomeTabContent: React.FC<{
 
       <RibbonGroup title="Número">
         <div className="flex flex-col gap-1">
-          <Dropdown value={currentNumberFormat} options={numberFormats} onChange={(fmt) => commands.setNumberFormat?.(fmt)} width={90} />
+          <NumberFormatPicker value={currentNumberFormat} onChange={(fmt) => commands.setNumberFormat?.(fmt)} />
           <div className="flex items-center gap-px">
-            <RibbonButton icon={<span className="text-[11px] font-bold text-green-700">$</span>} hasDropdown tooltip="Formato moneda" />
-            <RibbonButton icon={<span className="text-[11px] font-bold">%</span>} tooltip="Formato porcentaje" />
-            <RibbonButton icon={<span className="text-[9px] font-mono">,00</span>} tooltip="Estilo millares" />
-            <div className="w-px h-5 bg-gray-200 mx-0.5" />
-            <RibbonButton icon={<span className="text-[9px]">.0→</span>} tooltip="Aumentar decimales" />
-            <RibbonButton icon={<span className="text-[9px]">←.0</span>} tooltip="Disminuir decimales" />
+            <RibbonButton 
+              icon={<span className="text-[11px] font-bold text-green-700">$</span>} 
+              onClick={() => commands.setNumberFormat?.('Moneda')} 
+              tooltip="Formato moneda" 
+            />
+            <RibbonButton 
+              icon={<span className="text-[11px] font-bold">%</span>} 
+              onClick={() => commands.setNumberFormat?.('Porcentaje')} 
+              tooltip="Formato porcentaje" 
+            />
+            <RibbonButton 
+              icon={<span className="text-[9px] font-mono">,00</span>} 
+              onClick={() => commands.setNumberFormat?.('Número')} 
+              tooltip="Estilo millares" 
+            />
           </div>
         </div>
       </RibbonGroup>
@@ -731,8 +1004,10 @@ const HomeTabContent: React.FC<{
 
       <RibbonGroup title="Edición">
         <div className="flex items-start gap-0.5">
-          <SplitButton icon={Icons.sort} label="Ordenar" onClick={() => commands.sort?.('asc')} tooltip="Ordenar y filtrar" />
-          <SplitButton icon={Icons.find} label="Buscar" onClick={() => {}} tooltip="Buscar y seleccionar" />
+          <SplitButton icon={Icons.sortAsc} label="A→Z" onClick={() => commands.sort?.('asc')} tooltip="Ordenar A-Z" />
+          <SplitButton icon={Icons.sort} label="Z→A" onClick={() => commands.sort?.('desc')} tooltip="Ordenar Z-A" />
+          <SplitButton icon={Icons.filter} label="Filtro" onClick={() => commands.filter?.()} tooltip="Aplicar filtro" />
+          <SplitButton icon={Icons.find} label="Buscar" onClick={() => commands.findReplace?.()} tooltip="Buscar y reemplazar" />
         </div>
       </RibbonGroup>
     </div>
@@ -822,29 +1097,69 @@ const PageLayoutTabContent: React.FC = () => {
   );
 };
 
-const FormulasTabContent: React.FC = () => {
+const FormulasTabContent: React.FC<{ commands: Partial<RibbonCommands> }> = ({ commands }) => {
   return (
     <div className="flex items-start gap-0.5 px-1 py-0.5 min-h-[72px]">
-      <RibbonGroup title="Biblioteca de funciones">
+      <RibbonGroup title="Funciones rápidas">
         <div className="flex items-start gap-0.5">
-          <SplitButton icon={Icons.function} label="Insertar" onClick={() => {}} tooltip="Insertar función" />
-          <SplitButton icon={Icons.sum} label="Autosuma" onClick={() => {}} tooltip="Autosuma" />
+          <SplitButton 
+            icon={Icons.sum} 
+            label="SUMA" 
+            onClick={() => commands.insertFormula?.('SUM')} 
+            tooltip="Insertar SUMA - suma los valores de un rango" 
+          />
+          <SplitButton 
+            icon={<span className="text-[10px] font-bold">x̄</span>} 
+            label="PROMEDIO" 
+            onClick={() => commands.insertFormula?.('AVERAGE')} 
+            tooltip="Insertar PROMEDIO - calcula el promedio de un rango" 
+          />
+          <SplitButton 
+            icon={<span className="text-[10px] font-bold">#</span>} 
+            label="CONTAR" 
+            onClick={() => commands.insertFormula?.('COUNT')} 
+            tooltip="Insertar CONTAR - cuenta las celdas con números" 
+          />
         </div>
       </RibbonGroup>
       <RibbonSeparator />
-      <RibbonGroup title="Categorías">
+      <RibbonGroup title="Estadísticas">
         <div className="flex items-start gap-0.5">
-          <RibbonButton icon={<span className="text-[10px] font-bold">Σ</span>} size="large" label="Matemáticas" tooltip="Funciones matemáticas" />
-          <RibbonButton icon={<span className="text-[10px] font-bold">fx</span>} size="large" label="Lógicas" tooltip="Funciones lógicas" />
-          <RibbonButton icon={<span className="text-[10px] font-bold">Tx</span>} size="large" label="Texto" tooltip="Funciones de texto" />
-          <RibbonButton icon={<span className="text-[10px]">📅</span>} size="large" label="Fecha" tooltip="Funciones de fecha" />
+          <SplitButton 
+            icon={<span className="text-[10px] font-bold">↑</span>} 
+            label="MAX" 
+            onClick={() => commands.insertFormula?.('MAX')} 
+            tooltip="Insertar MAX - encuentra el valor máximo" 
+          />
+          <SplitButton 
+            icon={<span className="text-[10px] font-bold">↓</span>} 
+            label="MIN" 
+            onClick={() => commands.insertFormula?.('MIN')} 
+            tooltip="Insertar MIN - encuentra el valor mínimo" 
+          />
         </div>
       </RibbonGroup>
       <RibbonSeparator />
-      <RibbonGroup title="Nombres definidos">
+      <RibbonGroup title="Lógicas">
         <div className="flex items-start gap-0.5">
-          <SplitButton icon={Icons.format} label="Administrador" onClick={() => {}} tooltip="Administrador de nombres" />
-          <SplitButton icon={Icons.format} label="Definir" onClick={() => {}} tooltip="Definir nombre" />
+          <SplitButton 
+            icon={<span className="text-[10px] font-bold">?:</span>} 
+            label="SI" 
+            onClick={() => commands.insertFormula?.('IF')} 
+            tooltip="Insertar SI - condición lógica" 
+          />
+          <SplitButton 
+            icon={<span className="text-[10px] font-bold">↔</span>} 
+            label="BUSCARV" 
+            onClick={() => commands.insertFormula?.('VLOOKUP')} 
+            tooltip="Insertar BUSCARV - buscar valores en una tabla" 
+          />
+        </div>
+      </RibbonGroup>
+      <RibbonSeparator />
+      <RibbonGroup title="Biblioteca">
+        <div className="flex items-start gap-0.5">
+          <SplitButton icon={Icons.function} label="Todas" onClick={() => {}} tooltip="Ver todas las funciones disponibles" />
         </div>
       </RibbonGroup>
     </div>
@@ -1030,7 +1345,7 @@ export function ExcelRibbon({ commands, cellFormat, currentFont = 'Calibri', cur
       case 'pageLayout':
         return <PageLayoutTabContent />;
       case 'formulas':
-        return <FormulasTabContent />;
+        return <FormulasTabContent commands={commands} />;
       case 'data':
         return <DataTabContent commands={commands} />;
       case 'review':

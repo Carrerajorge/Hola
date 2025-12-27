@@ -52,12 +52,21 @@ interface CellData {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  strikethrough?: boolean;
   align?: 'left' | 'center' | 'right';
+  verticalAlign?: 'top' | 'middle' | 'bottom';
+  indent?: number;
   fontFamily?: string;
   fontSize?: number;
   color?: string;
   backgroundColor?: string;
-  numberFormat?: string;  // 'General', 'Number', 'Currency', 'Percentage', 'Date', 'Text'
+  numberFormat?: string;
+  borders?: {
+    top?: { style: string; color: string };
+    bottom?: { style: string; color: string };
+    left?: { style: string; color: string };
+    right?: { style: string; color: string };
+  };
 }
 
 interface ChartConfig {
@@ -321,12 +330,16 @@ const convertToSparseGrid = (data: SpreadsheetData): SparseGrid => {
         bold: cellData.bold,
         italic: cellData.italic,
         underline: cellData.underline,
+        strikethrough: cellData.strikethrough,
         align: cellData.align,
+        verticalAlign: cellData.verticalAlign,
+        indent: cellData.indent,
         fontFamily: cellData.fontFamily,
         fontSize: cellData.fontSize,
         color: cellData.color,
         backgroundColor: cellData.backgroundColor,
         numberFormat: cellData.numberFormat,
+        borders: cellData.borders,
       });
     } catch (e) {
       console.warn(`Failed to set cell at ${key}:`, e);
@@ -357,12 +370,16 @@ const convertFromSparseGrid = (grid: SparseGrid): SpreadsheetData => {
         bold: data.bold,
         italic: data.italic,
         underline: data.underline,
+        strikethrough: data.strikethrough,
         align: data.align,
+        verticalAlign: data.verticalAlign,
+        indent: data.indent,
         fontFamily: data.fontFamily,
         fontSize: data.fontSize,
         color: data.color,
         backgroundColor: data.backgroundColor,
         numberFormat: data.numberFormat,
+        borders: data.borders,
       };
       maxRow = Math.max(maxRow, row);
       maxCol = Math.max(maxCol, col);
@@ -1511,11 +1528,28 @@ export function SpreadsheetEditor({
         }
       }
       return cells;
+    } else if (!useVirtualized && selectionRange) {
+      const startParts = selectionRange.start.split('-').map(Number);
+      const endParts = selectionRange.end.split('-').map(Number);
+      if (startParts.length === 2 && endParts.length === 2) {
+        const minRow = Math.min(startParts[0], endParts[0]);
+        const maxRow = Math.max(startParts[0], endParts[0]);
+        const minCol = Math.min(startParts[1], endParts[1]);
+        const maxCol = Math.max(startParts[1], endParts[1]);
+        
+        const cells: Array<{ row: number; col: number }> = [];
+        for (let r = minRow; r <= maxRow; r++) {
+          for (let c = minCol; c <= maxCol; c++) {
+            cells.push({ row: r, col: c });
+          }
+        }
+        return cells;
+      }
     }
     
     const active = getActiveCell();
     return active ? [{ row: active.row, col: active.col }] : [];
-  }, [useVirtualized, virtualSelectionRange, getActiveCell]);
+  }, [useVirtualized, virtualSelectionRange, selectionRange, getActiveCell]);
 
   const applyToSelection = useCallback((updater: (cell: SparseCellData) => Partial<SparseCellData>) => {
     const cells = getSelectionCells();
@@ -1614,23 +1648,316 @@ export function SpreadsheetEditor({
     console.log('Merge cells:', selectionRange);
   }, [selectionRange]);
 
+  const unmergeCells = useCallback(() => {
+    if (!selectionRange) return;
+    console.log('Unmerge cells:', selectionRange);
+  }, [selectionRange]);
+
   const toggleWrapText = useCallback(() => {
     setWrapTextEnabled(prev => !prev);
   }, []);
 
-  const setNumberFormat = useCallback((format: string) => {
+  const toggleStrikethrough = useCallback(() => {
+    const active = getActiveCell();
+    if (!active) return;
+    const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
+    const newStrikethrough = !(firstCell?.strikethrough);
+    applyToSelection(() => ({ strikethrough: newStrikethrough }));
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
+
+  const setBorders = useCallback((type: 'all' | 'outside' | 'inside' | 'none' | 'top' | 'bottom' | 'left' | 'right', style: 'thin' | 'medium' | 'thick' = 'thin') => {
     const active = getActiveCell();
     if (!active) return;
     
+    const borderStyle = { style, color: '#000000' };
+    const cells = getSelectionCells();
+    if (cells.length === 0) return;
+    
+    const minRow = Math.min(...cells.map(c => c.row));
+    const maxRow = Math.max(...cells.map(c => c.row));
+    const minCol = Math.min(...cells.map(c => c.col));
+    const maxCol = Math.max(...cells.map(c => c.col));
+    
+    const applyBordersToCell = (row: number, col: number, existingBorders: any) => {
+      if (type === 'none') return undefined;
+      
+      const isTop = row === minRow;
+      const isBottom = row === maxRow;
+      const isLeft = col === minCol;
+      const isRight = col === maxCol;
+      
+      const borders = { ...existingBorders };
+      
+      if (type === 'all') {
+        borders.top = borderStyle;
+        borders.bottom = borderStyle;
+        borders.left = borderStyle;
+        borders.right = borderStyle;
+      } else if (type === 'outside') {
+        if (isTop) borders.top = borderStyle;
+        if (isBottom) borders.bottom = borderStyle;
+        if (isLeft) borders.left = borderStyle;
+        if (isRight) borders.right = borderStyle;
+      } else if (type === 'inside') {
+        if (!isTop) borders.top = borderStyle;
+        if (!isBottom) borders.bottom = borderStyle;
+        if (!isLeft) borders.left = borderStyle;
+        if (!isRight) borders.right = borderStyle;
+      } else {
+        if (type === 'top') borders.top = borderStyle;
+        if (type === 'bottom') borders.bottom = borderStyle;
+        if (type === 'left') borders.left = borderStyle;
+        if (type === 'right') borders.right = borderStyle;
+      }
+      
+      return borders;
+    };
+    
+    if (useVirtualized) {
+      cells.forEach(({ row, col }) => {
+        const cell = sparseGrid.getCell(row, col) || { value: '' };
+        const newBorders = applyBordersToCell(row, col, cell.borders || {});
+        sparseGrid.setCell(row, col, { ...cell, borders: newBorders });
+      });
+      setGridVersion(v => v + 1);
+    } else {
+      cells.forEach(({ row, col }) => {
+        const key = getCellKey(row, col);
+        const cell = data.cells[key] || { value: '' };
+        const newBorders = applyBordersToCell(row, col, cell.borders || {});
+        updateCell(key, { ...cell, borders: newBorders });
+      });
+    }
+  }, [getActiveCell, getSelectionCells, useVirtualized, sparseGrid, data.cells, updateCell]);
+
+  const [findReplaceOpen, setFindReplaceOpen] = useState(false);
+  const [findText, setFindText] = useState('');
+  const [replaceText, setReplaceText] = useState('');
+  const [findResults, setFindResults] = useState<Array<{row: number, col: number}>>([]);
+  const [currentFindIndex, setCurrentFindIndex] = useState(0);
+
+  const findInSpreadsheet = useCallback(() => {
+    if (!findText) return;
+    const results: Array<{row: number, col: number}> = [];
+    
+    if (useVirtualized) {
+      for (let r = 0; r < GRID_CONFIG.maxRows && r < 1000; r++) {
+        for (let c = 0; c < GRID_CONFIG.maxCols && c < 100; c++) {
+          const cell = sparseGrid.getCell(r, c);
+          if (cell?.value && String(cell.value).toLowerCase().includes(findText.toLowerCase())) {
+            results.push({ row: r, col: c });
+          }
+        }
+      }
+    } else {
+      Object.keys(data.cells).forEach(key => {
+        const cell = data.cells[key];
+        if (cell?.value && String(cell.value).toLowerCase().includes(findText.toLowerCase())) {
+          const [row, col] = key.split('-').map(Number);
+          results.push({ row, col });
+        }
+      });
+    }
+    
+    setFindResults(results);
+    setCurrentFindIndex(0);
+    if (results.length > 0) {
+      const first = results[0];
+      if (useVirtualized) {
+        setVirtualSelectedCell({ row: first.row, col: first.col });
+      } else {
+        setSelectedCell(`${first.row}-${first.col}`);
+      }
+    }
+  }, [findText, useVirtualized, sparseGrid, data.cells]);
+
+  const replaceInSpreadsheet = useCallback((replaceAll: boolean) => {
+    if (!findText) return;
+    
+    if (useVirtualized) {
+      const cellsToReplace = replaceAll ? findResults : (findResults.length > 0 ? [findResults[currentFindIndex]] : []);
+      cellsToReplace.forEach(({ row, col }) => {
+        const cell = sparseGrid.getCell(row, col) || { value: '' };
+        const newValue = String(cell.value).replace(new RegExp(findText, replaceAll ? 'gi' : 'i'), replaceText);
+        sparseGrid.setCell(row, col, { ...cell, value: newValue });
+      });
+      setGridVersion(v => v + 1);
+    } else {
+      const newCells = { ...data.cells };
+      const cellsToReplace = replaceAll ? findResults : (findResults.length > 0 ? [findResults[currentFindIndex]] : []);
+      cellsToReplace.forEach(({ row, col }) => {
+        const key = `${row}-${col}`;
+        const cell = newCells[key] || { value: '' };
+        const newValue = String(cell.value).replace(new RegExp(findText, replaceAll ? 'gi' : 'i'), replaceText);
+        newCells[key] = { ...cell, value: newValue };
+      });
+      setData(prev => ({ ...prev, cells: newCells }));
+    }
+    
+    if (!replaceAll && findResults.length > 1) {
+      setCurrentFindIndex(prev => (prev + 1) % findResults.length);
+    } else {
+      findInSpreadsheet();
+    }
+  }, [findText, replaceText, findResults, currentFindIndex, useVirtualized, sparseGrid, data.cells, findInSpreadsheet]);
+
+  const insertFormula = useCallback((formulaType: 'SUM' | 'AVERAGE' | 'COUNT' | 'MAX' | 'MIN' | 'IF' | 'VLOOKUP') => {
+    const active = getActiveCell();
+    if (!active) return;
+    
+    const selectionCells = getSelectionCells();
+    let formula = '';
+    
+    if (selectionCells.length > 1) {
+      const rows = selectionCells.map(c => c.row);
+      const cols = selectionCells.map(c => c.col);
+      const minRow = Math.min(...rows);
+      const maxRow = Math.max(...rows);
+      const minCol = Math.min(...cols);
+      const maxCol = Math.max(...cols);
+      const startRef = formatCellRef(minRow, minCol);
+      const endRef = formatCellRef(maxRow, maxCol);
+      formula = `=${formulaType}(${startRef}:${endRef})`;
+    } else {
+      const startRef = formatCellRef(Math.max(0, active.row - 5), active.col);
+      const endRef = formatCellRef(active.row - 1, active.col);
+      if (active.row > 0) {
+        formula = `=${formulaType}(${startRef}:${endRef})`;
+      } else {
+        formula = `=${formulaType}(A1:A10)`;
+      }
+    }
+    
     if (useVirtualized) {
       const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...cell, numberFormat: format });
+      const engine = new FormulaEngine((r, c) => {
+        const data = sparseGrid.getCell(r, c);
+        return data?.value ?? '';
+      });
+      const result = engine.evaluate(formula);
+      sparseGrid.setCell(active.row, active.col, { 
+        ...cell, 
+        formula, 
+        value: String(result) 
+      });
       setGridVersion(v => v + 1);
     } else {
       const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, numberFormat: format });
+      const result = evaluateFormula(formula, data.cells);
+      updateCell(active.key, { ...cell, formula, value: result });
     }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+  }, [getActiveCell, getSelectionCells, useVirtualized, sparseGrid, data.cells, updateCell]);
+
+  const sortData = useCallback((direction: 'asc' | 'desc') => {
+    const active = getActiveCell();
+    if (!active) return;
+    
+    const colToSort = active.col;
+    
+    if (useVirtualized) {
+      const rowsWithData: Array<{row: number, values: Map<number, any>}> = [];
+      
+      for (let r = 0; r < 1000; r++) {
+        const cell = sparseGrid.getCell(r, colToSort);
+        if (cell?.value) {
+          const rowData = new Map<number, any>();
+          for (let c = 0; c < 100; c++) {
+            const cellData = sparseGrid.getCell(r, c);
+            if (cellData) rowData.set(c, { ...cellData });
+          }
+          rowsWithData.push({ row: r, values: rowData });
+        }
+      }
+      
+      if (rowsWithData.length === 0) return;
+      
+      rowsWithData.sort((a, b) => {
+        const aVal = a.values.get(colToSort)?.value || '';
+        const bVal = b.values.get(colToSort)?.value || '';
+        const aNum = parseFloat(aVal);
+        const bNum = parseFloat(bVal);
+        
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          return direction === 'asc' ? aNum - bNum : bNum - aNum;
+        }
+        return direction === 'asc' 
+          ? String(aVal).localeCompare(String(bVal))
+          : String(bVal).localeCompare(String(aVal));
+      });
+      
+      rowsWithData.forEach((rowInfo, newIndex) => {
+        for (let c = 0; c < 100; c++) {
+          const cellData = rowInfo.values.get(c);
+          if (cellData) {
+            sparseGrid.setCell(newIndex, c, cellData);
+          } else {
+            sparseGrid.deleteCell(newIndex, c);
+          }
+        }
+      });
+      
+      setGridVersion(v => v + 1);
+    } else {
+      const rowsWithData: Array<{row: number, cells: { [key: string]: CellData }}> = [];
+      
+      for (let r = 0; r < data.rowCount; r++) {
+        const key = getCellKey(r, colToSort);
+        const cell = data.cells[key];
+        if (cell?.value) {
+          const rowCells: { [key: string]: CellData } = {};
+          for (let c = 0; c < data.colCount; c++) {
+            const cellKey = getCellKey(r, c);
+            if (data.cells[cellKey]) {
+              rowCells[c.toString()] = { ...data.cells[cellKey] };
+            }
+          }
+          rowsWithData.push({ row: r, cells: rowCells });
+        }
+      }
+      
+      if (rowsWithData.length === 0) return;
+      
+      rowsWithData.sort((a, b) => {
+        const aVal = a.cells[colToSort.toString()]?.value || '';
+        const bVal = b.cells[colToSort.toString()]?.value || '';
+        const aNum = parseFloat(aVal);
+        const bNum = parseFloat(bVal);
+        
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+          return direction === 'asc' ? aNum - bNum : bNum - aNum;
+        }
+        return direction === 'asc' 
+          ? String(aVal).localeCompare(String(bVal))
+          : String(bVal).localeCompare(String(aVal));
+      });
+      
+      const newCells: { [key: string]: CellData } = {};
+      rowsWithData.forEach((rowInfo, newIndex) => {
+        Object.entries(rowInfo.cells).forEach(([col, cellData]) => {
+          newCells[getCellKey(newIndex, parseInt(col))] = cellData;
+        });
+      });
+      
+      setData(prev => ({ ...prev, cells: newCells }));
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data]);
+
+  const setVerticalAlignment = useCallback((align: 'top' | 'middle' | 'bottom') => {
+    applyToSelection(() => ({ verticalAlign: align }));
+  }, [applyToSelection]);
+
+  const setIndent = useCallback((delta: number) => {
+    const active = getActiveCell();
+    if (!active) return;
+    const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
+    const currentIndent = firstCell?.indent || 0;
+    const newIndent = Math.max(0, currentIndent + delta);
+    applyToSelection(() => ({ indent: newIndent }));
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
+
+  const setNumberFormat = useCallback((format: string) => {
+    applyToSelection(() => ({ numberFormat: format }));
+  }, [applyToSelection]);
 
   const ribbonCommands: Partial<RibbonCommands> = useMemo(() => ({
     copy: () => {
@@ -1685,6 +2012,7 @@ export function SpreadsheetEditor({
     toggleBold,
     toggleItalic,
     toggleUnderline,
+    toggleStrikethrough,
     setFont: setFontFamily,
     setFontSize,
     setFontColor,
@@ -1692,23 +2020,30 @@ export function SpreadsheetEditor({
     alignLeft: () => setAlignment('left'),
     alignCenter: () => setAlignment('center'),
     alignRight: () => setAlignment('right'),
+    alignTop: () => setVerticalAlignment('top'),
+    alignMiddle: () => setVerticalAlignment('middle'),
+    alignBottom: () => setVerticalAlignment('bottom'),
+    increaseIndent: () => setIndent(1),
+    decreaseIndent: () => setIndent(-1),
     insertRow: addRow,
     insertColumn: addColumn,
     deleteRow,
     deleteColumn,
     insertChart: (type) => updateChartConfig(type, true),
-    sort: (direction) => {
-      console.log('Sort:', direction);
-    },
+    sort: sortData,
     filter: () => {
       console.log('Filter toggle');
     },
     undo: undoRedo.undo,
     redo: undoRedo.redo,
     mergeCells,
+    unmergeCells,
     wrapText: toggleWrapText,
     setNumberFormat,
-  }), [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell, toggleBold, toggleItalic, toggleUnderline, setFontFamily, setFontSize, setFontColor, setFillColor, setAlignment, addRow, addColumn, deleteRow, deleteColumn, updateChartConfig, undoRedo.undo, undoRedo.redo, mergeCells, toggleWrapText, setNumberFormat]);
+    setBorders,
+    insertFormula,
+    findReplace: () => setFindReplaceOpen(true),
+  }), [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell, toggleBold, toggleItalic, toggleUnderline, toggleStrikethrough, setFontFamily, setFontSize, setFontColor, setFillColor, setAlignment, setVerticalAlignment, setIndent, addRow, addColumn, deleteRow, deleteColumn, updateChartConfig, sortData, undoRedo.undo, undoRedo.redo, mergeCells, unmergeCells, toggleWrapText, setNumberFormat, setBorders, insertFormula]);
 
   const cellFormat: CellFormat = useMemo(() => {
     const active = getActiveCell();
@@ -2094,6 +2429,63 @@ export function SpreadsheetEditor({
                 Generar
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Find & Replace Dialog */}
+      {findReplaceOpen && (
+        <div className="fixed top-20 right-4 bg-white dark:bg-gray-900 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 p-4 w-80 z-[100]" data-testid="find-replace-dialog">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold">Buscar y reemplazar</h3>
+            <button
+              onClick={() => setFindReplaceOpen(false)}
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Buscar</label>
+              <input
+                type="text"
+                value={findText}
+                onChange={(e) => setFindText(e.target.value)}
+                placeholder="Texto a buscar..."
+                className="w-full px-3 py-1.5 text-sm border rounded focus:ring-1 focus:ring-green-500 outline-none dark:bg-gray-800 dark:border-gray-700"
+                onKeyDown={(e) => e.key === 'Enter' && findInSpreadsheet()}
+                autoFocus
+                data-testid="input-find-text"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Reemplazar con</label>
+              <input
+                type="text"
+                value={replaceText}
+                onChange={(e) => setReplaceText(e.target.value)}
+                placeholder="Nuevo texto..."
+                className="w-full px-3 py-1.5 text-sm border rounded focus:ring-1 focus:ring-green-500 outline-none dark:bg-gray-800 dark:border-gray-700"
+                data-testid="input-replace-text"
+              />
+            </div>
+            {findResults.length > 0 && (
+              <div className="text-xs text-gray-500">
+                {currentFindIndex + 1} de {findResults.length} resultados
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={findInSpreadsheet} className="flex-1" data-testid="btn-find">
+                Buscar
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => replaceInSpreadsheet(false)} className="flex-1" data-testid="btn-replace">
+                Reemplazar
+              </Button>
+            </div>
+            <Button size="sm" variant="default" onClick={() => replaceInSpreadsheet(true)} className="w-full" data-testid="btn-replace-all">
+              Reemplazar todo
+            </Button>
           </div>
         </div>
       )}
