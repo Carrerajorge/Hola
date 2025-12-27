@@ -218,13 +218,13 @@ const VirtualCell = memo(function VirtualCell({
   return (
     <div
       className={cn(
-        "absolute border-r border-b border-gray-200 dark:border-gray-700 px-1.5 flex items-center text-sm select-none overflow-hidden transition-all duration-200",
-        isSelected && !isEditing && "ring-2 ring-blue-500 ring-inset z-10 bg-blue-50 dark:bg-blue-950",
-        isInRange && !isSelected && "bg-blue-100/50 dark:bg-blue-900/50 border-blue-300",
+        "absolute border-r border-b border-gray-200 dark:border-gray-700 px-1.5 flex items-center text-sm select-none overflow-hidden cursor-cell hover:bg-blue-50/30 dark:hover:bg-blue-900/30",
+        isSelected && !isEditing && "ring-2 ring-blue-500 ring-inset z-10 bg-blue-100 dark:bg-blue-900",
+        isInRange && !isSelected && "bg-blue-100/60 dark:bg-blue-800/60",
         isStreaming && "ring-2 ring-purple-500 ring-inset z-20 bg-purple-50 dark:bg-purple-950",
         isRecentlyWritten && "animate-flash-green bg-green-100 dark:bg-green-900",
-        data.value && !isStreaming && !isRecentlyWritten && !isInRange && "bg-white dark:bg-gray-900",
-        !data.value && !isSelected && !isStreaming && !isInRange && "bg-gray-50/50 dark:bg-gray-900/50"
+        data.value && !isStreaming && !isRecentlyWritten && !isInRange && !isSelected && "bg-white dark:bg-gray-900",
+        !data.value && !isSelected && !isStreaming && !isInRange && "bg-gray-50/30 dark:bg-gray-900/30"
       )}
       style={cellStyle}
       onMouseDown={onMouseDown}
