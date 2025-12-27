@@ -1150,7 +1150,22 @@ export function VirtualizedExcel({
           return;
         case 'Delete':
         case 'Backspace':
-          updateCell(row, col, '');
+          // Delete selected range or single cell
+          if (selectionRange) {
+            const minRow = Math.min(selectionRange.startRow, selectionRange.endRow);
+            const maxRow = Math.max(selectionRange.startRow, selectionRange.endRow);
+            const minCol = Math.min(selectionRange.startCol, selectionRange.endCol);
+            const maxCol = Math.max(selectionRange.startCol, selectionRange.endCol);
+            
+            for (let r = minRow; r <= maxRow; r++) {
+              for (let c = minCol; c <= maxCol; c++) {
+                grid.setCell(r, c, { value: '' });
+              }
+            }
+            onGridChange(grid);
+          } else {
+            updateCell(row, col, '');
+          }
           e.preventDefault();
           return;
         default:
@@ -1190,7 +1205,7 @@ export function VirtualizedExcel({
     } catch (e) {
       console.error('Error handling keyboard navigation:', e);
     }
-  }, [selectedCell, editingCell, scrollPos, onEditCell, onSelectCell, updateCell, handleCellEdit]);
+  }, [selectedCell, editingCell, scrollPos, onEditCell, onSelectCell, updateCell, handleCellEdit, selectionRange, grid, onGridChange]);
 
   const visibleRows = useMemo(() => {
     const rows: number[] = [];
