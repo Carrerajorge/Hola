@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
+import Handsontable from 'handsontable';
 import 'handsontable/dist/handsontable.full.min.css';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -8,7 +9,7 @@ import {
   Download, Upload, Plus, Trash2, Save, FileSpreadsheet, 
   Table, BarChart3, Calculator, Filter, SortAsc, Search,
   Undo, Redo, Copy, Clipboard, Scissors, Bold, Italic,
-  AlignLeft, AlignCenter, AlignRight, Palette, Grid3X3
+  AlignLeft, AlignCenter, AlignRight, Palette, Grid3X3, Type
 } from 'lucide-react';
 import '../../styles/spreadsheet.css';
 
@@ -60,12 +61,159 @@ export function SpreadsheetEditor({
   const [isModified, setIsModified] = useState(false);
   const [formulaValue, setFormulaValue] = useState('');
 
+  const [cellFormat, setCellFormat] = useState({
+    bold: false,
+    italic: false,
+    align: 'left' as 'left' | 'center' | 'right',
+    backgroundColor: '',
+    textColor: ''
+  });
+
   useEffect(() => {
     if (initialData) {
       setData(initialData);
       setSheets([{ name: 'Hoja 1', data: initialData }]);
     }
   }, [initialData]);
+
+  const updateFormatState = useCallback(() => {
+    if (!hotRef.current?.hotInstance) return;
+    const hot = hotRef.current.hotInstance;
+    const selected = hot.getSelected();
+    
+    if (!selected || selected.length === 0) return;
+    
+    const [row, col] = [selected[0][0], selected[0][1]];
+    const meta = hot.getCellMeta(row, col);
+    
+    setCellFormat({
+      bold: meta.bold || false,
+      italic: meta.italic || false,
+      align: (meta.alignment as 'left' | 'center' | 'right') || 'left',
+      backgroundColor: meta.backgroundColor || '',
+      textColor: meta.textColor || ''
+    });
+  }, []);
+
+  const applyBold = useCallback(() => {
+    if (!hotRef.current?.hotInstance) return;
+    const hot = hotRef.current.hotInstance;
+    const selected = hot.getSelected();
+    
+    if (!selected || selected.length === 0) return;
+    
+    selected.forEach(([startRow, startCol, endRow, endCol]: number[]) => {
+      for (let row = Math.min(startRow, endRow); row <= Math.max(startRow, endRow); row++) {
+        for (let col = Math.min(startCol, endCol); col <= Math.max(startCol, endCol); col++) {
+          const meta = hot.getCellMeta(row, col);
+          const newBold = !meta.bold;
+          hot.setCellMeta(row, col, 'bold', newBold);
+        }
+      }
+    });
+    
+    hot.render();
+    setIsModified(true);
+    updateFormatState();
+  }, [updateFormatState]);
+
+  const applyItalic = useCallback(() => {
+    if (!hotRef.current?.hotInstance) return;
+    const hot = hotRef.current.hotInstance;
+    const selected = hot.getSelected();
+    
+    if (!selected || selected.length === 0) return;
+    
+    selected.forEach(([startRow, startCol, endRow, endCol]: number[]) => {
+      for (let row = Math.min(startRow, endRow); row <= Math.max(startRow, endRow); row++) {
+        for (let col = Math.min(startCol, endCol); col <= Math.max(startCol, endCol); col++) {
+          const meta = hot.getCellMeta(row, col);
+          const newItalic = !meta.italic;
+          hot.setCellMeta(row, col, 'italic', newItalic);
+        }
+      }
+    });
+    
+    hot.render();
+    setIsModified(true);
+    updateFormatState();
+  }, [updateFormatState]);
+
+  const applyAlignment = useCallback((alignment: 'left' | 'center' | 'right') => {
+    if (!hotRef.current?.hotInstance) return;
+    const hot = hotRef.current.hotInstance;
+    const selected = hot.getSelected();
+    
+    if (!selected || selected.length === 0) return;
+    
+    selected.forEach(([startRow, startCol, endRow, endCol]: number[]) => {
+      for (let row = Math.min(startRow, endRow); row <= Math.max(startRow, endRow); row++) {
+        for (let col = Math.min(startCol, endCol); col <= Math.max(startCol, endCol); col++) {
+          hot.setCellMeta(row, col, 'alignment', alignment);
+        }
+      }
+    });
+    
+    hot.render();
+    setIsModified(true);
+    updateFormatState();
+  }, [updateFormatState]);
+
+  const applyBackgroundColor = useCallback((color: string) => {
+    if (!hotRef.current?.hotInstance) return;
+    const hot = hotRef.current.hotInstance;
+    const selected = hot.getSelected();
+    
+    if (!selected || selected.length === 0) return;
+    
+    selected.forEach(([startRow, startCol, endRow, endCol]: number[]) => {
+      for (let row = Math.min(startRow, endRow); row <= Math.max(startRow, endRow); row++) {
+        for (let col = Math.min(startCol, endCol); col <= Math.max(startCol, endCol); col++) {
+          hot.setCellMeta(row, col, 'backgroundColor', color);
+        }
+      }
+    });
+    
+    hot.render();
+    setIsModified(true);
+    updateFormatState();
+  }, [updateFormatState]);
+
+  const applyTextColor = useCallback((color: string) => {
+    if (!hotRef.current?.hotInstance) return;
+    const hot = hotRef.current.hotInstance;
+    const selected = hot.getSelected();
+    
+    if (!selected || selected.length === 0) return;
+    
+    selected.forEach(([startRow, startCol, endRow, endCol]: number[]) => {
+      for (let row = Math.min(startRow, endRow); row <= Math.max(startRow, endRow); row++) {
+        for (let col = Math.min(startCol, endCol); col <= Math.max(startCol, endCol); col++) {
+          hot.setCellMeta(row, col, 'textColor', color);
+        }
+      }
+    });
+    
+    hot.render();
+    setIsModified(true);
+    updateFormatState();
+  }, [updateFormatState]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+        e.preventDefault();
+        applyBold();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'i') {
+        e.preventDefault();
+        applyItalic();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [applyBold, applyItalic]);
 
   const handleImport = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -229,10 +377,44 @@ export function SpreadsheetEditor({
     }
   }, []);
 
+  const handleSelectionEnd = useCallback(() => {
+    updateFormatState();
+  }, [updateFormatState]);
+
   const getCellReference = useCallback(() => {
     if (!selectedCell) return 'A1';
     return `${getColumnHeaders(26)[selectedCell.col] || 'A'}${selectedCell.row + 1}`;
   }, [selectedCell]);
+
+  const customRendererRef = useRef((
+    instance: Handsontable,
+    td: HTMLTableCellElement,
+    row: number,
+    col: number,
+    prop: string | number,
+    value: any,
+    cellProperties: Handsontable.CellProperties
+  ) => {
+    Handsontable.renderers.TextRenderer(instance, td, row, col, prop, value, cellProperties);
+    
+    const meta = instance.getCellMeta(row, col);
+    
+    if (meta.bold) {
+      td.style.fontWeight = 'bold';
+    }
+    if (meta.italic) {
+      td.style.fontStyle = 'italic';
+    }
+    if (meta.alignment) {
+      td.style.textAlign = meta.alignment as string;
+    }
+    if (meta.backgroundColor) {
+      td.style.backgroundColor = meta.backgroundColor as string;
+    }
+    if (meta.textColor) {
+      td.style.color = meta.textColor as string;
+    }
+  });
 
   const hotSettings = {
     data,
@@ -256,6 +438,8 @@ export function SpreadsheetEditor({
     readOnly,
     afterChange: handleDataChange,
     afterSelection: handleSelection,
+    afterSelectionEnd: handleSelectionEnd,
+    renderer: customRendererRef.current,
     className: 'spreadsheet-dark-theme',
     stretchH: 'all' as const
   };
@@ -320,24 +504,83 @@ export function SpreadsheetEditor({
         </div>
 
         <div className="flex items-center gap-1 px-2 border-r border-gray-600">
-          <button className="p-2 hover:bg-gray-700 rounded transition-colors" title="Negrita" data-testid="button-bold">
-            <Bold className="w-4 h-4 text-gray-300" />
+          <button 
+            onClick={applyBold} 
+            className={`p-2 rounded transition-colors ${cellFormat.bold ? 'bg-indigo-600 text-white' : 'hover:bg-gray-700'}`}
+            title="Negrita (Ctrl+B)" 
+            data-testid="button-bold"
+          >
+            <Bold className={`w-4 h-4 ${cellFormat.bold ? 'text-white' : 'text-gray-300'}`} />
           </button>
-          <button className="p-2 hover:bg-gray-700 rounded transition-colors" title="Cursiva" data-testid="button-italic">
-            <Italic className="w-4 h-4 text-gray-300" />
+          <button 
+            onClick={applyItalic}
+            className={`p-2 rounded transition-colors ${cellFormat.italic ? 'bg-indigo-600 text-white' : 'hover:bg-gray-700'}`}
+            title="Cursiva (Ctrl+I)" 
+            data-testid="button-italic"
+          >
+            <Italic className={`w-4 h-4 ${cellFormat.italic ? 'text-white' : 'text-gray-300'}`} />
           </button>
         </div>
 
         <div className="flex items-center gap-1 px-2 border-r border-gray-600">
-          <button className="p-2 hover:bg-gray-700 rounded transition-colors" title="Alinear Izquierda" data-testid="button-align-left">
-            <AlignLeft className="w-4 h-4 text-gray-300" />
+          <button 
+            onClick={() => applyAlignment('left')}
+            className={`p-2 rounded transition-colors ${cellFormat.align === 'left' ? 'bg-indigo-600 text-white' : 'hover:bg-gray-700'}`}
+            title="Alinear Izquierda" 
+            data-testid="button-align-left"
+          >
+            <AlignLeft className={`w-4 h-4 ${cellFormat.align === 'left' ? 'text-white' : 'text-gray-300'}`} />
           </button>
-          <button className="p-2 hover:bg-gray-700 rounded transition-colors" title="Centrar" data-testid="button-align-center">
-            <AlignCenter className="w-4 h-4 text-gray-300" />
+          <button 
+            onClick={() => applyAlignment('center')}
+            className={`p-2 rounded transition-colors ${cellFormat.align === 'center' ? 'bg-indigo-600 text-white' : 'hover:bg-gray-700'}`}
+            title="Centrar" 
+            data-testid="button-align-center"
+          >
+            <AlignCenter className={`w-4 h-4 ${cellFormat.align === 'center' ? 'text-white' : 'text-gray-300'}`} />
           </button>
-          <button className="p-2 hover:bg-gray-700 rounded transition-colors" title="Alinear Derecha" data-testid="button-align-right">
-            <AlignRight className="w-4 h-4 text-gray-300" />
+          <button 
+            onClick={() => applyAlignment('right')}
+            className={`p-2 rounded transition-colors ${cellFormat.align === 'right' ? 'bg-indigo-600 text-white' : 'hover:bg-gray-700'}`}
+            title="Alinear Derecha" 
+            data-testid="button-align-right"
+          >
+            <AlignRight className={`w-4 h-4 ${cellFormat.align === 'right' ? 'text-white' : 'text-gray-300'}`} />
           </button>
+        </div>
+
+        <div className="flex items-center gap-1 px-2 border-r border-gray-600">
+          <div className="relative" title="Color de Fondo">
+            <button 
+              className={`p-2 rounded transition-colors ${cellFormat.backgroundColor ? 'ring-2 ring-indigo-500' : 'hover:bg-gray-700'}`}
+              style={{ backgroundColor: cellFormat.backgroundColor || undefined }}
+              data-testid="button-bg-color"
+            >
+              <Palette className="w-4 h-4 text-gray-300" />
+            </button>
+            <input 
+              type="color" 
+              onChange={(e) => applyBackgroundColor(e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+              title="Color de Fondo"
+              data-testid="input-bg-color"
+            />
+          </div>
+          <div className="relative" title="Color de Texto">
+            <button 
+              className={`p-2 rounded transition-colors ${cellFormat.textColor ? 'ring-2 ring-indigo-500' : 'hover:bg-gray-700'}`}
+              data-testid="button-text-color"
+            >
+              <Type className="w-4 h-4" style={{ color: cellFormat.textColor || '#d1d5db' }} />
+            </button>
+            <input 
+              type="color" 
+              onChange={(e) => applyTextColor(e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+              title="Color de Texto"
+              data-testid="input-text-color"
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-1 px-2">
