@@ -339,6 +339,8 @@ export function SpreadsheetEditor({
       metadata: { formatting: extractFormatMetadata() }
     };
     
+    setSheets(updatedSheets);
+    
     if (onSave) {
       onSave(data, currentFileName, updatedSheets);
     }
