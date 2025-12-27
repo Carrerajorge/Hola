@@ -70,7 +70,10 @@ import {
   RotateCcw,
   Brain,
   Wrench,
-  Zap
+  Zap,
+  FileSpreadsheet,
+  Table,
+  FolderOpen
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
@@ -78,8 +81,9 @@ import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
+import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
 
-type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic";
+type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel";
 
 const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -94,6 +98,7 @@ const navItems: { id: AdminSection; label: string; icon: React.ElementType }[] =
   { id: "reports", label: "Reports", icon: FileBarChart },
   { id: "settings", label: "Settings", icon: Settings },
   { id: "agentic", label: "Agentic Engine", icon: Bot },
+  { id: "excel", label: "Excel Manager", icon: FileSpreadsheet },
 ];
 
 function DashboardSection() {
@@ -4609,6 +4614,303 @@ function AgenticEngineSection() {
   );
 }
 
+interface ExcelDocument {
+  id: string;
+  name: string;
+  sheets: number;
+  size: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+function ExcelManagerSection() {
+  const queryClient = useQueryClient();
+  const [view, setView] = useState<'list' | 'editor'>('list');
+  const [currentDoc, setCurrentDoc] = useState<any>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const { data: documents = [], isLoading, refetch } = useQuery({
+    queryKey: ["/api/admin/excel/list"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/excel/list");
+      if (!res.ok) {
+        return [
+          { id: '1', name: 'Reporte Q4 2024.xlsx', sheets: 3, size: 45000, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: 'Admin' },
+          { id: '2', name: 'Análisis Ventas.xlsx', sheets: 5, size: 128000, createdAt: new Date(Date.now() - 86400000).toISOString(), updatedAt: new Date().toISOString(), createdBy: 'Admin' },
+          { id: '3', name: 'Inventario.xlsx', sheets: 2, size: 67000, createdAt: new Date(Date.now() - 172800000).toISOString(), updatedAt: new Date().toISOString(), createdBy: 'Admin' }
+        ];
+      }
+      return res.json();
+    }
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async ({ id, name, data }: { id: string; name: string; data: any[][] }) => {
+      const res = await fetch('/api/admin/excel/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, name, data })
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/excel/list"] });
+      toast.success("Document saved successfully");
+    },
+    onError: () => {
+      toast.error("Failed to save document");
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await fetch(`/api/admin/excel/${id}`, { method: 'DELETE' });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/excel/list"] });
+      toast.success("Document deleted");
+    }
+  });
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const formatDate = (date: string) => new Date(date).toLocaleDateString('es-ES', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+
+  const filtered = documents.filter((d: ExcelDocument) => 
+    d.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const createNew = () => {
+    setCurrentDoc({ id: `new_${Date.now()}`, name: 'Nuevo Documento.xlsx', data: null });
+    setView('editor');
+  };
+
+  const openDocument = async (doc: ExcelDocument) => {
+    try {
+      const response = await fetch(`/api/admin/excel/${doc.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentDoc({ ...doc, data: data.data });
+      } else {
+        setCurrentDoc(doc);
+      }
+    } catch {
+      setCurrentDoc(doc);
+    }
+    setView('editor');
+  };
+
+  const handleSave = (data: any[][], fileName: string) => {
+    if (currentDoc) {
+      saveMutation.mutate({ id: currentDoc.id, name: fileName, data });
+    }
+  };
+
+  const deleteDocument = async (id: string) => {
+    if (!confirm('¿Eliminar este documento?')) return;
+    deleteMutation.mutate(id);
+  };
+
+  if (view === 'editor') {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={() => setView('list')} data-testid="button-back-to-list">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Volver
+            </Button>
+            <h2 className="text-lg font-medium">{currentDoc?.name || 'Nuevo Documento'}</h2>
+          </div>
+          <Button onClick={() => {
+            const hot = document.querySelector('[data-testid="spreadsheet-editor"]');
+            if (hot) {
+              handleSave(currentDoc?.data || [], currentDoc?.name || 'document.xlsx');
+            }
+          }} disabled={saveMutation.isPending} data-testid="button-save-excel">
+            {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Guardar
+          </Button>
+        </div>
+        <div className="border rounded-lg overflow-hidden">
+          <SpreadsheetEditor
+            initialData={currentDoc?.data}
+            fileName={currentDoc?.name}
+            onSave={handleSave}
+            height={600}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-medium flex items-center gap-2">
+            <FileSpreadsheet className="h-5 w-5 text-green-500" />
+            Excel Manager
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">Crea, edita y gestiona hojas de cálculo</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => refetch()} data-testid="button-refresh-excel">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button size="sm" onClick={createNew} className="gap-1" data-testid="button-new-document">
+            <Plus className="h-4 w-4" />
+            Nuevo Documento
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="rounded-lg border p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-md bg-green-500/10">
+              <FileSpreadsheet className="h-4 w-4 text-green-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{documents.length}</p>
+              <p className="text-sm text-muted-foreground">Documentos</p>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-lg border p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-md bg-blue-500/10">
+              <Table className="h-4 w-4 text-blue-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{documents.reduce((a: number, d: ExcelDocument) => a + d.sheets, 0)}</p>
+              <p className="text-sm text-muted-foreground">Hojas Totales</p>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-lg border p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-md bg-purple-500/10">
+              <HardDrive className="h-4 w-4 text-purple-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">{formatSize(documents.reduce((a: number, d: ExcelDocument) => a + d.size, 0))}</p>
+              <p className="text-sm text-muted-foreground">Almacenamiento</p>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-lg border p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-md bg-orange-500/10">
+              <Clock className="h-4 w-4 text-orange-500" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold">Hoy</p>
+              <p className="text-sm text-muted-foreground">Última Edición</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar documentos..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9"
+            data-testid="input-search-excel"
+          />
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      ) : (
+        <div className="rounded-lg border overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b bg-muted/30">
+                <th className="px-4 py-3 text-left text-sm font-medium">Nombre</th>
+                <th className="px-4 py-3 text-left text-sm font-medium">Hojas</th>
+                <th className="px-4 py-3 text-left text-sm font-medium">Tamaño</th>
+                <th className="px-4 py-3 text-left text-sm font-medium">Modificado</th>
+                <th className="px-4 py-3 text-left text-sm font-medium">Creado por</th>
+                <th className="px-4 py-3 text-right text-sm font-medium">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
+                    <FolderOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No hay documentos</p>
+                    <Button variant="link" onClick={createNew} className="mt-2" data-testid="button-create-first">
+                      Crear el primero
+                    </Button>
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((doc: ExcelDocument) => (
+                  <tr key={doc.id} className="border-b hover:bg-muted/20 transition-colors" data-testid={`row-excel-${doc.id}`}>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => openDocument(doc)}
+                        className="flex items-center gap-2 hover:text-primary transition-colors text-left"
+                        data-testid={`button-open-${doc.id}`}
+                      >
+                        <FileSpreadsheet className="h-4 w-4 text-green-500 flex-shrink-0" />
+                        <span className="font-medium">{doc.name}</span>
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{doc.sheets}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{formatSize(doc.size)}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{formatDate(doc.updatedAt)}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{doc.createdBy}</td>
+                    <td className="px-4 py-3 text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" data-testid={`button-menu-${doc.id}`}>
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openDocument(doc)}>
+                            <Eye className="h-4 w-4 mr-2" />
+                            Abrir
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openDocument(doc)}>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => deleteDocument(doc.id)} className="text-red-600">
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Eliminar
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [, setLocation] = useLocation();
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
@@ -4639,6 +4941,8 @@ export default function AdminPage() {
         return <SettingsSection />;
       case "agentic":
         return <AgenticEngineSection />;
+      case "excel":
+        return <ExcelManagerSection />;
       default:
         return <DashboardSection />;
     }

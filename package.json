@@ -167,6 +167,7 @@
     "vitest": "^4.0.16",
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
+    "xlsx": "^0.18.5",
     "xlsx-chart": "^0.4.3",
     "zod": "^3.25.76",
     "zod-validation-error": "^3.4.0",

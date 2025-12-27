@@ -17,6 +17,52 @@ import { chatAgenticCircuit } from "../services/chatAgenticCircuit";
 
 const gapsStore: any[] = [];
 
+interface ExcelDocument {
+  id: string;
+  name: string;
+  sheets: number;
+  size: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  data: any[][] | null;
+}
+
+const excelDocumentsStore = new Map<string, ExcelDocument>();
+
+excelDocumentsStore.set('1', {
+  id: '1',
+  name: 'Reporte Q4 2024.xlsx',
+  sheets: 3,
+  size: 45000,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  createdBy: 'Admin',
+  data: null
+});
+
+excelDocumentsStore.set('2', {
+  id: '2',
+  name: 'Análisis Ventas.xlsx',
+  sheets: 5,
+  size: 128000,
+  createdAt: new Date(Date.now() - 86400000).toISOString(),
+  updatedAt: new Date().toISOString(),
+  createdBy: 'Admin',
+  data: null
+});
+
+excelDocumentsStore.set('3', {
+  id: '3',
+  name: 'Inventario.xlsx',
+  sheets: 2,
+  size: 67000,
+  createdAt: new Date(Date.now() - 172800000).toISOString(),
+  updatedAt: new Date().toISOString(),
+  createdBy: 'Admin',
+  data: null
+});
+
 export function createAdminRouter() {
   const router = Router();
 
@@ -2566,6 +2612,94 @@ export function createAdminRouter() {
       res.json(stats);
     } catch (error) {
       res.json({ totalAtoms: 0, storageBytes: 0, avgWeight: 0, byType: {} });
+    }
+  });
+
+  // ========================================
+  // Excel Document Management
+  // ========================================
+
+  router.get("/excel/list", (req, res) => {
+    try {
+      const documents = Array.from(excelDocumentsStore.values()).map(doc => ({
+        id: doc.id,
+        name: doc.name,
+        sheets: doc.sheets,
+        size: doc.size,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+        createdBy: doc.createdBy
+      }));
+      res.json(documents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/excel/:id", (req, res) => {
+    try {
+      const doc = excelDocumentsStore.get(req.params.id);
+      if (!doc) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+      res.json(doc);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/excel/save", (req, res) => {
+    try {
+      const { id, name, data } = req.body;
+      if (!id || !name) {
+        return res.status(400).json({ error: "id and name are required" });
+      }
+
+      const existingDoc = excelDocumentsStore.get(id);
+      const now = new Date().toISOString();
+      const dataSize = data ? JSON.stringify(data).length : 0;
+      const sheetCount = data && Array.isArray(data) && data.length > 0 ? 1 : 1;
+
+      const document: ExcelDocument = {
+        id,
+        name,
+        sheets: existingDoc?.sheets || sheetCount,
+        size: dataSize || existingDoc?.size || 1000,
+        createdAt: existingDoc?.createdAt || now,
+        updatedAt: now,
+        createdBy: existingDoc?.createdBy || 'Admin',
+        data
+      };
+
+      excelDocumentsStore.set(id, document);
+
+      res.json({ 
+        success: true, 
+        document: {
+          id: document.id,
+          name: document.name,
+          sheets: document.sheets,
+          size: document.size,
+          createdAt: document.createdAt,
+          updatedAt: document.updatedAt,
+          createdBy: document.createdBy
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.delete("/excel/:id", (req, res) => {
+    try {
+      const doc = excelDocumentsStore.get(req.params.id);
+      if (!doc) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+      excelDocumentsStore.delete(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 
