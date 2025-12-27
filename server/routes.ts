@@ -26,6 +26,7 @@ import { createGmailRouter } from "./routes/gmailRouter";
 import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
+import aiExcelRouter from "./routes/aiExcelRouter";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
@@ -64,6 +65,7 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
   app.use("/health", healthRouter);
+  app.use("/api/ai", aiExcelRouter);
 
   // ===== Public Models Endpoint (for user-facing selector) =====
   app.get("/api/models/available", async (req: Request, res: Response) => {

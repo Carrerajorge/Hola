@@ -12,6 +12,9 @@ import {
   AlignLeft, AlignCenter, AlignRight, Palette, Grid3X3, Type
 } from 'lucide-react';
 import '../../styles/spreadsheet.css';
+import { useSpreadsheetStreaming } from './useSpreadsheetStreaming';
+import { AICommandBar } from './AICommandBar';
+import { StreamingIndicator } from './StreamingIndicator';
 
 registerAllModules();
 
@@ -68,6 +71,18 @@ export function SpreadsheetEditor({
     backgroundColor: '',
     textColor: ''
   });
+  const [selectedRange, setSelectedRange] = useState<{ startRow: number; startCol: number; endRow: number; endCol: number } | null>(null);
+  const [isAIProcessing, setIsAIProcessing] = useState(false);
+
+  const { 
+    isStreaming, 
+    streamingCell, 
+    streamToCell, 
+    streamToCells, 
+    streamFillColumn, 
+    streamFillRange, 
+    cancelStreaming 
+  } = useSpreadsheetStreaming(hotRef, setIsModified);
 
   useEffect(() => {
     if (initialData) {
@@ -369,13 +384,62 @@ export function SpreadsheetEditor({
     }
   }, []);
 
-  const handleSelection = useCallback((row: number, col: number) => {
+  const handleSelection = useCallback((row: number, col: number, row2: number, col2: number) => {
     setSelectedCell({ row, col });
+    setSelectedRange({
+      startRow: Math.min(row, row2),
+      startCol: Math.min(col, col2),
+      endRow: Math.max(row, row2),
+      endCol: Math.max(col, col2)
+    });
     if (hotRef.current?.hotInstance) {
       const value = hotRef.current.hotInstance.getDataAtCell(row, col);
       setFormulaValue(value || '');
     }
   }, []);
+
+  const handleAICommand = useCallback(async (command: string) => {
+    setIsAIProcessing(true);
+    try {
+      const response = await fetch('/api/ai/excel-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command,
+          selectedRange,
+          currentData: data
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to process AI command');
+      }
+
+      const result = await response.json();
+      
+      if (result.cells && result.cells.length > 0) {
+        await streamToCells(result.cells);
+      } else if (result.columnData) {
+        await streamFillColumn(
+          result.columnData.col, 
+          result.columnData.values, 
+          result.columnData.startRow || 0
+        );
+      } else if (result.rangeData) {
+        await streamFillRange(
+          result.rangeData.startRow,
+          result.rangeData.startCol,
+          result.rangeData.data
+        );
+      } else if (result.cell) {
+        await streamToCell(result.cell.row, result.cell.col, result.cell.value);
+      }
+    } catch (error) {
+      console.error('AI command error:', error);
+    } finally {
+      setIsAIProcessing(false);
+    }
+  }, [selectedRange, data, streamToCell, streamToCells, streamFillColumn, streamFillRange]);
 
   const handleSelectionEnd = useCallback(() => {
     updateFormatState();
@@ -628,6 +692,12 @@ export function SpreadsheetEditor({
         />
       </div>
 
+      <AICommandBar 
+        onExecute={handleAICommand}
+        isProcessing={isAIProcessing || isStreaming}
+        selectedRange={selectedRange}
+      />
+
       <div className="flex-1 overflow-hidden spreadsheet-container">
         <HotTable ref={hotRef} settings={hotSettings} />
       </div>
@@ -666,6 +736,12 @@ export function SpreadsheetEditor({
           <Plus className="w-4 h-4 text-gray-400" />
         </button>
       </div>
+
+      <StreamingIndicator 
+        isStreaming={isStreaming}
+        cell={streamingCell}
+        onCancel={cancelStreaming}
+      />
     </div>
   );
 }

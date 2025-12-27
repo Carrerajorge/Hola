@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { db } from "../db";
-import { users, chats, chatMessages, aiModels } from "@shared/schema";
+import { users, chats, chatMessages, aiModels, excelDocuments } from "@shared/schema";
 import { llmGateway } from "../lib/llmGateway";
 import { eq, desc, and, gte, lte, ilike, sql, inArray, count } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { syncModelsForProvider, syncAllProviders, getAvailableProviders, getModelStats } from "../services/aiModelSyncService";
 import { toolRegistry, ToolDefinition } from "../services/toolRegistry";
 import { IntentToolMapper } from "../services/intentMapper";
@@ -17,51 +18,37 @@ import { chatAgenticCircuit } from "../services/chatAgenticCircuit";
 
 const gapsStore: any[] = [];
 
-interface ExcelDocument {
-  id: string;
-  name: string;
-  sheets: number;
-  size: number;
-  createdAt: string;
-  updatedAt: string;
-  createdBy: string;
-  data: any[][] | null;
+async function seedDefaultExcelDocuments() {
+  const existing = await db.select().from(excelDocuments).limit(1);
+  if (existing.length === 0) {
+    await db.insert(excelDocuments).values([
+      {
+        uuid: nanoid(),
+        name: 'Reporte Q4 2024.xlsx',
+        sheets: [{ name: 'Sheet1', data: [] }, { name: 'Sheet2', data: [] }, { name: 'Sheet3', data: [] }],
+        size: 45000,
+        isTemplate: false,
+        version: 1
+      },
+      {
+        uuid: nanoid(),
+        name: 'Análisis Ventas.xlsx',
+        sheets: [{ name: 'Ventas', data: [] }, { name: 'Resumen', data: [] }, { name: 'Gráficos', data: [] }, { name: 'Proyecciones', data: [] }, { name: 'Datos', data: [] }],
+        size: 128000,
+        isTemplate: false,
+        version: 1
+      },
+      {
+        uuid: nanoid(),
+        name: 'Inventario.xlsx',
+        sheets: [{ name: 'Productos', data: [] }, { name: 'Stock', data: [] }],
+        size: 67000,
+        isTemplate: false,
+        version: 1
+      }
+    ]);
+  }
 }
-
-const excelDocumentsStore = new Map<string, ExcelDocument>();
-
-excelDocumentsStore.set('1', {
-  id: '1',
-  name: 'Reporte Q4 2024.xlsx',
-  sheets: 3,
-  size: 45000,
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-  createdBy: 'Admin',
-  data: null
-});
-
-excelDocumentsStore.set('2', {
-  id: '2',
-  name: 'Análisis Ventas.xlsx',
-  sheets: 5,
-  size: 128000,
-  createdAt: new Date(Date.now() - 86400000).toISOString(),
-  updatedAt: new Date().toISOString(),
-  createdBy: 'Admin',
-  data: null
-});
-
-excelDocumentsStore.set('3', {
-  id: '3',
-  name: 'Inventario.xlsx',
-  sheets: 2,
-  size: 67000,
-  createdAt: new Date(Date.now() - 172800000).toISOString(),
-  updatedAt: new Date().toISOString(),
-  createdBy: 'Admin',
-  data: null
-});
 
 export function createAdminRouter() {
   const router = Router();
@@ -2616,73 +2603,145 @@ export function createAdminRouter() {
   });
 
   // ========================================
-  // Excel Document Management
+  // Excel Document Management (Database-backed)
   // ========================================
 
-  router.get("/excel/list", (req, res) => {
+  router.get("/excel/list", async (req, res) => {
     try {
-      const documents = Array.from(excelDocumentsStore.values()).map(doc => ({
-        id: doc.id,
-        name: doc.name,
-        sheets: doc.sheets,
-        size: doc.size,
-        createdAt: doc.createdAt,
-        updatedAt: doc.updatedAt,
-        createdBy: doc.createdBy
+      await seedDefaultExcelDocuments();
+      
+      const documents = await db.select({
+        id: excelDocuments.uuid,
+        name: excelDocuments.name,
+        sheets: excelDocuments.sheets,
+        size: excelDocuments.size,
+        createdAt: excelDocuments.createdAt,
+        updatedAt: excelDocuments.updatedAt,
+        createdBy: excelDocuments.createdBy,
+        isTemplate: excelDocuments.isTemplate,
+        templateCategory: excelDocuments.templateCategory
+      })
+      .from(excelDocuments)
+      .orderBy(desc(excelDocuments.createdAt));
+      
+      const formattedDocuments = documents.map(doc => ({
+        ...doc,
+        sheets: Array.isArray(doc.sheets) ? (doc.sheets as any[]).length : 1,
+        createdBy: doc.createdBy ? String(doc.createdBy) : 'Admin'
       }));
-      res.json(documents);
+      
+      res.json(formattedDocuments);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  router.get("/excel/:id", (req, res) => {
+  router.get("/excel/:id", async (req, res) => {
     try {
-      const doc = excelDocumentsStore.get(req.params.id);
+      const [doc] = await db.select()
+        .from(excelDocuments)
+        .where(eq(excelDocuments.uuid, req.params.id))
+        .limit(1);
+      
       if (!doc) {
         return res.status(404).json({ error: "Document not found" });
       }
-      res.json(doc);
+      
+      res.json({
+        id: doc.uuid,
+        name: doc.name,
+        data: doc.data,
+        sheets: doc.sheets,
+        metadata: doc.metadata,
+        size: doc.size,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+        createdBy: doc.createdBy ? String(doc.createdBy) : 'Admin',
+        isTemplate: doc.isTemplate,
+        templateCategory: doc.templateCategory,
+        version: doc.version
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  router.post("/excel/save", (req, res) => {
+  router.post("/excel/save", async (req, res) => {
     try {
-      const { id, name, data } = req.body;
-      if (!id || !name) {
-        return res.status(400).json({ error: "id and name are required" });
+      const { id, name, data, sheets, metadata, isTemplate, templateCategory } = req.body;
+      
+      if (!name) {
+        return res.status(400).json({ error: "name is required" });
       }
 
-      const existingDoc = excelDocumentsStore.get(id);
-      const now = new Date().toISOString();
       const dataSize = data ? JSON.stringify(data).length : 0;
-      const sheetCount = data && Array.isArray(data) && data.length > 0 ? 1 : 1;
+      const sheetsData = sheets || (data ? [{ name: 'Sheet1', data }] : [{ name: 'Sheet1', data: [] }]);
+      const now = new Date();
 
-      const document: ExcelDocument = {
-        id,
-        name,
-        sheets: existingDoc?.sheets || sheetCount,
-        size: dataSize || existingDoc?.size || 1000,
-        createdAt: existingDoc?.createdAt || now,
-        updatedAt: now,
-        createdBy: existingDoc?.createdBy || 'Admin',
-        data
-      };
+      if (id) {
+        const [existingDoc] = await db.select()
+          .from(excelDocuments)
+          .where(eq(excelDocuments.uuid, id))
+          .limit(1);
 
-      excelDocumentsStore.set(id, document);
+        if (existingDoc) {
+          const [updated] = await db.update(excelDocuments)
+            .set({
+              name,
+              data,
+              sheets: sheetsData,
+              metadata,
+              size: dataSize || existingDoc.size,
+              updatedAt: now,
+              isTemplate: isTemplate ?? existingDoc.isTemplate,
+              templateCategory: templateCategory ?? existingDoc.templateCategory,
+              version: (existingDoc.version || 1) + 1
+            })
+            .where(eq(excelDocuments.uuid, id))
+            .returning();
+
+          return res.json({ 
+            success: true, 
+            document: {
+              id: updated.uuid,
+              name: updated.name,
+              sheets: Array.isArray(updated.sheets) ? (updated.sheets as any[]).length : 1,
+              size: updated.size,
+              createdAt: updated.createdAt,
+              updatedAt: updated.updatedAt,
+              createdBy: updated.createdBy ? String(updated.createdBy) : 'Admin',
+              version: updated.version
+            }
+          });
+        }
+      }
+
+      const newUuid = id || nanoid();
+      const [inserted] = await db.insert(excelDocuments)
+        .values({
+          uuid: newUuid,
+          name,
+          data,
+          sheets: sheetsData,
+          metadata,
+          size: dataSize || 1000,
+          isTemplate: isTemplate || false,
+          templateCategory,
+          version: 1
+        })
+        .returning();
 
       res.json({ 
         success: true, 
         document: {
-          id: document.id,
-          name: document.name,
-          sheets: document.sheets,
-          size: document.size,
-          createdAt: document.createdAt,
-          updatedAt: document.updatedAt,
-          createdBy: document.createdBy
+          id: inserted.uuid,
+          name: inserted.name,
+          sheets: Array.isArray(inserted.sheets) ? (inserted.sheets as any[]).length : 1,
+          size: inserted.size,
+          createdAt: inserted.createdAt,
+          updatedAt: inserted.updatedAt,
+          createdBy: inserted.createdBy ? String(inserted.createdBy) : 'Admin',
+          version: inserted.version
         }
       });
     } catch (error: any) {
@@ -2690,13 +2749,20 @@ export function createAdminRouter() {
     }
   });
 
-  router.delete("/excel/:id", (req, res) => {
+  router.delete("/excel/:id", async (req, res) => {
     try {
-      const doc = excelDocumentsStore.get(req.params.id);
+      const [doc] = await db.select()
+        .from(excelDocuments)
+        .where(eq(excelDocuments.uuid, req.params.id))
+        .limit(1);
+      
       if (!doc) {
         return res.status(404).json({ error: "Document not found" });
       }
-      excelDocumentsStore.delete(req.params.id);
+      
+      await db.delete(excelDocuments)
+        .where(eq(excelDocuments.uuid, req.params.id));
+      
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

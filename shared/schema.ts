@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1652,3 +1652,35 @@ export const insertAgentGapLogSchema = createInsertSchema(agentGapLogs).omit({
 
 export type InsertAgentGapLog = z.infer<typeof insertAgentGapLogSchema>;
 export type AgentGapLog = typeof agentGapLogs.$inferSelect;
+
+// ========================================
+// Excel Documents
+// ========================================
+
+export const excelDocuments = pgTable('excel_documents', {
+  id: serial('id').primaryKey(),
+  uuid: text('uuid').notNull().unique(),
+  name: text('name').notNull(),
+  data: jsonb('data'),
+  sheets: jsonb('sheets'),
+  metadata: jsonb('metadata'),
+  createdBy: integer('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+  size: integer('size').default(0),
+  isTemplate: boolean('is_template').default(false),
+  templateCategory: text('template_category'),
+  version: integer('version').default(1)
+}, (table) => [
+  index("excel_documents_uuid_idx").on(table.uuid),
+  index("excel_documents_created_idx").on(table.createdAt),
+]);
+
+export const insertExcelDocumentSchema = createInsertSchema(excelDocuments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true
+});
+
+export type InsertExcelDocument = z.infer<typeof insertExcelDocumentSchema>;
+export type ExcelDocument = typeof excelDocuments.$inferSelect;
