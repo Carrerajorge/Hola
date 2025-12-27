@@ -517,9 +517,24 @@ export function SpreadsheetEditor({
   }, [updateFormatState]);
 
   const getCellReference = useCallback(() => {
-    if (!selectedCell) return 'A1';
-    return `${getColumnHeaders(26)[selectedCell.col] || 'A'}${selectedCell.row + 1}`;
-  }, [selectedCell]);
+    if (!selectedRange) {
+      if (!selectedCell) return 'A1';
+      return `${getColumnHeaders(26)[selectedCell.col] || 'A'}${selectedCell.row + 1}`;
+    }
+    
+    const startRef = `${getColumnHeaders(26)[selectedRange.startCol] || 'A'}${selectedRange.startRow + 1}`;
+    const endRef = `${getColumnHeaders(26)[selectedRange.endCol] || 'A'}${selectedRange.endRow + 1}`;
+    
+    if (selectedRange.startRow === selectedRange.endRow && selectedRange.startCol === selectedRange.endCol) {
+      return startRef;
+    }
+    return `${startRef}:${endRef}`;
+  }, [selectedCell, selectedRange]);
+
+  const getSelectedCellCount = useCallback(() => {
+    if (!selectedRange) return 1;
+    return (selectedRange.endRow - selectedRange.startRow + 1) * (selectedRange.endCol - selectedRange.startCol + 1);
+  }, [selectedRange]);
 
   const customRendererRef = useRef((
     instance: Handsontable,
@@ -558,25 +573,51 @@ export function SpreadsheetEditor({
     height,
     width: '100%',
     licenseKey: 'non-commercial-and-evaluation',
+    
+    selectionMode: 'multiple' as const,
+    fillHandle: true,
+    outsideClickDeselects: false,
+    fragmentSelection: true,
+    
+    enterBeginsEditing: true,
+    enterMoves: { row: 1, col: 0 },
+    tabMoves: { row: 0, col: 1 },
+    autoWrapRow: true,
+    autoWrapCol: true,
+    
     contextMenu: true,
     manualColumnResize: true,
     manualRowResize: true,
+    manualColumnMove: true,
+    manualRowMove: true,
+    
+    copyPaste: {
+      columnsLimit: 1000,
+      rowsLimit: 1000,
+      pasteMode: 'overwrite' as const,
+      copyColumnHeaders: false,
+      copyColumnGroupHeaders: false,
+      copyColumnHeadersOnly: false,
+    },
+    
     filters: true,
     dropdownMenu: true,
     multiColumnSorting: true,
     mergeCells: true,
     comments: true,
     customBorders: true,
-    copyPaste: true,
-    fillHandle: true,
     undo: true,
+    
+    stretchH: 'all' as const,
+    wordWrap: false,
+    rowHeights: 25,
+    
     readOnly,
     afterChange: handleDataChange,
     afterSelection: handleSelection,
     afterSelectionEnd: handleSelectionEnd,
     renderer: customRendererRef.current,
     className: 'spreadsheet-dark-theme',
-    stretchH: 'all' as const
   };
 
   return (
@@ -748,6 +789,11 @@ export function SpreadsheetEditor({
           <span className="text-xs text-gray-400" data-testid="text-cell-reference">
             {getCellReference()}
           </span>
+          {getSelectedCellCount() > 1 && (
+            <span className="text-xs text-gray-500 ml-1" data-testid="text-cell-count">
+              ({getSelectedCellCount()} celdas)
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 px-2">
           <Calculator className="w-4 h-4 text-gray-400" />
