@@ -138,6 +138,12 @@ export async function setupAuth(app: Express) {
         const userId = user.claims?.sub;
         if (userId) {
           try {
+            // Update user's last login info
+            await authStorage.updateUserLogin(userId, {
+              ipAddress: req.ip || req.socket.remoteAddress || null,
+              userAgent: req.headers["user-agent"] || null
+            });
+            
             await storage.createAuditLog({
               userId,
               action: "user_login",

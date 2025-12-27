@@ -16,6 +16,7 @@ import { eq } from "drizzle-orm";
 export interface IAuthStorage {
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
+  updateUserLogin(id: string, loginData: { ipAddress?: string | null; userAgent?: string | null }): Promise<void>;
 }
 
 class AuthStorage implements IAuthStorage {
@@ -37,6 +38,15 @@ class AuthStorage implements IAuthStorage {
       })
       .returning();
     return user;
+  }
+
+  async updateUserLogin(id: string, loginData: { ipAddress?: string | null; userAgent?: string | null }): Promise<void> {
+    await db.update(users).set({
+      lastLoginAt: new Date(),
+      lastIp: loginData.ipAddress,
+      userAgent: loginData.userAgent,
+      updatedAt: new Date()
+    }).where(eq(users.id, id));
   }
 }
 

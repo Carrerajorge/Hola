@@ -90,8 +90,13 @@ export function registerAuthRoutes(app: Express): void {
           return res.status(500).json({ message: "Error al iniciar sesión" });
         }
         
-        // Track login
+        // Track login and update last login
         try {
+          await authStorage.updateUserLogin(dbUser.id, {
+            ipAddress: req.ip || req.socket.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null
+          });
+          
           await storage.createAuditLog({
             userId: dbUser.id,
             action: "user_login",
@@ -160,8 +165,13 @@ export function registerAuthRoutes(app: Express): void {
           return res.status(500).json({ message: "Login failed" });
         }
         
-        // Track admin login
+        // Track admin login and update last login
         try {
+          await authStorage.updateUserLogin(adminId, {
+            ipAddress: req.ip || req.socket.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null
+          });
+          
           await storage.createAuditLog({
             userId: adminId,
             action: "admin_login",
