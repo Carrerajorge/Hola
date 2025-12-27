@@ -29,7 +29,8 @@ import {
   FolderPlus,
   Folder,
   FolderOpen,
-  Zap
+  Zap,
+  SquarePen
 } from "lucide-react";
 import { SiraLogo } from "@/components/sira-logo";
 import { cn } from "@/lib/utils";
@@ -405,8 +406,8 @@ export function Sidebar({
           }}
           data-testid="button-new-chat"
         >
-          <Plus className="h-4 w-4" />
-          Nuevo Chat
+          <SquarePen className="h-4 w-4" />
+          Nuevo chat
         </Button>
         <Button 
           ref={searchButtonRef}
