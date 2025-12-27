@@ -1,15 +1,37 @@
+export interface CellBorders {
+  top?: { style: 'thin' | 'medium' | 'thick' | 'double'; color: string };
+  right?: { style: 'thin' | 'medium' | 'thick' | 'double'; color: string };
+  bottom?: { style: 'thin' | 'medium' | 'thick' | 'double'; color: string };
+  left?: { style: 'thin' | 'medium' | 'thick' | 'double'; color: string };
+}
+
+export interface MergeInfo {
+  isMerged: boolean;
+  mergeId?: string;
+  isMain?: boolean;
+  rowSpan?: number;
+  colSpan?: number;
+}
+
 export interface CellData {
   value: string;
   formula?: string;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  strikethrough?: boolean;
   align?: 'left' | 'center' | 'right';
+  verticalAlign?: 'top' | 'middle' | 'bottom';
   fontFamily?: string;
   fontSize?: number;
   color?: string;
   backgroundColor?: string;
   numberFormat?: string;  // 'General', 'Number', 'Currency', 'Percentage', 'Date', 'Text'
+  borders?: CellBorders;
+  merge?: MergeInfo;
+  wrapText?: boolean;
+  rotation?: number;
+  indent?: number;
   format?: {
     backgroundColor?: string;
     textColor?: string;

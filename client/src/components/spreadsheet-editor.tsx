@@ -398,6 +398,7 @@ export function SpreadsheetEditor({
   const [gridVersion, setGridVersion] = useState(0);
   const [virtualSelectedCell, setVirtualSelectedCell] = useState<{ row: number; col: number } | null>(null);
   const [virtualEditingCell, setVirtualEditingCell] = useState<{ row: number; col: number } | null>(null);
+  const [virtualSelectionRange, setVirtualSelectionRange] = useState<{ startRow: number; startCol: number; endRow: number; endCol: number } | null>(null);
   const [mergedCells, setMergedCells] = useState<Set<string>>(new Set());
   const [wrapText, setWrapTextEnabled] = useState(false);
   const [showAIPrompt, setShowAIPrompt] = useState(false);
@@ -1496,131 +1497,92 @@ export function SpreadsheetEditor({
     return null;
   }, [useVirtualized, virtualSelectedCell, selectedCell]);
 
-  const updateActiveCell = useCallback((updates: Partial<SparseCellData>) => {
+  const getSelectionCells = useCallback((): Array<{ row: number; col: number }> => {
+    if (useVirtualized && virtualSelectionRange) {
+      const minRow = Math.min(virtualSelectionRange.startRow, virtualSelectionRange.endRow);
+      const maxRow = Math.max(virtualSelectionRange.startRow, virtualSelectionRange.endRow);
+      const minCol = Math.min(virtualSelectionRange.startCol, virtualSelectionRange.endCol);
+      const maxCol = Math.max(virtualSelectionRange.startCol, virtualSelectionRange.endCol);
+      
+      const cells: Array<{ row: number; col: number }> = [];
+      for (let r = minRow; r <= maxRow; r++) {
+        for (let c = minCol; c <= maxCol; c++) {
+          cells.push({ row: r, col: c });
+        }
+      }
+      return cells;
+    }
+    
     const active = getActiveCell();
-    if (!active) return;
+    return active ? [{ row: active.row, col: active.col }] : [];
+  }, [useVirtualized, virtualSelectionRange, getActiveCell]);
+
+  const applyToSelection = useCallback((updater: (cell: SparseCellData) => Partial<SparseCellData>) => {
+    const cells = getSelectionCells();
+    if (cells.length === 0) return;
     
     if (useVirtualized) {
-      const existing = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...existing, ...updates });
+      cells.forEach(({ row, col }) => {
+        const existing = sparseGrid.getCell(row, col) || { value: '' };
+        sparseGrid.setCell(row, col, { ...existing, ...updater(existing) });
+      });
       setGridVersion(v => v + 1);
     } else {
-      const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, ...updates });
+      cells.forEach(({ row, col }) => {
+        const key = getCellKey(row, col);
+        const cell = data.cells[key] || { value: '' };
+        updateCell(key, { ...cell, ...updater(cell) });
+      });
     }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+  }, [getSelectionCells, useVirtualized, sparseGrid, data.cells, updateCell]);
+
+  const updateActiveCell = useCallback((updates: Partial<SparseCellData>) => {
+    applyToSelection(() => updates);
+  }, [applyToSelection]);
 
   const toggleBold = useCallback(() => {
     const active = getActiveCell();
     if (!active) return;
-    
-    if (useVirtualized) {
-      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...cell, bold: !cell.bold });
-      setGridVersion(v => v + 1);
-    } else {
-      const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, bold: !cell.bold });
-    }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+    const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
+    const newBold = !(firstCell?.bold);
+    applyToSelection(() => ({ bold: newBold }));
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
   const toggleItalic = useCallback(() => {
     const active = getActiveCell();
     if (!active) return;
-    
-    if (useVirtualized) {
-      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...cell, italic: !cell.italic });
-      setGridVersion(v => v + 1);
-    } else {
-      const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, italic: !cell.italic });
-    }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+    const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
+    const newItalic = !(firstCell?.italic);
+    applyToSelection(() => ({ italic: newItalic }));
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
   const toggleUnderline = useCallback(() => {
     const active = getActiveCell();
     if (!active) return;
-    
-    if (useVirtualized) {
-      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...cell, underline: !cell.underline });
-      setGridVersion(v => v + 1);
-    } else {
-      const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, underline: !cell.underline });
-    }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+    const firstCell = useVirtualized ? sparseGrid.getCell(active.row, active.col) : data.cells[active.key];
+    const newUnderline = !(firstCell?.underline);
+    applyToSelection(() => ({ underline: newUnderline }));
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, applyToSelection]);
 
   const setAlignment = useCallback((align: 'left' | 'center' | 'right') => {
-    const active = getActiveCell();
-    if (!active) return;
-    
-    if (useVirtualized) {
-      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...cell, align });
-      setGridVersion(v => v + 1);
-    } else {
-      const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, align });
-    }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+    applyToSelection(() => ({ align }));
+  }, [applyToSelection]);
 
   const setFontFamily = useCallback((fontFamily: string) => {
-    const active = getActiveCell();
-    if (!active) return;
-    
-    if (useVirtualized) {
-      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...cell, fontFamily });
-      setGridVersion(v => v + 1);
-    } else {
-      const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, fontFamily });
-    }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+    applyToSelection(() => ({ fontFamily }));
+  }, [applyToSelection]);
 
   const setFontSize = useCallback((fontSize: number) => {
-    const active = getActiveCell();
-    if (!active) return;
-    
-    if (useVirtualized) {
-      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...cell, fontSize });
-      setGridVersion(v => v + 1);
-    } else {
-      const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, fontSize });
-    }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+    applyToSelection(() => ({ fontSize }));
+  }, [applyToSelection]);
 
   const setFontColor = useCallback((color: string) => {
-    const active = getActiveCell();
-    if (!active) return;
-    
-    if (useVirtualized) {
-      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...cell, color });
-      setGridVersion(v => v + 1);
-    } else {
-      const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, color });
-    }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+    applyToSelection(() => ({ color }));
+  }, [applyToSelection]);
 
   const setFillColor = useCallback((backgroundColor: string) => {
-    const active = getActiveCell();
-    if (!active) return;
-    
-    if (useVirtualized) {
-      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      sparseGrid.setCell(active.row, active.col, { ...cell, backgroundColor });
-      setGridVersion(v => v + 1);
-    } else {
-      const cell = data.cells[active.key] || { value: '' };
-      updateCell(active.key, { ...cell, backgroundColor });
-    }
-  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+    applyToSelection(() => ({ backgroundColor }));
+  }, [applyToSelection]);
 
   const updateChartConfig = useCallback((type: 'bar' | 'line' | 'pie', visible: boolean) => {
     setWorkbook(prev => ({
@@ -1992,6 +1954,8 @@ export function SpreadsheetEditor({
             rowHeights={rowHeights}
             onColumnWidthChange={setColumnWidth}
             onRowHeightChange={setRowHeight}
+            selectionRange={virtualSelectionRange}
+            onSelectionRangeChange={setVirtualSelectionRange}
           />
           
           {/* Streaming Indicator */}

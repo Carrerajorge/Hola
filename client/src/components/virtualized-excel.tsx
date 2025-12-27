@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { cn } from '@/lib/utils';
-import { SparseGrid, getColumnName, formatCellRef, CellData } from '@/lib/sparseGrid';
+import { SparseGrid, getColumnName, formatCellRef, CellData, CellBorders } from '@/lib/sparseGrid';
 import { FormulaEngine } from '@/lib/formulaEngine';
 import { ChartLayer, ChartConfig as ChartLayerConfig } from './excel-chart-layer';
 import { 
@@ -9,6 +9,68 @@ import {
   ScrollThrottler,
   type PositionCache 
 } from '@/lib/excelPerformance';
+
+export interface SelectionRange {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+}
+
+function formatDisplayValue(value: string, numberFormat?: string): string {
+  if (!numberFormat || numberFormat === 'General' || numberFormat === 'Texto') {
+    return value;
+  }
+  
+  const num = parseFloat(value);
+  if (isNaN(num)) return value;
+  
+  switch (numberFormat) {
+    case 'Número':
+    case 'Number':
+      return num.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    case 'Moneda':
+    case 'Currency':
+      return num.toLocaleString('es-ES', { style: 'currency', currency: 'USD' });
+    case 'Porcentaje':
+    case 'Percentage':
+      return (num * 100).toLocaleString('es-ES', { minimumFractionDigits: 2 }) + '%';
+    case 'Fecha':
+    case 'Date':
+      try {
+        const date = new Date(num);
+        if (!isNaN(date.getTime())) {
+          return date.toLocaleDateString('es-ES');
+        }
+      } catch {}
+      return value;
+    default:
+      return value;
+  }
+}
+
+function getBorderStyle(borders?: CellBorders): React.CSSProperties {
+  const style: React.CSSProperties = {};
+  
+  if (borders?.top) {
+    const width = borders.top.style === 'thin' ? '1px' : borders.top.style === 'medium' ? '2px' : borders.top.style === 'thick' ? '3px' : '3px';
+    style.borderTop = `${width} ${borders.top.style === 'double' ? 'double' : 'solid'} ${borders.top.color}`;
+  }
+  if (borders?.right) {
+    const width = borders.right.style === 'thin' ? '1px' : borders.right.style === 'medium' ? '2px' : borders.right.style === 'thick' ? '3px' : '3px';
+    style.borderRight = `${width} ${borders.right.style === 'double' ? 'double' : 'solid'} ${borders.right.color}`;
+  }
+  if (borders?.bottom) {
+    const width = borders.bottom.style === 'thin' ? '1px' : borders.bottom.style === 'medium' ? '2px' : borders.bottom.style === 'thick' ? '3px' : '3px';
+    style.borderBottom = `${width} ${borders.bottom.style === 'double' ? 'double' : 'solid'} ${borders.bottom.color}`;
+  }
+  if (borders?.left) {
+    const width = borders.left.style === 'thin' ? '1px' : borders.left.style === 'medium' ? '2px' : borders.left.style === 'thick' ? '3px' : '3px';
+    style.borderLeft = `${width} ${borders.left.style === 'double' ? 'double' : 'solid'} ${borders.left.color}`;
+  }
+  
+  return style;
+}
 
 const GRID_CONFIG = {
   MAX_ROWS: 10000,
@@ -74,6 +136,8 @@ interface VirtualizedExcelProps {
   rowHeights?: { [row: number]: number };
   onColumnWidthChange?: (col: number, width: number) => void;
   onRowHeightChange?: (row: number, height: number) => void;
+  selectionRange?: SelectionRange | null;
+  onSelectionRangeChange?: (range: SelectionRange | null) => void;
 }
 
 const VirtualCell = memo(function VirtualCell({
@@ -81,6 +145,7 @@ const VirtualCell = memo(function VirtualCell({
   col,
   data,
   isSelected,
+  isInRange,
   isEditing,
   isStreaming,
   isRecentlyWritten,
@@ -88,6 +153,7 @@ const VirtualCell = memo(function VirtualCell({
   style,
   conditionalStyle,
   onMouseDown,
+  onMouseEnter,
   onDoubleClick,
   onBlur,
   onChange,
@@ -97,13 +163,15 @@ const VirtualCell = memo(function VirtualCell({
   col: number;
   data: CellData;
   isSelected: boolean;
+  isInRange?: boolean;
   isEditing: boolean;
   isStreaming: boolean;
   isRecentlyWritten: boolean;
   typingValue?: string;
   style: React.CSSProperties;
   conditionalStyle?: React.CSSProperties;
-  onMouseDown: () => void;
+  onMouseDown: (e: React.MouseEvent) => void;
+  onMouseEnter?: () => void;
   onDoubleClick: () => void;
   onBlur: () => void;
   onChange: (value: string) => void;
@@ -118,30 +186,43 @@ const VirtualCell = memo(function VirtualCell({
     }
   }, [isEditing]);
 
+  const borderStyles = getBorderStyle(data.borders);
+  const displayValue = formatDisplayValue(data.value, data.numberFormat);
+  
+  const textDecorations: string[] = [];
+  if (data.underline) textDecorations.push('underline');
+  if (data.strikethrough) textDecorations.push('line-through');
+
   const cellStyle: React.CSSProperties = {
     ...style,
+    ...borderStyles,
     fontWeight: data.bold ? 'bold' : 'normal',
     fontStyle: data.italic ? 'italic' : 'normal',
-    textDecoration: data.underline ? 'underline' : 'none',
+    textDecoration: textDecorations.length > 0 ? textDecorations.join(' ') : 'none',
     fontFamily: data.fontFamily || 'inherit',
     fontSize: data.fontSize ? `${data.fontSize}px` : 'inherit',
     textAlign: data.align || 'left',
+    verticalAlign: data.verticalAlign || 'middle',
     backgroundColor: conditionalStyle?.backgroundColor || data.backgroundColor || data.format?.backgroundColor,
     color: conditionalStyle?.color || data.color || data.format?.textColor,
+    whiteSpace: data.wrapText ? 'pre-wrap' : 'nowrap',
+    paddingLeft: data.indent ? `${data.indent * 8}px` : undefined,
   };
 
   return (
     <div
       className={cn(
-        "absolute border-r border-b border-gray-200 dark:border-gray-700 px-1.5 flex items-center text-sm select-none overflow-hidden whitespace-nowrap transition-all duration-200",
+        "absolute border-r border-b border-gray-200 dark:border-gray-700 px-1.5 flex items-center text-sm select-none overflow-hidden transition-all duration-200",
         isSelected && !isEditing && "ring-2 ring-blue-500 ring-inset z-10 bg-blue-50 dark:bg-blue-950",
+        isInRange && !isSelected && "bg-blue-100/50 dark:bg-blue-900/50 border-blue-300",
         isStreaming && "ring-2 ring-purple-500 ring-inset z-20 bg-purple-50 dark:bg-purple-950",
         isRecentlyWritten && "animate-flash-green bg-green-100 dark:bg-green-900",
-        data.value && !isStreaming && !isRecentlyWritten && "bg-white dark:bg-gray-900",
-        !data.value && !isSelected && !isStreaming && "bg-gray-50/50 dark:bg-gray-900/50"
+        data.value && !isStreaming && !isRecentlyWritten && !isInRange && "bg-white dark:bg-gray-900",
+        !data.value && !isSelected && !isStreaming && !isInRange && "bg-gray-50/50 dark:bg-gray-900/50"
       )}
       style={cellStyle}
       onMouseDown={onMouseDown}
+      onMouseEnter={onMouseEnter}
       onDoubleClick={onDoubleClick}
       data-testid={`cell-${row}-${col}`}
       data-row={row}
@@ -166,7 +247,7 @@ const VirtualCell = memo(function VirtualCell({
           <span className="inline-block w-0.5 h-4 bg-purple-500 animate-blink ml-0.5" />
         </span>
       ) : (
-        <span className="truncate">{data.value}</span>
+        <span className={data.wrapText ? '' : 'truncate'}>{displayValue}</span>
       )}
     </div>
   );
@@ -334,6 +415,8 @@ export function VirtualizedExcel({
   rowHeights,
   onColumnWidthChange,
   onRowHeightChange,
+  selectionRange: externalSelectionRange,
+  onSelectionRangeChange,
 }: VirtualizedExcelProps) {
   void version;
   const [scrollPos, setScrollPos] = useState({ top: 0, left: 0 });
@@ -343,6 +426,13 @@ export function VirtualizedExcel({
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollThrottler = useRef(new ScrollThrottler(16));
   
+  const [internalSelectionRange, setInternalSelectionRange] = useState<SelectionRange | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState<{ row: number; col: number } | null>(null);
+  
+  const selectionRange = externalSelectionRange ?? internalSelectionRange;
+  const setSelectionRange = onSelectionRangeChange ?? setInternalSelectionRange;
+  
   const [resizeState, setResizeState] = useState<ResizeState>({
     isResizing: false,
     type: null,
@@ -351,6 +441,15 @@ export function VirtualizedExcel({
     startSize: 0,
     currentSize: 0,
   });
+  
+  const isInSelectionRange = useCallback((row: number, col: number): boolean => {
+    if (!selectionRange) return false;
+    const minRow = Math.min(selectionRange.startRow, selectionRange.endRow);
+    const maxRow = Math.max(selectionRange.startRow, selectionRange.endRow);
+    const minCol = Math.min(selectionRange.startCol, selectionRange.endCol);
+    const maxCol = Math.max(selectionRange.startCol, selectionRange.endCol);
+    return row >= minRow && row <= maxRow && col >= minCol && col <= maxCol;
+  }, [selectionRange]);
 
   const handleColumnResizeStart = useCallback((col: number, startX: number, startWidth: number) => {
     setResizeState({
@@ -666,6 +765,45 @@ export function VirtualizedExcel({
     onGridChange(grid);
   }, [grid, onGridChange]);
 
+  const handleCellMouseDown = useCallback((row: number, col: number, e: React.MouseEvent) => {
+    if (e.shiftKey && selectedCell) {
+      setSelectionRange({
+        startRow: selectedCell.row,
+        startCol: selectedCell.col,
+        endRow: row,
+        endCol: col,
+      });
+    } else {
+      onSelectCell({ row, col });
+      setDragStart({ row, col });
+      setIsDragging(true);
+      setSelectionRange(null);
+    }
+  }, [onSelectCell, selectedCell, setSelectionRange]);
+
+  const handleCellMouseEnter = useCallback((row: number, col: number) => {
+    if (isDragging && dragStart) {
+      setSelectionRange({
+        startRow: dragStart.row,
+        startCol: dragStart.col,
+        endRow: row,
+        endCol: col,
+      });
+    }
+  }, [isDragging, dragStart, setSelectionRange]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+    setDragStart(null);
+  }, []);
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => document.removeEventListener('mouseup', handleMouseUp);
+    }
+  }, [isDragging, handleMouseUp]);
+
   const handleCellSelect = useCallback((row: number, col: number) => {
     onSelectCell({ row, col });
   }, [onSelectCell]);
@@ -915,15 +1053,22 @@ export function VirtualizedExcel({
                     bold: cellData.bold,
                     italic: cellData.italic,
                     underline: cellData.underline,
+                    strikethrough: cellData.strikethrough,
                     align: cellData.align,
+                    verticalAlign: cellData.verticalAlign,
                     fontFamily: cellData.fontFamily,
                     fontSize: cellData.fontSize,
                     color: cellData.color,
                     backgroundColor: cellData.backgroundColor,
+                    numberFormat: cellData.numberFormat,
+                    borders: cellData.borders,
+                    wrapText: cellData.wrapText,
+                    indent: cellData.indent,
                     format: cellData.format,
                   };
                   const isSelected = selectedCell?.row === row && selectedCell?.col === col;
                   const isEditing = editingCell?.row === row && editingCell?.col === col;
+                  const inRange = isInSelectionRange(row, col);
 
                   const isStreamingCell = activeStreamingCell?.row === row && activeStreamingCell?.col === col;
                   const isRecentlyWritten = isRecentCell(row, col);
@@ -936,6 +1081,7 @@ export function VirtualizedExcel({
                       col={col}
                       data={safeData}
                       isSelected={isSelected}
+                      isInRange={inRange}
                       isEditing={isEditing}
                       isStreaming={isStreamingCell}
                       isRecentlyWritten={isRecentlyWritten}
@@ -947,7 +1093,8 @@ export function VirtualizedExcel({
                         height: getRowHeight(row),
                       }}
                       conditionalStyle={conditionalStyle}
-                      onMouseDown={() => handleCellSelect(row, col)}
+                      onMouseDown={(e) => handleCellMouseDown(row, col, e)}
+                      onMouseEnter={() => handleCellMouseEnter(row, col)}
                       onDoubleClick={() => handleCellEdit(row, col)}
                       onBlur={handleCellBlur}
                       onChange={(value) => handleCellChange(row, col, value)}
@@ -973,7 +1120,11 @@ export function VirtualizedExcel({
 
       <div className="flex-shrink-0 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 flex items-center justify-between">
         <span>
-          {selectedCell
+          {selectionRange ? (
+            selectionRange.startRow === selectionRange.endRow && selectionRange.startCol === selectionRange.endCol
+              ? `Celda: ${formatCellRef(selectionRange.startRow, selectionRange.startCol)}`
+              : `Rango: ${formatCellRef(selectionRange.startRow, selectionRange.startCol)}:${formatCellRef(selectionRange.endRow, selectionRange.endCol)} (${(Math.abs(selectionRange.endRow - selectionRange.startRow) + 1) * (Math.abs(selectionRange.endCol - selectionRange.startCol) + 1)} celdas)`
+          ) : selectedCell
             ? `Celda: ${formatCellRef(selectedCell.row, selectedCell.col)}`
             : 'Selecciona una celda'}
         </span>
