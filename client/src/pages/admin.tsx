@@ -45,7 +45,11 @@ import {
   Calendar,
   ChevronDown,
   ChevronUp,
-  X
+  X,
+  Terminal,
+  Play,
+  Layers,
+  Server
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
@@ -2055,55 +2059,390 @@ function AnalyticsSection() {
 }
 
 function DatabaseSection() {
-  const { data: dbInfo, isLoading, refetch } = useQuery({
-    queryKey: ["/api/admin/database/info"],
+  const [activeTab, setActiveTab] = useState<"health" | "tables" | "query">("health");
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
+  const [sqlQuery, setSqlQuery] = useState("SELECT * FROM users LIMIT 10");
+  const [queryResult, setQueryResult] = useState<any>(null);
+  const [isExecuting, setIsExecuting] = useState(false);
+
+  const { data: healthData, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
+    queryKey: ["/api/admin/database/health"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/database/info");
+      const res = await fetch("/api/admin/database/health");
+      return res.json();
+    },
+    refetchInterval: 30000
+  });
+
+  const { data: tablesData, isLoading: tablesLoading } = useQuery({
+    queryKey: ["/api/admin/database/tables"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/database/tables");
       return res.json();
     }
   });
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-  }
+  const { data: tableDataResult, isLoading: tableDataLoading } = useQuery({
+    queryKey: ["/api/admin/database/tables", selectedTable],
+    queryFn: async () => {
+      if (!selectedTable) return null;
+      const res = await fetch(`/api/admin/database/tables/${selectedTable}`);
+      return res.json();
+    },
+    enabled: !!selectedTable
+  });
+
+  const { data: indexesData } = useQuery({
+    queryKey: ["/api/admin/database/indexes"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/database/indexes");
+      return res.json();
+    }
+  });
+
+  const executeQuery = async () => {
+    setIsExecuting(true);
+    try {
+      const res = await fetch("/api/admin/database/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: sqlQuery })
+      });
+      const result = await res.json();
+      setQueryResult(result);
+    } catch (error: any) {
+      setQueryResult({ success: false, error: error.message });
+    }
+    setIsExecuting(false);
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Database</h2>
-        <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh-db">
+        <h2 className="text-lg font-medium">Database Management</h2>
+        <Button variant="outline" size="sm" onClick={() => refetchHealth()} data-testid="button-refresh-db">
           <RefreshCw className="h-4 w-4 mr-2" />
           Actualizar
         </Button>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-lg border p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <Database className="h-5 w-5 text-muted-foreground" />
-            <span className="font-medium">Estado</span>
-          </div>
-          <Badge variant={dbInfo?.status === "healthy" ? "default" : "destructive"} className="mb-2">
-            {dbInfo?.status === "healthy" ? "Saludable" : "Error"}
-          </Badge>
-          <p className="text-xs text-muted-foreground">
-            Último backup: {dbInfo?.lastBackup ? format(new Date(dbInfo.lastBackup), "dd/MM/yyyy HH:mm") : "N/A"}
-          </p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <HardDrive className="h-5 w-5 text-muted-foreground" />
-            <span className="font-medium">Tablas</span>
-          </div>
-          <div className="space-y-2">
-            {dbInfo?.tables && Object.entries(dbInfo.tables).map(([name, info]: [string, any]) => (
-              <div key={name} className="flex justify-between text-sm">
-                <span className="text-muted-foreground">{name}</span>
-                <span>{info.count} registros</span>
-              </div>
-            ))}
-          </div>
-        </div>
+
+      <div className="flex gap-2 border-b">
+        <button
+          onClick={() => setActiveTab("health")}
+          className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors", activeTab === "health" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
+          data-testid="tab-db-health"
+        >
+          Health & Stats
+        </button>
+        <button
+          onClick={() => setActiveTab("tables")}
+          className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors", activeTab === "tables" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
+          data-testid="tab-db-tables"
+        >
+          Tables Browser
+        </button>
+        <button
+          onClick={() => setActiveTab("query")}
+          className={cn("px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors", activeTab === "query" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}
+          data-testid="tab-db-query"
+        >
+          SQL Query
+        </button>
       </div>
+
+      {activeTab === "health" && (
+        <div className="space-y-6">
+          {healthLoading ? (
+            <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+          ) : (
+            <>
+              <div className="grid grid-cols-4 gap-4">
+                <div className="rounded-lg border p-4" data-testid="card-db-status">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Activity className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Estado</span>
+                  </div>
+                  <Badge variant={healthData?.status === "healthy" ? "default" : "destructive"} className="text-sm">
+                    {healthData?.status === "healthy" ? "Saludable" : "Error"}
+                  </Badge>
+                  <p className="text-xs text-muted-foreground mt-2">Latencia: {healthData?.latencyMs}ms</p>
+                </div>
+                <div className="rounded-lg border p-4" data-testid="card-db-connections">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Server className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Conexiones</span>
+                  </div>
+                  <p className="text-2xl font-bold">{healthData?.pool?.active_connections || 0}</p>
+                  <p className="text-xs text-muted-foreground">Activas</p>
+                </div>
+                <div className="rounded-lg border p-4" data-testid="card-db-size">
+                  <div className="flex items-center gap-2 mb-2">
+                    <HardDrive className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Tamaño</span>
+                  </div>
+                  <p className="text-2xl font-bold">{healthData?.pool?.database_size || "N/A"}</p>
+                  <p className="text-xs text-muted-foreground">Total DB</p>
+                </div>
+                <div className="rounded-lg border p-4" data-testid="card-db-transactions">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Transacciones</span>
+                  </div>
+                  <p className="text-2xl font-bold">{Number(healthData?.pool?.transactions_committed || 0).toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">Confirmadas</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-lg border p-4">
+                  <h3 className="font-medium mb-4 flex items-center gap-2">
+                    <Database className="h-4 w-4" />
+                    Pool Statistics
+                  </h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Rows Returned</span>
+                      <span>{Number(healthData?.pool?.rows_returned || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Rows Fetched</span>
+                      <span>{Number(healthData?.pool?.rows_fetched || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Rows Inserted</span>
+                      <span>{Number(healthData?.pool?.rows_inserted || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Rows Updated</span>
+                      <span>{Number(healthData?.pool?.rows_updated || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Rows Deleted</span>
+                      <span>{Number(healthData?.pool?.rows_deleted || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Blocks Read</span>
+                      <span>{Number(healthData?.pool?.blocks_read || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Blocks Hit (Cache)</span>
+                      <span>{Number(healthData?.pool?.blocks_hit || 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-4">
+                  <h3 className="font-medium mb-4 flex items-center gap-2">
+                    <Server className="h-4 w-4" />
+                    Table Statistics
+                  </h3>
+                  <ScrollArea className="h-[200px]">
+                    <div className="space-y-1 text-sm">
+                      {healthData?.tables?.map((table: any) => (
+                        <div key={table.table_name} className="flex justify-between py-1 border-b border-dashed last:border-0">
+                          <span className="text-muted-foreground truncate max-w-[150px]" title={table.table_name}>{table.table_name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs">{table.row_count} rows</span>
+                            <span className="text-xs text-muted-foreground">{table.table_size}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-4">
+                <h3 className="font-medium mb-2">PostgreSQL Version</h3>
+                <p className="text-sm text-muted-foreground font-mono">{healthData?.version?.substring(0, 100)}</p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {activeTab === "tables" && (
+        <div className="space-y-4">
+          {tablesLoading ? (
+            <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
+          ) : (
+            <div className="grid grid-cols-4 gap-4">
+              <div className="col-span-1 rounded-lg border p-4">
+                <h3 className="font-medium mb-4">Tablas ({tablesData?.tables?.length || 0})</h3>
+                <ScrollArea className="h-[400px]">
+                  <div className="space-y-1">
+                    {tablesData?.tables?.map((table: any) => (
+                      <button
+                        key={table.table_name}
+                        onClick={() => setSelectedTable(table.table_name)}
+                        className={cn(
+                          "w-full text-left px-3 py-2 rounded text-sm transition-colors",
+                          selectedTable === table.table_name
+                            ? "bg-primary text-primary-foreground"
+                            : "hover:bg-muted"
+                        )}
+                        data-testid={`table-select-${table.table_name}`}
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="truncate">{table.table_name}</span>
+                          <span className="text-xs opacity-70">{table.row_count}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+
+              <div className="col-span-3 rounded-lg border p-4">
+                {!selectedTable ? (
+                  <div className="flex items-center justify-center h-[400px] text-muted-foreground">
+                    <div className="text-center">
+                      <Database className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>Selecciona una tabla para ver sus datos</p>
+                    </div>
+                  </div>
+                ) : tableDataLoading ? (
+                  <div className="flex items-center justify-center h-[400px]"><Loader2 className="h-6 w-6 animate-spin" /></div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium">{selectedTable}</h3>
+                      <div className="text-sm text-muted-foreground">
+                        {tableDataResult?.pagination?.total || 0} registros
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-muted-foreground flex flex-wrap gap-2 mb-2">
+                      {tableDataResult?.columns?.map((col: any) => (
+                        <span key={col.column_name} className="bg-muted px-2 py-1 rounded">
+                          {col.column_name}: <span className="text-primary">{col.data_type}</span>
+                        </span>
+                      ))}
+                    </div>
+
+                    <ScrollArea className="h-[300px]">
+                      <div className="min-w-full">
+                        <table className="w-full text-xs">
+                          <thead className="bg-muted sticky top-0">
+                            <tr>
+                              {tableDataResult?.columns?.slice(0, 8).map((col: any) => (
+                                <th key={col.column_name} className="px-2 py-1 text-left font-medium truncate max-w-[150px]">
+                                  {col.column_name}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tableDataResult?.data?.map((row: any, idx: number) => (
+                              <tr key={idx} className="border-b hover:bg-muted/50">
+                                {tableDataResult?.columns?.slice(0, 8).map((col: any) => (
+                                  <td key={col.column_name} className="px-2 py-1 truncate max-w-[150px]" title={String(row[col.column_name] ?? "")}>
+                                    {row[col.column_name] === null ? <span className="text-muted-foreground">NULL</span> : String(row[col.column_name]).substring(0, 50)}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </ScrollArea>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "query" && (
+        <div className="space-y-4">
+          <div className="rounded-lg border p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-medium flex items-center gap-2">
+                <Terminal className="h-4 w-4" />
+                SQL Query Explorer
+              </h3>
+              <Badge variant="outline" className="text-xs">Solo SELECT</Badge>
+            </div>
+            <textarea
+              value={sqlQuery}
+              onChange={(e) => setSqlQuery(e.target.value)}
+              className="w-full h-32 font-mono text-sm bg-muted p-4 rounded-lg border-0 resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="SELECT * FROM users LIMIT 10"
+              data-testid="input-sql-query"
+            />
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-xs text-muted-foreground">
+                Por seguridad, solo se permiten consultas SELECT
+              </p>
+              <Button onClick={executeQuery} disabled={isExecuting} data-testid="button-execute-query">
+                {isExecuting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+                Ejecutar
+              </Button>
+            </div>
+          </div>
+
+          {queryResult && (
+            <div className="rounded-lg border p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-medium">Resultados</h3>
+                {queryResult.success && (
+                  <div className="text-sm text-muted-foreground">
+                    {queryResult.rowCount} filas en {queryResult.executionTimeMs}ms
+                  </div>
+                )}
+              </div>
+              {queryResult.success ? (
+                <ScrollArea className="h-[300px]">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted sticky top-0">
+                      <tr>
+                        {queryResult.columns?.map((col: string) => (
+                          <th key={col} className="px-2 py-1 text-left font-medium">{col}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {queryResult.data?.map((row: any, idx: number) => (
+                        <tr key={idx} className="border-b hover:bg-muted/50">
+                          {queryResult.columns?.map((col: string) => (
+                            <td key={col} className="px-2 py-1 truncate max-w-[200px]" title={String(row[col] ?? "")}>
+                              {row[col] === null ? <span className="text-muted-foreground">NULL</span> : String(row[col]).substring(0, 100)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </ScrollArea>
+              ) : (
+                <div className="bg-destructive/10 text-destructive p-4 rounded-lg text-sm">
+                  <p className="font-medium mb-1">Error</p>
+                  <p>{queryResult.error}</p>
+                  {queryResult.hint && <p className="text-xs mt-2 opacity-70">{queryResult.hint}</p>}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="rounded-lg border p-4">
+            <h3 className="font-medium mb-4 flex items-center gap-2">
+              <Layers className="h-4 w-4" />
+              Índices ({indexesData?.indexes?.length || 0})
+            </h3>
+            <ScrollArea className="h-[150px]">
+              <div className="space-y-1 text-xs font-mono">
+                {indexesData?.indexes?.map((idx: any, i: number) => (
+                  <div key={i} className="flex justify-between py-1 border-b border-dashed">
+                    <span className="text-muted-foreground">{idx.tablename}.{idx.indexname}</span>
+                    <span>{idx.index_size}</span>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
