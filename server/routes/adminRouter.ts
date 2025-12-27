@@ -7,6 +7,8 @@ import { eq, desc, and, gte, lte, ilike, sql, inArray, count } from "drizzle-orm
 import { syncModelsForProvider, syncAllProviders, getAvailableProviders, getModelStats } from "../services/aiModelSyncService";
 import { toolRegistry, ToolDefinition } from "../services/toolRegistry";
 import { IntentToolMapper } from "../services/intentMapper";
+import { complexityAnalyzer } from "../services/complexityAnalyzer";
+import { orchestrationEngine } from "../services/orchestrationEngine";
 
 export function createAdminRouter() {
   const router = Router();
@@ -2402,6 +2404,46 @@ export function createAdminRouter() {
       }
 
       res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/agent/complexity/analyze", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+      const result = complexityAnalyzer.analyze(prompt);
+      res.json({ prompt, ...result });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/agent/orchestrate", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+
+      const complexity = complexityAnalyzer.analyze(prompt);
+      const subtasks = await orchestrationEngine.decomposeTask(prompt, complexity.score);
+      const plan = orchestrationEngine.buildExecutionPlan(subtasks);
+      const result = await orchestrationEngine.executeParallel(plan);
+      const combined = orchestrationEngine.combineResults(result);
+
+      res.json({
+        prompt,
+        complexity: {
+          score: complexity.score,
+          category: complexity.category,
+          recommended_path: complexity.recommended_path
+        },
+        orchestration: combined
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
