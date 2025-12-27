@@ -1391,6 +1391,17 @@ export function SpreadsheetEditor({
     }
   }, []);
 
+  // Helper to get the active cell (virtualized or legacy mode)
+  const getActiveCell = useCallback(() => {
+    if (useVirtualized && virtualSelectedCell) {
+      return { row: virtualSelectedCell.row, col: virtualSelectedCell.col, key: getCellKey(virtualSelectedCell.row, virtualSelectedCell.col) };
+    } else if (selectedCell) {
+      const parts = selectedCell.split('-');
+      return { row: parseInt(parts[0]), col: parseInt(parts[1]), key: selectedCell };
+    }
+    return null;
+  }, [useVirtualized, virtualSelectedCell, selectedCell]);
+
   const handleNavigationKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Handle Ctrl+Z (Undo) and Ctrl+Y (Redo) globally
     if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -1584,16 +1595,6 @@ export function SpreadsheetEditor({
       console.error('Failed to delete column:', e);
     }
   }, [selectedCell]);
-
-  const getActiveCell = useCallback(() => {
-    if (useVirtualized && virtualSelectedCell) {
-      return { row: virtualSelectedCell.row, col: virtualSelectedCell.col, key: getCellKey(virtualSelectedCell.row, virtualSelectedCell.col) };
-    } else if (selectedCell) {
-      const parts = selectedCell.split('-');
-      return { row: parseInt(parts[0]), col: parseInt(parts[1]), key: selectedCell };
-    }
-    return null;
-  }, [useVirtualized, virtualSelectedCell, selectedCell]);
 
   const getSelectionCells = useCallback((): Array<{ row: number; col: number }> => {
     if (useVirtualized && virtualSelectionRange) {
