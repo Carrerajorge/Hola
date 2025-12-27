@@ -3163,7 +3163,7 @@ IMPORTANTE:
     <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
       <header className="flex h-14 items-center justify-between px-2 sm:px-4 border-b border-white/20 dark:border-white/10 glass-card-light dark:glass-card rounded-none z-10 sticky top-0 flex-shrink-0 safe-area-top">
-        <div ref={modelSelectorRef} className="flex items-center gap-1 sm:gap-2 relative min-w-0 ml-14 sm:ml-0">
+        <div ref={modelSelectorRef} className="flex items-center gap-1 sm:gap-2 relative min-w-0 ml-12 sm:ml-0">
           {!isAnyModelAvailable ? (
             <Tooltip>
               <TooltipTrigger asChild>
