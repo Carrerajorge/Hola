@@ -603,28 +603,126 @@ export function createAdminRouter() {
     }
   });
 
+  // ========================================
+  // Settings Center Enterprise Module
+  // ========================================
+
   router.get("/settings", async (req, res) => {
     try {
-      const settings = await storage.getSettings();
+      await storage.seedDefaultSettings();
+      const settings = await storage.getSettingsConfig();
+      const grouped = settings.reduce((acc: Record<string, any[]>, s) => {
+        const cat = s.category || "general";
+        if (!acc[cat]) acc[cat] = [];
+        acc[cat].push(s);
+        return acc;
+      }, {});
+      res.json({ settings, grouped });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/settings/category/:category", async (req, res) => {
+    try {
+      await storage.seedDefaultSettings();
+      const settings = await storage.getSettingsConfigByCategory(req.params.category);
       res.json(settings);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  router.post("/settings", async (req, res) => {
+  router.get("/settings/key/:key", async (req, res) => {
     try {
-      const { key, value, description, category } = req.body;
-      if (!key) {
-        return res.status(400).json({ error: "key is required" });
+      const setting = await storage.getSettingsConfigByKey(req.params.key);
+      if (!setting) {
+        return res.status(404).json({ error: "Setting not found" });
       }
-      const setting = await storage.upsertSetting(key, value, description, category);
+      res.json(setting);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.put("/settings/:key", async (req, res) => {
+    try {
+      const existing = await storage.getSettingsConfigByKey(req.params.key);
+      if (!existing) {
+        return res.status(404).json({ error: "Setting not found" });
+      }
+      const updated = await storage.upsertSettingsConfig({
+        ...existing,
+        value: req.body.value,
+        updatedBy: req.body.updatedBy
+      });
       await storage.createAuditLog({
         action: "setting_update",
-        resource: "platform_settings",
-        details: { key, value }
+        resource: "settings_config",
+        details: { key: req.params.key, value: req.body.value }
       });
-      res.json(setting);
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/settings/bulk", async (req, res) => {
+    try {
+      const { settings } = req.body;
+      if (!Array.isArray(settings)) {
+        return res.status(400).json({ error: "settings must be an array" });
+      }
+      const results = [];
+      for (const s of settings) {
+        const existing = await storage.getSettingsConfigByKey(s.key);
+        if (existing) {
+          const updated = await storage.upsertSettingsConfig({
+            ...existing,
+            value: s.value,
+            updatedBy: s.updatedBy
+          });
+          results.push(updated);
+        }
+      }
+      await storage.createAuditLog({
+        action: "settings_bulk_update",
+        resource: "settings_config",
+        details: { count: results.length }
+      });
+      res.json({ updated: results.length, settings: results });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/settings/reset/:key", async (req, res) => {
+    try {
+      const existing = await storage.getSettingsConfigByKey(req.params.key);
+      if (!existing) {
+        return res.status(404).json({ error: "Setting not found" });
+      }
+      const updated = await storage.upsertSettingsConfig({
+        ...existing,
+        value: existing.defaultValue,
+        updatedBy: req.body.updatedBy
+      });
+      await storage.createAuditLog({
+        action: "setting_reset",
+        resource: "settings_config",
+        details: { key: req.params.key, defaultValue: existing.defaultValue }
+      });
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/settings/seed", async (req, res) => {
+    try {
+      await storage.seedDefaultSettings();
+      const settings = await storage.getSettingsConfig();
+      res.json({ seeded: true, count: settings.length });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

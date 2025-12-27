@@ -44,6 +44,7 @@ import {
   type SecurityPolicy, type InsertSecurityPolicy,
   type ReportTemplate, type InsertReportTemplate,
   type GeneratedReport, type InsertGeneratedReport,
+  type SettingsConfig, type InsertSettingsConfig,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
   gpts, gptCategories, gptVersions, users,
@@ -53,7 +54,7 @@ import {
   consentLogs, sharedLinks, companyKnowledge, gmailOAuthTokens,
   responseQualityMetrics, connectorUsageHourly, offlineMessageQueue,
   providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents, securityPolicies,
-  reportTemplates, generatedReports
+  reportTemplates, generatedReports, settingsConfig
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
@@ -294,6 +295,13 @@ export interface IStorage {
   createGeneratedReport(report: InsertGeneratedReport): Promise<GeneratedReport>;
   updateGeneratedReport(id: string, updates: Partial<InsertGeneratedReport>): Promise<GeneratedReport | undefined>;
   deleteGeneratedReport(id: string): Promise<void>;
+  // Settings Config
+  getSettingsConfig(): Promise<SettingsConfig[]>;
+  getSettingsConfigByCategory(category: string): Promise<SettingsConfig[]>;
+  getSettingsConfigByKey(key: string): Promise<SettingsConfig | undefined>;
+  upsertSettingsConfig(setting: InsertSettingsConfig): Promise<SettingsConfig>;
+  deleteSettingsConfig(key: string): Promise<void>;
+  seedDefaultSettings(): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -1979,6 +1987,69 @@ export class MemStorage implements IStorage {
 
   async deleteGeneratedReport(id: string): Promise<void> {
     await db.delete(generatedReports).where(eq(generatedReports.id, id));
+  }
+
+  // Settings Config CRUD
+  async getSettingsConfig(): Promise<SettingsConfig[]> {
+    return db.select().from(settingsConfig).orderBy(settingsConfig.category, settingsConfig.key);
+  }
+
+  async getSettingsConfigByCategory(category: string): Promise<SettingsConfig[]> {
+    return db.select().from(settingsConfig).where(eq(settingsConfig.category, category)).orderBy(settingsConfig.key);
+  }
+
+  async getSettingsConfigByKey(key: string): Promise<SettingsConfig | undefined> {
+    const [result] = await db.select().from(settingsConfig).where(eq(settingsConfig.key, key));
+    return result;
+  }
+
+  async upsertSettingsConfig(setting: InsertSettingsConfig): Promise<SettingsConfig> {
+    const existing = await this.getSettingsConfigByKey(setting.key);
+    if (existing) {
+      const [result] = await db.update(settingsConfig)
+        .set({ ...setting, updatedAt: new Date() })
+        .where(eq(settingsConfig.key, setting.key))
+        .returning();
+      return result;
+    }
+    const [result] = await db.insert(settingsConfig).values(setting).returning();
+    return result;
+  }
+
+  async deleteSettingsConfig(key: string): Promise<void> {
+    await db.delete(settingsConfig).where(eq(settingsConfig.key, key));
+  }
+
+  async seedDefaultSettings(): Promise<void> {
+    const existing = await this.getSettingsConfig();
+    if (existing.length > 0) return;
+
+    const defaultSettings: InsertSettingsConfig[] = [
+      { category: "general", key: "app_name", value: "Sira GPT", defaultValue: "Sira GPT", valueType: "string", description: "Application name" },
+      { category: "general", key: "app_description", value: "AI-powered chat assistant", defaultValue: "AI-powered chat assistant", valueType: "string", description: "Application description" },
+      { category: "general", key: "support_email", value: "", defaultValue: "", valueType: "string", description: "Support email address" },
+      { category: "general", key: "timezone_default", value: "UTC", defaultValue: "UTC", valueType: "string", description: "Default timezone" },
+      { category: "general", key: "date_format", value: "YYYY-MM-DD", defaultValue: "YYYY-MM-DD", valueType: "string", description: "Date format" },
+      { category: "general", key: "maintenance_mode", value: false, defaultValue: false, valueType: "boolean", description: "Enable maintenance mode" },
+      { category: "branding", key: "primary_color", value: "#6366f1", defaultValue: "#6366f1", valueType: "string", description: "Primary brand color" },
+      { category: "branding", key: "secondary_color", value: "#8b5cf6", defaultValue: "#8b5cf6", valueType: "string", description: "Secondary brand color" },
+      { category: "branding", key: "theme_mode", value: "dark", defaultValue: "dark", valueType: "string", description: "Default theme mode" },
+      { category: "users", key: "allow_registration", value: true, defaultValue: true, valueType: "boolean", description: "Allow user registration" },
+      { category: "users", key: "require_email_verification", value: false, defaultValue: false, valueType: "boolean", description: "Require email verification" },
+      { category: "users", key: "session_timeout_minutes", value: 1440, defaultValue: 1440, valueType: "number", description: "Session timeout in minutes" },
+      { category: "ai_models", key: "default_model", value: "grok-3-fast", defaultValue: "grok-3-fast", valueType: "string", description: "Default AI model" },
+      { category: "ai_models", key: "max_tokens_per_request", value: 4096, defaultValue: 4096, valueType: "number", description: "Max tokens per request" },
+      { category: "ai_models", key: "enable_streaming", value: true, defaultValue: true, valueType: "boolean", description: "Enable streaming responses" },
+      { category: "security", key: "max_login_attempts", value: 5, defaultValue: 5, valueType: "number", description: "Max login attempts before lockout" },
+      { category: "security", key: "lockout_duration_minutes", value: 30, defaultValue: 30, valueType: "number", description: "Lockout duration in minutes" },
+      { category: "security", key: "require_2fa_admins", value: false, defaultValue: false, valueType: "boolean", description: "Require 2FA for admins" },
+      { category: "notifications", key: "email_notifications_enabled", value: true, defaultValue: true, valueType: "boolean", description: "Enable email notifications" },
+      { category: "notifications", key: "slack_webhook_url", value: "", defaultValue: "", valueType: "string", description: "Slack webhook URL", isSensitive: "true" },
+    ];
+
+    for (const setting of defaultSettings) {
+      await db.insert(settingsConfig).values(setting).onConflictDoNothing();
+    }
   }
 }
 

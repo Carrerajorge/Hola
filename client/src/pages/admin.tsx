@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -63,12 +63,17 @@ import {
   ShieldAlert,
   ChevronLeft,
   ChevronRight,
-  DollarSign
+  DollarSign,
+  Palette,
+  Bell,
+  Code,
+  RotateCcw
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
+import { toast } from "sonner";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 
 type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings";
@@ -3589,11 +3594,29 @@ function ReportsSection() {
   );
 }
 
+type SettingsCategory = "general" | "branding" | "users" | "ai_models" | "security" | "notifications" | "advanced";
+
+const settingsCategories: { id: SettingsCategory; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: "general", label: "General", icon: Settings },
+  { id: "branding", label: "Branding", icon: Palette },
+  { id: "users", label: "Users", icon: Users },
+  { id: "ai_models", label: "AI Models", icon: Bot },
+  { id: "security", label: "Security", icon: Shield },
+  { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "advanced", label: "Advanced", icon: Code },
+];
+
+const timezones = ["UTC", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Paris", "Asia/Tokyo", "Asia/Shanghai", "Australia/Sydney"];
+const dateFormats = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY"];
+const themeModes = ["dark", "light", "auto"];
+
 function SettingsSection() {
   const queryClient = useQueryClient();
-  const [newSetting, setNewSetting] = useState({ key: "", value: "", description: "", category: "general" });
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
+  const [localSettings, setLocalSettings] = useState<Record<string, any>>({});
+  const [hasChanges, setHasChanges] = useState(false);
 
-  const { data: settings = [], isLoading } = useQuery({
+  const { data: settingsData, isLoading } = useQuery({
     queryKey: ["/api/admin/settings"],
     queryFn: async () => {
       const res = await fetch("/api/admin/settings");
@@ -3601,101 +3624,478 @@ function SettingsSection() {
     }
   });
 
-  const upsertSettingMutation = useMutation({
-    mutationFn: async (setting: any) => {
-      const res = await fetch("/api/admin/settings", {
-        method: "POST",
+  const { data: aiModels = [] } = useQuery({
+    queryKey: ["/api/ai-models"],
+    queryFn: async () => {
+      const res = await fetch("/api/ai-models");
+      return res.json();
+    }
+  });
+
+  useEffect(() => {
+    if (settingsData?.settings) {
+      const mapped: Record<string, any> = {};
+      settingsData.settings.forEach((s: any) => {
+        mapped[s.key] = s.value;
+      });
+      setLocalSettings(mapped);
+      setHasChanges(false);
+    }
+  }, [settingsData]);
+
+  const updateSettingMutation = useMutation({
+    mutationFn: async ({ key, value }: { key: string; value: any }) => {
+      const res = await fetch(`/api/admin/settings/${key}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(setting)
+        body: JSON.stringify({ value })
       });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/settings"] });
-      setNewSetting({ key: "", value: "", description: "", category: "general" });
+      toast.success("Setting updated successfully");
+    },
+    onError: () => {
+      toast.error("Failed to update setting");
     }
   });
 
+  const bulkUpdateMutation = useMutation({
+    mutationFn: async (settings: { key: string; value: any }[]) => {
+      const res = await fetch("/api/admin/settings/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings })
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings"] });
+      toast.success("Settings saved successfully");
+      setHasChanges(false);
+    },
+    onError: () => {
+      toast.error("Failed to save settings");
+    }
+  });
+
+  const resetSettingMutation = useMutation({
+    mutationFn: async (key: string) => {
+      const res = await fetch(`/api/admin/settings/reset/${key}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings"] });
+      setLocalSettings(prev => ({ ...prev, [data.key]: data.value }));
+      toast.success("Setting reset to default");
+    },
+    onError: () => {
+      toast.error("Failed to reset setting");
+    }
+  });
+
+  const updateLocal = (key: string, value: any) => {
+    setLocalSettings(prev => ({ ...prev, [key]: value }));
+    setHasChanges(true);
+  };
+
+  const saveCategory = () => {
+    const categorySettings = settingsData?.settings?.filter((s: any) => s.category === activeCategory) || [];
+    const updates = categorySettings.map((s: any) => ({
+      key: s.key,
+      value: localSettings[s.key]
+    }));
+    bulkUpdateMutation.mutate(updates);
+  };
+
+  const getSettingMeta = (key: string) => {
+    return settingsData?.settings?.find((s: any) => s.key === key);
+  };
+
   if (isLoading) {
-    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    return <div className="flex items-center justify-center py-12" data-testid="settings-loading"><Loader2 className="h-6 w-6 animate-spin" /></div>;
   }
 
-  const groupedSettings = settings.reduce((acc: any, s: any) => {
-    const cat = s.category || "general";
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(s);
-    return acc;
-  }, {});
-
-  return (
+  const renderGeneralSettings = () => (
     <div className="space-y-6">
-      <h2 className="text-lg font-medium">Settings</h2>
-      
-      <div className="rounded-lg border p-4 space-y-4">
-        <h3 className="text-sm font-medium">Añadir configuración</h3>
-        <div className="grid grid-cols-4 gap-4">
-          <Input 
-            placeholder="Clave" 
-            value={newSetting.key}
-            onChange={(e) => setNewSetting({ ...newSetting, key: e.target.value })}
+      <div className="space-y-2">
+        <Label htmlFor="app_name">Application Name</Label>
+        <div className="flex gap-2">
+          <Input
+            id="app_name"
+            data-testid="input-app-name"
+            value={localSettings.app_name || ""}
+            onChange={(e) => updateLocal("app_name", e.target.value)}
           />
-          <Input 
-            placeholder="Valor" 
-            value={newSetting.value}
-            onChange={(e) => setNewSetting({ ...newSetting, value: e.target.value })}
-          />
-          <Select value={newSetting.category} onValueChange={(value) => setNewSetting({ ...newSetting, category: value })}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="general">General</SelectItem>
-              <SelectItem value="ai">AI</SelectItem>
-              <SelectItem value="security">Seguridad</SelectItem>
-              <SelectItem value="billing">Facturación</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button 
-            onClick={() => upsertSettingMutation.mutate(newSetting)}
-            disabled={!newSetting.key}
-          >
-            Guardar
+          <Button variant="ghost" size="icon" onClick={() => resetSettingMutation.mutate("app_name")} title="Reset to default" data-testid="reset-app-name">
+            <RotateCcw className="h-4 w-4" />
           </Button>
         </div>
       </div>
-
-      {Object.entries(groupedSettings).map(([category, items]: [string, any]) => (
-        <div key={category} className="space-y-2">
-          <h3 className="text-sm font-medium capitalize">{category}</h3>
-          <div className="rounded-lg border divide-y">
-            {items.map((setting: any) => (
-              <div key={setting.id} className="flex items-center justify-between p-3">
-                <div>
-                  <p className="font-medium text-sm">{setting.key}</p>
-                  <p className="text-xs text-muted-foreground">{setting.description || "Sin descripción"}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Input 
-                    className="w-48 h-8 text-sm"
-                    defaultValue={setting.value}
-                    onBlur={(e) => {
-                      if (e.target.value !== setting.value) {
-                        upsertSettingMutation.mutate({ ...setting, value: e.target.value });
-                      }
-                    }}
-                  />
-                </div>
-              </div>
+      <div className="space-y-2">
+        <Label htmlFor="app_description">Application Description</Label>
+        <div className="flex gap-2">
+          <textarea
+            id="app_description"
+            data-testid="input-app-description"
+            className="flex min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={localSettings.app_description || ""}
+            onChange={(e) => updateLocal("app_description", e.target.value)}
+          />
+          <Button variant="ghost" size="icon" onClick={() => resetSettingMutation.mutate("app_description")} title="Reset to default" data-testid="reset-app-description">
+            <RotateCcw className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="support_email">Support Email</Label>
+        <Input
+          id="support_email"
+          type="email"
+          data-testid="input-support-email"
+          value={localSettings.support_email || ""}
+          onChange={(e) => updateLocal("support_email", e.target.value)}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="timezone_default">Default Timezone</Label>
+        <Select value={localSettings.timezone_default || "UTC"} onValueChange={(v) => updateLocal("timezone_default", v)}>
+          <SelectTrigger data-testid="select-timezone">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {timezones.map((tz) => (
+              <SelectItem key={tz} value={tz}>{tz}</SelectItem>
             ))}
-          </div>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="date_format">Date Format</Label>
+        <Select value={localSettings.date_format || "YYYY-MM-DD"} onValueChange={(v) => updateLocal("date_format", v)}>
+          <SelectTrigger data-testid="select-date-format">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {dateFormats.map((fmt) => (
+              <SelectItem key={fmt} value={fmt}>{fmt}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <Label htmlFor="maintenance_mode">Maintenance Mode</Label>
+          <p className="text-xs text-muted-foreground">Enable to show maintenance page to users</p>
         </div>
-      ))}
+        <Switch
+          id="maintenance_mode"
+          data-testid="switch-maintenance-mode"
+          checked={localSettings.maintenance_mode === true}
+          onCheckedChange={(v) => updateLocal("maintenance_mode", v)}
+        />
+      </div>
+    </div>
+  );
 
-      {settings.length === 0 && (
-        <div className="rounded-lg border p-8 text-center text-muted-foreground">
-          No hay configuraciones guardadas
+  const renderBrandingSettings = () => (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <Label htmlFor="primary_color">Primary Color</Label>
+        <div className="flex gap-2 items-center">
+          <input
+            id="primary_color"
+            type="color"
+            data-testid="input-primary-color"
+            value={localSettings.primary_color || "#6366f1"}
+            onChange={(e) => updateLocal("primary_color", e.target.value)}
+            className="w-12 h-10 rounded border cursor-pointer"
+          />
+          <Input
+            value={localSettings.primary_color || "#6366f1"}
+            onChange={(e) => updateLocal("primary_color", e.target.value)}
+            className="w-32"
+          />
+          <div
+            className="w-10 h-10 rounded border"
+            style={{ backgroundColor: localSettings.primary_color || "#6366f1" }}
+          />
         </div>
-      )}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="secondary_color">Secondary Color</Label>
+        <div className="flex gap-2 items-center">
+          <input
+            id="secondary_color"
+            type="color"
+            data-testid="input-secondary-color"
+            value={localSettings.secondary_color || "#8b5cf6"}
+            onChange={(e) => updateLocal("secondary_color", e.target.value)}
+            className="w-12 h-10 rounded border cursor-pointer"
+          />
+          <Input
+            value={localSettings.secondary_color || "#8b5cf6"}
+            onChange={(e) => updateLocal("secondary_color", e.target.value)}
+            className="w-32"
+          />
+          <div
+            className="w-10 h-10 rounded border"
+            style={{ backgroundColor: localSettings.secondary_color || "#8b5cf6" }}
+          />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="theme_mode">Default Theme</Label>
+        <Select value={localSettings.theme_mode || "dark"} onValueChange={(v) => updateLocal("theme_mode", v)}>
+          <SelectTrigger data-testid="select-theme-mode">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {themeModes.map((mode) => (
+              <SelectItem key={mode} value={mode}>{mode.charAt(0).toUpperCase() + mode.slice(1)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+
+  const renderUsersSettings = () => (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <Label htmlFor="allow_registration">Allow Registration</Label>
+          <p className="text-xs text-muted-foreground">Allow new users to sign up</p>
+        </div>
+        <Switch
+          id="allow_registration"
+          data-testid="switch-allow-registration"
+          checked={localSettings.allow_registration === true}
+          onCheckedChange={(v) => updateLocal("allow_registration", v)}
+        />
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <Label htmlFor="require_email_verification">Require Email Verification</Label>
+          <p className="text-xs text-muted-foreground">Require users to verify their email</p>
+        </div>
+        <Switch
+          id="require_email_verification"
+          data-testid="switch-email-verification"
+          checked={localSettings.require_email_verification === true}
+          onCheckedChange={(v) => updateLocal("require_email_verification", v)}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="session_timeout">Session Timeout (minutes)</Label>
+        <Input
+          id="session_timeout"
+          type="number"
+          data-testid="input-session-timeout"
+          value={localSettings.session_timeout_minutes || 1440}
+          onChange={(e) => updateLocal("session_timeout_minutes", parseInt(e.target.value) || 1440)}
+        />
+      </div>
+    </div>
+  );
+
+  const renderAIModelsSettings = () => (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <Label htmlFor="default_model">Default Model</Label>
+        <Select value={localSettings.default_model || "grok-3-fast"} onValueChange={(v) => updateLocal("default_model", v)}>
+          <SelectTrigger data-testid="select-default-model">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {aiModels.map((m: any) => (
+              <SelectItem key={m.id || m.modelId} value={m.modelId || m.id}>{m.name || m.modelId}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="max_tokens">Max Tokens Per Request</Label>
+        <Input
+          id="max_tokens"
+          type="number"
+          data-testid="input-max-tokens"
+          value={localSettings.max_tokens_per_request || 4096}
+          onChange={(e) => updateLocal("max_tokens_per_request", parseInt(e.target.value) || 4096)}
+        />
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <Label htmlFor="enable_streaming">Enable Streaming</Label>
+          <p className="text-xs text-muted-foreground">Stream AI responses in real-time</p>
+        </div>
+        <Switch
+          id="enable_streaming"
+          data-testid="switch-streaming"
+          checked={localSettings.enable_streaming === true}
+          onCheckedChange={(v) => updateLocal("enable_streaming", v)}
+        />
+      </div>
+    </div>
+  );
+
+  const renderSecuritySettings = () => (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <Label htmlFor="max_login_attempts">Max Login Attempts</Label>
+        <Input
+          id="max_login_attempts"
+          type="number"
+          data-testid="input-max-login-attempts"
+          value={localSettings.max_login_attempts || 5}
+          onChange={(e) => updateLocal("max_login_attempts", parseInt(e.target.value) || 5)}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="lockout_duration">Lockout Duration (minutes)</Label>
+        <Input
+          id="lockout_duration"
+          type="number"
+          data-testid="input-lockout-duration"
+          value={localSettings.lockout_duration_minutes || 30}
+          onChange={(e) => updateLocal("lockout_duration_minutes", parseInt(e.target.value) || 30)}
+        />
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <Label htmlFor="require_2fa">Require 2FA for Admins</Label>
+          <p className="text-xs text-muted-foreground">Enforce two-factor authentication for admin users</p>
+        </div>
+        <Switch
+          id="require_2fa"
+          data-testid="switch-require-2fa"
+          checked={localSettings.require_2fa_admins === true}
+          onCheckedChange={(v) => updateLocal("require_2fa_admins", v)}
+        />
+      </div>
+    </div>
+  );
+
+  const renderNotificationsSettings = () => (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <Label htmlFor="email_notifications">Email Notifications</Label>
+          <p className="text-xs text-muted-foreground">Enable email notifications for users</p>
+        </div>
+        <Switch
+          id="email_notifications"
+          data-testid="switch-email-notifications"
+          checked={localSettings.email_notifications_enabled === true}
+          onCheckedChange={(v) => updateLocal("email_notifications_enabled", v)}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="slack_webhook">Slack Webhook URL</Label>
+        <Input
+          id="slack_webhook"
+          type="text"
+          data-testid="input-slack-webhook"
+          placeholder="https://hooks.slack.com/services/..."
+          value={localSettings.slack_webhook_url || ""}
+          onChange={(e) => updateLocal("slack_webhook_url", e.target.value)}
+        />
+        <p className="text-xs text-muted-foreground">Optional: Configure Slack notifications</p>
+      </div>
+    </div>
+  );
+
+  const renderAdvancedSettings = () => (
+    <div className="space-y-4">
+      <div className="text-sm text-muted-foreground">Raw settings data for power users:</div>
+      <div className="rounded-lg border bg-muted/50 p-4 max-h-96 overflow-auto">
+        <pre className="text-xs font-mono whitespace-pre-wrap" data-testid="settings-json">
+          {JSON.stringify(settingsData?.settings || [], null, 2)}
+        </pre>
+      </div>
+    </div>
+  );
+
+  const renderCategoryContent = () => {
+    switch (activeCategory) {
+      case "general": return renderGeneralSettings();
+      case "branding": return renderBrandingSettings();
+      case "users": return renderUsersSettings();
+      case "ai_models": return renderAIModelsSettings();
+      case "security": return renderSecuritySettings();
+      case "notifications": return renderNotificationsSettings();
+      case "advanced": return renderAdvancedSettings();
+      default: return renderGeneralSettings();
+    }
+  };
+
+  return (
+    <div className="flex gap-6" data-testid="settings-section">
+      <div className="w-48 shrink-0 space-y-1">
+        {settingsCategories.map((cat) => (
+          <Button
+            key={cat.id}
+            variant={activeCategory === cat.id ? "secondary" : "ghost"}
+            className="w-full justify-start gap-2"
+            onClick={() => setActiveCategory(cat.id)}
+            data-testid={`settings-tab-${cat.id}`}
+          >
+            <cat.icon className="h-4 w-4" />
+            {cat.label}
+          </Button>
+        ))}
+      </div>
+      <div className="flex-1">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              {settingsCategories.find(c => c.id === activeCategory)?.icon && (
+                (() => {
+                  const Icon = settingsCategories.find(c => c.id === activeCategory)!.icon;
+                  return <Icon className="h-5 w-5" />;
+                })()
+              )}
+              {settingsCategories.find(c => c.id === activeCategory)?.label} Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {renderCategoryContent()}
+            {activeCategory !== "advanced" && (
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (settingsData?.settings) {
+                      const mapped: Record<string, any> = {};
+                      settingsData.settings.forEach((s: any) => {
+                        mapped[s.key] = s.value;
+                      });
+                      setLocalSettings(mapped);
+                      setHasChanges(false);
+                    }
+                  }}
+                  disabled={!hasChanges}
+                  data-testid="button-cancel-settings"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={saveCategory}
+                  disabled={!hasChanges || bulkUpdateMutation.isPending}
+                  data-testid="button-save-settings"
+                >
+                  {bulkUpdateMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Save Changes
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

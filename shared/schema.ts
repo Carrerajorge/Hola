@@ -1587,3 +1587,30 @@ export const insertGeneratedReportSchema = createInsertSchema(generatedReports).
 
 export type InsertGeneratedReport = z.infer<typeof insertGeneratedReportSchema>;
 export type GeneratedReport = typeof generatedReports.$inferSelect;
+
+// ========================================
+// Settings Configuration
+// ========================================
+
+export const settingsConfig = pgTable("settings_config", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  category: text("category").notNull(),
+  key: text("key").notNull().unique(),
+  value: jsonb("value"),
+  valueType: text("value_type").default("string"),
+  defaultValue: jsonb("default_value"),
+  description: text("description"),
+  isSensitive: text("is_sensitive").default("false"),
+  updatedBy: varchar("updated_by"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("settings_category_idx").on(table.category),
+]);
+
+export const insertSettingsConfigSchema = createInsertSchema(settingsConfig).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type InsertSettingsConfig = z.infer<typeof insertSettingsConfigSchema>;
+export type SettingsConfig = typeof settingsConfig.$inferSelect;
