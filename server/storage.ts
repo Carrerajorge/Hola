@@ -45,6 +45,7 @@ import {
   type ReportTemplate, type InsertReportTemplate,
   type GeneratedReport, type InsertGeneratedReport,
   type SettingsConfig, type InsertSettingsConfig,
+  type AgentGapLog, type InsertAgentGapLog,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
   gpts, gptCategories, gptVersions, users,
@@ -54,7 +55,7 @@ import {
   consentLogs, sharedLinks, companyKnowledge, gmailOAuthTokens,
   responseQualityMetrics, connectorUsageHourly, offlineMessageQueue,
   providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents, securityPolicies,
-  reportTemplates, generatedReports, settingsConfig
+  reportTemplates, generatedReports, settingsConfig, agentGapLogs
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
@@ -302,6 +303,10 @@ export interface IStorage {
   upsertSettingsConfig(setting: InsertSettingsConfig): Promise<SettingsConfig>;
   deleteSettingsConfig(key: string): Promise<void>;
   seedDefaultSettings(): Promise<void>;
+  // Agent Gap Logs
+  createAgentGapLog(log: InsertAgentGapLog): Promise<AgentGapLog>;
+  getAgentGapLogs(status?: string): Promise<AgentGapLog[]>;
+  updateAgentGapLog(id: string, updates: Partial<InsertAgentGapLog>): Promise<AgentGapLog | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -2050,6 +2055,29 @@ export class MemStorage implements IStorage {
     for (const setting of defaultSettings) {
       await db.insert(settingsConfig).values(setting).onConflictDoNothing();
     }
+  }
+
+  // Agent Gap Logs CRUD
+  async createAgentGapLog(log: InsertAgentGapLog): Promise<AgentGapLog> {
+    const [result] = await db.insert(agentGapLogs).values(log).returning();
+    return result;
+  }
+
+  async getAgentGapLogs(status?: string): Promise<AgentGapLog[]> {
+    if (status) {
+      return db.select().from(agentGapLogs)
+        .where(eq(agentGapLogs.status, status))
+        .orderBy(desc(agentGapLogs.createdAt));
+    }
+    return db.select().from(agentGapLogs).orderBy(desc(agentGapLogs.createdAt));
+  }
+
+  async updateAgentGapLog(id: string, updates: Partial<InsertAgentGapLog>): Promise<AgentGapLog | undefined> {
+    const [result] = await db.update(agentGapLogs)
+      .set(updates)
+      .where(eq(agentGapLogs.id, id))
+      .returning();
+    return result;
   }
 }
 

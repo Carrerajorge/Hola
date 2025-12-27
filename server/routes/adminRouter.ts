@@ -5,6 +5,8 @@ import { users, chats, chatMessages, aiModels } from "@shared/schema";
 import { llmGateway } from "../lib/llmGateway";
 import { eq, desc, and, gte, lte, ilike, sql, inArray, count } from "drizzle-orm";
 import { syncModelsForProvider, syncAllProviders, getAvailableProviders, getModelStats } from "../services/aiModelSyncService";
+import { toolRegistry, ToolDefinition } from "../services/toolRegistry";
+import { IntentToolMapper } from "../services/intentMapper";
 
 export function createAdminRouter() {
   const router = Router();
@@ -2290,6 +2292,116 @@ export function createAdminRouter() {
     try {
       await storage.deleteGeneratedReport(req.params.id);
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ========================================
+  // Agentic Engine
+  // ========================================
+
+  const intentMapper = new IntentToolMapper(toolRegistry);
+
+  router.get("/agent/tools", async (req, res) => {
+    try {
+      const tools = toolRegistry.getTools();
+      res.json({
+        total: tools.length,
+        tools: tools.map(t => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          category: t.category,
+          capabilities: t.capabilities,
+          endpoint: t.endpoint,
+          method: t.method,
+          isEnabled: t.isEnabled,
+          usageCount: t.usageCount,
+          successRate: t.successRate
+        }))
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/agent/tools/:category", async (req, res) => {
+    try {
+      const { category } = req.params;
+      const tools = toolRegistry.getToolsByCategory(category);
+      res.json({
+        category,
+        total: tools.length,
+        tools
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/agent/intents/analyze", async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "Prompt is required" });
+      }
+
+      const result = intentMapper.map(prompt);
+
+      if (result.hasGap && result.gapReason) {
+        await storage.createAgentGapLog({
+          userPrompt: prompt,
+          detectedIntent: result.intent,
+          gapReason: result.gapReason,
+          status: "pending"
+        });
+      }
+
+      res.json({
+        prompt,
+        intent: result.intent,
+        matches: result.matches.slice(0, 5),
+        hasGap: result.hasGap,
+        gapReason: result.gapReason,
+        suggestedAction: result.matches.length > 0 
+          ? `Use ${result.matches[0].toolId} tool` 
+          : "No suitable tool found"
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/agent/gaps", async (req, res) => {
+    try {
+      const { status } = req.query;
+      const gaps = await storage.getAgentGapLogs(status as string | undefined);
+      res.json({
+        total: gaps.length,
+        gaps
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.patch("/agent/gaps/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status, reviewedBy, suggestedCapability } = req.body;
+
+      const updated = await storage.updateAgentGapLog(id, {
+        status,
+        reviewedBy,
+        suggestedCapability
+      });
+
+      if (!updated) {
+        return res.status(404).json({ error: "Gap log not found" });
+      }
+
+      res.json(updated);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

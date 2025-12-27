@@ -1614,3 +1614,29 @@ export const insertSettingsConfigSchema = createInsertSchema(settingsConfig).omi
 
 export type InsertSettingsConfig = z.infer<typeof insertSettingsConfigSchema>;
 export type SettingsConfig = typeof settingsConfig.$inferSelect;
+
+// ========================================
+// Agentic Engine - Gap Logging
+// ========================================
+
+export const agentGapLogs = pgTable("agent_gap_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userPrompt: text("user_prompt").notNull(),
+  detectedIntent: text("detected_intent"),
+  gapReason: text("gap_reason"),
+  suggestedCapability: text("suggested_capability"),
+  status: text("status").default("pending"),
+  reviewedBy: varchar("reviewed_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("agent_gap_logs_status_idx").on(table.status),
+  index("agent_gap_logs_created_idx").on(table.createdAt),
+]);
+
+export const insertAgentGapLogSchema = createInsertSchema(agentGapLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAgentGapLog = z.infer<typeof insertAgentGapLogSchema>;
+export type AgentGapLog = typeof agentGapLogs.$inferSelect;
