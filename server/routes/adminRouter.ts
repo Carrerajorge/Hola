@@ -619,6 +619,71 @@ export function createAdminRouter() {
     }
   });
 
+  router.post("/conversations/search", async (req, res) => {
+    try {
+      const { query, limit = 50 } = req.body;
+      if (!query || query.length < 2) {
+        return res.json({ results: [] });
+      }
+      
+      const matchingMessages = await db.select({
+        chatId: chatMessages.chatId,
+        content: chatMessages.content,
+        role: chatMessages.role,
+        createdAt: chatMessages.createdAt
+      })
+        .from(chatMessages)
+        .where(ilike(chatMessages.content, `%${query}%`))
+        .limit(parseInt(limit as string));
+      
+      const chatIds = [...new Set(matchingMessages.map(m => m.chatId))];
+      if (chatIds.length === 0) {
+        return res.json({ results: [] });
+      }
+      
+      const conversations = await db.select().from(chats).where(inArray(chats.id, chatIds));
+      
+      res.json({
+        results: conversations.map(c => ({
+          ...c,
+          matchingMessages: matchingMessages.filter(m => m.chatId === c.id)
+        }))
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/conversations/:id/notes", async (req, res) => {
+    try {
+      const { note } = req.body;
+      const [conversation] = await db.select().from(chats).where(eq(chats.id, req.params.id));
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+      
+      const existingNotes = (conversation as any).internalNotes || [];
+      const newNote = {
+        id: `note-${Date.now()}`,
+        content: note,
+        createdAt: new Date().toISOString(),
+        author: "admin"
+      };
+      
+      const [updated] = await db.update(chats)
+        .set({ 
+          internalNotes: [...existingNotes, newNote],
+          updatedAt: new Date() 
+        })
+        .where(eq(chats.id, req.params.id))
+        .returning();
+      
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   router.get("/conversations/stats/summary", async (req, res) => {
     try {
       const now = new Date();
@@ -650,13 +715,16 @@ export function createAdminRouter() {
       const allUsers = await storage.getAllUsers();
       const totalMessages = allConversations.reduce((sum, c) => sum + (c.messageCount || 0), 0);
       const avgMessagesPerUser = allUsers.length > 0 ? Math.round(totalMessages / allUsers.length) : 0;
+      const totalConvCount = Number(totalConversations[0]?.count || 0);
+      const avgMessagesPerConversation = totalConvCount > 0 ? Math.round(totalMessages / totalConvCount) : 0;
 
       res.json({
         activeToday: Number(activeToday[0]?.count || 0),
         avgMessagesPerUser,
+        avgMessagesPerConversation,
         tokensConsumedToday: Number(tokensToday[0]?.sum || 0),
         flaggedConversations: Number(flaggedConversations[0]?.count || 0),
-        totalConversations: Number(totalConversations[0]?.count || 0)
+        totalConversations: totalConvCount
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
