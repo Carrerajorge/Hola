@@ -399,7 +399,10 @@ export function Sidebar({
         <Button 
           variant="ghost" 
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
-          onClick={onNewChat}
+          onClick={() => {
+            setLocation("/");
+            onNewChat?.();
+          }}
           data-testid="button-new-chat"
         >
           <Plus className="h-4 w-4" />
