@@ -607,17 +607,6 @@ export function Composer({
                     <Button 
                       variant="ghost" 
                       className="justify-start gap-2 text-sm h-9 glass-menu-item"
-                      onClick={() => openBlankDocEditor("ppt", { showInstructions: true })}
-                      data-testid="button-create-ppt-instructions"
-                    >
-                      <div className="flex items-center justify-center w-5 h-5 rounded bg-gradient-to-br from-orange-400 to-purple-500">
-                        <Wand2 className="h-3 w-3 text-white" />
-                      </div>
-                      Instrucciones PPT
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
                     >
                       <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
