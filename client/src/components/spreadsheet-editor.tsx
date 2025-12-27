@@ -1486,53 +1486,141 @@ export function SpreadsheetEditor({
     }
   }, [selectedCell]);
 
+  const getActiveCell = useCallback(() => {
+    if (useVirtualized && virtualSelectedCell) {
+      return { row: virtualSelectedCell.row, col: virtualSelectedCell.col, key: getCellKey(virtualSelectedCell.row, virtualSelectedCell.col) };
+    } else if (selectedCell) {
+      const parts = selectedCell.split('-');
+      return { row: parseInt(parts[0]), col: parseInt(parts[1]), key: selectedCell };
+    }
+    return null;
+  }, [useVirtualized, virtualSelectedCell, selectedCell]);
+
+  const updateActiveCell = useCallback((updates: Partial<SparseCellData>) => {
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const existing = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...existing, ...updates });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, ...updates });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
+
   const toggleBold = useCallback(() => {
-    if (!selectedCell) return;
-    const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, bold: !cell.bold });
-  }, [selectedCell, data.cells, updateCell]);
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...cell, bold: !cell.bold });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, bold: !cell.bold });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
 
   const toggleItalic = useCallback(() => {
-    if (!selectedCell) return;
-    const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, italic: !cell.italic });
-  }, [selectedCell, data.cells, updateCell]);
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...cell, italic: !cell.italic });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, italic: !cell.italic });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
 
   const toggleUnderline = useCallback(() => {
-    if (!selectedCell) return;
-    const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, underline: !cell.underline });
-  }, [selectedCell, data.cells, updateCell]);
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...cell, underline: !cell.underline });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, underline: !cell.underline });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
 
   const setAlignment = useCallback((align: 'left' | 'center' | 'right') => {
-    if (!selectedCell) return;
-    const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, align });
-  }, [selectedCell, data.cells, updateCell]);
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...cell, align });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, align });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
 
   const setFontFamily = useCallback((fontFamily: string) => {
-    if (!selectedCell) return;
-    const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, fontFamily });
-  }, [selectedCell, data.cells, updateCell]);
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...cell, fontFamily });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, fontFamily });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
 
   const setFontSize = useCallback((fontSize: number) => {
-    if (!selectedCell) return;
-    const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, fontSize });
-  }, [selectedCell, data.cells, updateCell]);
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...cell, fontSize });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, fontSize });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
 
   const setFontColor = useCallback((color: string) => {
-    if (!selectedCell) return;
-    const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, color });
-  }, [selectedCell, data.cells, updateCell]);
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...cell, color });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, color });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
 
   const setFillColor = useCallback((backgroundColor: string) => {
-    if (!selectedCell) return;
-    const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, backgroundColor });
-  }, [selectedCell, data.cells, updateCell]);
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...cell, backgroundColor });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, backgroundColor });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
 
   const updateChartConfig = useCallback((type: 'bar' | 'line' | 'pie', visible: boolean) => {
     setWorkbook(prev => ({
@@ -1569,36 +1657,67 @@ export function SpreadsheetEditor({
   }, []);
 
   const setNumberFormat = useCallback((format: string) => {
-    if (!selectedCell) return;
-    const cell = data.cells[selectedCell] || { value: '' };
-    updateCell(selectedCell, { ...cell, numberFormat: format });
-  }, [selectedCell, data.cells, updateCell]);
+    const active = getActiveCell();
+    if (!active) return;
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+      sparseGrid.setCell(active.row, active.col, { ...cell, numberFormat: format });
+      setGridVersion(v => v + 1);
+    } else {
+      const cell = data.cells[active.key] || { value: '' };
+      updateCell(active.key, { ...cell, numberFormat: format });
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell]);
 
   const ribbonCommands: Partial<RibbonCommands> = useMemo(() => ({
     copy: () => {
-      if (selectedCell) {
-        const cell = data.cells[selectedCell];
+      const active = getActiveCell();
+      if (!active) return;
+      
+      if (useVirtualized) {
+        const cell = sparseGrid.getCell(active.row, active.col);
+        if (cell?.value) navigator.clipboard.writeText(String(cell.value));
+      } else {
+        const cell = data.cells[active.key];
         if (cell?.value) navigator.clipboard.writeText(cell.value);
       }
     },
     cut: () => {
-      if (selectedCell) {
-        const cell = data.cells[selectedCell];
+      const active = getActiveCell();
+      if (!active) return;
+      
+      if (useVirtualized) {
+        const cell = sparseGrid.getCell(active.row, active.col);
+        if (cell?.value) {
+          navigator.clipboard.writeText(String(cell.value));
+          sparseGrid.setCell(active.row, active.col, { ...cell, value: '' });
+          setGridVersion(v => v + 1);
+        }
+      } else {
+        const cell = data.cells[active.key];
         if (cell?.value) {
           navigator.clipboard.writeText(cell.value);
-          updateCell(selectedCell, { ...cell, value: '' });
+          updateCell(active.key, { ...cell, value: '' });
         }
       }
     },
     paste: async () => {
-      if (selectedCell) {
-        try {
-          const text = await navigator.clipboard.readText();
-          const cell = data.cells[selectedCell] || { value: '' };
-          updateCell(selectedCell, { ...cell, value: text });
-        } catch (e) {
-          console.error('Paste failed:', e);
+      const active = getActiveCell();
+      if (!active) return;
+      
+      try {
+        const text = await navigator.clipboard.readText();
+        if (useVirtualized) {
+          const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
+          sparseGrid.setCell(active.row, active.col, { ...cell, value: text });
+          setGridVersion(v => v + 1);
+        } else {
+          const cell = data.cells[active.key] || { value: '' };
+          updateCell(active.key, { ...cell, value: text });
         }
+      } catch (e) {
+        console.error('Paste failed:', e);
       }
     },
     toggleBold,
@@ -1627,22 +1746,38 @@ export function SpreadsheetEditor({
     mergeCells,
     wrapText: toggleWrapText,
     setNumberFormat,
-  }), [selectedCell, data.cells, updateCell, toggleBold, toggleItalic, toggleUnderline, setFontFamily, setFontSize, setFontColor, setFillColor, setAlignment, addRow, addColumn, deleteRow, deleteColumn, updateChartConfig, undoRedo.undo, undoRedo.redo, mergeCells, toggleWrapText, setNumberFormat]);
+  }), [getActiveCell, useVirtualized, sparseGrid, data.cells, updateCell, toggleBold, toggleItalic, toggleUnderline, setFontFamily, setFontSize, setFontColor, setFillColor, setAlignment, addRow, addColumn, deleteRow, deleteColumn, updateChartConfig, undoRedo.undo, undoRedo.redo, mergeCells, toggleWrapText, setNumberFormat]);
 
   const cellFormat: CellFormat = useMemo(() => {
-    if (!selectedCell) return {};
-    const cell = data.cells[selectedCell];
-    return {
-      bold: cell?.bold,
-      italic: cell?.italic,
-      underline: cell?.underline,
-      align: cell?.align,
-      fontFamily: cell?.fontFamily,
-      fontSize: cell?.fontSize,
-      color: cell?.color,
-      backgroundColor: cell?.backgroundColor,
-    };
-  }, [selectedCell, data.cells]);
+    const active = getActiveCell();
+    if (!active) return {};
+    
+    if (useVirtualized) {
+      const cell = sparseGrid.getCell(active.row, active.col);
+      return {
+        bold: cell?.bold,
+        italic: cell?.italic,
+        underline: cell?.underline,
+        align: cell?.align,
+        fontFamily: cell?.fontFamily,
+        fontSize: cell?.fontSize,
+        color: cell?.color,
+        backgroundColor: cell?.backgroundColor,
+      };
+    } else {
+      const cell = data.cells[active.key];
+      return {
+        bold: cell?.bold,
+        italic: cell?.italic,
+        underline: cell?.underline,
+        align: cell?.align,
+        fontFamily: cell?.fontFamily,
+        fontSize: cell?.fontSize,
+        color: cell?.color,
+        backgroundColor: cell?.backgroundColor,
+      };
+    }
+  }, [getActiveCell, useVirtualized, sparseGrid, data.cells, gridVersion]);
 
   // Recalculate formulas when cells change
   const recalculateFormulas = useCallback(() => {
