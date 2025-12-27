@@ -1454,34 +1454,58 @@ function ConversationsSection() {
 
 function AIModelsSection() {
   const queryClient = useQueryClient();
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newModel, setNewModel] = useState({ name: "", provider: "", modelId: "", costPer1k: "0.00", description: "" });
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [providerFilter, setProviderFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [isSyncing, setIsSyncing] = useState(false);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  const { data: models = [], isLoading } = useQuery({
-    queryKey: ["/api/admin/models"],
+  const { data: stats, isLoading: statsLoading } = useQuery({
+    queryKey: ["/api/admin/models/stats"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/models");
+      const res = await fetch("/api/admin/models/stats");
       return res.json();
     }
   });
 
-  const createModelMutation = useMutation({
-    mutationFn: async (model: any) => {
-      const res = await fetch("/api/admin/models", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(model)
-      });
+  const { data: modelsData, isLoading, refetch } = useQuery({
+    queryKey: ["/api/admin/models/filtered", page, debouncedSearch, providerFilter, typeFilter, statusFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), limit: "15" });
+      if (debouncedSearch) params.append("search", debouncedSearch);
+      if (providerFilter !== "all") params.append("provider", providerFilter);
+      if (typeFilter !== "all") params.append("type", typeFilter);
+      if (statusFilter !== "all") params.append("status", statusFilter);
+      const res = await fetch(`/api/admin/models/filtered?${params}`);
       return res.json();
-    },
-    onSuccess: () => {
+    }
+  });
+
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+      setPage(1);
+    }, 500);
+  };
+
+  const syncAll = async () => {
+    setIsSyncing(true);
+    try {
+      await fetch("/api/admin/models/sync", { method: "POST" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
-      setShowAddModal(false);
-      setNewModel({ name: "", provider: "", modelId: "", costPer1k: "0.00", description: "" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      refetch();
+    } finally {
+      setIsSyncing(false);
     }
-  });
+  };
 
-  const updateModelMutation = useMutation({
+  const updateMutation = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: any }) => {
       const res = await fetch(`/api/admin/models/${id}`, {
         method: "PATCH",
@@ -1492,128 +1516,335 @@ function AIModelsSection() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      refetch();
     }
   });
 
-  const deleteModelMutation = useMutation({
+  const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       await fetch(`/api/admin/models/${id}`, { method: "DELETE" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      refetch();
     }
   });
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-  }
+  const providerColors: Record<string, string> = {
+    anthropic: "bg-orange-500/10 text-orange-600 border-orange-500/30",
+    google: "bg-blue-500/10 text-blue-600 border-blue-500/30",
+    xai: "bg-purple-500/10 text-purple-600 border-purple-500/30",
+    openai: "bg-green-500/10 text-green-600 border-green-500/30",
+    openrouter: "bg-cyan-500/10 text-cyan-600 border-cyan-500/30",
+    perplexity: "bg-pink-500/10 text-pink-600 border-pink-500/30"
+  };
+
+  const typeColors: Record<string, string> = {
+    TEXT: "bg-gray-500/10 text-gray-600",
+    IMAGE: "bg-purple-500/10 text-purple-600",
+    EMBEDDING: "bg-blue-500/10 text-blue-600",
+    AUDIO: "bg-yellow-500/10 text-yellow-600",
+    VIDEO: "bg-red-500/10 text-red-600",
+    MULTIMODAL: "bg-gradient-to-r from-purple-500/10 to-blue-500/10 text-purple-600"
+  };
+
+  const models = modelsData?.data || [];
+  const pagination = modelsData?.pagination || { page: 1, totalPages: 1, total: 0 };
+
+  const MetricCardSkeleton = () => (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-md bg-muted animate-pulse w-9 h-9" />
+        <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+      </div>
+      <div className="h-8 w-16 bg-muted animate-pulse rounded" />
+    </div>
+  );
+
+  const TableRowSkeleton = () => (
+    <tr className="border-b">
+      <td className="p-3"><div className="space-y-1"><div className="h-4 w-32 bg-muted animate-pulse rounded" /><div className="h-3 w-24 bg-muted animate-pulse rounded" /></div></td>
+      <td className="p-3"><div className="h-5 w-16 bg-muted animate-pulse rounded" /></td>
+      <td className="p-3"><div className="h-5 w-14 bg-muted animate-pulse rounded" /></td>
+      <td className="p-3"><div className="h-4 w-20 bg-muted animate-pulse rounded" /></td>
+      <td className="p-3"><div className="h-5 w-10 bg-muted animate-pulse rounded-full" /></td>
+      <td className="p-3"><div className="h-4 w-24 bg-muted animate-pulse rounded" /></td>
+      <td className="p-3"><div className="h-7 w-7 bg-muted animate-pulse rounded" /></td>
+    </tr>
+  );
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">AI Models ({models.length})</h2>
-        <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-          <DialogTrigger asChild>
-            <Button size="sm" data-testid="button-add-model">
-              <Plus className="h-4 w-4 mr-2" />
-              Añadir modelo
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Añadir modelo AI</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Nombre</Label>
-                <Input 
-                  placeholder="GPT-4 Turbo" 
-                  value={newModel.name}
-                  onChange={(e) => setNewModel({ ...newModel, name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Proveedor</Label>
-                <Input 
-                  placeholder="OpenAI" 
-                  value={newModel.provider}
-                  onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Model ID</Label>
-                <Input 
-                  placeholder="gpt-4-turbo" 
-                  value={newModel.modelId}
-                  onChange={(e) => setNewModel({ ...newModel, modelId: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Costo por 1K tokens</Label>
-                <Input 
-                  placeholder="0.03" 
-                  value={newModel.costPer1k}
-                  onChange={(e) => setNewModel({ ...newModel, costPer1k: e.target.value })}
-                />
-              </div>
-              <Button 
-                className="w-full" 
-                onClick={() => createModelMutation.mutate(newModel)}
-                disabled={!newModel.name || !newModel.provider || !newModel.modelId}
-              >
-                Crear modelo
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <h2 className="text-lg font-medium" data-testid="text-ai-models-title">AI Models</h2>
+        <Button
+          size="sm"
+          onClick={syncAll}
+          disabled={isSyncing}
+          className="gap-2"
+          data-testid="button-sync-all"
+        >
+          {isSyncing ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Sincronizando...
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-4 w-4" />
+              Sincronizar Todo
+            </>
+          )}
+        </Button>
       </div>
-      <div className="grid gap-4">
-        {models.length === 0 ? (
-          <div className="rounded-lg border p-8 text-center text-muted-foreground">
-            No hay modelos configurados. Añade uno para empezar.
-          </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {statsLoading ? (
+          <>
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+          </>
         ) : (
-          models.map((model: any) => (
-            <div key={model.id} className="rounded-lg border p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <Bot className="h-5 w-5" />
-                  <div>
-                    <p className="font-medium">{model.name}</p>
-                    <p className="text-xs text-muted-foreground">{model.provider} - {model.modelId}</p>
-                  </div>
+          <>
+            <div className="rounded-lg border p-4" data-testid="card-total-models">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-md bg-purple-500/10">
+                  <Bot className="h-4 w-4 text-purple-500" />
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground">€{model.costPer1k}/1K</span>
-                  <Switch 
-                    checked={model.status === "active"} 
-                    onCheckedChange={(checked) => updateModelMutation.mutate({ 
-                      id: model.id, 
-                      updates: { status: checked ? "active" : "inactive" } 
-                    })}
-                    data-testid={`switch-model-${model.id}`}
-                  />
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-7 w-7 p-0 text-destructive"
-                    onClick={() => deleteModelMutation.mutate(model.id)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
+                <span className="text-sm font-medium text-muted-foreground">Total Modelos</span>
               </div>
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">Uso este mes</span>
-                  <span>{model.usagePercent || 0}%</span>
-                </div>
-                <Progress value={model.usagePercent || 0} className="h-1.5" />
-              </div>
+              <p className="text-2xl font-bold" data-testid="text-total-models-count">{stats?.total || 0}</p>
             </div>
-          ))
+
+            <div className="rounded-lg border p-4" data-testid="card-active-models">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-md bg-green-500/10">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                </div>
+                <span className="text-sm font-medium text-muted-foreground">Modelos Activos</span>
+              </div>
+              <p className="text-2xl font-bold text-green-600" data-testid="text-active-models-count">{stats?.active || 0}</p>
+            </div>
+
+            <div className="rounded-lg border p-4" data-testid="card-inactive-models">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-md bg-red-500/10">
+                  <X className="h-4 w-4 text-red-500" />
+                </div>
+                <span className="text-sm font-medium text-muted-foreground">Modelos Inactivos</span>
+              </div>
+              <p className="text-2xl font-bold text-red-600" data-testid="text-inactive-models-count">{stats?.inactive || 0}</p>
+            </div>
+
+            <div className="rounded-lg border p-4" data-testid="card-providers">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 rounded-md bg-blue-500/10">
+                  <HardDrive className="h-4 w-4 text-blue-500" />
+                </div>
+                <span className="text-sm font-medium text-muted-foreground">Proveedores</span>
+              </div>
+              <p className="text-2xl font-bold" data-testid="text-providers-count">{stats?.providers || 0}</p>
+            </div>
+          </>
         )}
       </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar modelos..."
+            className="pl-9 h-9"
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            data-testid="input-search-models"
+          />
+        </div>
+
+        <Select value={providerFilter} onValueChange={(v) => { setProviderFilter(v); setPage(1); }}>
+          <SelectTrigger className="w-[140px] h-9" data-testid="select-provider-filter">
+            <SelectValue placeholder="Proveedor" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="anthropic">Anthropic</SelectItem>
+            <SelectItem value="google">Google</SelectItem>
+            <SelectItem value="xai">xAI</SelectItem>
+            <SelectItem value="openai">OpenAI</SelectItem>
+            <SelectItem value="openrouter">OpenRouter</SelectItem>
+            <SelectItem value="perplexity">Perplexity</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(1); }}>
+          <SelectTrigger className="w-[140px] h-9" data-testid="select-type-filter">
+            <SelectValue placeholder="Tipo" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="TEXT">TEXT</SelectItem>
+            <SelectItem value="IMAGE">IMAGE</SelectItem>
+            <SelectItem value="EMBEDDING">EMBEDDING</SelectItem>
+            <SelectItem value="AUDIO">AUDIO</SelectItem>
+            <SelectItem value="VIDEO">VIDEO</SelectItem>
+            <SelectItem value="MULTIMODAL">MULTIMODAL</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+          <SelectTrigger className="w-[130px] h-9" data-testid="select-status-filter">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos</SelectItem>
+            <SelectItem value="active">Activo</SelectItem>
+            <SelectItem value="inactive">Inactivo</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {isSyncing && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30">
+          <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+          <span className="text-sm text-blue-600">Sincronizando modelos con proveedores...</span>
+        </div>
+      )}
+
+      <div className="rounded-lg border overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 border-b">
+              <tr>
+                <th className="text-left p-3 font-medium">Modelo</th>
+                <th className="text-left p-3 font-medium">Proveedor</th>
+                <th className="text-left p-3 font-medium">Tipo</th>
+                <th className="text-left p-3 font-medium">Context Window</th>
+                <th className="text-left p-3 font-medium">Status</th>
+                <th className="text-left p-3 font-medium">Última Sync</th>
+                <th className="text-right p-3 font-medium">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <>
+                  <TableRowSkeleton />
+                  <TableRowSkeleton />
+                  <TableRowSkeleton />
+                  <TableRowSkeleton />
+                  <TableRowSkeleton />
+                </>
+              ) : models.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                    <div className="flex flex-col items-center gap-2">
+                      <Bot className="h-8 w-8 text-muted-foreground/50" />
+                      <p>No hay modelos {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all" ? "que coincidan con los filtros" : "configurados"}</p>
+                      {!debouncedSearch && providerFilter === "all" && typeFilter === "all" && statusFilter === "all" && (
+                        <Button variant="outline" size="sm" onClick={syncAll} disabled={isSyncing} className="mt-2" data-testid="button-sync-empty">
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Sincronizar modelos
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                models.map((model: any) => (
+                  <tr key={model.id} className="border-b last:border-0 hover:bg-muted/30" data-testid={`row-model-${model.id}`}>
+                    <td className="p-3">
+                      <div>
+                        <p className="font-medium">{model.name}</p>
+                        <p className="text-xs text-muted-foreground font-mono">{model.modelId}</p>
+                      </div>
+                    </td>
+                    <td className="p-3">
+                      <Badge
+                        variant="outline"
+                        className={cn("text-xs border", providerColors[model.provider?.toLowerCase()] || "bg-gray-500/10 text-gray-600 border-gray-500/30")}
+                        data-testid={`badge-provider-${model.id}`}
+                      >
+                        {model.provider}
+                      </Badge>
+                    </td>
+                    <td className="p-3">
+                      <Badge
+                        variant="secondary"
+                        className={cn("text-xs", typeColors[model.type] || "bg-gray-500/10 text-gray-600")}
+                        data-testid={`badge-type-${model.id}`}
+                      >
+                        {model.type || "TEXT"}
+                      </Badge>
+                    </td>
+                    <td className="p-3 text-muted-foreground">
+                      {model.contextWindow ? `${model.contextWindow.toLocaleString()} tokens` : "-"}
+                    </td>
+                    <td className="p-3">
+                      <Switch
+                        checked={model.status === "active"}
+                        onCheckedChange={(checked) => updateMutation.mutate({
+                          id: model.id,
+                          updates: { status: checked ? "active" : "inactive" }
+                        })}
+                        disabled={updateMutation.isPending}
+                        data-testid={`switch-status-${model.id}`}
+                      />
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground">
+                      {model.lastSyncAt ? format(new Date(model.lastSyncAt), "dd/MM/yyyy HH:mm") : "Never"}
+                    </td>
+                    <td className="p-3">
+                      <div className="flex justify-end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                          onClick={() => deleteMutation.mutate(model.id)}
+                          disabled={deleteMutation.isPending}
+                          data-testid={`button-delete-model-${model.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {!isLoading && models.length > 0 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground" data-testid="text-pagination-info">
+            Showing {((pagination.page - 1) * 15) + 1} to {Math.min(pagination.page * 15, pagination.total)} of {pagination.total}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pagination.page <= 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              data-testid="button-prev-page"
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pagination.page >= pagination.totalPages}
+              onClick={() => setPage(p => p + 1)}
+              data-testid="button-next-page"
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
