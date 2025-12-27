@@ -1159,3 +1159,196 @@ export const insertGmailOAuthTokenSchema = createInsertSchema(gmailOAuthTokens).
 
 export type InsertGmailOAuthToken = z.infer<typeof insertGmailOAuthTokenSchema>;
 export type GmailOAuthToken = typeof gmailOAuthTokens.$inferSelect;
+
+// ========================================
+// Admin Dashboard Tables
+// ========================================
+
+// Admin Audit Logs - Track all admin actions
+export const adminAuditLogs = pgTable("admin_audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  adminId: varchar("admin_id").notNull().references(() => users.id),
+  action: text("action").notNull(), // 'user.create', 'user.delete', 'settings.update', etc.
+  targetType: text("target_type"), // 'user', 'settings', 'report', etc.
+  targetId: varchar("target_id"),
+  details: jsonb("details"), // action-specific data
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("admin_audit_logs_admin_idx").on(table.adminId),
+  index("admin_audit_logs_action_idx").on(table.action),
+  index("admin_audit_logs_created_idx").on(table.createdAt),
+]);
+
+export const insertAdminAuditLogSchema = createInsertSchema(adminAuditLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAdminAuditLog = z.infer<typeof insertAdminAuditLogSchema>;
+export type AdminAuditLog = typeof adminAuditLogs.$inferSelect;
+
+// AI Model Usage - Track token consumption per model
+export const aiModelUsage = pgTable("ai_model_usage", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  provider: text("provider").notNull(), // 'xai', 'gemini'
+  model: text("model").notNull(), // 'grok-3-fast', 'gemini-2.5-flash', etc.
+  promptTokens: integer("prompt_tokens").default(0),
+  completionTokens: integer("completion_tokens").default(0),
+  totalTokens: integer("total_tokens").default(0),
+  latencyMs: integer("latency_ms"),
+  costEstimate: text("cost_estimate"), // stored as string for precision
+  requestType: text("request_type"), // 'chat', 'vision', 'embedding'
+  success: text("success").default("true"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("ai_model_usage_user_idx").on(table.userId),
+  index("ai_model_usage_provider_idx").on(table.provider),
+  index("ai_model_usage_created_idx").on(table.createdAt),
+]);
+
+export const insertAiModelUsageSchema = createInsertSchema(aiModelUsage).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAiModelUsage = z.infer<typeof insertAiModelUsageSchema>;
+export type AiModelUsage = typeof aiModelUsage.$inferSelect;
+
+// Security Events - Track security-related events
+export const securityEvents = pgTable("security_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  eventType: text("event_type").notNull(), // 'login_failed', 'login_success', 'password_reset', 'suspicious_activity', 'rate_limit', 'ip_blocked'
+  severity: text("severity").default("info"), // 'info', 'warning', 'error', 'critical'
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  details: jsonb("details"),
+  resolved: text("resolved").default("false"),
+  resolvedBy: varchar("resolved_by").references(() => users.id),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("security_events_user_idx").on(table.userId),
+  index("security_events_type_idx").on(table.eventType),
+  index("security_events_severity_idx").on(table.severity),
+  index("security_events_created_idx").on(table.createdAt),
+]);
+
+export const insertSecurityEventSchema = createInsertSchema(securityEvents).omit({
+  id: true,
+  createdAt: true,
+  resolvedAt: true,
+});
+
+export type InsertSecurityEvent = z.infer<typeof insertSecurityEventSchema>;
+export type SecurityEvent = typeof securityEvents.$inferSelect;
+
+
+// Admin Reports - Generated reports
+export const adminReports = pgTable("admin_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  type: text("type").notNull(), // 'users', 'usage', 'revenue', 'security', 'custom'
+  parameters: jsonb("parameters"), // report generation parameters
+  status: text("status").default("pending"), // 'pending', 'generating', 'completed', 'failed'
+  fileUrl: text("file_url"),
+  fileSize: integer("file_size"),
+  generatedBy: varchar("generated_by").notNull().references(() => users.id),
+  scheduledId: varchar("scheduled_id"), // if part of a scheduled report
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+}, (table) => [
+  index("admin_reports_type_idx").on(table.type),
+  index("admin_reports_status_idx").on(table.status),
+  index("admin_reports_generated_by_idx").on(table.generatedBy),
+]);
+
+export const insertAdminReportSchema = createInsertSchema(adminReports).omit({
+  id: true,
+  createdAt: true,
+  completedAt: true,
+});
+
+export type InsertAdminReport = z.infer<typeof insertAdminReportSchema>;
+export type AdminReport = typeof adminReports.$inferSelect;
+
+// Scheduled Reports - Recurring report generation
+export const scheduledReports = pgTable("scheduled_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  parameters: jsonb("parameters"),
+  schedule: text("schedule").notNull(), // cron expression
+  recipients: text("recipients").array(), // email addresses
+  isActive: text("is_active").default("true"),
+  lastRunAt: timestamp("last_run_at"),
+  nextRunAt: timestamp("next_run_at"),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("scheduled_reports_active_next_idx").on(table.isActive, table.nextRunAt),
+]);
+
+export const insertScheduledReportSchema = createInsertSchema(scheduledReports).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastRunAt: true,
+});
+
+export type InsertScheduledReport = z.infer<typeof insertScheduledReportSchema>;
+export type ScheduledReport = typeof scheduledReports.$inferSelect;
+
+// IP Blocklist - Blocked IP addresses
+export const ipBlocklist = pgTable("ip_blocklist", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ipAddress: text("ip_address").notNull().unique(),
+  reason: text("reason"),
+  blockedBy: varchar("blocked_by").notNull().references(() => users.id),
+  expiresAt: timestamp("expires_at"), // null = permanent
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("ip_blocklist_ip_idx").on(table.ipAddress),
+  index("ip_blocklist_expires_idx").on(table.expiresAt),
+]);
+
+export const insertIpBlocklistSchema = createInsertSchema(ipBlocklist).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertIpBlocklist = z.infer<typeof insertIpBlocklistSchema>;
+export type IpBlocklist = typeof ipBlocklist.$inferSelect;
+
+// Analytics Events - User behavior tracking
+export const analyticsEvents = pgTable("analytics_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  sessionId: varchar("session_id"),
+  eventName: text("event_name").notNull(), // 'page_view', 'chat_started', 'document_generated', etc.
+  eventData: jsonb("event_data"),
+  pageUrl: text("page_url"),
+  referrer: text("referrer"),
+  deviceType: text("device_type"), // 'desktop', 'mobile', 'tablet'
+  browser: text("browser"),
+  country: text("country"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("analytics_events_user_idx").on(table.userId),
+  index("analytics_events_event_idx").on(table.eventName),
+  index("analytics_events_created_idx").on(table.createdAt),
+]);
+
+export const insertAnalyticsEventSchema = createInsertSchema(analyticsEvents).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAnalyticsEvent = z.infer<typeof insertAnalyticsEventSchema>;
+export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
