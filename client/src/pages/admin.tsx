@@ -1512,11 +1512,13 @@ function AIModelsSection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates)
       });
+      if (!res.ok) throw new Error("Failed to update model");
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
       refetch();
     }
   });
