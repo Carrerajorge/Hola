@@ -236,6 +236,42 @@ export function createAdminRouter() {
     }
   });
 
+  router.patch("/models/:id/toggle", async (req, res) => {
+    try {
+      const { isEnabled } = req.body;
+      const userId = (req as any).user?.id || null;
+      
+      const updateData: any = {
+        isEnabled: isEnabled ? "true" : "false",
+      };
+      
+      if (isEnabled) {
+        updateData.enabledAt = new Date();
+        updateData.enabledByAdminId = userId;
+      } else {
+        updateData.enabledAt = null;
+        updateData.enabledByAdminId = null;
+      }
+      
+      const model = await storage.updateAiModel(req.params.id, updateData);
+      if (!model) {
+        return res.status(404).json({ error: "Model not found" });
+      }
+      
+      await storage.createAuditLog({
+        userId,
+        action: isEnabled ? "model_enable" : "model_disable",
+        resource: "ai_models",
+        resourceId: req.params.id,
+        details: { isEnabled, modelName: model.name }
+      });
+      
+      res.json(model);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   router.get("/payments", async (req, res) => {
     try {
       const payments = await storage.getPayments();

@@ -63,6 +63,33 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
 
+  // ===== Public Models Endpoint (for user-facing selector) =====
+  app.get("/api/models/available", async (req: Request, res: Response) => {
+    try {
+      const allModels = await storage.getAiModels();
+      const models = allModels
+        .filter((m: any) => m.isEnabled === "true")
+        .sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0))
+        .map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          provider: m.provider,
+          modelId: m.modelId,
+          description: m.description,
+          isEnabled: m.isEnabled,
+          enabledAt: m.enabledAt,
+          displayOrder: m.displayOrder || 0,
+          icon: m.icon,
+          modelType: m.modelType,
+          contextWindow: m.contextWindow,
+        }));
+      res.json({ models });
+    } catch (error: any) {
+      console.error("[Models] Error fetching available models:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ===== AI Quality Stats & Content Filter Endpoints =====
   
   // GET /api/ai/quality-stats - Return quality statistics

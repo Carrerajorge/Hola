@@ -737,11 +737,17 @@ export const aiModels = pgTable("ai_models", {
   lastSyncAt: timestamp("last_sync_at"),
   isDeprecated: text("is_deprecated").default("false"),
   releaseDate: text("release_date"),
+  isEnabled: text("is_enabled").default("false"),
+  enabledAt: timestamp("enabled_at"),
+  enabledByAdminId: varchar("enabled_by_admin_id"),
+  displayOrder: integer("display_order").default(0),
+  icon: text("icon"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("ai_models_provider_idx").on(table.provider),
   index("ai_models_model_type_idx").on(table.modelType),
   index("ai_models_status_idx").on(table.status),
+  index("ai_models_is_enabled_idx").on(table.isEnabled),
 ]);
 
 export const insertAiModelSchema = createInsertSchema(aiModels).omit({
