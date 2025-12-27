@@ -729,8 +729,20 @@ export const aiModels = pgTable("ai_models", {
   usagePercent: integer("usage_percent").default(0),
   description: text("description"),
   capabilities: jsonb("capabilities"),
+  modelType: text("model_type").default("TEXT"),
+  contextWindow: integer("context_window"),
+  maxOutputTokens: integer("max_output_tokens"),
+  inputCostPer1k: text("input_cost_per_1k").default("0.00"),
+  outputCostPer1k: text("output_cost_per_1k").default("0.00"),
+  lastSyncAt: timestamp("last_sync_at"),
+  isDeprecated: text("is_deprecated").default("false"),
+  releaseDate: text("release_date"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+  index("ai_models_provider_idx").on(table.provider),
+  index("ai_models_model_type_idx").on(table.modelType),
+  index("ai_models_status_idx").on(table.status),
+]);
 
 export const insertAiModelSchema = createInsertSchema(aiModels).omit({
   id: true,

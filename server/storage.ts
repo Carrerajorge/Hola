@@ -137,6 +137,9 @@ export interface IStorage {
   // Admin: AI Models
   createAiModel(model: InsertAiModel): Promise<AiModel>;
   getAiModels(): Promise<AiModel[]>;
+  getAiModelsFiltered(filters: { provider?: string; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }>;
+  getAiModelById(id: string): Promise<AiModel | undefined>;
+  getAiModelByModelId(modelId: string, provider: string): Promise<AiModel | undefined>;
   updateAiModel(id: string, updates: Partial<InsertAiModel>): Promise<AiModel | undefined>;
   deleteAiModel(id: string): Promise<void>;
   // Admin: Payments
@@ -828,6 +831,63 @@ export class MemStorage implements IStorage {
 
   async getAiModels(): Promise<AiModel[]> {
     return db.select().from(aiModels).orderBy(desc(aiModels.createdAt));
+  }
+
+  async getAiModelsFiltered(filters: { provider?: string; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }> {
+    const { provider, type, status, search, sortBy = "name", sortOrder = "asc", page = 1, limit = 20 } = filters;
+    const conditions = [];
+    
+    if (provider) {
+      conditions.push(eq(aiModels.provider, provider.toLowerCase()));
+    }
+    if (type) {
+      conditions.push(eq(aiModels.modelType, type));
+    }
+    if (status) {
+      conditions.push(eq(aiModels.status, status));
+    }
+    if (search) {
+      conditions.push(
+        sql`(${aiModels.name} ILIKE ${`%${search}%`} OR ${aiModels.modelId} ILIKE ${`%${search}%`} OR ${aiModels.description} ILIKE ${`%${search}%`})`
+      );
+    }
+    
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    
+    const allModels = await db.select().from(aiModels).where(whereClause);
+    const total = allModels.length;
+    
+    let sortedModels = [...allModels];
+    sortedModels.sort((a, b) => {
+      let aVal: any, bVal: any;
+      switch (sortBy) {
+        case "name": aVal = a.name; bVal = b.name; break;
+        case "provider": aVal = a.provider; bVal = b.provider; break;
+        case "modelType": aVal = a.modelType; bVal = b.modelType; break;
+        case "contextWindow": aVal = a.contextWindow || 0; bVal = b.contextWindow || 0; break;
+        case "createdAt": aVal = a.createdAt; bVal = b.createdAt; break;
+        default: aVal = a.name; bVal = b.name;
+      }
+      const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+      return sortOrder === "desc" ? -cmp : cmp;
+    });
+    
+    const offset = (page - 1) * limit;
+    const models = sortedModels.slice(offset, offset + limit);
+    
+    return { models, total };
+  }
+
+  async getAiModelById(id: string): Promise<AiModel | undefined> {
+    const [result] = await db.select().from(aiModels).where(eq(aiModels.id, id));
+    return result;
+  }
+
+  async getAiModelByModelId(modelId: string, provider: string): Promise<AiModel | undefined> {
+    const [result] = await db.select().from(aiModels).where(
+      and(eq(aiModels.modelId, modelId), eq(aiModels.provider, provider.toLowerCase()))
+    );
+    return result;
   }
 
   async updateAiModel(id: string, updates: Partial<InsertAiModel>): Promise<AiModel | undefined> {

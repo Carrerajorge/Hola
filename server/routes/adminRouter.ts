@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { db } from "../db";
-import { users, chats, chatMessages } from "@shared/schema";
+import { users, chats, chatMessages, aiModels } from "@shared/schema";
 import { llmGateway } from "../lib/llmGateway";
-import { eq, desc, and, gte, lte, ilike, sql, inArray } from "drizzle-orm";
+import { eq, desc, and, gte, lte, ilike, sql, inArray, count } from "drizzle-orm";
+import { syncModelsForProvider, syncAllProviders, getAvailableProviders, getModelStats } from "../services/aiModelSyncService";
 
 export function createAdminRouter() {
   const router = Router();
@@ -835,5 +836,171 @@ export function createAdminRouter() {
     }
   });
 
+  // AI Models Management - Enhanced endpoints
+  router.get("/models/filtered", async (req, res) => {
+    try {
+      const { 
+        page = "1", 
+        limit = "20", 
+        provider, 
+        type, 
+        status, 
+        search, 
+        sortBy = "name", 
+        sortOrder = "asc" 
+      } = req.query;
+
+      const result = await storage.getAiModelsFiltered({
+        provider: provider as string,
+        type: type as string,
+        status: status as string,
+        search: search as string,
+        sortBy: sortBy as string,
+        sortOrder: sortOrder as string,
+        page: parseInt(page as string),
+        limit: parseInt(limit as string),
+      });
+
+      res.json({
+        models: result.models,
+        total: result.total,
+        page: parseInt(page as string),
+        limit: parseInt(limit as string),
+        totalPages: Math.ceil(result.total / parseInt(limit as string)),
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/models/stats", async (req, res) => {
+    try {
+      const allModels = await storage.getAiModels();
+      const knownStats = getModelStats();
+      
+      const byProvider: Record<string, number> = {};
+      const byType: Record<string, number> = {};
+      let active = 0;
+      let inactive = 0;
+      let deprecated = 0;
+
+      for (const model of allModels) {
+        byProvider[model.provider] = (byProvider[model.provider] || 0) + 1;
+        byType[model.modelType || "TEXT"] = (byType[model.modelType || "TEXT"] || 0) + 1;
+        if (model.status === "active") active++;
+        else inactive++;
+        if (model.isDeprecated === "true") deprecated++;
+      }
+
+      res.json({
+        total: allModels.length,
+        active,
+        inactive,
+        deprecated,
+        byProvider,
+        byType,
+        knownModels: knownStats,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/providers", async (req, res) => {
+    try {
+      const providers = getAvailableProviders();
+      const allModels = await storage.getAiModels();
+      
+      const providerStats = providers.map(provider => {
+        const models = allModels.filter(m => m.provider.toLowerCase() === provider.toLowerCase());
+        const activeCount = models.filter(m => m.status === "active").length;
+        return {
+          id: provider,
+          name: provider.charAt(0).toUpperCase() + provider.slice(1),
+          modelCount: models.length,
+          activeCount,
+          hasApiKey: checkApiKeyExists(provider),
+        };
+      });
+
+      res.json(providerStats);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/models/sync/:provider", async (req, res) => {
+    try {
+      const { provider } = req.params;
+      const result = await syncModelsForProvider(provider);
+      
+      await storage.createAuditLog({
+        action: "models_sync",
+        resource: "ai_models",
+        details: { provider, ...result },
+      });
+
+      res.json({
+        success: true,
+        provider,
+        ...result,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/models/sync", async (req, res) => {
+    try {
+      const results = await syncAllProviders();
+      
+      let totalAdded = 0;
+      let totalUpdated = 0;
+      for (const r of Object.values(results)) {
+        totalAdded += r.added;
+        totalUpdated += r.updated;
+      }
+
+      await storage.createAuditLog({
+        action: "models_sync_all",
+        resource: "ai_models",
+        details: { results, totalAdded, totalUpdated },
+      });
+
+      res.json({
+        success: true,
+        results,
+        summary: { totalAdded, totalUpdated },
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/models/:id", async (req, res) => {
+    try {
+      const model = await storage.getAiModelById(req.params.id);
+      if (!model) {
+        return res.status(404).json({ error: "Model not found" });
+      }
+      res.json(model);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return router;
+}
+
+function checkApiKeyExists(provider: string): boolean {
+  const keyMap: Record<string, string> = {
+    anthropic: "ANTHROPIC_API_KEY",
+    google: "GOOGLE_GENERATIVE_AI_API_KEY",
+    xai: "XAI_API_KEY",
+    openai: "OPENAI_API_KEY",
+    openrouter: "OPENROUTER_API_KEY",
+    perplexity: "PERPLEXITY_API_KEY",
+  };
+  const envKey = keyMap[provider.toLowerCase()];
+  return envKey ? !!process.env[envKey] : false;
 }
