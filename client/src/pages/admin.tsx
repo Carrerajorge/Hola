@@ -1574,6 +1574,7 @@ function AIModelsSection() {
       <td className="p-3"><div className="h-5 w-14 bg-muted animate-pulse rounded" /></td>
       <td className="p-3"><div className="h-4 w-20 bg-muted animate-pulse rounded" /></td>
       <td className="p-3"><div className="h-5 w-10 bg-muted animate-pulse rounded-full" /></td>
+      <td className="p-3"><div className="h-5 w-9 bg-muted animate-pulse rounded-full" /></td>
       <td className="p-3"><div className="h-4 w-24 bg-muted animate-pulse rounded" /></td>
       <td className="p-3"><div className="h-7 w-7 bg-muted animate-pulse rounded" /></td>
     </tr>
@@ -1728,6 +1729,7 @@ function AIModelsSection() {
                 <th className="text-left p-3 font-medium">Tipo</th>
                 <th className="text-left p-3 font-medium">Context Window</th>
                 <th className="text-left p-3 font-medium">Status</th>
+                <th className="text-left p-3 font-medium">Activo</th>
                 <th className="text-left p-3 font-medium">Última Sync</th>
                 <th className="text-right p-3 font-medium">Acciones</th>
               </tr>
@@ -1743,7 +1745,7 @@ function AIModelsSection() {
                 </>
               ) : models.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                  <td colSpan={8} className="p-8 text-center text-muted-foreground">
                     <div className="flex flex-col items-center gap-2">
                       <Bot className="h-8 w-8 text-muted-foreground/50" />
                       <p>No hay modelos {debouncedSearch || providerFilter !== "all" || typeFilter !== "all" || statusFilter !== "all" ? "que coincidan con los filtros" : "configurados"}</p>
@@ -1795,6 +1797,18 @@ function AIModelsSection() {
                         })}
                         disabled={updateMutation.isPending}
                         data-testid={`switch-status-${model.id}`}
+                      />
+                    </td>
+                    <td className="p-3">
+                      <Switch
+                        checked={model.isEnabled === "true"}
+                        onCheckedChange={(checked) => updateMutation.mutate({
+                          id: model.id,
+                          updates: { isEnabled: checked ? "true" : "false" }
+                        })}
+                        disabled={updateMutation.isPending}
+                        className={model.isEnabled === "true" ? "data-[state=checked]:bg-green-500" : ""}
+                        data-testid={`switch-enabled-${model.id}`}
                       />
                     </td>
                     <td className="p-3 text-xs text-muted-foreground">

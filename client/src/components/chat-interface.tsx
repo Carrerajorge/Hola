@@ -84,6 +84,7 @@ import { Composer } from "@/components/composer";
 import { MessageList, parseDocumentBlocks, type DocumentBlock } from "@/components/message-list";
 import { useAuth } from "@/hooks/use-auth";
 import { Database, Sparkles, AudioLines } from "lucide-react";
+import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
 
 const extractTextFromChildren = (children: React.ReactNode): string => {
@@ -780,10 +781,29 @@ export function ChatInterface({
   const [isFigmaConnecting, setIsFigmaConnecting] = useState(false);
   const [isFigmaConnected, setIsFigmaConnected] = useState(false);
   const [showFigmaTokenInput, setShowFigmaTokenInput] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<"xai" | "gemini">("gemini");
-  const [selectedModel, setSelectedModel] = useState<string>("gemini-3-flash-preview");
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const modelSelectorRef = useRef<HTMLDivElement>(null);
+  
+  const { availableModels, isLoading: isModelsLoading, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
+  
+  const selectedModelData = useMemo(() => {
+    if (!selectedModelId) return availableModels[0] || null;
+    return availableModels.find(m => m.id === selectedModelId || m.modelId === selectedModelId) || availableModels[0] || null;
+  }, [selectedModelId, availableModels]);
+  
+  const selectedProvider = selectedModelData?.provider || "gemini";
+  const selectedModel = selectedModelData?.modelId || "gemini-3-flash-preview";
+  
+  const modelsByProvider = useMemo(() => {
+    const grouped: Record<string, AvailableModel[]> = {};
+    availableModels.forEach(model => {
+      if (!grouped[model.provider]) {
+        grouped[model.provider] = [];
+      }
+      grouped[model.provider].push(model);
+    });
+    return grouped;
+  }, [availableModels]);
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [isDocGeneratorOpen, setIsDocGeneratorOpen] = useState(false);
   const [docGeneratorType, setDocGeneratorType] = useState<"word" | "excel">("word");
@@ -3144,72 +3164,69 @@ IMPORTANTE:
       {/* Header */}
       <header className="flex h-14 items-center justify-between px-2 sm:px-4 border-b border-white/20 dark:border-white/10 glass-card-light dark:glass-card rounded-none z-10 sticky top-0 flex-shrink-0 safe-area-top">
         <div ref={modelSelectorRef} className="flex items-center gap-1 sm:gap-2 relative min-w-0">
-          <div 
-            className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors"
-            onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
-            data-testid="button-model-selector"
-          >
-            <span className="font-semibold text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none">
-              {selectedProvider === "xai" ? "xAI" : "Gemini"}: {
-                selectedProvider === "xai" 
-                  ? (selectedModel === "grok-3-fast" ? "Grok 3" : "Vision")
-                  : (selectedModel === "gemini-3-flash-preview" ? "3 Flash" 
-                     : selectedModel === "gemini-2.5-flash" ? "2.5 Flash" : "2.5 Pro")
-              }
-            </span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-          </div>
-          
-          {isModelSelectorOpen && (
-            <div className="absolute top-full left-0 mt-1 w-64 bg-popover border border-border rounded-lg shadow-lg z-50">
-              <div className="p-2">
-                <div className="text-xs font-medium text-muted-foreground mb-2 px-2">xAI</div>
-                <button
-                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "xai" && selectedModel === "grok-3-fast" ? "bg-muted" : ""}`}
-                  onClick={() => { setSelectedProvider("xai"); setSelectedModel("grok-3-fast"); setIsModelSelectorOpen(false); }}
-                  data-testid="model-option-grok-3-fast"
+          {!isAnyModelAvailable ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div 
+                  className="flex items-center gap-1 sm:gap-2 bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-1 rounded-md cursor-not-allowed opacity-60"
+                  data-testid="button-model-selector-disabled"
                 >
-                  <div className="font-medium">Grok 3 Fast</div>
-                  <div className="text-xs text-muted-foreground">Respuestas más rápidas</div>
-                </button>
-                <button
-                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "xai" && selectedModel === "grok-2-vision-1212" ? "bg-muted" : ""}`}
-                  onClick={() => { setSelectedProvider("xai"); setSelectedModel("grok-2-vision-1212"); setIsModelSelectorOpen(false); }}
-                  data-testid="model-option-grok-2-vision"
-                >
-                  <div className="font-medium">Grok 2 Vision</div>
-                  <div className="text-xs text-muted-foreground">Análisis de imágenes</div>
-                </button>
-                
-                <div className="border-t border-border my-2"></div>
-                
-                <div className="text-xs font-medium text-muted-foreground mb-2 px-2">Google Gemini</div>
-                <button
-                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "gemini" && selectedModel === "gemini-3-flash-preview" ? "bg-muted" : ""}`}
-                  onClick={() => { setSelectedProvider("gemini"); setSelectedModel("gemini-3-flash-preview"); setIsModelSelectorOpen(false); }}
-                  data-testid="model-option-gemini-3-flash"
-                >
-                  <div className="font-medium">Gemini 3 Flash Preview</div>
-                  <div className="text-xs text-muted-foreground">Más nuevo y rápido (predeterminado)</div>
-                </button>
-                <button
-                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "gemini" && selectedModel === "gemini-2.5-flash" ? "bg-muted" : ""}`}
-                  onClick={() => { setSelectedProvider("gemini"); setSelectedModel("gemini-2.5-flash"); setIsModelSelectorOpen(false); }}
-                  data-testid="model-option-gemini-flash"
-                >
-                  <div className="font-medium">Gemini 2.5 Flash</div>
-                  <div className="text-xs text-muted-foreground">Rápido y eficiente</div>
-                </button>
-                <button
-                  className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedProvider === "gemini" && selectedModel === "gemini-2.5-pro" ? "bg-muted" : ""}`}
-                  onClick={() => { setSelectedProvider("gemini"); setSelectedModel("gemini-2.5-pro"); setIsModelSelectorOpen(false); }}
-                  data-testid="model-option-gemini-pro"
-                >
-                  <div className="font-medium">Gemini 2.5 Pro</div>
-                  <div className="text-xs text-muted-foreground">Más capaz y avanzado</div>
-                </button>
+                  <span className="font-semibold text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none text-gray-500 dark:text-gray-400">
+                    Sin modelos activos
+                  </span>
+                  <ChevronDown className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>No hay modelos disponibles. Un administrador debe activar al menos un modelo.</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <>
+              <div 
+                className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors"
+                onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
+                data-testid="button-model-selector"
+              >
+                <span className="font-semibold text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none">
+                  {selectedModelData?.name || "Seleccionar modelo"}
+                </span>
+                <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
               </div>
-            </div>
+              
+              {isModelSelectorOpen && (
+                <div className="absolute top-full left-0 mt-1 w-64 bg-popover border border-border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
+                  <div className="p-2">
+                    {Object.entries(modelsByProvider).map(([provider, models], providerIndex) => (
+                      <div key={provider}>
+                        {providerIndex > 0 && <div className="border-t border-border my-2"></div>}
+                        <div className="text-xs font-medium text-muted-foreground mb-2 px-2 capitalize">
+                          {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
+                        </div>
+                        {models.map((model) => (
+                          <button
+                            key={model.id}
+                            className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${
+                              selectedModelData?.id === model.id ? "bg-muted" : ""
+                            }`}
+                            onClick={() => { 
+                              setSelectedModelId(model.id); 
+                              setIsModelSelectorOpen(false); 
+                            }}
+                            data-testid={`model-option-${model.modelId}`}
+                          >
+                            <div className="font-medium">{model.name}</div>
+                            {model.description && (
+                              <div className="text-xs text-muted-foreground">{model.description}</div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
         <div className="flex items-center gap-0.5 sm:gap-1">

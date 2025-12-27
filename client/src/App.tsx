@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect } from "react";
 import { SettingsProvider } from "@/contexts/SettingsContext";
+import { ModelAvailabilityProvider } from "@/contexts/ModelAvailabilityContext";
 import Home from "@/pages/home";
 import ProfilePage from "@/pages/profile";
 import BillingPage from "@/pages/billing";
@@ -54,11 +55,13 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <SettingsProvider>
-        <TooltipProvider>
-          <AuthCallbackHandler />
-          <Toaster />
-          <Router />
-        </TooltipProvider>
+        <ModelAvailabilityProvider>
+          <TooltipProvider>
+            <AuthCallbackHandler />
+            <Toaster />
+            <Router />
+          </TooltipProvider>
+        </ModelAvailabilityProvider>
       </SettingsProvider>
     </QueryClientProvider>
   );
