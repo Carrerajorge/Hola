@@ -322,7 +322,7 @@ export default function Home() {
       </div>
 
       {/* Mobile Sidebar */}
-      <div className="md:hidden absolute top-4 left-4 z-50">
+      <div className="md:hidden absolute top-4 left-1/2 -translate-x-1/2 z-50">
         <Sheet>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon" className="bg-card border border-border rounded-lg">
