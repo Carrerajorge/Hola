@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1493,7 +1493,7 @@ export const kpiSnapshots = pgTable("kpi_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   activeUsersNow: integer("active_users_now").default(0),
   queriesPerMinute: integer("queries_per_minute").default(0),
-  tokensConsumedToday: integer("tokens_consumed_today").default(0),
+  tokensConsumedToday: bigint("tokens_consumed_today", { mode: 'number' }).default(0),
   revenueToday: text("revenue_today").default("0.00"),
   avgLatencyMs: integer("avg_latency_ms").default(0),
   errorRatePercentage: text("error_rate_percentage").default("0.00"),
