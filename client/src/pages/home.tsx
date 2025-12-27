@@ -325,7 +325,7 @@ export default function Home() {
       <div className="md:hidden absolute top-4 left-3 z-50">
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="bg-card border border-border rounded-lg mt-[-9px] mb-[-9px]">
+            <Button variant="ghost" size="icon" className="bg-card border border-border rounded-lg mt-[-8px] mb-[-8px]">
               <Menu className="h-6 w-6 text-foreground" />
             </Button>
           </SheetTrigger>
