@@ -48,8 +48,9 @@ function GlobalKeyboardShortcuts() {
     setSearchOpen(true);
   }, []);
 
-  const handleCloseSearch = useCallback(() => {
+  const handleCloseDialogs = useCallback(() => {
     setSearchOpen(false);
+    window.dispatchEvent(new CustomEvent("close-all-dialogs"));
   }, []);
 
   const handleOpenSettings = useCallback(() => {
@@ -64,7 +65,7 @@ function GlobalKeyboardShortcuts() {
   useKeyboardShortcuts([
     { key: "n", ctrl: true, action: handleNewChat, description: "Nuevo chat" },
     { key: "k", ctrl: true, action: handleOpenSearch, description: "Búsqueda rápida" },
-    { key: "Escape", action: handleCloseSearch, description: "Cerrar diálogo" },
+    { key: "Escape", action: handleCloseDialogs, description: "Cerrar diálogo" },
     { key: ",", ctrl: true, action: handleOpenSettings, description: "Configuración" },
   ]);
 
