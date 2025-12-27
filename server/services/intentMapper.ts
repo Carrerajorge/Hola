@@ -12,6 +12,7 @@ export interface IntentResult {
   hasGap: boolean;
   gapReason?: string;
   complexity?: 'trivial' | 'simple' | 'complex';
+  language?: string;
 }
 
 interface KeywordMapping {
@@ -86,11 +87,34 @@ export class IntentToolMapper {
   private static readonly SIMPLE_PATTERNS = /(qué es|define|traduce|cuánto es|what is|how to)/i;
   private static readonly ADMIN_PATTERNS = /(crear|delete|update|list|enable|disable|generar|export)/i;
 
+  private readonly LANGUAGE_PATTERNS: Record<string, RegExp[]> = {
+    es: [/\b(qué|cómo|cuándo|dónde|crear|usuario|hola|gracias|sistema)\b/i],
+    en: [/\b(what|how|when|where|create|user|hello|thanks|system)\b/i],
+    fr: [/\b(quoi|comment|quand|où|créer|utilisateur|bonjour|merci)\b/i],
+    de: [/\b(was|wie|wann|wo|erstellen|benutzer|hallo|danke)\b/i],
+    pt: [/\b(que|como|quando|onde|criar|usuário|olá|obrigado)\b/i]
+  };
+
   private analysisCache: Map<string, CachedAnalysis> = new Map();
   private readonly CACHE_TTL_MS = 5 * 60 * 1000;
 
   constructor(toolRegistry: ToolRegistryService) {
     this.toolRegistry = toolRegistry;
+  }
+
+  detectLanguage(prompt: string): string {
+    const lower = prompt.toLowerCase();
+    const scores: Record<string, number> = { es: 0, en: 0, fr: 0, de: 0, pt: 0 };
+
+    for (const [lang, patterns] of Object.entries(this.LANGUAGE_PATTERNS)) {
+      for (const pattern of patterns) {
+        const matches = lower.match(pattern);
+        if (matches) scores[lang] += matches.length;
+      }
+    }
+
+    const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+    return best[1] > 0 ? best[0] : 'en';
   }
 
   private fastPath(prompt: string): { skip: boolean; complexity: 'trivial' | 'simple' | 'complex' } {
@@ -135,18 +159,23 @@ export class IntentToolMapper {
   }
 
   map(userPrompt: string): IntentResult {
+    const language = this.detectLanguage(userPrompt);
     const fastResult = this.fastPath(userPrompt);
+    
     if (fastResult.skip) {
       return {
         intent: 'Conversational',
         matches: [],
         hasGap: false,
-        complexity: fastResult.complexity
+        complexity: fastResult.complexity,
+        language
       };
     }
 
     const cached = this.getFromCache(userPrompt);
-    if (cached) return cached;
+    if (cached) {
+      return { ...cached, language };
+    }
 
     const normalizedPrompt = userPrompt.toLowerCase().trim();
     const matches: IntentMatch[] = [];
@@ -192,7 +221,8 @@ export class IntentToolMapper {
       gapReason: hasGap 
         ? this.generateGapReason(normalizedPrompt, detectedCategory) 
         : undefined,
-      complexity: 'complex'
+      complexity: 'complex',
+      language
     };
 
     this.setCache(userPrompt, result);

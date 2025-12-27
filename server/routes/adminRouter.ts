@@ -9,6 +9,9 @@ import { toolRegistry, ToolDefinition } from "../services/toolRegistry";
 import { IntentToolMapper } from "../services/intentMapper";
 import { complexityAnalyzer } from "../services/complexityAnalyzer";
 import { orchestrationEngine } from "../services/orchestrationEngine";
+import { compressedMemory } from "../services/compressedMemory";
+import { progressTracker } from "../services/progressTracker";
+import { errorRecovery } from "../services/errorRecovery";
 
 export function createAdminRouter() {
   const router = Router();
@@ -2363,6 +2366,7 @@ export function createAdminRouter() {
       res.json({
         prompt,
         intent: result.intent,
+        language: result.language,
         matches: result.matches.slice(0, 5),
         hasGap: result.hasGap,
         gapReason: result.gapReason,
@@ -2447,6 +2451,47 @@ export function createAdminRouter() {
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
+  });
+
+  router.get("/agent/memory/stats", (req, res) => {
+    res.json(compressedMemory.getStats());
+  });
+
+  router.post("/agent/memory/atom", (req, res) => {
+    const { type, data } = req.body;
+    if (!type || !data) return res.status(400).json({ error: "type and data required" });
+    const atom = compressedMemory.createAtom(type, data);
+    res.json(atom);
+  });
+
+  router.post("/agent/memory/gc", (req, res) => {
+    const { minWeight } = req.body;
+    const removed = compressedMemory.garbageCollect(minWeight || 0.1);
+    res.json({ removed, stats: compressedMemory.getStats() });
+  });
+
+  router.get("/agent/progress/:taskId", (req, res) => {
+    const status = progressTracker.getTaskStatus(req.params.taskId);
+    if (!status) return res.status(404).json({ error: "Task not found" });
+    res.json(status);
+  });
+
+  router.get("/agent/progress", (req, res) => {
+    res.json(progressTracker.getAllActiveTasks());
+  });
+
+  router.get("/agent/circuits", (req, res) => {
+    res.json(errorRecovery.getAllCircuits());
+  });
+
+  router.post("/agent/circuits/:name/reset", (req, res) => {
+    errorRecovery.resetCircuit(req.params.name);
+    res.json({ message: "Circuit reset", circuit: errorRecovery.getOrCreateCircuit(req.params.name) });
+  });
+
+  router.post("/agent/circuits/:name/failure", (req, res) => {
+    errorRecovery.recordFailure(req.params.name);
+    res.json(errorRecovery.getOrCreateCircuit(req.params.name));
   });
 
   return router;
