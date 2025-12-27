@@ -878,6 +878,154 @@ const RibbonGroup: React.FC<{ title: string; children: React.ReactNode }> = ({ t
 
 const RibbonSeparator: React.FC = () => <div className="w-px h-[62px] bg-gradient-to-b from-gray-200 via-gray-300 to-gray-200 mx-0.5" />;
 
+const ChartThumbnail: React.FC<{ type: string; label: string; onClick: () => void }> = ({ type, label, onClick }) => {
+  const chartSvgs: Record<string, React.ReactNode> = {
+    col_clustered: (
+      <svg viewBox="0 0 100 80" fill="none" className="w-14 h-12">
+        <rect x="15" y="35" width="12" height="30" stroke="#111827" fill="#2563eb" fillOpacity="0.3" />
+        <rect x="32" y="20" width="12" height="45" stroke="#111827" fill="#2563eb" fillOpacity="0.5" />
+        <rect x="49" y="10" width="12" height="55" stroke="#111827" fill="#2563eb" fillOpacity="0.7" />
+        <rect x="66" y="25" width="12" height="40" stroke="#111827" fill="#2563eb" fillOpacity="0.4" />
+        <line x1="10" y1="66" x2="92" y2="66" stroke="#111827"/>
+      </svg>
+    ),
+    col_stacked: (
+      <svg viewBox="0 0 100 80" fill="none" className="w-14 h-12">
+        <rect x="20" y="40" width="14" height="26" stroke="#111827" fill="#2563eb" fillOpacity="0.5" />
+        <rect x="20" y="26" width="14" height="14" stroke="#111827" fill="#f59e0b" fillOpacity="0.5" />
+        <rect x="45" y="30" width="14" height="36" stroke="#111827" fill="#2563eb" fillOpacity="0.5" />
+        <rect x="45" y="16" width="14" height="14" stroke="#111827" fill="#f59e0b" fillOpacity="0.5" />
+        <rect x="70" y="20" width="14" height="46" stroke="#111827" fill="#2563eb" fillOpacity="0.5" />
+        <line x1="10" y1="66" x2="92" y2="66" stroke="#111827"/>
+      </svg>
+    ),
+    bar_clustered: (
+      <svg viewBox="0 0 100 80" fill="none" className="w-14 h-12">
+        <rect x="18" y="16" width="55" height="10" stroke="#111827" fill="#2563eb" fillOpacity="0.5" />
+        <rect x="18" y="34" width="35" height="10" stroke="#111827" fill="#2563eb" fillOpacity="0.5" />
+        <rect x="18" y="52" width="65" height="10" stroke="#111827" fill="#2563eb" fillOpacity="0.5" />
+      </svg>
+    ),
+    line_basic: (
+      <svg viewBox="0 0 100 80" fill="none" className="w-14 h-12">
+        <polyline points="12,56 34,36 56,46 86,20" stroke="#2563eb" strokeWidth="2" fill="none"/>
+        <circle cx="12" cy="56" r="3" fill="#2563eb"/>
+        <circle cx="34" cy="36" r="3" fill="#2563eb"/>
+        <circle cx="56" cy="46" r="3" fill="#2563eb"/>
+        <circle cx="86" cy="20" r="3" fill="#2563eb"/>
+        <line x1="10" y1="66" x2="92" y2="66" stroke="#111827"/>
+      </svg>
+    ),
+    area_basic: (
+      <svg viewBox="0 0 100 80" fill="none" className="w-14 h-12">
+        <polygon points="12,66 12,56 34,36 56,46 86,20 86,66" fill="#2563eb" fillOpacity="0.3" stroke="#2563eb" strokeWidth="2"/>
+        <line x1="10" y1="66" x2="92" y2="66" stroke="#111827"/>
+      </svg>
+    ),
+    pie_basic: (
+      <svg viewBox="0 0 100 80" fill="none" className="w-14 h-12">
+        <circle cx="50" cy="40" r="28" fill="none" stroke="#111827"/>
+        <path d="M50,40 L50,12 A28,28 0 0,1 78,40 Z" fill="#2563eb" fillOpacity="0.7"/>
+        <path d="M50,40 L78,40 A28,28 0 0,1 35,65 Z" fill="#f59e0b" fillOpacity="0.7"/>
+        <path d="M50,40 L35,65 A28,28 0 0,1 50,12 Z" fill="#22c55e" fillOpacity="0.7"/>
+      </svg>
+    ),
+    scatter_basic: (
+      <svg viewBox="0 0 100 80" fill="none" className="w-14 h-12">
+        <circle cx="20" cy="50" r="4" fill="#2563eb"/>
+        <circle cx="35" cy="35" r="4" fill="#2563eb"/>
+        <circle cx="50" cy="45" r="4" fill="#2563eb"/>
+        <circle cx="65" cy="25" r="4" fill="#2563eb"/>
+        <circle cx="80" cy="30" r="4" fill="#2563eb"/>
+        <line x1="10" y1="66" x2="92" y2="66" stroke="#111827"/>
+        <line x1="12" y1="10" x2="12" y2="66" stroke="#111827"/>
+      </svg>
+    ),
+    radar_basic: (
+      <svg viewBox="0 0 100 80" fill="none" className="w-14 h-12">
+        <polygon points="50,15 80,30 75,55 25,55 20,30" fill="#2563eb" fillOpacity="0.3" stroke="#2563eb" strokeWidth="2"/>
+        <polygon points="50,25 68,35 65,50 35,50 32,35" fill="none" stroke="#111827" strokeDasharray="2"/>
+      </svg>
+    )
+  };
+
+  return (
+    <button
+      className="border border-gray-200 rounded-lg bg-white h-[70px] cursor-pointer flex flex-col items-center justify-center gap-1 hover:border-blue-400 hover:shadow-md transition-all"
+      onClick={onClick}
+    >
+      {chartSvgs[type] || <span className="text-2xl">📊</span>}
+      <span className="text-[9px] text-gray-600">{label}</span>
+    </button>
+  );
+};
+
+interface ChartPickerProps {
+  icon: React.ReactNode;
+  label: string;
+  onSelect: (chartType: string) => void;
+  chartTypes: Array<{ type: string; label: string; category: string }>;
+}
+
+const ChartPicker: React.FC<ChartPickerProps> = ({ icon, label, onSelect, chartTypes }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const categories = [...new Set(chartTypes.map(c => c.category))];
+
+  return (
+    <div className="relative" ref={pickerRef}>
+      <div className="flex flex-col items-stretch rounded overflow-hidden border border-transparent hover:border-gray-300 transition-colors min-w-[52px] h-[58px]">
+        <button 
+          className="flex-1 flex flex-col items-center justify-center border-none bg-transparent cursor-pointer p-1 gap-0.5 hover:bg-[rgba(0,0,0,0.06)] transition-colors"
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          <span className="w-5 h-5">{icon}</span>
+          <span className="text-[10px] text-gray-700 leading-tight font-medium">{label}</span>
+        </button>
+        <button
+          className="flex items-center justify-center h-3.5 border-none border-t border-gray-200 bg-transparent cursor-pointer hover:bg-[rgba(0,0,0,0.08)] transition-colors"
+          onClick={() => setIsOpen(!isOpen)}
+          aria-haspopup="true"
+          aria-expanded={isOpen}
+        >
+          <span className="w-2.5 h-2.5 text-gray-500">{Icons.dropdown}</span>
+        </button>
+      </div>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-1 p-3 bg-white border border-gray-300 rounded-xl shadow-xl z-50 min-w-[340px]">
+          {categories.map((category) => (
+            <div key={category} className="mb-3 last:mb-0">
+              <h4 className="text-[11px] font-semibold text-gray-700 mb-2 px-1">{category}</h4>
+              <div className="grid grid-cols-3 gap-2">
+                {chartTypes.filter(c => c.category === category).map((chart) => (
+                  <ChartThumbnail
+                    key={chart.type}
+                    type={chart.type}
+                    label={chart.label}
+                    onClick={() => { onSelect(chart.type); setIsOpen(false); }}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const HomeTabContent: React.FC<{
   commands: Partial<RibbonCommands>;
   cellFormat?: CellFormat;
@@ -1020,54 +1168,77 @@ const HomeTabContent: React.FC<{
 };
 
 const InsertTabContent: React.FC<{ commands: Partial<RibbonCommands> }> = ({ commands }) => {
+  const columnChartTypes = [
+    { type: 'col_clustered', label: 'Agrupadas', category: 'Columnas 2D' },
+    { type: 'col_stacked', label: 'Apiladas', category: 'Columnas 2D' },
+    { type: 'bar_clustered', label: 'Barras', category: 'Barras 2D' },
+  ];
+
+  const lineChartTypes = [
+    { type: 'line_basic', label: 'Línea', category: 'Líneas 2D' },
+    { type: 'area_basic', label: 'Área', category: 'Áreas 2D' },
+  ];
+
+  const pieChartTypes = [
+    { type: 'pie_basic', label: 'Circular', category: 'Circular' },
+  ];
+
+  const scatterChartTypes = [
+    { type: 'scatter_basic', label: 'Dispersión', category: 'XY (Dispersión)' },
+    { type: 'radar_basic', label: 'Radial', category: 'Otros' },
+  ];
+
   return (
     <div className="flex items-start gap-0.5 px-1 py-0.5 min-h-[72px]">
-      <RibbonGroup title="Hoja">
-        <SplitButton 
-          icon={<span className="text-[16px]">📊</span>} 
-          label="Hoja de tabla" 
-          onClick={() => {}} 
-          tooltip="Insertar tabla dinámica" 
-        />
-      </RibbonGroup>
-      <RibbonSeparator />
-      <RibbonGroup title="Tablas">
-        <SplitButton icon={Icons.formatTable} label="Tabla" onClick={() => {}} tooltip="Insertar tabla" />
+      <RibbonGroup title="Hoja / Tablas">
+        <div className="flex items-start gap-0.5">
+          <SplitButton 
+            icon={
+              <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="3" width="18" height="18" rx="1" />
+                <line x1="3" y1="9" x2="21" y2="9" />
+                <line x1="9" y1="3" x2="9" y2="21" />
+              </svg>
+            } 
+            label="Hoja de tabla" 
+            onClick={() => {}} 
+            tooltip="Insertar tabla dinámica" 
+          />
+          <SplitButton icon={Icons.formatTable} label="Tabla" onClick={() => {}} tooltip="Insertar tabla" />
+        </div>
       </RibbonGroup>
       <RibbonSeparator />
       <RibbonGroup title="Gráfico">
-        <div className="flex items-start gap-1">
-          <div className="flex flex-col items-center">
-            <SplitButton 
-              icon={<span className="text-[18px]">📊</span>} 
-              label="Gráfico" 
-              onClick={() => commands.insertChart?.('bar')} 
-              tooltip="Insertar gráfico" 
-            />
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-center gap-0.5">
-              <RibbonButton icon={Icons.chart} onClick={() => commands.insertChart?.('bar')} tooltip="Gráfico de columnas" />
-              <RibbonButton icon={Icons.lineChart} onClick={() => commands.insertChart?.('line')} tooltip="Gráfico de líneas" />
-              <RibbonButton icon={Icons.pieChart} onClick={() => commands.insertChart?.('pie')} tooltip="Gráfico circular" />
-            </div>
-            <div className="flex items-center gap-0.5">
-              <RibbonButton icon={<span className="text-[10px]">📈</span>} onClick={() => commands.insertChart?.('area')} tooltip="Gráfico de área" />
-              <RibbonButton icon={<span className="text-[10px]">⬤</span>} onClick={() => commands.insertChart?.('scatter')} tooltip="Gráfico de dispersión" />
-              <RibbonButton icon={<span className="text-[10px]">🗺️</span>} onClick={() => commands.insertChart?.('map')} tooltip="Gráfico de mapa" />
-            </div>
-          </div>
-          <SplitButton 
-            icon={<span className="text-[14px]">▌▌▌</span>} 
-            label="Código de barras" 
-            onClick={() => {}} 
-            tooltip="Insertar código de barras" 
+        <div className="flex items-start gap-0.5">
+          <ChartPicker
+            icon={Icons.chart}
+            label="Gráfico"
+            onSelect={(type) => commands.insertChart?.(type)}
+            chartTypes={columnChartTypes}
           />
-          <SplitButton 
-            icon={<span className="text-[14px]">📉</span>} 
-            label="Minigráficos" 
-            onClick={() => {}} 
-            tooltip="Insertar minigráficos (sparklines)" 
+          <ChartPicker
+            icon={Icons.lineChart}
+            label="Líneas"
+            onSelect={(type) => commands.insertChart?.(type)}
+            chartTypes={lineChartTypes}
+          />
+          <ChartPicker
+            icon={
+              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="7" cy="7" r="3" />
+                <circle cx="14" cy="14" r="4" />
+                <circle cx="18" cy="6" r="2" />
+              </svg>
+            }
+            label="Dispersión"
+            onSelect={(type) => commands.insertChart?.(type)}
+            chartTypes={scatterChartTypes}
+          />
+          <ChartPicker
+            icon={Icons.pieChart}
+            label="Otros"
+            onSelect={(type) => commands.insertChart?.(type)}
+            chartTypes={pieChartTypes}
           />
         </div>
       </RibbonGroup>
@@ -1077,13 +1248,26 @@ const InsertTabContent: React.FC<{ commands: Partial<RibbonCommands> }> = ({ com
           <SplitButton icon={Icons.image} label="Imagen" onClick={() => {}} tooltip="Insertar imagen" />
           <SplitButton icon={Icons.shapes} label="Formas" onClick={() => {}} tooltip="Insertar forma" />
           <SplitButton 
-            icon={<span className="text-[14px]">📷</span>} 
-            label="Instantánea de rango" 
+            icon={
+              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
+                <path d="M21 15l-5-5L5 21" />
+              </svg>
+            } 
+            label="Instantánea" 
             onClick={() => {}} 
             tooltip="Captura de pantalla de rango" 
           />
           <SplitButton 
-            icon={<span className="text-[14px]">🎛️</span>} 
+            icon={
+              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+                <circle cx="9" cy="12" r="2" />
+                <line x1="14" y1="10" x2="18" y2="10" />
+                <line x1="14" y1="14" x2="18" y2="14" />
+              </svg>
+            } 
             label="Controles" 
             onClick={() => {}} 
             tooltip="Insertar controles de formulario" 
@@ -1093,7 +1277,12 @@ const InsertTabContent: React.FC<{ commands: Partial<RibbonCommands> }> = ({ com
       <RibbonSeparator />
       <RibbonGroup title="Vínculos">
         <SplitButton 
-          icon={<span className="text-[16px]">🔗</span>} 
+          icon={
+            <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+          } 
           label="Hipervínculo" 
           onClick={() => {}} 
           tooltip="Insertar hipervínculo (Ctrl+K)" 
