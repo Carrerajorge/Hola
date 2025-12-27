@@ -150,6 +150,7 @@ const VirtualCell = memo(function VirtualCell({
   isStreaming,
   isRecentlyWritten,
   typingValue,
+  editingValue,
   style,
   conditionalStyle,
   onMouseDown,
@@ -157,6 +158,7 @@ const VirtualCell = memo(function VirtualCell({
   onDoubleClick,
   onBlur,
   onChange,
+  onTypingChange,
   onKeyDown,
 }: {
   row: number;
@@ -168,6 +170,7 @@ const VirtualCell = memo(function VirtualCell({
   isStreaming: boolean;
   isRecentlyWritten: boolean;
   typingValue?: string;
+  editingValue?: string;
   style: React.CSSProperties;
   conditionalStyle?: React.CSSProperties;
   onMouseDown: (e: React.MouseEvent) => void;
@@ -175,6 +178,7 @@ const VirtualCell = memo(function VirtualCell({
   onDoubleClick: () => void;
   onBlur: () => void;
   onChange: (value: string) => void;
+  onTypingChange: (value: string) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -209,6 +213,8 @@ const VirtualCell = memo(function VirtualCell({
     paddingLeft: data.indent ? `${data.indent * 8}px` : undefined,
   };
 
+  const inputValue = editingValue !== undefined ? editingValue : (data.formula || data.value);
+
   return (
     <div
       className={cn(
@@ -232,10 +238,12 @@ const VirtualCell = memo(function VirtualCell({
         <input
           ref={inputRef}
           type="text"
-          defaultValue={data.formula || data.value}
+          value={inputValue}
+          autoFocus
           className="w-full h-full bg-white dark:bg-gray-900 outline-none text-sm px-0.5"
-          onBlur={(e) => {
-            onChange(e.target.value);
+          onChange={(e) => onTypingChange(e.target.value)}
+          onBlur={() => {
+            onChange(inputValue);
             onBlur();
           }}
           onKeyDown={onKeyDown}
@@ -449,6 +457,8 @@ export function VirtualizedExcel({
     startSize: 0,
     currentSize: 0,
   });
+  
+  const [editingValue, setEditingValue] = useState<string | undefined>(undefined);
   
   const isInSelectionRange = useCallback((row: number, col: number): boolean => {
     if (!selectionRange) return false;
@@ -837,13 +847,20 @@ export function VirtualizedExcel({
   }, [onSelectCell, setSelectionRange]);
 
   const handleCellEdit = useCallback((row: number, col: number) => {
+    const cellData = grid.getCell(row, col);
+    setEditingValue(cellData?.formula || cellData?.value || '');
     onEditCell({ row, col });
     onSelectCell({ row, col });
-  }, [onEditCell, onSelectCell]);
+  }, [onEditCell, onSelectCell, grid]);
 
   const handleCellBlur = useCallback(() => {
+    setEditingValue(undefined);
     onEditCell(null);
   }, [onEditCell]);
+
+  const handleTypingChange = useCallback((value: string) => {
+    setEditingValue(value);
+  }, []);
 
   const handleCellChange = useCallback((row: number, col: number, value: string) => {
     if (typeof row !== 'number' || typeof col !== 'number' || isNaN(row) || isNaN(col)) {
@@ -864,16 +881,25 @@ export function VirtualizedExcel({
   const handleCellKeyDown = useCallback((e: React.KeyboardEvent, row: number, col: number) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      if (editingValue !== undefined) {
+        updateCell(row, col, editingValue);
+      }
+      setEditingValue(undefined);
       onEditCell(null);
       onSelectCell({ row: Math.min(row + 1, GRID_CONFIG.MAX_ROWS - 1), col });
     } else if (e.key === 'Tab') {
       e.preventDefault();
+      if (editingValue !== undefined) {
+        updateCell(row, col, editingValue);
+      }
+      setEditingValue(undefined);
       onEditCell(null);
       onSelectCell({ row, col: Math.min(col + 1, GRID_CONFIG.MAX_COLS - 1) });
     } else if (e.key === 'Escape') {
+      setEditingValue(undefined);
       onEditCell(null);
     }
-  }, [onEditCell, onSelectCell]);
+  }, [onEditCell, onSelectCell, editingValue, updateCell]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!selectedCell || editingCell) return;
@@ -906,7 +932,7 @@ export function VirtualizedExcel({
           e.preventDefault();
           break;
         case 'Enter':
-          onEditCell({ row, col });
+          handleCellEdit(row, col);
           e.preventDefault();
           return;
         case 'Delete':
@@ -916,9 +942,8 @@ export function VirtualizedExcel({
           return;
         default:
           if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            setEditingValue(e.key);
             onEditCell({ row, col });
-            grid.setCell(row, col, { value: e.key });
-            onGridChange(grid);
             e.preventDefault();
           }
           return;
@@ -952,7 +977,7 @@ export function VirtualizedExcel({
     } catch (e) {
       console.error('Error handling keyboard navigation:', e);
     }
-  }, [selectedCell, editingCell, scrollPos, grid, onGridChange, onEditCell, onSelectCell, updateCell]);
+  }, [selectedCell, editingCell, scrollPos, onEditCell, onSelectCell, updateCell, handleCellEdit]);
 
   const visibleRows = useMemo(() => {
     const rows: number[] = [];
@@ -1116,6 +1141,7 @@ export function VirtualizedExcel({
                       isStreaming={isStreamingCell}
                       isRecentlyWritten={isRecentlyWritten}
                       typingValue={isStreamingCell ? typingValue : undefined}
+                      editingValue={isEditing ? editingValue : undefined}
                       style={{
                         top: getRowTop(row),
                         left: getColumnLeft(col),
@@ -1128,6 +1154,7 @@ export function VirtualizedExcel({
                       onDoubleClick={() => handleCellEdit(row, col)}
                       onBlur={handleCellBlur}
                       onChange={(value) => handleCellChange(row, col, value)}
+                      onTypingChange={handleTypingChange}
                       onKeyDown={(e) => handleCellKeyDown(e, row, col)}
                     />
                   );
