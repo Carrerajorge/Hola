@@ -588,16 +588,22 @@ export function createAdminRouter() {
       const limitNum = Math.min(parseInt(limit as string), 100);
       const offset = (pageNum - 1) * limitNum;
 
-      // Validate table exists in public schema
+      // Sanitize table name first - only allow alphanumeric and underscore
+      const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+      if (safeTableName !== tableName || !safeTableName) {
+        return res.status(400).json({ error: "Invalid table name" });
+      }
+
+      // Validate table exists in public schema using parameterized query
       const tableCheck = await db.execute(sql`
         SELECT table_name FROM information_schema.tables 
-        WHERE table_schema = 'public' AND table_name = ${tableName}
+        WHERE table_schema = 'public' AND table_name = ${safeTableName}
       `);
       if (tableCheck.rows.length === 0) {
         return res.status(404).json({ error: "Table not found" });
       }
 
-      // Get columns info
+      // Get columns info using parameterized query
       const columns = await db.execute(sql`
         SELECT 
           column_name, 
@@ -606,16 +612,15 @@ export function createAdminRouter() {
           column_default,
           character_maximum_length
         FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = ${tableName}
+        WHERE table_schema = 'public' AND table_name = ${safeTableName}
         ORDER BY ordinal_position
       `);
 
-      // Get row count
-      const countResult = await db.execute(sql.raw(`SELECT COUNT(*) as total FROM "${tableName}"`));
+      // Get row count using sanitized table name
+      const countResult = await db.execute(sql.raw(`SELECT COUNT(*) as total FROM "${safeTableName}"`));
       const total = parseInt(countResult.rows[0]?.total || "0");
 
-      // Get data with pagination - sanitize table name
-      const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+      // Get data with pagination using sanitized table name
       const data = await db.execute(sql.raw(`SELECT * FROM "${safeTableName}" LIMIT ${limitNum} OFFSET ${offset}`));
 
       res.json({
@@ -641,9 +646,11 @@ export function createAdminRouter() {
         return res.status(400).json({ error: "Query is required" });
       }
 
-      // Security: Only allow SELECT statements
+      // Security: Only allow SELECT statements (including CTEs with WITH...SELECT)
       const trimmedQuery = query.trim().toUpperCase();
-      if (!trimmedQuery.startsWith('SELECT')) {
+      const isSelect = trimmedQuery.startsWith('SELECT');
+      const isCteSelect = trimmedQuery.startsWith('WITH') && /\bSELECT\b/.test(trimmedQuery) && !/\b(INSERT|UPDATE|DELETE)\b/.test(trimmedQuery);
+      if (!isSelect && !isCteSelect) {
         return res.status(403).json({ 
           error: "Only SELECT queries are allowed for security reasons",
           hint: "Use the Replit Database panel for write operations"
