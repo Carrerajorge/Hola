@@ -686,8 +686,8 @@ function CostTrackingPanel({ data }: { data: any[] }) {
 function APILogsExplorer() {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({
-    provider: "",
-    status: "",
+    provider: "all",
+    status: "all",
     search: "",
     dateFrom: "",
     dateTo: "",
@@ -701,7 +701,7 @@ function APILogsExplorer() {
       const params = new URLSearchParams({
         page: page.toString(),
         limit: itemsPerPage.toString(),
-        ...Object.fromEntries(Object.entries(filters).filter(([_, v]) => v)),
+        ...Object.fromEntries(Object.entries(filters).filter(([_, v]) => v && v !== "all")),
       });
       const res = await fetch(`/api/admin/analytics/logs?${params}`);
       return res.json();
@@ -753,7 +753,7 @@ function APILogsExplorer() {
                 <SelectValue placeholder="Provider" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All</SelectItem>
+                <SelectItem value="all">All</SelectItem>
                 <SelectItem value="xai">xAI</SelectItem>
                 <SelectItem value="gemini">Gemini</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
@@ -764,7 +764,7 @@ function APILogsExplorer() {
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All</SelectItem>
+                <SelectItem value="all">All</SelectItem>
                 <SelectItem value="2xx">2xx Success</SelectItem>
                 <SelectItem value="4xx">4xx Error</SelectItem>
                 <SelectItem value="5xx">5xx Error</SelectItem>
