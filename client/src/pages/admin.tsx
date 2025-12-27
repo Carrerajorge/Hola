@@ -1550,8 +1550,12 @@ function AIModelsSection() {
     MULTIMODAL: "bg-gradient-to-r from-purple-500/10 to-blue-500/10 text-purple-600"
   };
 
-  const models = modelsData?.data || [];
-  const pagination = modelsData?.pagination || { page: 1, totalPages: 1, total: 0 };
+  const models = modelsData?.models || [];
+  const pagination = { 
+    page: modelsData?.page || 1, 
+    totalPages: modelsData?.totalPages || 1, 
+    total: modelsData?.total || 0 
+  };
 
   const MetricCardSkeleton = () => (
     <div className="rounded-lg border p-4 space-y-3">
