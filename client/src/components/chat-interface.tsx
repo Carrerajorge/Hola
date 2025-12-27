@@ -3184,7 +3184,7 @@ IMPORTANTE:
           ) : (
             <>
               <div 
-                className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors"
+                className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
                 onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
                 data-testid="button-model-selector"
               >
@@ -3263,7 +3263,6 @@ IMPORTANTE:
           </Button>
         </div>
       </header>
-
       {/* Main Content Area with Side Panel */}
       {(previewDocument || activeDocEditor) ? (
         <PanelGroup direction="horizontal" className="flex-1">
@@ -3755,8 +3754,6 @@ IMPORTANTE:
           />
         </div>
       )}
-      
-      
       <ETLDialog 
         open={isETLDialogOpen} 
         onClose={() => setIsETLDialogOpen(false)}
@@ -3769,12 +3766,10 @@ IMPORTANTE:
           });
         }}
       />
-
       <UpgradePlanDialog 
         open={isUpgradeDialogOpen} 
         onOpenChange={setIsUpgradeDialogOpen} 
       />
-
       <DocumentGeneratorDialog
         open={isDocGeneratorOpen}
         onClose={() => setIsDocGeneratorOpen(false)}
@@ -3788,7 +3783,6 @@ IMPORTANTE:
           });
         }}
       />
-
       <GoogleFormsDialog
         open={isGoogleFormsOpen}
         onClose={() => {
@@ -3805,13 +3799,11 @@ IMPORTANTE:
           });
         }}
       />
-
       {/* Voice Chat Mode - Fullscreen conversation with Grok */}
       <VoiceChatMode 
         open={isVoiceChatOpen} 
         onClose={() => setIsVoiceChatOpen(false)} 
       />
-
       {/* Image Lightbox Modal */}
       {lightboxImage && (
         <div 
@@ -3846,7 +3838,6 @@ IMPORTANTE:
           </div>
         </div>
       )}
-
       {/* File Attachment Preview Modal */}
       {previewFileAttachment && (
         <motion.div 
@@ -4033,7 +4024,6 @@ IMPORTANTE:
           </motion.div>
         </motion.div>
       )}
-
       {/* Uploaded Image Preview Modal */}
       {previewUploadedImage && (
         <motion.div 
@@ -4068,7 +4058,6 @@ IMPORTANTE:
           </motion.div>
         </motion.div>
       )}
-
     </div>
   );
 }
