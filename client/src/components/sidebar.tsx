@@ -50,6 +50,7 @@ import { Folder as FolderType } from "@/hooks/use-chat-folders";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { NewChatButton } from "@/components/chat/NewChatButton";
 
 interface SidebarProps {
   className?: string;
@@ -397,18 +398,7 @@ export function Sidebar({
       </div>
 
       <div className="px-2 py-2">
-        <Button 
-          variant="ghost" 
-          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
-          onClick={() => {
-            setLocation("/");
-            onNewChat?.();
-          }}
-          data-testid="button-new-chat"
-        >
-          <SquarePen className="h-4 w-4" />
-          Nuevo chat
-        </Button>
+        <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
         <Button 
           ref={searchButtonRef}
           variant="ghost" 
