@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -682,15 +682,73 @@ function UsersSection() {
   );
 }
 
+function formatConvId(id: string): string {
+  const hash = id.slice(-4).toUpperCase();
+  return `CONV-${hash}`;
+}
+
+function formatRelativeTime(date: Date | string | null): string {
+  if (!date) return "-";
+  const d = new Date(date);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return format(d, "dd/MM/yy");
+}
+
+function formatDuration(start: Date | string | null, end: Date | string | null): string {
+  if (!start) return "-";
+  const s = new Date(start);
+  const e = end ? new Date(end) : new Date();
+  const diffMs = e.getTime() - s.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  const hours = Math.floor(mins / 60);
+  if (hours > 0) return `${hours}h ${mins % 60}m`;
+  return `${mins}m`;
+}
+
 function ConversationsSection() {
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({ status: "", flagStatus: "", userId: "", aiModel: "" });
+  const [sortBy, setSortBy] = useState<string>("createdAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [filters, setFilters] = useState({
+    status: "",
+    flagStatus: "",
+    userId: "",
+    aiModel: "",
+    dateFrom: "",
+    dateTo: "",
+    minTokens: "",
+    maxTokens: ""
+  });
   const [showFilters, setShowFilters] = useState(false);
   const [viewingConversation, setViewingConversation] = useState<any>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [newNote, setNewNote] = useState("");
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const updateFilters = (newFilters: Partial<typeof filters>) => {
     setFilters(prev => ({ ...prev, ...newFilters }));
     setPage(1);
+  };
+
+  const handleSort = (column: string) => {
+    if (sortBy === column) {
+      setSortOrder(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(column);
+      setSortOrder("desc");
+    }
   };
 
   const { data: statsData } = useQuery({
@@ -702,13 +760,17 @@ function ConversationsSection() {
   });
 
   const { data: conversationsData, isLoading, refetch } = useQuery({
-    queryKey: ["/api/admin/conversations", page, filters],
+    queryKey: ["/api/admin/conversations", page, filters, sortBy, sortOrder],
     queryFn: async () => {
-      const params = new URLSearchParams({ page: String(page), limit: "20" });
+      const params = new URLSearchParams({ page: String(page), limit: "20", sortBy, sortOrder });
       if (filters.status) params.set("status", filters.status);
       if (filters.flagStatus) params.set("flagStatus", filters.flagStatus);
       if (filters.userId) params.set("userId", filters.userId);
       if (filters.aiModel) params.set("aiModel", filters.aiModel);
+      if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+      if (filters.dateTo) params.set("dateTo", filters.dateTo);
+      if (filters.minTokens) params.set("minTokens", filters.minTokens);
+      if (filters.maxTokens) params.set("maxTokens", filters.maxTokens);
       const res = await fetch(`/api/admin/conversations?${params}`);
       return res.json();
     }
@@ -733,240 +795,659 @@ function ConversationsSection() {
       });
       return res.json();
     },
-    onSuccess: () => refetch()
+    onSuccess: () => {
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/conversations", viewingConversation?.id] });
+    }
   });
 
-  const handleExport = (format: "csv" | "json") => {
-    window.open(`/api/admin/conversations/export?format=${format}`, "_blank");
+  const addNoteMutation = useMutation({
+    mutationFn: async ({ id, note }: { id: string; note: string }) => {
+      const res = await fetch(`/api/admin/conversations/${id}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note })
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      setNewNote("");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/conversations", viewingConversation?.id] });
+    }
+  });
+
+  const handleSearch = async (query: string) => {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    
+    searchTimeoutRef.current = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await fetch("/api/admin/conversations/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query })
+        });
+        const data = await res.json();
+        setSearchResults(data.results || []);
+      } catch (e) {
+        setSearchResults([]);
+      }
+      setIsSearching(false);
+    }, 500);
   };
 
-  const stats = statsData || { activeToday: 0, avgMessagesPerUser: 0, tokensConsumedToday: 0, flaggedConversations: 0 };
+  const handleExportJson = () => {
+    if (!conversationDetail) return;
+    const blob = new Blob([JSON.stringify(conversationDetail, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `conversation-${formatConvId(conversationDetail.id)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyTranscript = () => {
+    if (!conversationDetail?.messages) return;
+    const transcript = conversationDetail.messages
+      .map((m: any) => `[${m.role.toUpperCase()}]: ${m.content}`)
+      .join("\n\n");
+    navigator.clipboard.writeText(transcript);
+  };
+
+  const stats = statsData || { activeToday: 0, avgMessagesPerConversation: 0, tokensConsumedToday: 0, flaggedConversations: 0 };
   const conversations = conversationsData?.data || [];
   const pagination = conversationsData?.pagination || { page: 1, totalPages: 1, total: 0 };
 
   const flagColors: Record<string, string> = {
-    reviewed: "bg-green-500/10 text-green-600",
-    needs_attention: "bg-yellow-500/10 text-yellow-600",
-    spam: "bg-red-500/10 text-red-600",
-    vip_support: "bg-purple-500/10 text-purple-600"
+    reviewed: "bg-green-500/10 text-green-600 border-green-500/30",
+    needs_attention: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30",
+    spam: "bg-red-500/10 text-red-600 border-red-500/30",
+    vip_support: "bg-purple-500/10 text-purple-600 border-purple-500/30"
   };
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-  }
+  const statusColors: Record<string, string> = {
+    active: "bg-green-500/10 text-green-600 border-green-500/30",
+    completed: "bg-blue-500/10 text-blue-600 border-blue-500/30",
+    flagged: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30",
+    archived: "bg-gray-500/10 text-gray-500 border-gray-500/30"
+  };
+
+  const SortIcon = ({ column }: { column: string }) => (
+    <span className="ml-1 inline-flex">
+      {sortBy === column ? (
+        sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+      ) : (
+        <ChevronDown className="h-3 w-3 opacity-30" />
+      )}
+    </span>
+  );
+
+  const clearFilters = () => {
+    setFilters({
+      status: "",
+      flagStatus: "",
+      userId: "",
+      aiModel: "",
+      dateFrom: "",
+      dateTo: "",
+      minTokens: "",
+      maxTokens: ""
+    });
+    setPage(1);
+  };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Conversations ({pagination.total})</h2>
+        <h2 className="text-lg font-semibold tracking-tight">CONVERSATION TRACKER</h2>
         <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1" data-testid="button-export-conversations">
-                <Download className="h-4 w-4" />
-                Export
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => handleExport("csv")}>Export CSV</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport("json")}>Export JSON</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="ghost" size="sm" onClick={() => refetch()}>
+          <Button variant="ghost" size="sm" onClick={() => refetch()} data-testid="button-refresh-conversations" className="transition-all duration-200 hover:bg-muted">
             <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="rounded-lg border p-3">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-            <Activity className="h-3 w-3" />
-            Active Today
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-lg border bg-card p-4 transition-all duration-200 hover:border-primary/30" data-testid="stat-conversations-today">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+            <Activity className="h-3.5 w-3.5" />
+            Conversations Today
           </div>
-          <p className="text-xl font-bold">{stats.activeToday}</p>
+          <p className="text-2xl font-bold tabular-nums">{stats.activeToday}</p>
         </div>
-        <div className="rounded-lg border p-3">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-            <MessageSquare className="h-3 w-3" />
-            Avg Msgs/User
+        <div className="rounded-lg border bg-card p-4 transition-all duration-200 hover:border-primary/30" data-testid="stat-avg-messages">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+            <MessageSquare className="h-3.5 w-3.5" />
+            Avg Messages/Conv
           </div>
-          <p className="text-xl font-bold">{stats.avgMessagesPerUser}</p>
+          <p className="text-2xl font-bold tabular-nums">{stats.avgMessagesPerConversation || stats.avgMessagesPerUser || 0}</p>
         </div>
-        <div className="rounded-lg border p-3">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-            <BarChart3 className="h-3 w-3" />
+        <div className="rounded-lg border bg-card p-4 transition-all duration-200 hover:border-primary/30" data-testid="stat-tokens-today">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+            <BarChart3 className="h-3.5 w-3.5" />
             Tokens Today
           </div>
-          <p className="text-xl font-bold">{stats.tokensConsumedToday.toLocaleString()}</p>
+          <p className="text-2xl font-bold tabular-nums">{(stats.tokensConsumedToday || 0).toLocaleString()}</p>
         </div>
-        <div className="rounded-lg border p-3">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-            <Flag className="h-3 w-3" />
-            Flagged
+        <div className="rounded-lg border bg-card p-4 transition-all duration-200 hover:border-primary/30" data-testid="stat-flagged">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+            <Flag className="h-3.5 w-3.5" />
+            Flagged/Review
           </div>
-          <p className="text-xl font-bold text-yellow-600">{stats.flaggedConversations}</p>
+          <p className="text-2xl font-bold tabular-nums text-yellow-500">{stats.flaggedConversations}</p>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)} className="gap-1" data-testid="button-toggle-filters">
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[280px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search conversations, messages..."
+            className="pl-9 h-9 transition-all duration-200"
+            value={searchQuery}
+            onChange={(e) => handleSearch(e.target.value)}
+            data-testid="input-global-search"
+          />
+          {isSearching && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+          )}
+          {searchResults.length > 0 && searchQuery && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-lg shadow-lg z-50 max-h-[300px] overflow-y-auto">
+              {searchResults.map((result: any, idx: number) => (
+                <div
+                  key={idx}
+                  className="p-3 hover:bg-muted cursor-pointer border-b last:border-0 transition-colors duration-150"
+                  onClick={() => {
+                    setViewingConversation(result);
+                    setSearchQuery("");
+                    setSearchResults([]);
+                  }}
+                  data-testid={`search-result-${idx}`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-mono text-xs text-primary">{formatConvId(result.id)}</span>
+                    <span className="text-xs text-muted-foreground">{result.user?.email || "Anonymous"}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{result.matchedContent || result.title}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowFilters(!showFilters)}
+          className={cn("gap-1.5 transition-all duration-200", showFilters && "bg-muted")}
+          data-testid="button-toggle-filters"
+        >
           <Filter className="h-4 w-4" />
           Filters
+          {Object.values(filters).some(v => v) && (
+            <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">{Object.values(filters).filter(v => v).length}</Badge>
+          )}
         </Button>
       </div>
 
       {showFilters && (
-        <div className="flex items-center gap-2 p-3 rounded-lg border bg-muted/30 flex-wrap">
-          <Select value={filters.status} onValueChange={(v) => updateFilters({ status: v })}>
-            <SelectTrigger className="w-[130px] h-8" data-testid="select-conv-status"><SelectValue placeholder="Status" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All Status</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="flagged">Flagged</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={filters.flagStatus} onValueChange={(v) => updateFilters({ flagStatus: v })}>
-            <SelectTrigger className="w-[150px] h-8" data-testid="select-conv-flag"><SelectValue placeholder="Flag Status" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">All Flags</SelectItem>
-              <SelectItem value="reviewed">Reviewed</SelectItem>
-              <SelectItem value="needs_attention">Needs Attention</SelectItem>
-              <SelectItem value="spam">Spam</SelectItem>
-              <SelectItem value="vip_support">VIP Support</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input placeholder="User ID" className="w-[180px] h-8" value={filters.userId} onChange={(e) => updateFilters({ userId: e.target.value })} data-testid="input-conv-userid" />
-          <Button variant="ghost" size="sm" onClick={() => { setFilters({ status: "", flagStatus: "", userId: "", aiModel: "" }); setPage(1); }} data-testid="button-clear-filters">Clear</Button>
-        </div>
-      )}
-
-      <div className="rounded-lg border overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 border-b">
-              <tr>
-                <th className="text-left p-3 font-medium">Conversation</th>
-                <th className="text-left p-3 font-medium">User</th>
-                <th className="text-left p-3 font-medium">Messages</th>
-                <th className="text-left p-3 font-medium">Tokens</th>
-                <th className="text-left p-3 font-medium">Model</th>
-                <th className="text-left p-3 font-medium">Status</th>
-                <th className="text-left p-3 font-medium">Flag</th>
-                <th className="text-left p-3 font-medium">Started</th>
-                <th className="text-right p-3 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {conversations.length === 0 ? (
-                <tr><td colSpan={9} className="p-4 text-center text-muted-foreground">No conversations found</td></tr>
-              ) : conversations.map((conv: any) => (
-                <tr key={conv.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="p-3">
-                    <p className="font-medium truncate max-w-[200px]">{conv.title || "Untitled"}</p>
-                    <p className="text-xs text-muted-foreground font-mono">{conv.id.slice(0, 8)}...</p>
-                  </td>
-                  <td className="p-3">
-                    {conv.user ? (
-                      <div>
-                        <p className="text-xs truncate max-w-[120px]">{conv.user.email || conv.user.fullName || "-"}</p>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">Anonymous</span>
-                    )}
-                  </td>
-                  <td className="p-3 text-muted-foreground">{conv.messageCount || 0}</td>
-                  <td className="p-3 text-muted-foreground">{(conv.tokensUsed || 0).toLocaleString()}</td>
-                  <td className="p-3"><span className="text-xs">{conv.aiModelUsed || "-"}</span></td>
-                  <td className="p-3">
-                    <Badge variant={conv.conversationStatus === "active" ? "default" : conv.conversationStatus === "flagged" ? "destructive" : "secondary"} className="text-xs">
-                      {conv.conversationStatus || "active"}
-                    </Badge>
-                  </td>
-                  <td className="p-3">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className={cn("h-6 px-2 text-xs", conv.flagStatus && flagColors[conv.flagStatus])}>
-                          {conv.flagStatus || "Set Flag"}
-                          <ChevronDown className="h-3 w-3 ml-1" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent>
-                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: null })}>Clear Flag</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: "reviewed" })}>Reviewed</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: "needs_attention" })}>Needs Attention</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: "spam" })}>Spam</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => flagMutation.mutate({ id: conv.id, flagStatus: "vip_support" })}>VIP Support</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
-                  <td className="p-3 text-xs text-muted-foreground">{conv.createdAt ? format(new Date(conv.createdAt), "dd/MM/yy HH:mm") : "-"}</td>
-                  <td className="p-3">
-                    <div className="flex justify-end">
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setViewingConversation(conv)} data-testid={`button-view-conversation-${conv.id}`}>
-                        <Eye className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Page {pagination.page} of {pagination.totalPages}</span>
-          <div className="flex gap-1">
-            <Button variant="outline" size="sm" disabled={pagination.page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button>
-            <Button variant="outline" size="sm" disabled={pagination.page === pagination.totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+        <div className="p-4 rounded-lg border bg-muted/20 space-y-3 transition-all duration-200">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Date From</Label>
+              <Input
+                type="date"
+                className="h-8 text-xs"
+                value={filters.dateFrom}
+                onChange={(e) => updateFilters({ dateFrom: e.target.value })}
+                data-testid="input-date-from"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Date To</Label>
+              <Input
+                type="date"
+                className="h-8 text-xs"
+                value={filters.dateTo}
+                onChange={(e) => updateFilters({ dateTo: e.target.value })}
+                data-testid="input-date-to"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Status</Label>
+              <Select value={filters.status} onValueChange={(v) => updateFilters({ status: v })}>
+                <SelectTrigger className="h-8 text-xs" data-testid="select-status">
+                  <SelectValue placeholder="All" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All Status</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="flagged">Flagged</SelectItem>
+                  <SelectItem value="archived">Archived</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Flag</Label>
+              <Select value={filters.flagStatus} onValueChange={(v) => updateFilters({ flagStatus: v })}>
+                <SelectTrigger className="h-8 text-xs" data-testid="select-flag">
+                  <SelectValue placeholder="All" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All Flags</SelectItem>
+                  <SelectItem value="reviewed">Reviewed</SelectItem>
+                  <SelectItem value="needs_attention">Needs Attention</SelectItem>
+                  <SelectItem value="spam">Spam</SelectItem>
+                  <SelectItem value="vip_support">VIP Support</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">AI Model</Label>
+              <Input
+                placeholder="e.g. grok-3"
+                className="h-8 text-xs"
+                value={filters.aiModel}
+                onChange={(e) => updateFilters({ aiModel: e.target.value })}
+                data-testid="input-ai-model"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Min Tokens</Label>
+              <Input
+                type="number"
+                placeholder="0"
+                className="h-8 text-xs"
+                value={filters.minTokens}
+                onChange={(e) => updateFilters({ minTokens: e.target.value })}
+                data-testid="input-min-tokens"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Max Tokens</Label>
+              <Input
+                type="number"
+                placeholder="∞"
+                className="h-8 text-xs"
+                value={filters.maxTokens}
+                onChange={(e) => updateFilters({ maxTokens: e.target.value })}
+                data-testid="input-max-tokens"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">User ID</Label>
+              <Input
+                placeholder="User ID..."
+                className="h-8 text-xs"
+                value={filters.userId}
+                onChange={(e) => updateFilters({ userId: e.target.value })}
+                data-testid="input-user-id"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="ghost" size="sm" onClick={clearFilters} data-testid="button-clear-filters" className="text-xs">
+              Clear All Filters
+            </Button>
           </div>
         </div>
       )}
 
-      <Dialog open={!!viewingConversation} onOpenChange={() => setViewingConversation(null)}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4" />
-              Conversation Details
-            </DialogTitle>
-          </DialogHeader>
-          {loadingDetail ? (
-            <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div>
-          ) : conversationDetail && (
-            <div className="flex-1 overflow-hidden flex flex-col gap-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <div><span className="text-muted-foreground">ID:</span> <span className="font-mono text-xs">{conversationDetail.id}</span></div>
-                <div><span className="text-muted-foreground">User:</span> {conversationDetail.user?.email || "Anonymous"}</div>
-                <div><span className="text-muted-foreground">Messages:</span> {conversationDetail.messageCount || 0}</div>
-                <div><span className="text-muted-foreground">Tokens:</span> {(conversationDetail.tokensUsed || 0).toLocaleString()}</div>
-                <div><span className="text-muted-foreground">Model:</span> {conversationDetail.aiModelUsed || "-"}</div>
-                <div><span className="text-muted-foreground">Status:</span> <Badge variant="secondary">{conversationDetail.conversationStatus}</Badge></div>
-                <div><span className="text-muted-foreground">Flag:</span> {conversationDetail.flagStatus ? <Badge className={flagColors[conversationDetail.flagStatus]}>{conversationDetail.flagStatus}</Badge> : "-"}</div>
-                <div><span className="text-muted-foreground">Started:</span> {conversationDetail.createdAt ? format(new Date(conversationDetail.createdAt), "dd/MM/yyyy HH:mm") : "-"}</div>
+      {isLoading ? (
+        <div className="space-y-2" data-testid="skeleton-loader">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="animate-pulse h-12 bg-muted rounded-lg" />
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 border-b">
+                <tr>
+                  <th
+                    className="text-left p-3 font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                    onClick={() => handleSort("id")}
+                    data-testid="th-id"
+                  >
+                    <div className="flex items-center">ID<SortIcon column="id" /></div>
+                  </th>
+                  <th
+                    className="text-left p-3 font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                    onClick={() => handleSort("userEmail")}
+                    data-testid="th-user"
+                  >
+                    <div className="flex items-center">User Email<SortIcon column="userEmail" /></div>
+                  </th>
+                  <th
+                    className="text-left p-3 font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                    onClick={() => handleSort("createdAt")}
+                    data-testid="th-started"
+                  >
+                    <div className="flex items-center">Started<SortIcon column="createdAt" /></div>
+                  </th>
+                  <th
+                    className="text-left p-3 font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                    onClick={() => handleSort("messageCount")}
+                    data-testid="th-messages"
+                  >
+                    <div className="flex items-center">Messages<SortIcon column="messageCount" /></div>
+                  </th>
+                  <th
+                    className="text-left p-3 font-medium cursor-pointer hover:bg-muted/70 transition-colors"
+                    onClick={() => handleSort("tokensUsed")}
+                    data-testid="th-tokens"
+                  >
+                    <div className="flex items-center">Tokens<SortIcon column="tokensUsed" /></div>
+                  </th>
+                  <th className="text-left p-3 font-medium" data-testid="th-model">AI Model</th>
+                  <th className="text-left p-3 font-medium" data-testid="th-status">Status</th>
+                  <th className="text-left p-3 font-medium" data-testid="th-duration">Duration</th>
+                  <th className="text-right p-3 font-medium" data-testid="th-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {conversations.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="p-8 text-center text-muted-foreground">
+                      <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      No conversations found
+                    </td>
+                  </tr>
+                ) : conversations.map((conv: any) => (
+                  <tr
+                    key={conv.id}
+                    className="border-b last:border-0 hover:bg-muted/30 cursor-pointer transition-colors duration-150"
+                    onClick={() => setViewingConversation(conv)}
+                    data-testid={`row-conversation-${conv.id}`}
+                  >
+                    <td className="p-3">
+                      <span className="font-mono text-xs text-primary">{formatConvId(conv.id)}</span>
+                    </td>
+                    <td className="p-3">
+                      <span
+                        className="text-xs truncate max-w-[150px] block hover:text-primary transition-colors cursor-pointer"
+                        title={conv.user?.email}
+                      >
+                        {conv.user?.email || "Anonymous"}
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground">{formatRelativeTime(conv.createdAt)}</td>
+                    <td className="p-3 text-muted-foreground tabular-nums">{conv.messageCount || 0}</td>
+                    <td className="p-3 text-muted-foreground tabular-nums">{(conv.tokensUsed || 0).toLocaleString()}</td>
+                    <td className="p-3"><span className="text-xs font-mono">{conv.aiModelUsed || "-"}</span></td>
+                    <td className="p-3">
+                      <Badge
+                        variant="outline"
+                        className={cn("text-xs border", statusColors[conv.conversationStatus] || statusColors.active)}
+                      >
+                        {conv.conversationStatus || "active"}
+                      </Badge>
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground tabular-nums">
+                      {formatDuration(conv.createdAt, conv.lastMessageAt)}
+                    </td>
+                    <td className="p-3">
+                      <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 transition-all duration-200 hover:bg-primary/10"
+                          onClick={() => setViewingConversation(conv)}
+                          data-testid={`button-view-${conv.id}`}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">
+            Showing {((page - 1) * 20) + 1}-{Math.min(page * 20, pagination.total)} of {pagination.total}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page === 1}
+              onClick={() => setPage(1)}
+              data-testid="button-first-page"
+            >
+              First
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page === 1}
+              onClick={() => setPage(p => p - 1)}
+              data-testid="button-prev-page"
+            >
+              Previous
+            </Button>
+            <div className="flex items-center gap-1 mx-2">
+              {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                let pageNum: number;
+                if (pagination.totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (page <= 3) {
+                  pageNum = i + 1;
+                } else if (page >= pagination.totalPages - 2) {
+                  pageNum = pagination.totalPages - 4 + i;
+                } else {
+                  pageNum = page - 2 + i;
+                }
+                return (
+                  <Button
+                    key={pageNum}
+                    variant={page === pageNum ? "default" : "outline"}
+                    size="sm"
+                    className="w-8 h-8 p-0"
+                    onClick={() => setPage(pageNum)}
+                    data-testid={`button-page-${pageNum}`}
+                  >
+                    {pageNum}
+                  </Button>
+                );
+              })}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page === pagination.totalPages}
+              onClick={() => setPage(p => p + 1)}
+              data-testid="button-next-page"
+            >
+              Next
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page === pagination.totalPages}
+              onClick={() => setPage(pagination.totalPages)}
+              data-testid="button-last-page"
+            >
+              Last
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {viewingConversation && (
+        <div
+          className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col"
+          data-testid="fullscreen-modal"
+        >
+          <div className="flex items-center justify-between p-4 border-b bg-card">
+            <div className="flex items-center gap-4">
+              <span className="font-mono text-lg font-semibold text-primary">
+                {formatConvId(viewingConversation.id)}
+              </span>
+              <Separator orientation="vertical" className="h-6" />
+              <span className="text-sm text-muted-foreground">{conversationDetail?.user?.email || "Anonymous"}</span>
+              <Separator orientation="vertical" className="h-6" />
+              <span className="text-sm text-muted-foreground">
+                <Clock className="inline h-3.5 w-3.5 mr-1" />
+                {formatDuration(viewingConversation.createdAt, viewingConversation.lastMessageAt)}
+              </span>
+              <Separator orientation="vertical" className="h-6" />
+              <span className="text-sm text-muted-foreground font-mono">{conversationDetail?.aiModelUsed || "-"}</span>
+              <Separator orientation="vertical" className="h-6" />
+              <span className="text-sm text-muted-foreground tabular-nums">
+                {(conversationDetail?.tokensUsed || 0).toLocaleString()} tokens
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={() => setViewingConversation(null)}
+              data-testid="button-close-modal"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6">
+            {loadingDetail ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-
-              <Separator />
-
-              <div className="flex-1 overflow-y-auto space-y-3">
-                <h4 className="text-sm font-medium sticky top-0 bg-background py-2">Message History ({conversationDetail.messages?.length || 0})</h4>
+            ) : conversationDetail && (
+              <div className="max-w-4xl mx-auto space-y-4">
                 {(conversationDetail.messages || []).map((msg: any, idx: number) => (
-                  <div key={msg.id || idx} className={cn("rounded-lg p-3 text-sm", msg.role === "user" ? "bg-primary/5 ml-8" : "bg-muted/50 mr-8")}>
+                  <div
+                    key={msg.id || idx}
+                    className={cn(
+                      "rounded-lg p-4 transition-all duration-200",
+                      msg.role === "user"
+                        ? "bg-primary/20 ml-12 rounded-tr-sm"
+                        : "bg-muted mr-12 rounded-tl-sm"
+                    )}
+                    data-testid={`message-${idx}`}
+                  >
                     <div className="flex items-center justify-between mb-2">
-                      <Badge variant={msg.role === "user" ? "default" : "secondary"} className="text-xs">{msg.role}</Badge>
-                      <span className="text-xs text-muted-foreground">{msg.createdAt ? format(new Date(msg.createdAt), "HH:mm:ss") : ""}</span>
+                      <Badge
+                        variant={msg.role === "user" ? "default" : "secondary"}
+                        className="text-xs"
+                      >
+                        {msg.role}
+                      </Badge>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        {msg.tokens && <span className="tabular-nums">{msg.tokens} tokens</span>}
+                        <span>{msg.createdAt ? format(new Date(msg.createdAt), "HH:mm:ss") : ""}</span>
+                      </div>
                     </div>
-                    <p className="whitespace-pre-wrap text-xs leading-relaxed">{msg.content?.slice(0, 500)}{msg.content?.length > 500 ? "..." : ""}</p>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+
+          <div className="border-t bg-card p-4">
+            <div className="max-w-4xl mx-auto flex items-center gap-3 flex-wrap">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      "gap-1.5",
+                      conversationDetail?.flagStatus && flagColors[conversationDetail.flagStatus]
+                    )}
+                    data-testid="button-flag-dropdown"
+                  >
+                    <Flag className="h-4 w-4" />
+                    {conversationDetail?.flagStatus || "Flag Conversation"}
+                    <ChevronDown className="h-3 w-3 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem
+                    onClick={() => flagMutation.mutate({ id: viewingConversation.id, flagStatus: null })}
+                    data-testid="flag-clear"
+                  >
+                    Clear Flag
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => flagMutation.mutate({ id: viewingConversation.id, flagStatus: "reviewed" })}
+                    data-testid="flag-reviewed"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-green-500 mr-2" />
+                    Reviewed
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => flagMutation.mutate({ id: viewingConversation.id, flagStatus: "needs_attention" })}
+                    data-testid="flag-needs-attention"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-yellow-500 mr-2" />
+                    Needs Attention
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => flagMutation.mutate({ id: viewingConversation.id, flagStatus: "spam" })}
+                    data-testid="flag-spam"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-red-500 mr-2" />
+                    Spam
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => flagMutation.mutate({ id: viewingConversation.id, flagStatus: "vip_support" })}
+                    data-testid="flag-vip"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-purple-500 mr-2" />
+                    VIP Support
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <Button variant="outline" size="sm" onClick={handleExportJson} data-testid="button-export-json">
+                <Download className="h-4 w-4 mr-1.5" />
+                Export JSON
+              </Button>
+
+              <Button variant="outline" size="sm" onClick={handleCopyTranscript} data-testid="button-copy-transcript">
+                <FileText className="h-4 w-4 mr-1.5" />
+                Copy Transcript
+              </Button>
+
+              <div className="flex-1" />
+
+              <div className="flex items-center gap-2">
+                <Textarea
+                  placeholder="Add internal note..."
+                  className="h-9 min-h-[36px] resize-none text-sm"
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  data-testid="textarea-note"
+                />
+                <Button
+                  size="sm"
+                  disabled={!newNote.trim() || addNoteMutation.isPending}
+                  onClick={() => addNoteMutation.mutate({ id: viewingConversation.id, note: newNote })}
+                  data-testid="button-add-note"
+                >
+                  {addNoteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add Note"}
+                </Button>
+              </div>
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

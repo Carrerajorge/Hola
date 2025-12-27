@@ -501,6 +501,17 @@ export function createAdminRouter() {
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
+      const sortColumnMap: Record<string, any> = {
+        createdAt: chats.createdAt,
+        messageCount: chats.messageCount,
+        tokensUsed: chats.tokensUsed,
+        aiModelUsed: chats.aiModelUsed,
+        conversationStatus: chats.conversationStatus,
+        lastMessageAt: chats.lastMessageAt
+      };
+      const sortColumn = sortColumnMap[sortBy as string] || chats.createdAt;
+      const orderClause = sortOrder === "asc" ? sortColumn : desc(sortColumn);
+
       const [conversationsResult, totalResult] = await Promise.all([
         db.select({
           id: chats.id,
@@ -517,7 +528,7 @@ export function createAdminRouter() {
         })
           .from(chats)
           .where(whereClause)
-          .orderBy(sortOrder === "asc" ? chats.createdAt : desc(chats.createdAt))
+          .orderBy(orderClause)
           .limit(limitNum)
           .offset(offset),
         db.select({ count: sql<number>`count(*)` }).from(chats).where(whereClause)
