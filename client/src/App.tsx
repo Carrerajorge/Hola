@@ -15,6 +15,7 @@ import BillingPage from "@/pages/billing";
 import SettingsPage from "@/pages/settings";
 import PrivacyPage from "@/pages/privacy";
 import AdminPage from "@/pages/admin";
+import SystemHealthPage from "@/pages/admin/SystemHealth";
 import WorkspaceSettingsPage from "@/pages/workspace-settings";
 import WorkspacePage from "@/pages/workspace";
 import SkillsPage from "@/pages/skills";
@@ -102,6 +103,7 @@ function Router() {
       <Route path="/settings" component={SettingsPage} />
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/admin" component={AdminPage} />
+      <Route path="/admin/health" component={SystemHealthPage} />
       <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
       <Route path="/workspace" component={WorkspacePage} />
       <Route path="/skills" component={SkillsPage} />
