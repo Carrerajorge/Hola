@@ -3803,164 +3803,158 @@ IMPORTANTE:
         </PanelGroup>
       ) : (
         <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-          {/* Messages Area - scrollable section */}
-          <div 
-            ref={messagesContainerRef}
-            onScroll={handleScroll}
-            className="flex-1 overflow-y-auto min-h-0"
-          >
-          {hasMessages && (
-            <div className="p-4 sm:p-6 md:p-10 space-y-6">
-              <MessageList
-                messages={messages}
-                variant="default"
-                editingMessageId={editingMessageId}
-                editContent={editContent}
-                setEditContent={setEditContent}
-                copiedMessageId={copiedMessageId}
-                messageFeedback={messageFeedback}
-                speakingMessageId={speakingMessageId}
-                isGeneratingImage={isGeneratingImage}
-                pendingGeneratedImage={pendingGeneratedImage}
-                latestGeneratedImageRef={latestGeneratedImageRef}
-                streamingContent={streamingContent}
-                aiState={aiState}
-                regeneratingMsgIndex={regeneratingMsgIndex}
-                handleCopyMessage={handleCopyMessage}
-                handleStartEdit={handleStartEdit}
-                handleCancelEdit={handleCancelEdit}
-                handleSendEdit={handleSendEdit}
-                handleFeedback={handleFeedback}
-                handleRegenerate={handleRegenerate}
-                handleShare={handleShare}
-                handleReadAloud={handleReadAloud}
-                handleOpenDocumentPreview={handleOpenDocumentPreview}
-                handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
-                handleDownloadImage={handleDownloadImage}
-                setLightboxImage={setLightboxImage}
-                handleReopenDocument={handleReopenDocument}
-                minimizedDocument={minimizedDocument}
-                onRestoreDocument={restoreDocEditor}
-                onSelectSuggestedReply={(text) => setInput(text)}
-              />
-              
-              <div ref={messagesEndRef} />
-
-            </div>
-          )}
-
-          {/* Scroll to bottom button */}
-          {hasMessages && showScrollButton && (
-            <motion.button
-              initial={{ opacity: 0, scale: 0.8, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.8, y: 10 }}
-              onClick={() => {
-                setUserHasScrolledUp(false);
-                scrollToBottom();
-              }}
-              className="fixed bottom-32 right-8 z-40 flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105"
-              data-testid="button-scroll-to-bottom"
-            >
-              <ChevronDown className="h-4 w-4" />
-              <span className="text-sm font-medium">Ir al final</span>
-            </motion.button>
-          )}
-
-          {/* Processing indicators when AI is working (even without messages) */}
-          {!hasMessages && aiState !== "idle" && (
-            <div className="flex-1 flex flex-col items-center justify-center px-4">
-              <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
-                {/* Streaming Indicator with cancel button */}
-                <StreamingIndicator
-                  aiState={aiState}
+          {/* Content Area - conditional based on whether we have messages */}
+          {hasMessages ? (
+            <>
+              {/* Scrollable messages container */}
+              <div 
+                ref={messagesContainerRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 md:p-10 space-y-6"
+              >
+                <MessageList
+                  messages={messages}
+                  variant="default"
+                  editingMessageId={editingMessageId}
+                  editContent={editContent}
+                  setEditContent={setEditContent}
+                  copiedMessageId={copiedMessageId}
+                  messageFeedback={messageFeedback}
+                  speakingMessageId={speakingMessageId}
+                  isGeneratingImage={isGeneratingImage}
+                  pendingGeneratedImage={pendingGeneratedImage}
+                  latestGeneratedImageRef={latestGeneratedImageRef}
                   streamingContent={streamingContent}
-                  onCancel={handleStopChat}
+                  aiState={aiState}
+                  regeneratingMsgIndex={regeneratingMsgIndex}
+                  handleCopyMessage={handleCopyMessage}
+                  handleStartEdit={handleStartEdit}
+                  handleCancelEdit={handleCancelEdit}
+                  handleSendEdit={handleSendEdit}
+                  handleFeedback={handleFeedback}
+                  handleRegenerate={handleRegenerate}
+                  handleShare={handleShare}
+                  handleReadAloud={handleReadAloud}
+                  handleOpenDocumentPreview={handleOpenDocumentPreview}
+                  handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+                  handleDownloadImage={handleDownloadImage}
+                  setLightboxImage={setLightboxImage}
+                  handleReopenDocument={handleReopenDocument}
+                  minimizedDocument={minimizedDocument}
+                  onRestoreDocument={restoreDocEditor}
+                  onSelectSuggestedReply={(text) => setInput(text)}
                 />
-                
-                {/* Streaming content with fade-in animation */}
-                {streamingContent && (
-                  <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">
-                    <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                      <MarkdownErrorBoundary fallbackContent={streamingContent}>
-                        <MarkdownRenderer
-                          content={streamingContent}
-                          customComponents={{...CleanDataTableComponents}}
-                        />
-                      </MarkdownErrorBoundary>
-                      <span className="typing-cursor">|</span>
-                    </div>
-                  </div>
-                )}
+                <div ref={messagesEndRef} />
               </div>
-            </div>
-          )}
 
-          {/* Welcome Screen when no messages AND not processing */}
-          {!hasMessages && aiState === "idle" && (
-            <div className="flex-1 flex flex-col items-center justify-center px-4">
-              <motion.div 
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ duration: 0.5, ease: "easeOut" }}
-                className="mb-8"
-              >
-                {activeGpt?.avatar ? (
-                  <AvatarWithFallback 
-                    src={activeGpt.avatar} 
-                    alt={activeGpt.name}
-                    fallback={<Bot className="h-10 w-10 text-white" />}
-                  />
-                ) : (
-                  <SiraLogo size={80} />
-                )}
-              </motion.div>
-              <motion.h1 
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.2 }}
-                className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
-              >
-                {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
-              </motion.h1>
-              <motion.p 
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.3 }}
-                className="text-muted-foreground text-center max-w-md text-base"
-              >
-                {activeGpt 
-                  ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
-                  : "Soy MICHAT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
-                }
-              </motion.p>
-              {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
-                <motion.div
-                  initial={{ y: 20, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.5, delay: 0.4 }}
-                  className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
+              {/* Scroll to bottom button */}
+              {showScrollButton && (
+                <motion.button
+                  initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                  onClick={() => {
+                    setUserHasScrolledUp(false);
+                    scrollToBottom();
+                  }}
+                  className="fixed bottom-32 right-8 z-40 flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105"
+                  data-testid="button-scroll-to-bottom"
                 >
-                  {activeGpt.conversationStarters
-                    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-                    .map((starter, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => setInput(starter)}
-                        className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
-                        data-testid={`button-starter-${idx}`}
-                      >
-                        {starter}
-                      </button>
-                    ))}
-                </motion.div>
+                  <ChevronDown className="h-4 w-4" />
+                  <span className="text-sm font-medium">Ir al final</span>
+                </motion.button>
+              )}
+            </>
+          ) : (
+            /* No messages - center content vertically */
+            <div className="flex-1 flex flex-col items-center justify-center px-4">
+              {aiState !== "idle" ? (
+                /* Processing indicators when AI is working */
+                <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
+                  <StreamingIndicator
+                    aiState={aiState}
+                    streamingContent={streamingContent}
+                    onCancel={handleStopChat}
+                  />
+                  {streamingContent && (
+                    <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">
+                      <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
+                        <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                          <MarkdownRenderer
+                            content={streamingContent}
+                            customComponents={{...CleanDataTableComponents}}
+                          />
+                        </MarkdownErrorBoundary>
+                        <span className="typing-cursor">|</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Welcome Screen */
+                <>
+                  <motion.div 
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.5, ease: "easeOut" }}
+                    className="mb-8"
+                  >
+                    {activeGpt?.avatar ? (
+                      <AvatarWithFallback 
+                        src={activeGpt.avatar} 
+                        alt={activeGpt.name}
+                        fallback={<Bot className="h-10 w-10 text-white" />}
+                      />
+                    ) : (
+                      <SiraLogo size={80} />
+                    )}
+                  </motion.div>
+                  <motion.h1 
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.5, delay: 0.2 }}
+                    className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
+                  >
+                    {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
+                  </motion.h1>
+                  <motion.p 
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.5, delay: 0.3 }}
+                    className="text-muted-foreground text-center max-w-md text-base"
+                  >
+                    {activeGpt 
+                      ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
+                      : "Soy MICHAT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                    }
+                  </motion.p>
+                  {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                    <motion.div
+                      initial={{ y: 20, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ duration: 0.5, delay: 0.4 }}
+                      className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
+                    >
+                      {activeGpt.conversationStarters
+                        .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+                        .map((starter, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setInput(starter)}
+                            className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                            data-testid={`button-starter-${idx}`}
+                          >
+                            {starter}
+                          </button>
+                        ))}
+                    </motion.div>
+                  )}
+                </>
               )}
             </div>
           )}
-          </div>
-          {/* End of scrollable area */}
           
-          {/* Input Bar - outside scroll container */}
+          {/* Input Bar - always at bottom, outside scroll container */}
           <Composer
             input={input}
             setInput={setInput}
