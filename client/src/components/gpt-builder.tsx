@@ -606,7 +606,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           placeholder="¿Qué hace este GPT? ¿Cómo se comporta? ¿Qué debería evitar hacer?"
                           value={formData.systemPrompt}
                           onChange={(e) => handleFormChange({ systemPrompt: e.target.value })}
-                          className="min-h-[200px] resize-none"
+                          className="min-h-[200px] max-h-[400px] resize-y overflow-y-auto"
                           maxLength={8000}
                           data-testid="input-gpt-instructions"
                         />
