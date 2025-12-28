@@ -4,8 +4,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { MonacoCodeEditor } from "./monaco-code-editor";
 import { Save, X, Code2 } from "lucide-react";
@@ -77,6 +79,9 @@ export function CodeEditorModal({
               </span>
             )}
           </DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Editor de código con resaltado de sintaxis</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
 
         <div className="flex-1 overflow-hidden p-2" data-testid="code-editor-container">

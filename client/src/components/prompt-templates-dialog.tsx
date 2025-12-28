@@ -4,7 +4,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -89,6 +91,9 @@ export function PromptTemplatesDialog({
             <Sparkles className="h-5 w-5 text-purple-500" />
             Plantillas de prompts
           </DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Gestiona y utiliza tus plantillas de prompts</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
 
         <div className="flex items-center gap-2 flex-wrap">

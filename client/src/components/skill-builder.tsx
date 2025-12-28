@@ -2,8 +2,10 @@ import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -230,10 +232,13 @@ export function SkillBuilder({ open, onOpenChange, onSave, editingSkill }: Skill
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden" data-testid="skill-builder-dialog" aria-describedby="skill-builder-desc">
-        <DialogDescription id="skill-builder-desc" className="sr-only">
-          Wizard para crear o editar un Skill personalizado
-        </DialogDescription>
+      <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden" data-testid="skill-builder-dialog">
+        <VisuallyHidden>
+          <DialogTitle>Skill Builder</DialogTitle>
+          <DialogDescription>
+            Wizard para crear o editar un Skill personalizado
+          </DialogDescription>
+        </VisuallyHidden>
         <div className="flex items-center justify-between px-6 py-4 border-b bg-muted/30">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl shadow-lg">

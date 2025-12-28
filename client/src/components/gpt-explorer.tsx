@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -144,6 +145,10 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-screen h-screen max-w-none rounded-none p-0 gap-0 overflow-hidden" data-testid="gpt-explorer-dialog">
+        <VisuallyHidden>
+          <DialogTitle>Explorar GPTs</DialogTitle>
+          <DialogDescription>Descubre y crea versiones personalizadas de ChatGPT</DialogDescription>
+        </VisuallyHidden>
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between px-6 py-4 border-b">
             <div className="flex items-center gap-4">

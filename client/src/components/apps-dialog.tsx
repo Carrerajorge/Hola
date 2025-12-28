@@ -4,7 +4,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -832,6 +834,9 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <DialogTitle className="text-2xl font-semibold">Aplicaciones</DialogTitle>
+                <VisuallyHidden>
+                  <DialogDescription>Explora e integra aplicaciones con Sira GPT</DialogDescription>
+                </VisuallyHidden>
                 <Badge variant="secondary" className="text-xs font-medium">BETA</Badge>
               </div>
               <div className="relative w-64">

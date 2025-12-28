@@ -4,7 +4,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -45,6 +47,9 @@ export function FavoritesDialog({
             <Star className="h-5 w-5 text-yellow-500" />
             Mensajes guardados
           </DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Tus mensajes favoritos guardados</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
 
         <div className="relative">

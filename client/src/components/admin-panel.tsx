@@ -3,7 +3,9 @@ import {
   Dialog,
   DialogContent,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -661,7 +663,10 @@ export function AdminPanel({ open, onOpenChange }: AdminPanelProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl h-[80vh] p-0 gap-0">
-        <DialogTitle className="sr-only">Admin Panel</DialogTitle>
+        <VisuallyHidden>
+          <DialogTitle>Admin Panel</DialogTitle>
+          <DialogDescription>Panel de administración del sistema</DialogDescription>
+        </VisuallyHidden>
         <div className="flex h-full">
           <div className="w-48 border-r bg-muted/30 p-2">
             <div className="p-2 mb-2">

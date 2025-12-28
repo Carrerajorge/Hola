@@ -1,5 +1,6 @@
 import React from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -81,7 +82,11 @@ export function AboutGptDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md p-0 gap-0 overflow-hidden" aria-describedby="about-gpt-description">
+      <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+        <VisuallyHidden>
+          <DialogTitle>Información del GPT</DialogTitle>
+          <DialogDescription>Detalles e información sobre el GPT seleccionado</DialogDescription>
+        </VisuallyHidden>
         <div className="flex items-center justify-between p-3 border-b">
           <div className="w-8" />
           <div className="flex-1" />
@@ -115,10 +120,6 @@ export function AboutGptDialog({
               <X className="h-4 w-4" />
             </Button>
           </div>
-        </div>
-
-        <div id="about-gpt-description" className="sr-only">
-          Información detallada del GPT
         </div>
 
         <ScrollArea className="max-h-[70vh]">

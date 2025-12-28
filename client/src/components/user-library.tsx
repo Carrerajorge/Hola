@@ -5,7 +5,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -267,6 +269,9 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
             <DialogTitle className="text-xl font-semibold" data-testid="library-title">
               Tu Biblioteca de Medios
             </DialogTitle>
+            <VisuallyHidden>
+              <DialogDescription>Explora y gestiona tus archivos multimedia</DialogDescription>
+            </VisuallyHidden>
           </DialogHeader>
 
           <Tabs

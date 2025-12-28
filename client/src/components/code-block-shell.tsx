@@ -6,8 +6,10 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -630,6 +632,9 @@ export function CodeBlockShell({
               <DialogTitle className="text-zinc-100">
                 Add Annotation (Line {annotationForm.line})
               </DialogTitle>
+              <VisuallyHidden>
+                <DialogDescription>Agregar una anotación a la línea de código</DialogDescription>
+              </VisuallyHidden>
             </DialogHeader>
 
             <div className="space-y-4 py-2">

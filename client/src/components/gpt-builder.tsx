@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -960,6 +961,9 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
             <DialogContent className="sm:max-w-[500px]" data-testid="action-editor-dialog">
               <DialogHeader>
                 <DialogTitle>{editingAction ? "Editar acción" : "Nueva acción"}</DialogTitle>
+                <VisuallyHidden>
+                  <DialogDescription>Configura los detalles de la acción API</DialogDescription>
+                </VisuallyHidden>
               </DialogHeader>
               <div className="space-y-4 pt-4">
                 <div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -1027,6 +1028,9 @@ function DataControlsSection() {
         <DialogContent className="max-w-md max-h-[80vh]">
           <DialogHeader>
             <DialogTitle>Chats archivados</DialogTitle>
+            <VisuallyHidden>
+              <DialogDescription>Lista de chats archivados</DialogDescription>
+            </VisuallyHidden>
           </DialogHeader>
           <ScrollArea className="h-[400px] pr-4">
             {isLoadingArchived ? (
@@ -1066,6 +1070,9 @@ function DataControlsSection() {
         <DialogContent className="max-w-lg max-h-[80vh]">
           <DialogHeader>
             <DialogTitle>Enlaces compartidos</DialogTitle>
+            <VisuallyHidden>
+              <DialogDescription>Gestiona tus enlaces compartidos</DialogDescription>
+            </VisuallyHidden>
           </DialogHeader>
           <ScrollArea className="h-[400px] pr-4">
             {isLoadingLinks ? (

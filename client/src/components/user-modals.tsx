@@ -4,7 +4,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +51,9 @@ export function ProfileModal({ open, onOpenChange }: ModalProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-lg font-medium">Perfil</DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Administra tu información de perfil</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
         <div className="space-y-6 py-4">
           <div className="flex items-center gap-4">
@@ -134,6 +139,9 @@ export function BillingModal({ open, onOpenChange }: ModalProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-lg font-medium">Facturación</DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Información de facturación y métodos de pago</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
         <div className="space-y-6 py-4">
           <div className="rounded-lg border p-4 space-y-3">
@@ -210,6 +218,9 @@ export function SettingsModal({ open, onOpenChange }: ModalProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-lg font-medium">Configuración</DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Opciones de configuración de la aplicación</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
         <div className="space-y-6 py-4">
           <div className="flex items-center justify-between">
@@ -273,6 +284,9 @@ export function PrivacyModal({ open, onOpenChange }: ModalProps) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-lg font-medium">Privacidad</DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Opciones de privacidad y datos personales</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
         <div className="space-y-6 py-4">
           <div className="flex items-center justify-between">
@@ -331,6 +345,9 @@ export function AdminPanelModal({ open, onOpenChange }: ModalProps) {
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-lg font-medium">Admin Panel</DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Panel de administración del sistema</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
         <div className="space-y-6 py-4">
           <div className="grid grid-cols-2 gap-4">

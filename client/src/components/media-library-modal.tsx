@@ -5,7 +5,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -302,12 +304,14 @@ export function MediaLibraryModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent 
         className="w-screen h-screen max-w-none max-h-none m-0 rounded-none flex flex-col p-0 gap-0"
-        aria-describedby={undefined}
         data-testid="modal-media-library"
       >
         <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-lg font-semibold">Biblioteca de Medios</DialogTitle>
+            <VisuallyHidden>
+              <DialogDescription>Gestiona tus archivos multimedia</DialogDescription>
+            </VisuallyHidden>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <HardDrive className="h-3.5 w-3.5" />
               <span>{totalCount} archivo{totalCount !== 1 ? 's' : ''}</span>

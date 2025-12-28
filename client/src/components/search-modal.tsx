@@ -5,7 +5,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -198,13 +200,13 @@ export function SearchModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-lg p-0 gap-0 overflow-hidden rounded-xl shadow-2xl"
-        aria-describedby={undefined}
         onKeyDown={handleKeyDown}
         data-testid="modal-search"
       >
-        <DialogHeader className="sr-only">
+        <VisuallyHidden>
           <DialogTitle>Buscar chats</DialogTitle>
-        </DialogHeader>
+          <DialogDescription>Buscar en tus conversaciones</DialogDescription>
+        </VisuallyHidden>
 
         <div className="flex items-center gap-3 px-4 py-3 border-b">
           <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />

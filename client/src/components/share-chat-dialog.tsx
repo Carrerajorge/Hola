@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -162,6 +163,9 @@ export function ShareChatDialog({ chatId, chatTitle, children }: ShareChatDialog
             <UserPlus className="h-5 w-5" />
             Compartir "{chatTitle || 'Chat'}"
           </DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Comparte este chat con otros usuarios</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
 
         <div className="space-y-4 py-4">

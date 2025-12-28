@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { X, Sparkles, MessageSquare, Image, Brain, Clock, Target, Zap, Users, Shield, FileText, Video, Code, Star, Infinity, CheckCircle2 } from "lucide-react";
@@ -130,7 +131,10 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto p-0">
-        <DialogTitle className="sr-only">Mejora tu plan</DialogTitle>
+        <VisuallyHidden>
+          <DialogTitle>Mejora tu plan</DialogTitle>
+          <DialogDescription>Compara y selecciona el plan que mejor se adapte a tus necesidades</DialogDescription>
+        </VisuallyHidden>
         <div className="sticky top-0 bg-background z-10 p-6 pb-4 border-b">
           <div className="flex justify-between items-start">
             <div></div>

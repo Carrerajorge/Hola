@@ -3,7 +3,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Keyboard } from "lucide-react";
 
 interface KeyboardShortcutsDialogProps {
@@ -34,6 +36,9 @@ export function KeyboardShortcutsDialog({
             <Keyboard className="h-5 w-5" />
             Atajos de teclado
           </DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Lista de atajos de teclado disponibles</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
         <div className="space-y-1 py-2">
           {shortcuts.map((shortcut, idx) => (

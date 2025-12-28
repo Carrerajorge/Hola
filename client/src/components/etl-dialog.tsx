@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -154,6 +155,9 @@ export function ETLDialog({ open, onClose, onComplete }: ETLDialogProps) {
             <Database className="h-5 w-5" />
             ETL Agent - Download Economic Data
           </DialogTitle>
+          <VisuallyHidden>
+            <DialogDescription>Descarga datos económicos de múltiples países</DialogDescription>
+          </VisuallyHidden>
         </DialogHeader>
 
         {status === "loading" ? (
