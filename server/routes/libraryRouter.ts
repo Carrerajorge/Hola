@@ -12,6 +12,21 @@ import {
   type InsertLibraryCollection,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { validate } from "../middleware/validateRequest";
+import {
+  uploadRequestUrlSchema,
+  uploadCompleteSchema,
+  createFolderSchema,
+  updateFolderSchema,
+  createCollectionSchema,
+  updateCollectionSchema,
+  addFileToCollectionSchema,
+  updateFileSchema,
+  libraryFilesQuerySchema,
+  uuidParamSchema,
+  fileIdParamSchema,
+  createLibraryItemSchema,
+} from "../schemas/librarySchemas";
 
 export function createLibraryRouter() {
   const router = Router();
@@ -29,16 +44,12 @@ export function createLibraryRouter() {
     return userId;
   };
 
-  router.post("/api/library/upload/request-url", async (req, res) => {
+  router.post("/api/library/upload/request-url", ...validate({ body: uploadRequestUrlSchema }), async (req, res) => {
     try {
       const userId = requireAuth(req, res);
       if (!userId) return;
 
       const { filename, contentType, folderId } = req.body;
-
-      if (!filename) {
-        return res.status(400).json({ error: "Filename is required" });
-      }
 
       const result = await libraryService.generateUploadUrl(
         userId,
@@ -57,20 +68,12 @@ export function createLibraryRouter() {
     }
   });
 
-  router.post("/api/library/upload/complete", async (req, res) => {
+  router.post("/api/library/upload/complete", ...validate({ body: uploadCompleteSchema }), async (req, res) => {
     try {
       const userId = requireAuth(req, res);
       if (!userId) return;
 
       const { storagePath, metadata } = req.body;
-
-      if (!storagePath) {
-        return res.status(400).json({ error: "Storage path is required" });
-      }
-
-      if (!metadata || !metadata.name || !metadata.originalName) {
-        return res.status(400).json({ error: "File metadata with name and originalName is required" });
-      }
 
       const fileMetadata: FileMetadata = {
         name: metadata.name,
@@ -117,16 +120,12 @@ export function createLibraryRouter() {
     }
   });
 
-  router.post("/api/library/folders", async (req, res) => {
+  router.post("/api/library/folders", ...validate({ body: createFolderSchema }), async (req, res) => {
     try {
       const userId = requireAuth(req, res);
       if (!userId) return;
 
       const { name, description, color, icon, parentId } = req.body;
-
-      if (!name) {
-        return res.status(400).json({ error: "Folder name is required" });
-      }
 
       let parentPath = "/";
       if (parentId) {
@@ -162,7 +161,7 @@ export function createLibraryRouter() {
     }
   });
 
-  router.put("/api/library/folders/:id", async (req, res) => {
+  router.put("/api/library/folders/:id", ...validate({ body: updateFolderSchema, params: uuidParamSchema }), async (req, res) => {
     try {
       const userId = requireAuth(req, res);
       if (!userId) return;
@@ -250,16 +249,12 @@ export function createLibraryRouter() {
     }
   });
 
-  router.post("/api/library/collections", async (req, res) => {
+  router.post("/api/library/collections", ...validate({ body: createCollectionSchema }), async (req, res) => {
     try {
       const userId = requireAuth(req, res);
       if (!userId) return;
 
       const { name, description, type, coverFileId, smartRules, isPublic } = req.body;
-
-      if (!name) {
-        return res.status(400).json({ error: "Collection name is required" });
-      }
 
       const collectionData: InsertLibraryCollection = {
         uuid: randomUUID(),
@@ -280,7 +275,7 @@ export function createLibraryRouter() {
     }
   });
 
-  router.put("/api/library/collections/:id", async (req, res) => {
+  router.put("/api/library/collections/:id", ...validate({ body: updateCollectionSchema, params: uuidParamSchema }), async (req, res) => {
     try {
       const userId = requireAuth(req, res);
       if (!userId) return;
@@ -350,17 +345,13 @@ export function createLibraryRouter() {
     }
   });
 
-  router.post("/api/library/collections/:id/files", async (req, res) => {
+  router.post("/api/library/collections/:id/files", ...validate({ body: addFileToCollectionSchema, params: uuidParamSchema }), async (req, res) => {
     try {
       const userId = requireAuth(req, res);
       if (!userId) return;
 
       const { id } = req.params;
       const { fileId, order } = req.body;
-
-      if (!fileId) {
-        return res.status(400).json({ error: "File ID is required" });
-      }
 
       const [collection] = await db
         .select()
@@ -456,7 +447,7 @@ export function createLibraryRouter() {
     }
   });
 
-  router.get("/api/library/files", async (req, res) => {
+  router.get("/api/library/files", ...validate({ query: libraryFilesQuerySchema }), async (req, res) => {
     try {
       const userId = requireAuth(req, res);
       if (!userId) return;
@@ -541,7 +532,7 @@ export function createLibraryRouter() {
     }
   });
 
-  router.put("/api/library/files/:id", async (req, res) => {
+  router.put("/api/library/files/:id", ...validate({ body: updateFileSchema, params: uuidParamSchema }), async (req, res) => {
     try {
       const userId = requireAuth(req, res);
       if (!userId) return;
@@ -667,7 +658,7 @@ export function createLibraryRouter() {
     }
   });
 
-  router.post("/api/library", async (req, res) => {
+  router.post("/api/library", ...validate({ body: createLibraryItemSchema }), async (req, res) => {
     try {
       const user = (req as any).user;
       const userId = user?.claims?.sub;
@@ -677,10 +668,6 @@ export function createLibraryRouter() {
       }
       
       const { mediaType, title, description, storagePath, thumbnailPath, mimeType, size, metadata, sourceChatId } = req.body;
-      
-      if (!mediaType || !title || !storagePath) {
-        return res.status(400).json({ error: "mediaType, title, and storagePath are required" });
-      }
       
       const item = await storage.createLibraryItem({
         userId,

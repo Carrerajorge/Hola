@@ -1,5 +1,24 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+const AUTH_STORAGE_KEY = "siragpt_auth_user";
+
+let isRedirecting = false;
+
+function handleUnauthorized() {
+  if (isRedirecting) return;
+  
+  const publicPaths = ['/login', '/signup', '/welcome', '/privacy'];
+  const isPublicPath = publicPaths.some(path => window.location.pathname.startsWith(path));
+  
+  if (!isPublicPath) {
+    isRedirecting = true;
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    queryClient.setQueryData(["/api/auth/user"], null);
+    queryClient.clear();
+    window.location.href = '/login';
+  }
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -19,6 +38,11 @@ export async function apiRequest(
     credentials: "include",
   });
 
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new Error('Unauthorized');
+  }
+
   await throwIfResNotOk(res);
   return res;
 }
@@ -33,8 +57,12 @@ export const getQueryFn: <T>(options: {
       credentials: "include",
     });
 
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
+    if (res.status === 401) {
+      if (unauthorizedBehavior === "returnNull") {
+        return null;
+      }
+      handleUnauthorized();
+      throw new Error('Unauthorized');
     }
 
     await throwIfResNotOk(res);
@@ -52,6 +80,11 @@ export const queryClient = new QueryClient({
     },
     mutations: {
       retry: false,
+      onError: (error) => {
+        if (error instanceof Error && error.message.includes('401')) {
+          handleUnauthorized();
+        }
+      },
     },
   },
 });

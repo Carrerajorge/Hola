@@ -129,19 +129,51 @@ const QUERY_KEYS = {
   stats: '/api/library/stats',
 };
 
-async function fetchWithAuth<T>(url: string): Promise<T | null> {
+export interface LibraryError {
+  code: 'UNAUTHORIZED' | 'NOT_FOUND' | 'SERVER_ERROR' | 'NETWORK_ERROR';
+  message: string;
+  status?: number;
+}
+
+interface FetchResult<T> {
+  data: T | null;
+  error: LibraryError | null;
+  isAuthenticated: boolean;
+}
+
+async function fetchWithAuth<T>(url: string): Promise<FetchResult<T>> {
   try {
     const response = await fetch(url, { credentials: 'include' });
     if (response.status === 401) {
-      return null;
+      return { 
+        data: null, 
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required', status: 401 },
+        isAuthenticated: false 
+      };
+    }
+    if (response.status === 404) {
+      return { 
+        data: null, 
+        error: { code: 'NOT_FOUND', message: 'Resource not found', status: 404 },
+        isAuthenticated: true 
+      };
     }
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      return { 
+        data: null, 
+        error: { code: 'SERVER_ERROR', message: `HTTP ${response.status}: ${response.statusText}`, status: response.status },
+        isAuthenticated: true 
+      };
     }
-    return response.json();
+    const data = await response.json();
+    return { data, error: null, isAuthenticated: true };
   } catch (error) {
     console.error(`Failed to fetch ${url}:`, error);
-    throw error;
+    return { 
+      data: null, 
+      error: { code: 'NETWORK_ERROR', message: error instanceof Error ? error.message : 'Network error' },
+      isAuthenticated: true 
+    };
   }
 }
 
@@ -160,26 +192,26 @@ export function useCloudLibrary(filters?: FileFilters) {
     return queryString ? `${QUERY_KEYS.files}?${queryString}` : QUERY_KEYS.files;
   }, [filters]);
 
-  const filesQuery = useQuery<LibraryFile[] | null>({
+  const filesQuery = useQuery<FetchResult<LibraryFile[]>>({
     queryKey: [QUERY_KEYS.files, filters],
     queryFn: () => fetchWithAuth<LibraryFile[]>(buildFilesUrl()),
     staleTime: 30000,
     gcTime: 5 * 60 * 1000,
   });
 
-  const foldersQuery = useQuery<LibraryFolder[] | null>({
+  const foldersQuery = useQuery<FetchResult<LibraryFolder[]>>({
     queryKey: [QUERY_KEYS.folders],
     queryFn: () => fetchWithAuth<LibraryFolder[]>(QUERY_KEYS.folders),
     staleTime: 60000,
   });
 
-  const collectionsQuery = useQuery<LibraryCollection[] | null>({
+  const collectionsQuery = useQuery<FetchResult<LibraryCollection[]>>({
     queryKey: [QUERY_KEYS.collections],
     queryFn: () => fetchWithAuth<LibraryCollection[]>(QUERY_KEYS.collections),
     staleTime: 60000,
   });
 
-  const statsQuery = useQuery<StorageStats | null>({
+  const statsQuery = useQuery<FetchResult<StorageStats>>({
     queryKey: [QUERY_KEYS.stats],
     queryFn: () => fetchWithAuth<StorageStats>(QUERY_KEYS.stats),
     staleTime: 30000,
@@ -319,15 +351,19 @@ export function useCloudLibrary(filters?: FileFilters) {
     },
     onMutate: async (fileId) => {
       await queryClient.cancelQueries({ queryKey: [QUERY_KEYS.files] });
-      const previousFiles = queryClient.getQueryData<LibraryFile[]>([QUERY_KEYS.files, filters]);
-      queryClient.setQueryData<LibraryFile[] | null>([QUERY_KEYS.files, filters], (old) =>
-        old?.filter((f) => f.uuid !== fileId) ?? null
-      );
-      return { previousFiles };
+      const previousData = queryClient.getQueryData<FetchResult<LibraryFile[]>>([QUERY_KEYS.files, filters]);
+      queryClient.setQueryData<FetchResult<LibraryFile[]>>([QUERY_KEYS.files, filters], (old) => {
+        if (!old) return { data: [], error: null, isAuthenticated: true };
+        return {
+          ...old,
+          data: (old.data ?? []).filter((f) => f.uuid !== fileId),
+        };
+      });
+      return { previousData };
     },
     onError: (_err, _fileId, context) => {
-      if (context?.previousFiles) {
-        queryClient.setQueryData([QUERY_KEYS.files, filters], context.previousFiles);
+      if (context?.previousData) {
+        queryClient.setQueryData([QUERY_KEYS.files, filters], context.previousData);
       }
     },
     onSettled: () => {
@@ -488,19 +524,24 @@ export function useCloudLibrary(filters?: FileFilters) {
     },
   });
 
+  const isAuthenticated = filesQuery.data?.isAuthenticated ?? true;
+  const libraryError = filesQuery.data?.error ?? null;
+
   return {
-    files: filesQuery.data ?? [],
-    folders: foldersQuery.data ?? [],
-    collections: collectionsQuery.data ?? [],
-    stats: statsQuery.data,
+    files: filesQuery.data?.data ?? [],
+    folders: foldersQuery.data?.data ?? [],
+    collections: collectionsQuery.data?.data ?? [],
+    stats: statsQuery.data?.data ?? null,
 
     isLoading: filesQuery.isLoading,
     isFoldersLoading: foldersQuery.isLoading,
     isCollectionsLoading: collectionsQuery.isLoading,
     isStatsLoading: statsQuery.isLoading,
 
-    isError: filesQuery.isError,
+    isError: filesQuery.isError || !!libraryError,
     error: filesQuery.error,
+    libraryError,
+    isAuthenticated,
 
     uploadProgress: Array.from(uploadProgress.values()),
 

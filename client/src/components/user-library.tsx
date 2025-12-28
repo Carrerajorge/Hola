@@ -276,12 +276,16 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
     getDownloadUrl,
     uploadFile,
     isUploading,
+    isAuthenticated,
+    libraryError,
   } = useCloudLibrary({ type: filterType as FileType | undefined });
 
+  const safeFiles = files ?? [];
+
   const filteredFiles = useMemo(() => {
-    if (activeTab === "all") return files;
-    return files.filter((f) => f.type === activeTab);
-  }, [files, activeTab]);
+    if (activeTab === "all") return safeFiles;
+    return safeFiles.filter((f) => f.type === activeTab);
+  }, [safeFiles, activeTab]);
 
   const handleTabChange = (value: string) => {
     setActiveTab(value as FilterType);
@@ -404,7 +408,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
                   className="px-4"
                   data-testid="tab-all"
                 >
-                  Todo ({files.length})
+                  Todo ({safeFiles.length})
                 </TabsTrigger>
                 <TabsTrigger
                   value="image"
@@ -435,7 +439,17 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
 
             <ScrollArea className="flex-1 px-6 py-4">
               <TabsContent value={activeTab} className="mt-0 h-full">
-                {isLoading ? (
+                {!isAuthenticated ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center" data-testid="auth-required-state">
+                    <FolderOpen className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                    <p className="text-lg font-medium text-muted-foreground">
+                      Inicia sesión para ver tu biblioteca
+                    </p>
+                    <p className="text-sm text-muted-foreground/70 mt-1">
+                      Necesitas estar autenticado para acceder a tus archivos
+                    </p>
+                  </div>
+                ) : isLoading ? (
                   <div
                     className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
                     data-testid="loading-skeleton"
