@@ -3802,15 +3802,15 @@ IMPORTANTE:
           </Panel>
         </PanelGroup>
       ) : (
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          {/* Messages Area - only show when there are messages */}
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+          {/* Messages Area - scrollable section */}
+          <div 
+            ref={messagesContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto min-h-0"
+          >
           {hasMessages && (
-            <div 
-              ref={messagesContainerRef}
-              onScroll={handleScroll}
-              className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6 overscroll-contain scroll-smooth"
-              style={{ paddingBottom: 'var(--composer-height, 120px)' }}
-            >
+            <div className="p-4 sm:p-6 md:p-10 space-y-6">
               <MessageList
                 messages={messages}
                 variant="default"
@@ -3957,8 +3957,10 @@ IMPORTANTE:
               )}
             </div>
           )}
+          </div>
+          {/* End of scrollable area */}
           
-          {/* Input Bar */}
+          {/* Input Bar - outside scroll container */}
           <Composer
             input={input}
             setInput={setInput}

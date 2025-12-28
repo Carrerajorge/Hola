@@ -743,10 +743,10 @@ export function Composer({
 
   const containerClass = isDocumentMode
     ? cn(
-        "sticky bottom-0 p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
+        "p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
         isDraggingOver && "ring-2 ring-primary rounded-2xl"
       )
-    : "shrink-0 px-4 pb-4 pt-2 bg-background sticky bottom-0 z-10";
+    : "shrink-0 px-4 pb-4 pt-2 bg-background";
 
   const inputContainerClass = isDocumentMode
     ? "relative flex flex-col rounded-3xl bg-zinc-100/80 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-700/50 px-5 py-4 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-all duration-200"
