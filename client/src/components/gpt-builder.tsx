@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { useModelAvailability } from "@/contexts/ModelAvailabilityContext";
 import type { Gpt } from "./gpt-explorer";
 import type { GptKnowledge, GptAction } from "@shared/schema";
 
@@ -57,12 +58,14 @@ interface ActionFormData {
 
 export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilderProps) {
   const { toast } = useToast();
+  const { availableModels } = useModelAvailability();
   const [activeTab, setActiveTab] = useState<"crear" | "configurar">("configurar");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [knowledgeFiles, setKnowledgeFiles] = useState<GptKnowledge[]>([]);
   const [actions, setActions] = useState<GptAction[]>([]);
   const [previewMessage, setPreviewMessage] = useState("");
+  const [previewModelId, setPreviewModelId] = useState<string>("");
   const [hasChanges, setHasChanges] = useState(false);
   const [showActionEditor, setShowActionEditor] = useState(false);
   const [editingAction, setEditingAction] = useState<GptAction | null>(null);
@@ -895,14 +898,19 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
             <div className="w-[400px] flex flex-col bg-muted/20">
               <div className="flex items-center justify-between px-4 py-3 border-b">
                 <span className="text-sm font-medium">Vista previa</span>
-                <Select defaultValue="5.2">
-                  <SelectTrigger className="w-[120px] h-8 text-xs">
-                    <SelectValue />
+                <Select 
+                  value={previewModelId || (availableModels[0]?.modelId || "")} 
+                  onValueChange={setPreviewModelId}
+                >
+                  <SelectTrigger className="w-[160px] h-8 text-xs">
+                    <SelectValue placeholder="Seleccionar modelo" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="5.2">Modelo 5.2</SelectItem>
-                    <SelectItem value="4o">GPT-4o</SelectItem>
-                    <SelectItem value="4o-mini">GPT-4o mini</SelectItem>
+                    {availableModels.map((model) => (
+                      <SelectItem key={model.id} value={model.modelId}>
+                        {model.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
