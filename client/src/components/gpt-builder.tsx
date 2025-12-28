@@ -19,11 +19,19 @@ import {
   Copy,
   Globe,
   Lock,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Upload,
+  FileText,
+  File,
+  Zap,
+  Play,
+  Code,
+  Send
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import type { Gpt } from "./gpt-explorer";
+import type { GptKnowledge, GptAction } from "@shared/schema";
 
 interface GptBuilderProps {
   open: boolean;
@@ -36,6 +44,11 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("create");
   const [saving, setSaving] = useState(false);
+  const [knowledgeFiles, setKnowledgeFiles] = useState<GptKnowledge[]>([]);
+  const [actions, setActions] = useState<GptAction[]>([]);
+  const [previewMessage, setPreviewMessage] = useState("");
+  const [previewResponse, setPreviewResponse] = useState("");
+  const [testingPreview, setTestingPreview] = useState(false);
   
   const [formData, setFormData] = useState({
     name: "",
@@ -82,6 +95,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           pptCreation: true
         }
       });
+      loadKnowledgeAndActions(editingGpt.id);
     } else {
       setFormData({
         name: "",
@@ -103,8 +117,25 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           pptCreation: true
         }
       });
+      setKnowledgeFiles([]);
+      setActions([]);
     }
+    setPreviewMessage("");
+    setPreviewResponse("");
   }, [editingGpt, open]);
+
+  const loadKnowledgeAndActions = async (gptId: string) => {
+    try {
+      const [knowledgeRes, actionsRes] = await Promise.all([
+        fetch(`/api/gpts/${gptId}/knowledge`),
+        fetch(`/api/gpts/${gptId}/actions`)
+      ]);
+      if (knowledgeRes.ok) setKnowledgeFiles(await knowledgeRes.json());
+      if (actionsRes.ok) setActions(await actionsRes.json());
+    } catch (error) {
+      console.error("Error loading knowledge/actions:", error);
+    }
+  };
 
   const generateSlug = (name: string, addSuffix = false) => {
     let slug = name
@@ -238,8 +269,22 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
               <div className="flex items-center gap-4">
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
                   <TabsList className="bg-muted/50">
-                    <TabsTrigger value="create" data-testid="tab-create">Crear</TabsTrigger>
-                    <TabsTrigger value="configure" data-testid="tab-configure">Configurar</TabsTrigger>
+                    <TabsTrigger value="create" data-testid="tab-create">
+                      <Bot className="h-4 w-4 mr-1.5" />
+                      Crear
+                    </TabsTrigger>
+                    <TabsTrigger value="knowledge" data-testid="tab-knowledge">
+                      <FileText className="h-4 w-4 mr-1.5" />
+                      Conocimiento
+                    </TabsTrigger>
+                    <TabsTrigger value="actions" data-testid="tab-actions">
+                      <Zap className="h-4 w-4 mr-1.5" />
+                      Acciones
+                    </TabsTrigger>
+                    <TabsTrigger value="configure" data-testid="tab-configure">
+                      <Settings2 className="h-4 w-4 mr-1.5" />
+                      Configurar
+                    </TabsTrigger>
                   </TabsList>
                 </Tabs>
               </div>
@@ -360,6 +405,206 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                         className="mt-1"
                         data-testid="input-gpt-welcome"
                       />
+                    </div>
+                  </>
+                )}
+
+                {activeTab === "knowledge" && (
+                  <>
+                    <div className="space-y-4">
+                      <div>
+                        <Label>Base de conocimiento</Label>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          Sube archivos para que tu GPT pueda usar como referencia. Soporta PDF, TXT, DOCX, XLSX y más.
+                        </p>
+                        
+                        <div className="border-2 border-dashed rounded-lg p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
+                          onClick={() => document.getElementById("file-upload")?.click()}
+                          data-testid="knowledge-upload-zone"
+                        >
+                          <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                          <p className="font-medium">Arrastra archivos aquí o haz clic para subir</p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            PDF, TXT, DOCX, XLSX, CSV, JSON (máx. 20MB)
+                          </p>
+                          <input
+                            id="file-upload"
+                            type="file"
+                            multiple
+                            accept=".pdf,.txt,.docx,.xlsx,.csv,.json,.md"
+                            className="hidden"
+                            onChange={(e) => {
+                              const files = e.target.files;
+                              if (files && editingGpt) {
+                                Array.from(files).forEach(async (file) => {
+                                  toast({
+                                    title: "Archivo detectado",
+                                    description: `${file.name} - La subida se implementará con Object Storage`
+                                  });
+                                });
+                              } else if (!editingGpt) {
+                                toast({
+                                  title: "Guarda primero",
+                                  description: "Guarda el GPT antes de agregar archivos",
+                                  variant: "destructive"
+                                });
+                              }
+                            }}
+                            data-testid="file-input"
+                          />
+                        </div>
+                      </div>
+
+                      {knowledgeFiles.length > 0 && (
+                        <div className="space-y-2">
+                          <Label>Archivos cargados ({knowledgeFiles.length})</Label>
+                          {knowledgeFiles.map((file) => (
+                            <div key={file.id} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`knowledge-file-${file.id}`}>
+                              <div className="flex items-center gap-3">
+                                <File className="h-5 w-5 text-muted-foreground" />
+                                <div>
+                                  <p className="font-medium text-sm">{file.fileName}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {(file.fileSize / 1024).toFixed(1)} KB - {file.embeddingStatus}
+                                  </p>
+                                </div>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={async () => {
+                                  if (editingGpt) {
+                                    await fetch(`/api/gpts/${editingGpt.id}/knowledge/${file.id}`, { method: "DELETE" });
+                                    setKnowledgeFiles(prev => prev.filter(f => f.id !== file.id));
+                                    toast({ title: "Archivo eliminado" });
+                                  }
+                                }}
+                                data-testid={`delete-knowledge-${file.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {knowledgeFiles.length === 0 && (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <FileText className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                          <p>No hay archivos en la base de conocimiento</p>
+                          <p className="text-sm">Sube archivos para que el GPT pueda usarlos como referencia</p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {activeTab === "actions" && (
+                  <>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label>Acciones personalizadas</Label>
+                          <p className="text-sm text-muted-foreground">
+                            Conecta APIs externas para que tu GPT pueda realizar acciones.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            if (!editingGpt) {
+                              toast({
+                                title: "Guarda primero",
+                                description: "Guarda el GPT antes de agregar acciones",
+                                variant: "destructive"
+                              });
+                              return;
+                            }
+                            toast({
+                              title: "Crear acción",
+                              description: "El editor de acciones se abrirá aquí"
+                            });
+                          }}
+                          data-testid="button-add-action"
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Nueva acción
+                        </Button>
+                      </div>
+
+                      {actions.length > 0 && (
+                        <div className="space-y-2">
+                          {actions.map((action) => (
+                            <div key={action.id} className="flex items-center justify-between p-4 border rounded-lg" data-testid={`action-${action.id}`}>
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                                  <Code className="h-5 w-5 text-primary" />
+                                </div>
+                                <div>
+                                  <p className="font-medium">{action.name}</p>
+                                  <p className="text-sm text-muted-foreground">
+                                    {action.httpMethod} {action.endpoint}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">
+                                  {action.usageCount} usos
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (editingGpt) {
+                                      await fetch(`/api/gpts/${editingGpt.id}/actions/${action.id}`, { method: "DELETE" });
+                                      setActions(prev => prev.filter(a => a.id !== action.id));
+                                      toast({ title: "Acción eliminada" });
+                                    }
+                                  }}
+                                  data-testid={`delete-action-${action.id}`}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {actions.length === 0 && (
+                        <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
+                          <Zap className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                          <p className="font-medium">Sin acciones personalizadas</p>
+                          <p className="text-sm">Las acciones permiten a tu GPT interactuar con APIs externas</p>
+                        </div>
+                      )}
+
+                      <div className="pt-4 border-t">
+                        <Label className="text-base">Ejemplos de acciones</Label>
+                        <div className="grid gap-2 mt-3">
+                          <button className="flex items-start gap-3 p-3 border rounded-lg text-left hover:bg-muted/50 transition-colors">
+                            <Globe className="h-5 w-5 text-blue-500 mt-0.5" />
+                            <div>
+                              <p className="font-medium text-sm">Consultar API del clima</p>
+                              <p className="text-xs text-muted-foreground">Obtén información meteorológica en tiempo real</p>
+                            </div>
+                          </button>
+                          <button className="flex items-start gap-3 p-3 border rounded-lg text-left hover:bg-muted/50 transition-colors">
+                            <Code className="h-5 w-5 text-green-500 mt-0.5" />
+                            <div>
+                              <p className="font-medium text-sm">Buscar en base de datos</p>
+                              <p className="text-xs text-muted-foreground">Consulta información de tu sistema</p>
+                            </div>
+                          </button>
+                          <button className="flex items-start gap-3 p-3 border rounded-lg text-left hover:bg-muted/50 transition-colors">
+                            <Send className="h-5 w-5 text-purple-500 mt-0.5" />
+                            <div>
+                              <p className="font-medium text-sm">Enviar notificaciones</p>
+                              <p className="text-xs text-muted-foreground">Envía emails o mensajes de Slack</p>
+                            </div>
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </>
                 )}
@@ -548,21 +793,44 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
             </ScrollArea>
           </div>
 
-          <div className="w-80 border-l bg-muted/30 flex flex-col">
-            <div className="p-4 border-b">
-              <h3 className="font-medium">Vista previa</h3>
+          <div className="w-96 border-l bg-muted/30 flex flex-col">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="font-medium flex items-center gap-2">
+                <Play className="h-4 w-4" />
+                Vista previa
+              </h3>
             </div>
             <ScrollArea className="flex-1">
-              <div className="p-4">
+              <div className="p-4 space-y-4">
                 <div className="bg-background rounded-lg p-4 space-y-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
-                      <Bot className="h-5 w-5 text-muted-foreground" />
+                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                      <Bot className="h-6 w-6 text-primary" />
                     </div>
-                    <div>
-                      <p className="font-medium">{formData.name || "Nombre del GPT"}</p>
-                      <p className="text-xs text-muted-foreground">{formData.description || "Sin descripción"}</p>
+                    <div className="flex-1">
+                      <p className="font-semibold">{formData.name || "Nombre del GPT"}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-2">{formData.description || "Sin descripción"}</p>
                     </div>
+                  </div>
+
+                  <div className="flex gap-2 flex-wrap">
+                    {knowledgeFiles.length > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs rounded-full">
+                        <FileText className="h-3 w-3" />
+                        {knowledgeFiles.length} archivo{knowledgeFiles.length > 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {actions.length > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs rounded-full">
+                        <Zap className="h-3 w-3" />
+                        {actions.length} acción{actions.length > 1 ? "es" : ""}
+                      </span>
+                    )}
+                    {Object.entries(formData.capabilities).filter(([_, v]) => v).length > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs rounded-full">
+                        {Object.entries(formData.capabilities).filter(([_, v]) => v).length} capacidades
+                      </span>
+                    )}
                   </div>
                   
                   {formData.welcomeMessage && (
@@ -577,6 +845,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                         <button
                           key={index}
                           className="w-full text-left p-2 border rounded-lg text-sm hover:bg-muted/50 transition-colors"
+                          onClick={() => setPreviewMessage(starter)}
                         >
                           {starter}
                         </button>
