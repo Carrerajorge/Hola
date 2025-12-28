@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useLocation } from "wouter";
-import { Plus, Loader2, Sparkles, Check } from "lucide-react";
+import { SquarePen, Loader2, Check } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -61,10 +61,7 @@ export function NewChatButton({
         ) : showSuccess ? (
           <Check className="h-5 w-5" />
         ) : (
-          <div className="relative">
-            <Plus className={cn("h-5 w-5 transition-transform duration-300", isHovered && "rotate-90")} />
-            {isHovered && <Sparkles className="absolute -top-1 -right-1 w-3 h-3 text-yellow-300 opacity-100 animate-pulse" />}
-          </div>
+          <SquarePen className={cn("h-5 w-5 transition-transform duration-300", isHovered && "scale-110")} />
         )}
         
         {variant !== "fab" && (
