@@ -726,6 +726,75 @@ export const insertGptVersionSchema = createInsertSchema(gptVersions).omit({
 export type InsertGptVersion = z.infer<typeof insertGptVersionSchema>;
 export type GptVersion = typeof gptVersions.$inferSelect;
 
+// GPT Knowledge Base - files and documents attached to GPTs
+export const gptKnowledge = pgTable("gpt_knowledge", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  gptId: varchar("gpt_id").notNull().references(() => gpts.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  fileType: text("file_type").notNull(), // pdf, txt, docx, xlsx, etc.
+  fileSize: integer("file_size").notNull(),
+  storageUrl: text("storage_url").notNull(),
+  contentHash: text("content_hash"), // for deduplication
+  extractedText: text("extracted_text"), // parsed text content for RAG
+  embeddingStatus: text("embedding_status").default("pending"), // pending, processing, completed, failed
+  chunkCount: integer("chunk_count").default(0),
+  metadata: jsonb("metadata"), // { pages, wordCount, language, etc. }
+  isActive: text("is_active").default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("gpt_knowledge_gpt_idx").on(table.gptId),
+  index("gpt_knowledge_status_idx").on(table.embeddingStatus),
+]);
+
+export const insertGptKnowledgeSchema = createInsertSchema(gptKnowledge).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  chunkCount: true,
+});
+
+export type InsertGptKnowledge = z.infer<typeof insertGptKnowledgeSchema>;
+export type GptKnowledge = typeof gptKnowledge.$inferSelect;
+
+// GPT Actions - custom API integrations for GPTs
+export const gptActions = pgTable("gpt_actions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  gptId: varchar("gpt_id").notNull().references(() => gpts.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  actionType: text("action_type").notNull().default("api"), // api, webhook, function
+  httpMethod: text("http_method").default("GET"), // GET, POST, PUT, DELETE, PATCH
+  endpoint: text("endpoint").notNull(),
+  headers: jsonb("headers"), // { "Authorization": "Bearer {{API_KEY}}", etc. }
+  bodyTemplate: text("body_template"), // JSON template with {{variable}} placeholders
+  responseMapping: jsonb("response_mapping"), // how to parse the response
+  authType: text("auth_type").default("none"), // none, api_key, oauth, bearer
+  authConfig: jsonb("auth_config"), // encrypted auth configuration
+  parameters: jsonb("parameters"), // [{ name, type, required, description }]
+  rateLimit: integer("rate_limit").default(100), // calls per minute
+  timeout: integer("timeout").default(30000), // ms
+  isActive: text("is_active").default("true"),
+  lastUsedAt: timestamp("last_used_at"),
+  usageCount: integer("usage_count").default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("gpt_actions_gpt_idx").on(table.gptId),
+  index("gpt_actions_type_idx").on(table.actionType),
+]);
+
+export const insertGptActionSchema = createInsertSchema(gptActions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  usageCount: true,
+  lastUsedAt: true,
+});
+
+export type InsertGptAction = z.infer<typeof insertGptActionSchema>;
+export type GptAction = typeof gptActions.$inferSelect;
+
 // Admin Tables
 
 // AI Models Registry

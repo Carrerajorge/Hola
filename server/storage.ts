@@ -33,6 +33,8 @@ import {
   type Gpt, type InsertGpt,
   type GptCategory, type InsertGptCategory,
   type GptVersion, type InsertGptVersion,
+  type GptKnowledge, type InsertGptKnowledge,
+  type GptAction, type InsertGptAction,
   type AiModel, type InsertAiModel,
   type Payment, type InsertPayment,
   type Invoice, type InsertInvoice,
@@ -66,7 +68,7 @@ import {
   type AgentGapLog, type InsertAgentGapLog,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
-  gpts, gptCategories, gptVersions, users,
+  gpts, gptCategories, gptVersions, gptKnowledge, gptActions, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
   notificationEventTypes, notificationPreferences, userSettings,
   integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs,
@@ -159,6 +161,19 @@ export interface IStorage {
   createGptVersion(version: InsertGptVersion): Promise<GptVersion>;
   getGptVersions(gptId: string): Promise<GptVersion[]>;
   getLatestGptVersion(gptId: string): Promise<GptVersion | undefined>;
+  // GPT Knowledge operations
+  createGptKnowledge(knowledge: InsertGptKnowledge): Promise<GptKnowledge>;
+  getGptKnowledge(gptId: string): Promise<GptKnowledge[]>;
+  getGptKnowledgeById(id: string): Promise<GptKnowledge | undefined>;
+  updateGptKnowledge(id: string, updates: Partial<InsertGptKnowledge>): Promise<GptKnowledge | undefined>;
+  deleteGptKnowledge(id: string): Promise<void>;
+  // GPT Actions operations
+  createGptAction(action: InsertGptAction): Promise<GptAction>;
+  getGptActions(gptId: string): Promise<GptAction[]>;
+  getGptActionById(id: string): Promise<GptAction | undefined>;
+  updateGptAction(id: string, updates: Partial<InsertGptAction>): Promise<GptAction | undefined>;
+  deleteGptAction(id: string): Promise<void>;
+  incrementGptActionUsage(id: string): Promise<void>;
   // Admin: User management
   getAllUsers(): Promise<User[]>;
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
@@ -875,6 +890,70 @@ export class MemStorage implements IStorage {
       .orderBy(desc(gptVersions.versionNumber))
       .limit(1);
     return result;
+  }
+
+  // GPT Knowledge operations
+  async createGptKnowledge(knowledge: InsertGptKnowledge): Promise<GptKnowledge> {
+    const [result] = await db.insert(gptKnowledge).values(knowledge).returning();
+    return result;
+  }
+
+  async getGptKnowledge(gptId: string): Promise<GptKnowledge[]> {
+    return db.select().from(gptKnowledge)
+      .where(and(eq(gptKnowledge.gptId, gptId), eq(gptKnowledge.isActive, "true")))
+      .orderBy(desc(gptKnowledge.createdAt));
+  }
+
+  async getGptKnowledgeById(id: string): Promise<GptKnowledge | undefined> {
+    const [result] = await db.select().from(gptKnowledge).where(eq(gptKnowledge.id, id));
+    return result;
+  }
+
+  async updateGptKnowledge(id: string, updates: Partial<InsertGptKnowledge>): Promise<GptKnowledge | undefined> {
+    const [result] = await db.update(gptKnowledge)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(gptKnowledge.id, id))
+      .returning();
+    return result;
+  }
+
+  async deleteGptKnowledge(id: string): Promise<void> {
+    await db.update(gptKnowledge).set({ isActive: "false" }).where(eq(gptKnowledge.id, id));
+  }
+
+  // GPT Actions operations
+  async createGptAction(action: InsertGptAction): Promise<GptAction> {
+    const [result] = await db.insert(gptActions).values(action).returning();
+    return result;
+  }
+
+  async getGptActions(gptId: string): Promise<GptAction[]> {
+    return db.select().from(gptActions)
+      .where(and(eq(gptActions.gptId, gptId), eq(gptActions.isActive, "true")))
+      .orderBy(gptActions.name);
+  }
+
+  async getGptActionById(id: string): Promise<GptAction | undefined> {
+    const [result] = await db.select().from(gptActions).where(eq(gptActions.id, id));
+    return result;
+  }
+
+  async updateGptAction(id: string, updates: Partial<InsertGptAction>): Promise<GptAction | undefined> {
+    const [result] = await db.update(gptActions)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(gptActions.id, id))
+      .returning();
+    return result;
+  }
+
+  async deleteGptAction(id: string): Promise<void> {
+    await db.update(gptActions).set({ isActive: "false" }).where(eq(gptActions.id, id));
+  }
+
+  async incrementGptActionUsage(id: string): Promise<void> {
+    await db.update(gptActions)
+      .set({ usageCount: sql`${gptActions.usageCount} + 1`, lastUsedAt: new Date() })
+      .where(eq(gptActions.id, id));
   }
 
   // Admin: User management
