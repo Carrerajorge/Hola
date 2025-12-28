@@ -546,7 +546,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                 </button>
               </div>
 
-              <ScrollArea className="flex-1">
+              <div className="flex-1 overflow-y-auto">
                 <div className="p-6 max-w-2xl mx-auto space-y-6">
                   {activeTab === "crear" ? (
                     <div className="space-y-4">
@@ -833,7 +833,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                     </>
                   )}
                 </div>
-              </ScrollArea>
+              </div>
             </div>
 
             <div className="w-[400px] flex flex-col bg-muted/20">
