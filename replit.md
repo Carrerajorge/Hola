@@ -28,8 +28,33 @@ Preferred communication style: Simple, everyday language.
 - **Multi-Intent Pipeline**: Processes complex user prompts through stages: Plan, Decompose, Execute, and Aggregate, with automatic detection and parallel execution.
 - **Document Generation System**: Generates Excel (.xlsx) and Word (.docx) files based on Zod schemas (`shared/documentSpecs.ts`), using LLM-driven orchestration with repair loops for validation. Includes dedicated services for rendering Excel and Word documents.
 - **Professional CV/Resume Generation System**: A three-layer architecture for structured CV generation, featuring a `CvSpec` schema, a template engine with multiple layouts and styling options, and an intelligent mapping layer for data formatting and visual elements. It uses dedicated prompts for CV content generation.
-- **System Observability**: Implements structured JSON logging, health monitoring for AI providers and the database, an alert manager, and request tracing middleware.
+- **System Observability**: Implements structured JSON logging with correlation IDs (`server/utils/logger.ts`), health monitoring for AI providers and the database, an alert manager, and request tracing middleware with AsyncLocalStorage context propagation.
 - **Connector Management**: Tracks usage and provides threshold-based alerting for various connectors (e.g., Gmail, Gemini).
+
+### Infrastructure (Enterprise-Grade)
+- **Security**:
+  - Password hashing with bcrypt (12 salt rounds) via `server/utils/password.ts`
+  - Backwards-compatible password migration on login
+  - Multi-tenant validation in repository layer
+- **Modular Repositories** (`server/repositories/`):
+  - `baseRepository.ts`: Ownership validation, custom errors (OwnershipError, ValidationError, NotFoundError), transaction helpers, structured logging
+  - `userRepository.ts`: User CRUD with validation
+  - `chatRepository.ts`: Chat/message operations with ownership checks
+- **Error Handling** (`server/utils/`):
+  - Custom error classes: AppError, ValidationError, NotFoundError, AuthenticationError, AuthorizationError, RateLimitError, ExternalServiceError
+  - Retry utility with exponential backoff (`retry.ts`)
+  - Circuit breaker pattern for external service calls (`circuitBreaker.ts`)
+  - Global Express error handler middleware (`server/middleware/errorHandler.ts`)
+- **Structured Logging**:
+  - JSON logger with log levels via LOG_LEVEL env var (`server/utils/logger.ts`)
+  - Request correlation with traceId via AsyncLocalStorage (`server/middleware/correlationContext.ts`)
+  - Request logging middleware with duration tracking (`server/middleware/requestLogger.ts`)
+- **API Validation**:
+  - Zod validation middleware for body/query/params (`server/middleware/validateRequest.ts`)
+  - Common API schemas with pagination, sorting, UUID validation (`server/schemas/apiSchemas.ts`)
+- **Database Performance**:
+  - Optimized indices for frequently queried fields (chatMessages.chatId, chats.userId, aiModels.provider, etc.)
+  - Migration file: `server/migrations/add_performance_indices.sql`
 
 ### Data Storage
 - **Database**: PostgreSQL, managed with Drizzle ORM for schema definition and migrations.
