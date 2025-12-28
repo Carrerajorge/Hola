@@ -748,11 +748,14 @@ export function Composer({
       )
     : "shrink-0 px-4 pb-4";
 
+  const hasMultilineText = input.includes('\n') || input.length > 60;
+  
   const inputContainerClass = isDocumentMode
-    ? "relative flex flex-col rounded-full bg-muted/20 dark:bg-muted/10 border border-border/40 px-4 py-1 focus-within:border-border/60 transition-all duration-200"
+    ? "relative flex flex-col rounded-2xl bg-zinc-100/80 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-700/50 px-4 py-3 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-all duration-200"
     : cn(
-        "max-w-2xl mx-auto bg-muted/30 dark:bg-muted/20 rounded-full border border-border/40 dark:border-border/30 px-4 py-2 relative hover:border-border/60 focus-within:border-border/70 focus-within:bg-muted/40 transition-all duration-200",
-        selectedDocText && "border-primary/30",
+        "max-w-2xl mx-auto bg-zinc-100/80 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-700/50 relative transition-all duration-200",
+        hasMultilineText ? "rounded-2xl px-4 py-3" : "rounded-full px-4 py-2",
+        selectedDocText && "border-zinc-300 dark:border-zinc-600",
         isDraggingOver && "border-primary/50 bg-primary/5"
       );
 
@@ -875,29 +878,88 @@ export function Composer({
       />
 
       <div className={inputContainerClass}>
-        <div className={isDocumentMode ? "" : "flex flex-col gap-2"}>
-          {renderAttachmentPreview()}
+        {renderAttachmentPreview()}
 
-          {isDocumentMode && selectedDocText && handleDocTextDeselect && (
-            <div className="mb-2 px-1 animate-in fade-in duration-150" data-testid="selected-doc-text-banner">
-              <div className="bg-teal-50/80 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-700 rounded-lg px-3 py-1.5 text-sm text-teal-700 dark:text-teal-300 flex items-center gap-2">
-                <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
-                <span className="truncate flex-1" data-testid="selected-doc-text-preview">
-                  {selectedDocText.length > 50 ? selectedDocText.substring(0, 50) + '...' : selectedDocText}
-                </span>
-                <button 
-                  onClick={handleDocTextDeselect}
-                  className="text-teal-500 hover:text-teal-700 flex-shrink-0 p-0.5 rounded hover:bg-teal-100 dark:hover:bg-teal-800/50 transition-colors"
-                  aria-label="Deselect text"
-                  data-testid="button-deselect-doc-text"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+        {isDocumentMode && selectedDocText && handleDocTextDeselect && (
+          <div className="mb-2 animate-in fade-in duration-150" data-testid="selected-doc-text-banner">
+            <div className="bg-zinc-200/60 dark:bg-zinc-700/40 rounded-lg px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-300 flex items-center gap-2">
+              <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+              <span className="truncate flex-1" data-testid="selected-doc-text-preview">
+                {selectedDocText.length > 50 ? selectedDocText.substring(0, 50) + '...' : selectedDocText}
+              </span>
+              <button 
+                onClick={handleDocTextDeselect}
+                className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 flex-shrink-0 p-0.5 rounded hover:bg-zinc-300/50 dark:hover:bg-zinc-600/50 transition-colors"
+                aria-label="Deselect text"
+                data-testid="button-deselect-doc-text"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {hasMultilineText ? (
+          <div className="flex flex-col gap-2 relative">
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInputChange}
+              onFocus={onTextareaFocus}
+              onKeyDown={(e) => {
+                handleMentionKeyDown(e);
+                if (showMentionPopover) return;
+                handleHistoryNavigation(e);
+                const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
+                  e.preventDefault();
+                  handleSubmitWithHistory();
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
+                  e.preventDefault();
+                  handleSubmitWithHistory();
+                }
+              }}
+              onPaste={handlePaste}
+              placeholder={placeholder}
+              aria-label="Message input"
+              aria-describedby="composer-hint"
+              className="min-h-[60px] max-h-[200px] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed"
+              rows={3}
+            />
+            
+            <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center">
+                {renderToolsPopover()}
+                {!isDocumentMode && renderSelectedToolLogo()}
+                {renderSelectedDocToolLogo()}
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <RecordingPanel
+                  isRecording={isRecording}
+                  isPaused={isPaused}
+                  recordingTime={recordingTime}
+                  canSend={hasContent}
+                  onDiscard={discardVoiceRecording}
+                  onPause={pauseVoiceRecording}
+                  onResume={resumeVoiceRecording}
+                  onSend={sendVoiceRecording}
+                  onToggleRecording={toggleVoiceRecording}
+                  onOpenVoiceChat={() => setIsVoiceChatOpen(true)}
+                  onStopChat={handleStopChat}
+                  onSubmit={handleSubmit}
+                  aiState={aiState}
+                  hasContent={hasContent}
+                />
               </div>
             </div>
-          )}
-          
-          <div className="flex items-center gap-2 relative">
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 relative">
+            {renderToolsPopover()}
+            
             <div className="flex-1 min-w-0">
               <Textarea
                 ref={textareaRef}
@@ -907,17 +969,13 @@ export function Composer({
                 onKeyDown={(e) => {
                   handleMentionKeyDown(e);
                   if (showMentionPopover) return;
-                  
                   handleHistoryNavigation(e);
-                  
                   const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
-                  
                   if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
                     e.preventDefault();
                     handleSubmitWithHistory();
                     return;
                   }
-                  
                   if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
                     e.preventDefault();
                     handleSubmitWithHistory();
@@ -927,51 +985,15 @@ export function Composer({
                 placeholder={placeholder}
                 aria-label="Message input"
                 aria-describedby="composer-hint"
-                className={cn(
-                  "min-h-[24px] max-h-[200px] w-full resize-none border-0 bg-transparent py-1 px-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-sm text-foreground placeholder:text-muted-foreground/50 transition-colors",
-                  !isDocumentMode && "leading-normal"
-                )}
+                className="min-h-[24px] w-full resize-none border-0 bg-transparent py-0.5 px-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-normal"
                 rows={1}
               />
             </div>
             
-            {showMentionPopover && filteredSources.length > 0 && (
-              <div 
-                className="absolute bottom-full left-0 mb-2 w-56 bg-popover/95 backdrop-blur-sm border border-border/50 rounded-lg shadow-lg z-50 overflow-hidden"
-                data-testid="mention-popover"
-              >
-                <div className="px-3 py-1.5 text-[11px] font-medium text-muted-foreground/70 border-b border-border/30 uppercase tracking-wide">
-                  Fuentes
-                </div>
-                <div className="py-0.5">
-                  {filteredSources.map((source, index) => (
-                    <button
-                      key={source.id}
-                      onClick={() => insertMention(source)}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 transition-colors text-left",
-                        index === mentionIndex && "bg-muted/60"
-                      )}
-                      data-testid={`mention-${source.id}`}
-                    >
-                      <div className="flex items-center justify-center w-6 h-6 rounded bg-muted/60 text-muted-foreground">
-                        {source.icon}
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="font-medium text-foreground text-sm">{source.name}</span>
-                        <span className="text-[11px] text-muted-foreground/60">{source.mention}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {!isDocumentMode && renderSelectedToolLogo()}
+            {renderSelectedDocToolLogo()}
             
-            <div className="flex items-center gap-1 flex-shrink-0">
-              {renderToolsPopover()}
-              {!isDocumentMode && renderSelectedToolLogo()}
-              {renderSelectedDocToolLogo()}
-              
+            <div className="flex items-center gap-2 flex-shrink-0">
               <RecordingPanel
                 isRecording={isRecording}
                 isPaused={isPaused}
@@ -990,80 +1012,112 @@ export function Composer({
               />
             </div>
           </div>
-          
-          {showKnowledgeBase && (
-            <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-border/20">
-              <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 text-muted-foreground text-[11px]" data-testid="knowledge-base-active">
-                <Users className="h-3 w-3" />
-                <span data-testid="knowledge-base-label">Conocimientos</span>
-                <button 
-                  onClick={() => setShowKnowledgeBase(false)}
-                  className="ml-0.5 hover:bg-muted rounded p-0.5 transition-colors focus:outline-none"
-                  aria-label="Close knowledge base"
-                  data-testid="button-close-knowledge-base"
-                >
-                  <X className="h-2.5 w-2.5" />
-                </button>
-              </div>
-              
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button 
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-muted/40 text-[11px] text-muted-foreground transition-colors"
-                    data-testid="button-fuentes-dropdown"
-                  >
-                    <span>Fuentes</span>
-                    <ChevronDown className="h-2.5 w-2.5" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-52 p-1 bg-popover/95 backdrop-blur-sm border-border/50" data-testid="fuentes-popover">
-                  <div className="grid gap-0.5">
-                    <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">
-                      Fuentes conectadas
-                    </div>
-                    
-                    {connectedSources.length === 0 ? (
-                      <div className="px-2 py-2 text-xs text-muted-foreground text-center">
-                        No hay fuentes
-                      </div>
-                    ) : (
-                      connectedSources.map(source => (
-                        <SourceListItem
-                          key={source.id}
-                          icon={source.icon}
-                          label={source.name}
-                          variant="toggle"
-                          checked={getSourceActive(source.id)}
-                          onCheckedChange={() => toggleKnowledgeSource(source.id)}
-                          data-testid={`source-${source.id}`}
-                        />
-                      ))
-                    )}
-                    
-                    <div className="border-t border-border/30 mt-0.5 pt-0.5">
-                      <SourceListItem
-                        icon={
-                          <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
-                            <circle cx="4" cy="8" r="1.5" />
-                            <circle cx="8" cy="8" r="1.5" />
-                            <circle cx="12" cy="8" r="1.5" />
-                            <circle cx="4" cy="4" r="1.5" />
-                            <circle cx="8" cy="4" r="1.5" />
-                            <circle cx="12" cy="4" r="1.5" />
-                          </svg>
-                        }
-                        label="Conectar más"
-                        variant="connect"
-                        onConnect={() => onOpenApps?.()}
-                        data-testid="source-connect-more"
-                      />
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
+        )}
+        
+        {showMentionPopover && filteredSources.length > 0 && (
+          <div 
+            className="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg z-50 overflow-hidden"
+            data-testid="mention-popover"
+          >
+            <div className="px-3 py-1.5 text-[11px] font-medium text-zinc-500 border-b border-zinc-100 dark:border-zinc-700 uppercase tracking-wide">
+              Fuentes
             </div>
-          )}
-        </div>
+            <div className="py-0.5">
+              {filteredSources.map((source, index) => (
+                <button
+                  key={source.id}
+                  onClick={() => insertMention(source)}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-700/50 transition-colors text-left",
+                    index === mentionIndex && "bg-zinc-100 dark:bg-zinc-700"
+                  )}
+                  data-testid={`mention-${source.id}`}
+                >
+                  <div className="flex items-center justify-center w-6 h-6 rounded bg-zinc-100 dark:bg-zinc-700 text-zinc-500">
+                    {source.icon}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-medium text-zinc-800 dark:text-zinc-100 text-sm">{source.name}</span>
+                    <span className="text-[11px] text-zinc-400">{source.mention}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {showKnowledgeBase && (
+          <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
+            <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-200/60 dark:bg-zinc-700/50 text-zinc-500 dark:text-zinc-400 text-[11px]" data-testid="knowledge-base-active">
+              <Users className="h-3 w-3" />
+              <span data-testid="knowledge-base-label">Conocimientos</span>
+              <button 
+                onClick={() => setShowKnowledgeBase(false)}
+                className="ml-0.5 hover:bg-zinc-300/50 dark:hover:bg-zinc-600/50 rounded p-0.5 transition-colors focus:outline-none"
+                aria-label="Close knowledge base"
+                data-testid="button-close-knowledge-base"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </div>
+            
+            <Popover>
+              <PopoverTrigger asChild>
+                <button 
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50 text-[11px] text-zinc-500 transition-colors"
+                  data-testid="button-fuentes-dropdown"
+                >
+                  <span>Fuentes</span>
+                  <ChevronDown className="h-2.5 w-2.5" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-52 p-1 bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" data-testid="fuentes-popover">
+                <div className="grid gap-0.5">
+                  <div className="px-2 py-1 text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
+                    Fuentes conectadas
+                  </div>
+                  
+                  {connectedSources.length === 0 ? (
+                    <div className="px-2 py-2 text-xs text-zinc-400 text-center">
+                      No hay fuentes
+                    </div>
+                  ) : (
+                    connectedSources.map(source => (
+                      <SourceListItem
+                        key={source.id}
+                        icon={source.icon}
+                        label={source.name}
+                        variant="toggle"
+                        checked={getSourceActive(source.id)}
+                        onCheckedChange={() => toggleKnowledgeSource(source.id)}
+                        data-testid={`source-${source.id}`}
+                      />
+                    ))
+                  )}
+                  
+                  <div className="border-t border-zinc-100 dark:border-zinc-700 mt-0.5 pt-0.5">
+                    <SourceListItem
+                      icon={
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                          <circle cx="4" cy="8" r="1.5" />
+                          <circle cx="8" cy="8" r="1.5" />
+                          <circle cx="12" cy="8" r="1.5" />
+                          <circle cx="4" cy="4" r="1.5" />
+                          <circle cx="8" cy="4" r="1.5" />
+                          <circle cx="12" cy="4" r="1.5" />
+                        </svg>
+                      }
+                      label="Conectar más"
+                      variant="connect"
+                      onConnect={() => onOpenApps?.()}
+                      data-testid="source-connect-more"
+                    />
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        )}
       </div>
 
       <div id="composer-hint" className="text-center text-[11px] text-muted-foreground/50 mt-2 tracking-wide">
