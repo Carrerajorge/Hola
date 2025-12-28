@@ -724,9 +724,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
   const rehypePlugins = useMemo(() => {
     const plugins: any[] = [];
+    if (sanitize && !enableMath) {
+      plugins.push([rehypeSanitize, sanitizeSchema]);
+    }
     if (enableMath) plugins.push(rehypeKatex);
     if (enableCodeHighlight) plugins.push(rehypeHighlight);
-    if (sanitize) plugins.push([rehypeSanitize, sanitizeSchema]);
     return plugins;
   }, [enableMath, enableCodeHighlight, sanitize]);
 
