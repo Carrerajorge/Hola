@@ -68,9 +68,19 @@ function updateUserSession(
   user: any,
   tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers
 ) {
-  user.claims = tokens.claims();
+  try {
+    if (tokens.id_token) {
+      user.claims = tokens.claims();
+    }
+  } catch (error) {
+    console.warn("[Auth] Could not extract claims from token:", error);
+  }
+  
   user.access_token = tokens.access_token;
-  user.refresh_token = tokens.refresh_token;
+  
+  if (tokens.refresh_token) {
+    user.refresh_token = tokens.refresh_token;
+  }
   
   if (tokens.expires_in) {
     user.expires_at = Math.floor(Date.now() / 1000) + tokens.expires_in;
@@ -105,10 +115,21 @@ export async function setupAuth(app: Express) {
     tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
     verified: passport.AuthenticateCallback
   ) => {
-    const user = {};
-    updateUserSession(user, tokens);
-    await upsertUser(tokens.claims());
-    verified(null, user);
+    try {
+      const user: any = {};
+      updateUserSession(user, tokens);
+      
+      if (user.claims) {
+        await upsertUser(user.claims);
+      } else if (tokens.id_token) {
+        await upsertUser(tokens.claims());
+      }
+      
+      verified(null, user);
+    } catch (error) {
+      console.error("[Auth] Verify callback error:", error);
+      verified(error as Error, undefined);
+    }
   };
 
   // Keep track of registered strategies
