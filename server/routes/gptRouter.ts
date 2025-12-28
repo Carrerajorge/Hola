@@ -202,5 +202,139 @@ export function createGptRouter() {
     }
   });
 
+  // GPT Knowledge Base routes
+  router.get("/gpts/:id/knowledge", async (req, res) => {
+    try {
+      const knowledge = await storage.getGptKnowledge(req.params.id);
+      res.json(knowledge);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/gpts/:id/knowledge", async (req, res) => {
+    try {
+      const { fileName, fileType, fileSize, storageUrl, contentHash, extractedText, embeddingStatus, metadata } = req.body;
+      
+      if (!fileName || !fileType || !fileSize || !storageUrl) {
+        return res.status(400).json({ error: "fileName, fileType, fileSize, and storageUrl are required" });
+      }
+      
+      const knowledge = await storage.createGptKnowledge({
+        gptId: req.params.id,
+        fileName,
+        fileType,
+        fileSize,
+        storageUrl,
+        contentHash: contentHash || null,
+        extractedText: extractedText || null,
+        embeddingStatus: embeddingStatus || "pending",
+        metadata: metadata || null,
+        isActive: "true"
+      });
+      res.json(knowledge);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.patch("/gpts/:id/knowledge/:knowledgeId", async (req, res) => {
+    try {
+      const updates = req.body;
+      const knowledge = await storage.updateGptKnowledge(req.params.knowledgeId, updates);
+      if (!knowledge) {
+        return res.status(404).json({ error: "Knowledge item not found" });
+      }
+      res.json(knowledge);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.delete("/gpts/:id/knowledge/:knowledgeId", async (req, res) => {
+    try {
+      await storage.deleteGptKnowledge(req.params.knowledgeId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // GPT Actions routes
+  router.get("/gpts/:id/actions", async (req, res) => {
+    try {
+      const actions = await storage.getGptActions(req.params.id);
+      res.json(actions);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/gpts/:id/actions", async (req, res) => {
+    try {
+      const { 
+        name, description, actionType, httpMethod, endpoint, 
+        headers, bodyTemplate, responseMapping, authType, authConfig, 
+        parameters, rateLimit, timeout 
+      } = req.body;
+      
+      if (!name || !endpoint) {
+        return res.status(400).json({ error: "name and endpoint are required" });
+      }
+      
+      const action = await storage.createGptAction({
+        gptId: req.params.id,
+        name,
+        description: description || null,
+        actionType: actionType || "api",
+        httpMethod: httpMethod || "GET",
+        endpoint,
+        headers: headers || null,
+        bodyTemplate: bodyTemplate || null,
+        responseMapping: responseMapping || null,
+        authType: authType || "none",
+        authConfig: authConfig || null,
+        parameters: parameters || null,
+        rateLimit: rateLimit || 100,
+        timeout: timeout || 30000,
+        isActive: "true"
+      });
+      res.json(action);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.patch("/gpts/:id/actions/:actionId", async (req, res) => {
+    try {
+      const updates = req.body;
+      const action = await storage.updateGptAction(req.params.actionId, updates);
+      if (!action) {
+        return res.status(404).json({ error: "Action not found" });
+      }
+      res.json(action);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.delete("/gpts/:id/actions/:actionId", async (req, res) => {
+    try {
+      await storage.deleteGptAction(req.params.actionId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.post("/gpts/:id/actions/:actionId/use", async (req, res) => {
+    try {
+      await storage.incrementGptActionUsage(req.params.actionId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return router;
 }
