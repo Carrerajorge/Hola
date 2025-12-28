@@ -1758,3 +1758,173 @@ export const insertExcelDocumentSchema = createInsertSchema(excelDocuments).omit
 
 export type InsertExcelDocument = z.infer<typeof insertExcelDocumentSchema>;
 export type ExcelDocument = typeof excelDocuments.$inferSelect;
+
+// ========================================
+// Enhanced Multimedia Library System
+// ========================================
+
+export const libraryFileMetadataSchema = z.object({
+  exif: z.record(z.any()).optional(),
+  colors: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
+  aiDescription: z.string().optional(),
+  sourceChat: z.string().optional(),
+  sourceMessage: z.string().optional(),
+  generatedBy: z.enum(['ai', 'user', 'system']).optional(),
+  originalPrompt: z.string().optional(),
+});
+
+export const libraryFolders = pgTable('library_folders', {
+  id: serial('id').primaryKey(),
+  uuid: text('uuid').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description'),
+  color: text('color').default('#6366f1'),
+  icon: text('icon').default('folder'),
+  parentId: integer('parent_id'),
+  path: text('path').notNull(),
+  userId: varchar('user_id').notNull(),
+  isSystem: boolean('is_system').default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  index('library_folders_user_idx').on(table.userId),
+  index('library_folders_parent_idx').on(table.parentId),
+]);
+
+export const insertLibraryFolderSchema = createInsertSchema(libraryFolders).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertLibraryFolder = z.infer<typeof insertLibraryFolderSchema>;
+export type LibraryFolder = typeof libraryFolders.$inferSelect;
+
+export const libraryFiles = pgTable('library_files', {
+  id: serial('id').primaryKey(),
+  uuid: text('uuid').notNull().unique(),
+  name: text('name').notNull(),
+  originalName: text('original_name').notNull(),
+  description: text('description'),
+  type: text('type').notNull(),
+  mimeType: text('mime_type').notNull(),
+  extension: text('extension').notNull(),
+  storagePath: text('storage_path').notNull(),
+  storageUrl: text('storage_url'),
+  thumbnailPath: text('thumbnail_path'),
+  thumbnailUrl: text('thumbnail_url'),
+  size: integer('size').notNull().default(0),
+  width: integer('width'),
+  height: integer('height'),
+  duration: integer('duration'),
+  pages: integer('pages'),
+  metadata: jsonb('metadata').$type<z.infer<typeof libraryFileMetadataSchema>>(),
+  folderId: integer('folder_id'),
+  tags: text('tags').array(),
+  isFavorite: boolean('is_favorite').default(false),
+  isArchived: boolean('is_archived').default(false),
+  isPinned: boolean('is_pinned').default(false),
+  userId: varchar('user_id').notNull(),
+  isPublic: boolean('is_public').default(false),
+  sharedWith: jsonb('shared_with').$type<string[]>(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  lastAccessedAt: timestamp('last_accessed_at'),
+  deletedAt: timestamp('deleted_at'),
+  version: integer('version').default(1),
+  parentVersionId: integer('parent_version_id'),
+}, (table) => [
+  index('library_files_user_idx').on(table.userId),
+  index('library_files_type_idx').on(table.userId, table.type),
+  index('library_files_folder_idx').on(table.folderId),
+  index('library_files_created_idx').on(table.createdAt),
+]);
+
+export const insertLibraryFileSchema = createInsertSchema(libraryFiles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertLibraryFile = z.infer<typeof insertLibraryFileSchema>;
+export type LibraryFile = typeof libraryFiles.$inferSelect;
+
+export const smartRulesSchema = z.object({
+  conditions: z.array(z.object({
+    field: z.string(),
+    operator: z.string(),
+    value: z.any(),
+  })),
+  matchAll: z.boolean(),
+});
+
+export const libraryCollections = pgTable('library_collections', {
+  id: serial('id').primaryKey(),
+  uuid: text('uuid').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description'),
+  coverFileId: integer('cover_file_id'),
+  type: text('type').default('album'),
+  smartRules: jsonb('smart_rules').$type<z.infer<typeof smartRulesSchema>>(),
+  userId: varchar('user_id').notNull(),
+  isPublic: boolean('is_public').default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  index('library_collections_user_idx').on(table.userId),
+]);
+
+export const insertLibraryCollectionSchema = createInsertSchema(libraryCollections).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertLibraryCollection = z.infer<typeof insertLibraryCollectionSchema>;
+export type LibraryCollection = typeof libraryCollections.$inferSelect;
+
+export const libraryFileCollections = pgTable('library_file_collections', {
+  id: serial('id').primaryKey(),
+  fileId: integer('file_id').notNull(),
+  collectionId: integer('collection_id').notNull(),
+  order: integer('order').default(0),
+  addedAt: timestamp('added_at').defaultNow().notNull(),
+}, (table) => [
+  index('library_file_collections_file_idx').on(table.fileId),
+  index('library_file_collections_collection_idx').on(table.collectionId),
+]);
+
+export const libraryActivity = pgTable('library_activity', {
+  id: serial('id').primaryKey(),
+  fileId: integer('file_id'),
+  folderId: integer('folder_id'),
+  collectionId: integer('collection_id'),
+  action: text('action').notNull(),
+  userId: varchar('user_id').notNull(),
+  details: jsonb('details'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  index('library_activity_user_idx').on(table.userId),
+  index('library_activity_file_idx').on(table.fileId),
+  index('library_activity_created_idx').on(table.createdAt),
+]);
+
+export type LibraryActivityRecord = typeof libraryActivity.$inferSelect;
+
+export const libraryStorage = pgTable('library_storage', {
+  id: serial('id').primaryKey(),
+  userId: varchar('user_id').notNull().unique(),
+  totalBytes: bigint('total_bytes', { mode: 'number' }).default(0),
+  imageBytes: bigint('image_bytes', { mode: 'number' }).default(0),
+  videoBytes: bigint('video_bytes', { mode: 'number' }).default(0),
+  documentBytes: bigint('document_bytes', { mode: 'number' }).default(0),
+  otherBytes: bigint('other_bytes', { mode: 'number' }).default(0),
+  fileCount: integer('file_count').default(0),
+  quotaBytes: bigint('quota_bytes', { mode: 'number' }).default(5368709120),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => [
+  index('library_storage_user_idx').on(table.userId),
+]);
+
+export type LibraryStorageStats = typeof libraryStorage.$inferSelect;
