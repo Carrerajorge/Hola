@@ -1,9 +1,69 @@
-import React, { memo, useMemo, useState, useEffect, useRef, lazy, Suspense, useCallback } from "react";
+import React, { memo, useMemo, useState, useEffect, useRef, lazy, Suspense, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
 import { cn } from "@/lib/utils";
 import { parseDocument, detectFormat, type DocumentFormat } from "@/lib/rstParser";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 
 const MarkdownRenderer = lazy(() => import("./markdown-renderer"));
+
+interface DocumentErrorBoundaryProps {
+  children: ReactNode;
+  fallbackContent?: string;
+}
+
+interface DocumentErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class DocumentErrorBoundary extends Component<DocumentErrorBoundaryProps, DocumentErrorBoundaryState> {
+  constructor(props: DocumentErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): DocumentErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('[DocumentErrorBoundary] Error renderizando documento:', {
+      error: error.message,
+      stack: errorInfo.componentStack
+    });
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-4 border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+          <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 mb-2">
+            <AlertTriangle className="h-4 w-4" />
+            <span className="font-medium text-sm">Error al renderizar el documento</span>
+          </div>
+          {this.props.fallbackContent && (
+            <pre className="text-xs text-muted-foreground whitespace-pre-wrap max-h-40 overflow-auto bg-muted/50 p-2 rounded mt-2">
+              {this.props.fallbackContent.slice(0, 500)}
+              {this.props.fallbackContent.length > 500 && '...'}
+            </pre>
+          )}
+          <button
+            onClick={this.handleRetry}
+            className="mt-2 flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Reintentar
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 const CHUNK_SIZE = 50;
 const CHUNK_HEIGHT_ESTIMATE = 100;
@@ -84,14 +144,16 @@ const LazyChunk = memo(function LazyChunk({
   }
 
   return (
-    <Suspense fallback={
-      <div className="flex items-center gap-2 p-4 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        <span className="text-sm">Loading content...</span>
-      </div>
-    }>
-      <MarkdownRenderer content={chunk.content} className={className} />
-    </Suspense>
+    <DocumentErrorBoundary fallbackContent={chunk.content}>
+      <Suspense fallback={
+        <div className="flex items-center gap-2 p-4 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span className="text-sm">Loading content...</span>
+        </div>
+      }>
+        <MarkdownRenderer content={chunk.content} className={className} />
+      </Suspense>
+    </DocumentErrorBoundary>
   );
 });
 
@@ -174,14 +236,16 @@ export const DocumentRenderer = memo(function DocumentRenderer({
 
     return (
       <div className={cn("document-renderer", className)} data-testid="document-renderer">
-        <Suspense fallback={
-          <div className="flex items-center gap-2 p-4 text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm">Loading markdown renderer...</span>
-          </div>
-        }>
-          <MarkdownRenderer content={content} />
-        </Suspense>
+        <DocumentErrorBoundary fallbackContent={content}>
+          <Suspense fallback={
+            <div className="flex items-center gap-2 p-4 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading markdown renderer...</span>
+            </div>
+          }>
+            <MarkdownRenderer content={content} />
+          </Suspense>
+        </DocumentErrorBoundary>
       </div>
     );
   }

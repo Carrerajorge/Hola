@@ -1320,10 +1320,12 @@ export function MessageList({
         <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
           <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
             <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-              <MarkdownRenderer
-                content={streamingContent}
-                customComponents={{ ...CleanDataTableComponents }}
-              />
+              <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                <MarkdownRenderer
+                  content={streamingContent}
+                  customComponents={{ ...CleanDataTableComponents }}
+                />
+              </MarkdownErrorBoundary>
               <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5" />
             </div>
           </div>

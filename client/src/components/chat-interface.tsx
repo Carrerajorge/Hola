@@ -53,7 +53,7 @@ import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
 
 import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, generateRequestId, generateClientRequestId, getActiveRun, updateActiveRunStatus, clearActiveRun, hasActiveRun, resolveRealChatId, isPendingChat } from "@/hooks/use-chats";
-import { MarkdownRenderer } from "@/components/markdown-renderer";
+import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
 import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
@@ -86,6 +86,37 @@ import { useAuth } from "@/hooks/use-auth";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
+
+function AvatarWithFallback({ 
+  src, 
+  alt, 
+  fallback 
+}: { 
+  src: string; 
+  alt: string; 
+  fallback: React.ReactNode;
+}) {
+  const [hasError, setHasError] = useState(false);
+  
+  if (hasError) {
+    return (
+      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
+        {fallback}
+      </div>
+    );
+  }
+  
+  return (
+    <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
+      <img 
+        src={src} 
+        alt={alt} 
+        className="w-full h-full rounded-2xl object-cover"
+        onError={() => setHasError(true)}
+      />
+    </div>
+  );
+}
 
 const extractTextFromChildren = (children: React.ReactNode): string => {
   if (typeof children === 'string') return children;
@@ -3411,10 +3442,12 @@ IMPORTANTE:
               )}
               {aiState === "responding" && streamingContent && (
                 <div className="px-4 py-3 text-foreground min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
-                  <MarkdownRenderer
-                    content={streamingContent}
-                    customComponents={{...CleanDataTableComponents}}
-                  />
+                  <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                    <MarkdownRenderer
+                      content={streamingContent}
+                      customComponents={{...CleanDataTableComponents}}
+                    />
+                  </MarkdownErrorBoundary>
                   <span className="typing-cursor">|</span>
                 </div>
               )}
@@ -3644,10 +3677,12 @@ IMPORTANTE:
                 <div className="w-full max-w-3xl mx-auto">
                   <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
                     <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                      <MarkdownRenderer
-                        content={streamingContent}
-                        customComponents={{...CleanDataTableComponents}}
-                      />
+                      <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                        <MarkdownRenderer
+                          content={streamingContent}
+                          customComponents={{...CleanDataTableComponents}}
+                        />
+                      </MarkdownErrorBoundary>
                       <span className="inline-block w-0.5 h-4 bg-primary animate-[pulse_0.33s_ease-in-out_infinite] ml-0.5" />
                     </div>
                   </div>
@@ -3683,9 +3718,11 @@ IMPORTANTE:
                 className="mb-8"
               >
                 {activeGpt?.avatar ? (
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
-                    <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
-                  </div>
+                  <AvatarWithFallback 
+                    src={activeGpt.avatar} 
+                    alt={activeGpt.name}
+                    fallback={<Bot className="h-10 w-10 text-white" />}
+                  />
                 ) : (
                   <SiraLogo size={80} />
                 )}
@@ -3716,16 +3753,18 @@ IMPORTANTE:
                   transition={{ duration: 0.5, delay: 0.4 }}
                   className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
                 >
-                  {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setInput(starter)}
-                      className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
-                      data-testid={`button-starter-${idx}`}
-                    >
-                      {starter}
-                    </button>
-                  ))}
+                  {activeGpt.conversationStarters
+                    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+                    .map((starter, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setInput(starter)}
+                        className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                        data-testid={`button-starter-${idx}`}
+                      >
+                        {starter}
+                      </button>
+                    ))}
                 </motion.div>
               )}
             </div>
@@ -4027,7 +4066,9 @@ IMPORTANTE:
                   className="prose prose-sm dark:prose-invert max-w-none"
                 >
                   <div className="bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
-                    <MarkdownRenderer content={previewFileAttachment.content} />
+                    <MarkdownErrorBoundary fallbackContent={previewFileAttachment.content}>
+                      <MarkdownRenderer content={previewFileAttachment.content} />
+                    </MarkdownErrorBoundary>
                   </div>
                 </motion.div>
               ) : (
