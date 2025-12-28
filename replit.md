@@ -19,6 +19,11 @@ Preferred communication style: Simple, everyday language.
 - **Productivity Features**: Offers chat folders, command history, draft auto-save, and context-aware suggested replies.
 - **Background Processing System**: An enterprise-grade system using Web Workers, IndexedDB for task persistence, and BroadcastChannel for multi-tab coordination, ensuring task completion even when the user navigates away.
 - **Enterprise Features**: Offline mode with IndexedDB queuing and auto-sync, a unified workspace with resizable panels and an AI Steps Rail, and an AI quality system for response analysis and content filtering.
+- **Performance Optimizations**: Message virtualization with @tanstack/react-virtual (threshold: 50+ messages), React.memo with custom comparison functions, lazy image loading with skeleton placeholders, useMemo for expensive computations.
+- **Streaming UX**: StreamingIndicator component with typing animation (3 dots), token counter display, prominent cancel button with pulsing animation, and smooth content fade-in effects.
+- **Resilience Features**: Exponential backoff retry logic (base 1s, max 30s with jitter), offline message queuing with auto-sync, ConnectionDot status indicator, user-friendly error toasts.
+- **Security Hardening**: DOMPurify sanitization for all markdown content, frontend rate limiting (3 messages per 10 seconds), MIME type validation with magic byte detection for file uploads.
+- **Accessibility**: Keyboard shortcuts (Escape to cancel streaming, Ctrl+/ for shortcuts dialog), ARIA live regions for screen reader announcements, proper focus management.
 
 ### Backend
 - **Runtime**: Node.js with Express.js for RESTful API endpoints.
