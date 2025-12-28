@@ -8,6 +8,23 @@ import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
 import { storage } from "../../storage";
+import { withRetry } from "../../utils/retry";
+import { authRateLimiter } from "../../middleware/rateLimiter";
+
+const PRE_EMPTIVE_REFRESH_THRESHOLD_SECONDS = 300;
+const AUTH_METRICS = {
+  loginAttempts: 0,
+  loginSuccess: 0,
+  loginFailures: 0,
+  tokenRefreshAttempts: 0,
+  tokenRefreshSuccess: 0,
+  tokenRefreshFailures: 0,
+  sessionCreations: 0,
+};
+
+export function getAuthMetrics() {
+  return { ...AUTH_METRICS };
+}
 
 const getOidcConfig = memoize(
   async () => {
@@ -54,7 +71,16 @@ function updateUserSession(
   user.claims = tokens.claims();
   user.access_token = tokens.access_token;
   user.refresh_token = tokens.refresh_token;
-  user.expires_at = user.claims?.exp;
+  
+  if (tokens.expires_in) {
+    user.expires_at = Math.floor(Date.now() / 1000) + tokens.expires_in;
+  } else if (user.claims?.exp) {
+    user.expires_at = user.claims.exp;
+  } else {
+    user.expires_at = Math.floor(Date.now() / 1000) + 3600;
+  }
+  
+  user.last_refresh = Date.now();
 }
 
 async function upsertUser(claims: any) {
@@ -109,7 +135,11 @@ export async function setupAuth(app: Express) {
   passport.serializeUser((user: Express.User, cb) => cb(null, user));
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
-  app.get("/api/login", (req, res, next) => {
+  app.get("/api/login", authRateLimiter, (req, res, next) => {
+    AUTH_METRICS.loginAttempts++;
+    const startTime = Date.now();
+    console.log(`[Auth] Login initiated from IP: ${req.ip}, hostname: ${req.hostname}`);
+    
     ensureStrategy(req.hostname);
     passport.authenticate(`replitauth:${req.hostname}`, {
       prompt: "login consent",
@@ -117,28 +147,52 @@ export async function setupAuth(app: Express) {
     })(req, res, next);
   });
 
-  app.get("/api/callback", (req, res, next) => {
+  app.get("/api/callback", authRateLimiter, (req, res, next) => {
+    const startTime = Date.now();
+    const requestId = `cb-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
     ensureStrategy(req.hostname);
     passport.authenticate(`replitauth:${req.hostname}`, (err: any, user: any, info: any) => {
       if (err) {
-        console.error("[Auth] Callback error:", err);
+        AUTH_METRICS.loginFailures++;
+        console.error(`[Auth] [${requestId}] Callback error after ${Date.now() - startTime}ms:`, {
+          error: err.message,
+          code: err.code,
+          ip: req.ip,
+        });
         return res.redirect("/login?error=auth_failed");
       }
       if (!user) {
-        console.error("[Auth] No user returned:", info);
+        AUTH_METRICS.loginFailures++;
+        console.error(`[Auth] [${requestId}] No user returned after ${Date.now() - startTime}ms:`, {
+          info,
+          ip: req.ip,
+        });
         return res.redirect("/login?error=no_user");
       }
       req.logIn(user, async (loginErr) => {
         if (loginErr) {
-          console.error("[Auth] Login error:", loginErr);
+          AUTH_METRICS.loginFailures++;
+          console.error(`[Auth] [${requestId}] Login error after ${Date.now() - startTime}ms:`, {
+            error: loginErr.message,
+            ip: req.ip,
+          });
           return res.redirect("/login?error=login_failed");
         }
         
-        // Track user login
+        AUTH_METRICS.loginSuccess++;
+        AUTH_METRICS.sessionCreations++;
+        
         const userId = user.claims?.sub;
+        const loginDuration = Date.now() - startTime;
+        console.log(`[Auth] [${requestId}] Login successful in ${loginDuration}ms:`, {
+          userId,
+          email: user.claims?.email,
+          ip: req.ip,
+        });
+        
         if (userId) {
           try {
-            // Update user's last login info
             await authStorage.updateUserLogin(userId, {
               ipAddress: req.ip || req.socket.remoteAddress || null,
               userAgent: req.headers["user-agent"] || null
@@ -150,17 +204,17 @@ export async function setupAuth(app: Express) {
               resource: "auth",
               details: { 
                 email: user.claims?.email,
-                provider: "google_oauth"
+                provider: "google_oauth",
+                duration_ms: loginDuration,
               },
               ipAddress: req.ip || req.socket.remoteAddress || null,
               userAgent: req.headers["user-agent"] || null
             });
           } catch (auditError) {
-            console.error("Failed to create audit log:", auditError);
+            console.warn(`[Auth] [${requestId}] Failed to create audit log:`, auditError);
           }
         }
         
-        // Redirect with success flag so client can set localStorage
         return res.redirect("/?auth=success");
       });
     })(req, res, next);
@@ -180,29 +234,83 @@ export async function setupAuth(app: Express) {
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
   const user = req.user as any;
+  const requestId = `auth-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
   if (!req.isAuthenticated() || !user.expires_at) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ 
+      message: "Unauthorized",
+      code: "SESSION_INVALID",
+    });
   }
 
   const now = Math.floor(Date.now() / 1000);
-  if (now <= user.expires_at) {
+  const timeUntilExpiry = user.expires_at - now;
+  
+  if (timeUntilExpiry > PRE_EMPTIVE_REFRESH_THRESHOLD_SECONDS) {
     return next();
   }
 
   const refreshToken = user.refresh_token;
   if (!refreshToken) {
-    res.status(401).json({ message: "Unauthorized" });
-    return;
+    console.warn(`[Auth] [${requestId}] No refresh token available for user:`, user.claims?.sub);
+    return res.status(401).json({ 
+      message: "Session expired",
+      code: "NO_REFRESH_TOKEN",
+    });
   }
 
+  if (timeUntilExpiry > 0) {
+    console.log(`[Auth] [${requestId}] Pre-emptive token refresh triggered, expires in ${timeUntilExpiry}s`);
+  } else {
+    console.log(`[Auth] [${requestId}] Token expired ${-timeUntilExpiry}s ago, attempting refresh`);
+  }
+
+  AUTH_METRICS.tokenRefreshAttempts++;
+  
   try {
     const config = await getOidcConfig();
-    const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
+    
+    const tokenResponse = await withRetry(
+      () => client.refreshTokenGrant(config, refreshToken),
+      {
+        maxRetries: 2,
+        baseDelay: 500,
+        maxDelay: 2000,
+        shouldRetry: (error) => {
+          const errorMsg = error.message.toLowerCase();
+          return errorMsg.includes('network') || 
+                 errorMsg.includes('timeout') || 
+                 errorMsg.includes('econnreset') ||
+                 errorMsg.includes('5');
+        },
+        onRetry: (error, attempt, delay) => {
+          console.warn(`[Auth] [${requestId}] Token refresh retry ${attempt}: ${error.message}, waiting ${delay}ms`);
+        },
+      }
+    );
+    
     updateUserSession(user, tokenResponse);
+    AUTH_METRICS.tokenRefreshSuccess++;
+    console.log(`[Auth] [${requestId}] Token refresh successful for user:`, user.claims?.sub);
+    
     return next();
-  } catch (error) {
-    res.status(401).json({ message: "Unauthorized" });
-    return;
+  } catch (error: any) {
+    AUTH_METRICS.tokenRefreshFailures++;
+    console.error(`[Auth] [${requestId}] Token refresh failed:`, {
+      userId: user.claims?.sub,
+      error: error.message,
+    });
+    
+    return res.status(401).json({ 
+      message: "Session expired, please login again",
+      code: "TOKEN_REFRESH_FAILED",
+    });
   }
 };
+
+export function getSessionStats() {
+  return {
+    metrics: getAuthMetrics(),
+    timestamp: new Date().toISOString(),
+  };
+}

@@ -1,8 +1,9 @@
 import type { Express } from "express";
 import { authStorage } from "./storage";
-import { isAuthenticated } from "./replitAuth";
+import { isAuthenticated, getAuthMetrics, getSessionStats } from "./replitAuth";
 import { storage } from "../../storage";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
+import { authRateLimiter, getRateLimitStats } from "../../middleware/rateLimiter";
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -14,8 +15,27 @@ function isAdminConfigured(): boolean {
 
 // Register auth-specific routes
 export function registerAuthRoutes(app: Express): void {
+  // Auth metrics endpoint (admin only)
+  app.get("/api/auth/metrics", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await authStorage.getUser(req.user?.claims?.sub);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      res.json({
+        auth: getSessionStats(),
+        rateLimit: getRateLimitStats(),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("[Auth] Failed to get metrics:", error);
+      res.status(500).json({ message: "Failed to retrieve metrics" });
+    }
+  });
+
   // User login with email/password (for users created by admin)
-  app.post("/api/auth/login", async (req: any, res) => {
+  app.post("/api/auth/login", authRateLimiter, async (req: any, res) => {
     try {
       const { email, password } = req.body;
       
@@ -153,7 +173,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // Admin login with email/password
-  app.post("/api/auth/admin-login", async (req: any, res) => {
+  app.post("/api/auth/admin-login", authRateLimiter, async (req: any, res) => {
     try {
       const { email, password } = req.body;
       
