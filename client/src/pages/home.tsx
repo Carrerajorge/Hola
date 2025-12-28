@@ -144,6 +144,8 @@ export default function Home() {
     // Let the background streaming complete naturally and trigger badge notification
     // Only reset the process steps for UI
     setAiProcessSteps([]);
+    // Close any open dialogs
+    setIsAppsDialogOpen(false);
   };
   
   const handleSendNewChatMessage = useCallback((message: Message) => {
