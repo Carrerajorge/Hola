@@ -248,6 +248,7 @@ const sanitizeSchema = {
     "mtr",
     "mtd",
     "annotation",
+    "annotation-xml",
     "semantics",
     "svg",
     "path",
