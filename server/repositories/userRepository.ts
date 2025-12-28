@@ -12,6 +12,7 @@ import {
   NotFoundError,
   ValidationError 
 } from "./baseRepository";
+import { hashPassword, isHashed } from "../utils/password";
 
 export interface UserStats {
   total: number;
@@ -55,7 +56,12 @@ export class UserRepository {
     }
     logRepositoryAction({ action: "createUser", metadata: { username: user.username } });
     
-    const [created] = await db.insert(users).values(user).returning();
+    const userToInsert = { ...user };
+    if (userToInsert.password && !isHashed(userToInsert.password)) {
+      userToInsert.password = await hashPassword(userToInsert.password);
+    }
+    
+    const [created] = await db.insert(users).values(userToInsert).returning();
     return created;
   }
 
@@ -68,8 +74,13 @@ export class UserRepository {
     validateResourceId(id, "User");
     logRepositoryAction({ action: "updateUser", resourceId: id });
     
+    const updatesToApply = { ...updates, updatedAt: new Date() };
+    if (updatesToApply.password && !isHashed(updatesToApply.password)) {
+      updatesToApply.password = await hashPassword(updatesToApply.password);
+    }
+    
     const [result] = await db.update(users)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(updatesToApply)
       .where(eq(users.id, id))
       .returning();
     return result;

@@ -228,13 +228,74 @@ export function useSpreadsheet(initialWorkbook?: Workbook): UseSpreadsheetReturn
         return V(expr);
       }
 
-      const safeExpr = expr
-        .replace(/([A-Z]+\d+)/gi, (match) => `V("${match.toUpperCase()}")`)
-        .replace(/\^/g, '**');
+      // Safe expression evaluator - no dynamic code execution
+      const safeEval = (expression: string): number => {
+        // Only allow: numbers, cell references (already replaced), +, -, *, /, (, ), **, spaces
+        const sanitized = expression
+          .replace(/([A-Z]+\d+)/gi, (match) => String(V(match.toUpperCase())))
+          .replace(/\^/g, '**');
+        
+        // Validate expression contains only safe characters
+        if (!/^[\d\s+\-*/().]+$/.test(sanitized)) {
+          throw new Error('Invalid expression');
+        }
+        
+        // Parse and evaluate safely using a simple recursive descent parser
+        let pos = 0;
+        const tokens = sanitized.match(/(\d+\.?\d*|\+|\-|\*{1,2}|\/|\(|\))/g) || [];
+        
+        const parseNumber = (): number => {
+          if (tokens[pos] === '(') {
+            pos++;
+            const result = parseAddSub();
+            if (tokens[pos] === ')') pos++;
+            return result;
+          }
+          if (tokens[pos] === '-') {
+            pos++;
+            return -parseNumber();
+          }
+          const num = parseFloat(tokens[pos] || '0');
+          pos++;
+          return isNaN(num) ? 0 : num;
+        };
+        
+        const parsePow = (): number => {
+          let left = parseNumber();
+          while (tokens[pos] === '**') {
+            pos++;
+            left = Math.pow(left, parseNumber());
+          }
+          return left;
+        };
+        
+        const parseMulDiv = (): number => {
+          let left = parsePow();
+          while (tokens[pos] === '*' || tokens[pos] === '/') {
+            const op = tokens[pos];
+            pos++;
+            const right = parsePow();
+            left = op === '*' ? left * right : (right !== 0 ? left / right : 0);
+          }
+          return left;
+        };
+        
+        const parseAddSub = (): number => {
+          let left = parseMulDiv();
+          while (tokens[pos] === '+' || tokens[pos] === '-') {
+            const op = tokens[pos];
+            pos++;
+            const right = parseMulDiv();
+            left = op === '+' ? left + right : left - right;
+          }
+          return left;
+        };
+        
+        return parseAddSub();
+      };
       
       try {
-        const fn = new Function('V', 'R', `return ${safeExpr}`);
-        return fn(V, R);
+        return safeEval(expr);
       } catch {
         return '#ERROR!';
       }

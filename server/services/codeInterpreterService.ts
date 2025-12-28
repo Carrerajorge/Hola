@@ -177,7 +177,9 @@ async function runPythonCode(code: string): Promise<ExecutionResult> {
 
       try {
         fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {}
+      } catch (cleanupErr) {
+        console.warn("[CodeInterpreter] Failed to cleanup temp directory:", tmpDir);
+      }
 
       if (timedOut) {
         resolve({
@@ -196,7 +198,9 @@ async function runPythonCode(code: string): Promise<ExecutionResult> {
         try {
           artifacts = JSON.parse(artifactMatch[1]);
           stdout = stdout.replace(/__ARTIFACTS_JSON__:.+$/m, "").trim();
-        } catch {}
+        } catch (parseErr) {
+          console.warn("[CodeInterpreter] Failed to parse artifacts JSON");
+        }
       }
 
       resolve({
@@ -214,7 +218,9 @@ async function runPythonCode(code: string): Promise<ExecutionResult> {
 
       try {
         fs.rmSync(tmpDir, { recursive: true, force: true });
-      } catch {}
+      } catch (cleanupErr) {
+        console.warn("[CodeInterpreter] Failed to cleanup temp directory on error:", tmpDir);
+      }
 
       resolve({
         success: false,

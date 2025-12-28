@@ -4,9 +4,13 @@ import { isAuthenticated } from "./replitAuth";
 import { storage } from "../../storage";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
 
-// Admin credentials from environment variables
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@gmail.com";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "123456";
+// Admin credentials from environment variables - REQUIRED, no fallback for security
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+
+function isAdminConfigured(): boolean {
+  return !!(ADMIN_EMAIL && ADMIN_PASSWORD && ADMIN_PASSWORD.length >= 8);
+}
 
 // Register auth-specific routes
 export function registerAuthRoutes(app: Express): void {
@@ -20,7 +24,7 @@ export function registerAuthRoutes(app: Express): void {
       }
       
       // Check if it's the admin (case-insensitive email comparison)
-      if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase() && password === ADMIN_PASSWORD) {
+      if (isAdminConfigured() && email.toLowerCase() === ADMIN_EMAIL!.toLowerCase() && password === ADMIN_PASSWORD) {
         const adminId = "admin-user-id";
         await authStorage.upsertUser({
           id: adminId,
@@ -157,7 +161,8 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ message: "Email and password required" });
       }
       
-      if (email.toLowerCase() !== ADMIN_EMAIL.toLowerCase() || password !== ADMIN_PASSWORD) {
+      // Verify admin is configured and credentials match
+      if (!isAdminConfigured() || email.toLowerCase() !== ADMIN_EMAIL!.toLowerCase() || password !== ADMIN_PASSWORD) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
       

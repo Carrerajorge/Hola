@@ -89,7 +89,9 @@ function extractLinks(document: Document, baseUrl: URL): ExtractedLink[] {
         href: absoluteUrl.href,
         isInternal: absoluteUrl.hostname === baseUrl.hostname
       });
-    } catch {}
+    } catch (e) {
+      // Invalid URL format - skip this link silently as it's expected for malformed hrefs
+    }
   });
 
   return links.slice(0, 100);
@@ -111,7 +113,9 @@ function extractImages(document: Document, baseUrl: URL): ExtractedImage[] {
         width: parseInt(img.getAttribute("width") || "0") || undefined,
         height: parseInt(img.getAttribute("height") || "0") || undefined
       });
-    } catch {}
+    } catch (e) {
+      // Invalid URL format - skip this image silently as it's expected for malformed srcs
+    }
   });
 
   return images.slice(0, 50);
