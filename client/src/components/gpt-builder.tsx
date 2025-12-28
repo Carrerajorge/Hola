@@ -40,15 +40,33 @@ interface GptBuilderProps {
   onSave?: (gpt: Gpt) => void;
 }
 
+interface ActionFormData {
+  name: string;
+  description: string;
+  httpMethod: string;
+  endpoint: string;
+  authType: string;
+}
+
 export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilderProps) {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("create");
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [knowledgeFiles, setKnowledgeFiles] = useState<GptKnowledge[]>([]);
   const [actions, setActions] = useState<GptAction[]>([]);
   const [previewMessage, setPreviewMessage] = useState("");
   const [previewResponse, setPreviewResponse] = useState("");
   const [testingPreview, setTestingPreview] = useState(false);
+  const [showActionEditor, setShowActionEditor] = useState(false);
+  const [editingAction, setEditingAction] = useState<GptAction | null>(null);
+  const [actionForm, setActionForm] = useState<ActionFormData>({
+    name: "",
+    description: "",
+    httpMethod: "GET",
+    endpoint: "",
+    authType: "none"
+  });
   
   const [formData, setFormData] = useState({
     name: "",
@@ -418,37 +436,83 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           Sube archivos para que tu GPT pueda usar como referencia. Soporta PDF, TXT, DOCX, XLSX y más.
                         </p>
                         
-                        <div className="border-2 border-dashed rounded-lg p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
-                          onClick={() => document.getElementById("file-upload")?.click()}
+                        <div 
+                          className={cn(
+                            "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+                            uploading ? "border-primary bg-primary/5" : "hover:border-primary/50"
+                          )}
+                          onClick={() => !uploading && document.getElementById("file-upload")?.click()}
                           data-testid="knowledge-upload-zone"
                         >
-                          <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-                          <p className="font-medium">Arrastra archivos aquí o haz clic para subir</p>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            PDF, TXT, DOCX, XLSX, CSV, JSON (máx. 20MB)
-                          </p>
+                          {uploading ? (
+                            <>
+                              <div className="h-10 w-10 mx-auto mb-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                              <p className="font-medium text-primary">Subiendo archivos...</p>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                              <p className="font-medium">Arrastra archivos aquí o haz clic para subir</p>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                PDF, TXT, DOCX, XLSX, CSV, JSON (máx. 20MB)
+                              </p>
+                            </>
+                          )}
                           <input
                             id="file-upload"
                             type="file"
                             multiple
                             accept=".pdf,.txt,.docx,.xlsx,.csv,.json,.md"
                             className="hidden"
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const files = e.target.files;
-                              if (files && editingGpt) {
-                                Array.from(files).forEach(async (file) => {
-                                  toast({
-                                    title: "Archivo detectado",
-                                    description: `${file.name} - La subida se implementará con Object Storage`
-                                  });
-                                });
-                              } else if (!editingGpt) {
+                              if (!files || files.length === 0) return;
+                              
+                              if (!editingGpt) {
                                 toast({
                                   title: "Guarda primero",
                                   description: "Guarda el GPT antes de agregar archivos",
                                   variant: "destructive"
                                 });
+                                return;
                               }
+                              
+                              setUploading(true);
+                              for (const file of Array.from(files)) {
+                                try {
+                                  const fileExt = file.name.split('.').pop()?.toLowerCase() || 'unknown';
+                                  const storageUrl = `gpt-knowledge/${editingGpt.id}/${Date.now()}-${file.name}`;
+                                  
+                                  const response = await fetch(`/api/gpts/${editingGpt.id}/knowledge`, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      fileName: file.name,
+                                      fileType: fileExt,
+                                      fileSize: file.size,
+                                      storageUrl: storageUrl,
+                                      embeddingStatus: "pending",
+                                      metadata: { originalName: file.name, mimeType: file.type }
+                                    })
+                                  });
+                                  
+                                  if (response.ok) {
+                                    const newKnowledge = await response.json();
+                                    setKnowledgeFiles(prev => [newKnowledge, ...prev]);
+                                    toast({ title: "Archivo agregado", description: file.name });
+                                  } else {
+                                    throw new Error("Error al subir archivo");
+                                  }
+                                } catch (error) {
+                                  toast({
+                                    title: "Error",
+                                    description: `No se pudo agregar ${file.name}`,
+                                    variant: "destructive"
+                                  });
+                                }
+                              }
+                              setUploading(false);
+                              e.target.value = '';
                             }}
                             data-testid="file-input"
                           />
@@ -520,10 +584,9 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                               });
                               return;
                             }
-                            toast({
-                              title: "Crear acción",
-                              description: "El editor de acciones se abrirá aquí"
-                            });
+                            setEditingAction(null);
+                            setActionForm({ name: "", description: "", httpMethod: "GET", endpoint: "", authType: "none" });
+                            setShowActionEditor(true);
                           }}
                           data-testid="button-add-action"
                         >
@@ -858,6 +921,137 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           </div>
         </div>
       </DialogContent>
+
+      <Dialog open={showActionEditor} onOpenChange={setShowActionEditor}>
+        <DialogContent className="sm:max-w-[500px]" data-testid="action-editor-dialog">
+          <DialogHeader>
+            <DialogTitle>{editingAction ? "Editar acción" : "Nueva acción"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div>
+              <Label htmlFor="action-name">Nombre</Label>
+              <Input
+                id="action-name"
+                placeholder="Ej: Consultar clima"
+                value={actionForm.name}
+                onChange={(e) => setActionForm(prev => ({ ...prev, name: e.target.value }))}
+                className="mt-1"
+                data-testid="input-action-name"
+              />
+            </div>
+            <div>
+              <Label htmlFor="action-description">Descripción</Label>
+              <Textarea
+                id="action-description"
+                placeholder="Describe lo que hace esta acción..."
+                value={actionForm.description}
+                onChange={(e) => setActionForm(prev => ({ ...prev, description: e.target.value }))}
+                className="mt-1"
+                data-testid="input-action-description"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Método HTTP</Label>
+                <div className="flex gap-1 mt-1">
+                  {["GET", "POST", "PUT", "DELETE"].map((method) => (
+                    <Button
+                      key={method}
+                      type="button"
+                      variant={actionForm.httpMethod === method ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setActionForm(prev => ({ ...prev, httpMethod: method }))}
+                    >
+                      {method}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label>Autenticación</Label>
+                <div className="flex gap-1 mt-1">
+                  {[{ value: "none", label: "Ninguna" }, { value: "api_key", label: "API Key" }].map((auth) => (
+                    <Button
+                      key={auth.value}
+                      type="button"
+                      variant={actionForm.authType === auth.value ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setActionForm(prev => ({ ...prev, authType: auth.value }))}
+                    >
+                      {auth.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="action-endpoint">Endpoint URL</Label>
+              <Input
+                id="action-endpoint"
+                placeholder="https://api.example.com/endpoint"
+                value={actionForm.endpoint}
+                onChange={(e) => setActionForm(prev => ({ ...prev, endpoint: e.target.value }))}
+                className="mt-1 font-mono text-sm"
+                data-testid="input-action-endpoint"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setShowActionEditor(false)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (!editingGpt || !actionForm.name.trim() || !actionForm.endpoint.trim()) {
+                    toast({
+                      title: "Error",
+                      description: "Nombre y endpoint son requeridos",
+                      variant: "destructive"
+                    });
+                    return;
+                  }
+                  
+                  try {
+                    if (editingAction) {
+                      const response = await fetch(`/api/gpts/${editingGpt.id}/actions/${editingAction.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(actionForm)
+                      });
+                      if (response.ok) {
+                        const updated = await response.json();
+                        setActions(prev => prev.map(a => a.id === updated.id ? updated : a));
+                        toast({ title: "Acción actualizada" });
+                      }
+                    } else {
+                      const response = await fetch(`/api/gpts/${editingGpt.id}/actions`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(actionForm)
+                      });
+                      if (response.ok) {
+                        const newAction = await response.json();
+                        setActions(prev => [newAction, ...prev]);
+                        toast({ title: "Acción creada" });
+                      }
+                    }
+                    setShowActionEditor(false);
+                  } catch (error) {
+                    toast({
+                      title: "Error",
+                      description: "No se pudo guardar la acción",
+                      variant: "destructive"
+                    });
+                  }
+                }}
+                data-testid="button-save-action"
+              >
+                <Save className="h-4 w-4 mr-2" />
+                {editingAction ? "Actualizar" : "Crear"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
