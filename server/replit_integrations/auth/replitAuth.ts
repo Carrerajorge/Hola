@@ -121,8 +121,9 @@ export async function setupAuth(app: Express) {
       
       if (user.claims) {
         await upsertUser(user.claims);
-      } else if (tokens.id_token) {
-        await upsertUser(tokens.claims());
+      } else {
+        console.error("[Auth] No claims available after token processing - cannot create user");
+        return verified(new Error("No claims available"), undefined);
       }
       
       verified(null, user);
@@ -302,7 +303,9 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
           return errorMsg.includes('network') || 
                  errorMsg.includes('timeout') || 
                  errorMsg.includes('econnreset') ||
-                 errorMsg.includes('5');
+                 errorMsg.includes('502') ||
+                 errorMsg.includes('503') ||
+                 errorMsg.includes('504');
         },
         onRetry: (error, attempt, delay) => {
           console.warn(`[Auth] [${requestId}] Token refresh retry ${attempt}: ${error.message}, waiting ${delay}ms`);
