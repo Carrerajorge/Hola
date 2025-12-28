@@ -2,6 +2,7 @@ import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect, useState, useCallback } from "react";
 import { SettingsProvider } from "@/contexts/SettingsContext";
@@ -121,6 +122,17 @@ function App() {
             <AuthCallbackHandler />
             <GlobalKeyboardShortcuts />
             <Toaster />
+            <SonnerToaster 
+              position="bottom-right" 
+              richColors 
+              closeButton
+              toastOptions={{
+                classNames: {
+                  toast: 'text-sm',
+                  actionButton: 'text-xs font-medium',
+                }
+              }}
+            />
             <Router />
           </TooltipProvider>
         </ModelAvailabilityProvider>

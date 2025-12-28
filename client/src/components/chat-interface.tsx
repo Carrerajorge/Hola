@@ -330,6 +330,64 @@ const CleanDataTableComponents = {
   }
 };
 
+interface StreamingIndicatorProps {
+  aiState: "idle" | "thinking" | "responding";
+  streamingContent: string;
+  onCancel: () => void;
+}
+
+function StreamingIndicator({ aiState, streamingContent, onCancel }: StreamingIndicatorProps) {
+  const estimatedTokens = useMemo(() => {
+    if (!streamingContent) return 0;
+    return Math.ceil(streamingContent.length / 4);
+  }, [streamingContent]);
+
+  if (aiState === "idle") return null;
+
+  return (
+    <div className="streaming-indicator-container flex items-center gap-3 px-4 py-2 rounded-lg bg-muted/50 border border-border/50" data-testid="streaming-indicator">
+      {aiState === "thinking" && (
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-muted-foreground" data-testid="typing-indicator">
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+          </div>
+          <span className="text-sm text-muted-foreground">Pensando...</span>
+        </div>
+      )}
+      
+      {aiState === "responding" && (
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-primary" data-testid="typing-indicator">
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+          </div>
+          <span className="text-sm text-muted-foreground">Escribiendo...</span>
+          {estimatedTokens > 0 && (
+            <span className="token-counter-pulse text-xs text-muted-foreground/70 tabular-nums" data-testid="token-counter">
+              ~{estimatedTokens} tokens
+            </span>
+          )}
+        </div>
+      )}
+      
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        onClick={onCancel}
+        className="cancel-button-pulse ml-auto h-8 px-3 text-sm font-medium"
+        data-testid="button-cancel-streaming"
+      >
+        <Square className="h-3.5 w-3.5 mr-1.5 fill-current" />
+        Detener
+      </Button>
+    </div>
+  );
+}
+
 interface ContentBlock {
   id: number;
   type: 'heading1' | 'heading2' | 'heading3' | 'paragraph' | 'list' | 'numberedList' | 'blockquote' | 'table' | 'hr';
@@ -3530,28 +3588,26 @@ IMPORTANTE:
 
         {/* Thinking/Responding State */}
         {aiState !== "idle" && !isGeneratingImage && (
-          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-            <div className="flex flex-col gap-2 items-start">
-              {aiState === "thinking" && (
-                <div className="liquid-message-ai-light px-4 py-3 text-sm">
-                  <div className="flex items-center">
-                    <span className="thinking-wave">Pensando</span>
-                    <span className="thinking-cursor">|</span>
-                  </div>
-                </div>
-              )}
-              {aiState === "responding" && streamingContent && (
-                <div className="px-4 py-3 text-foreground min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
-                  <MarkdownErrorBoundary fallbackContent={streamingContent}>
-                    <MarkdownRenderer
-                      content={streamingContent}
-                      customComponents={{...CleanDataTableComponents}}
-                    />
-                  </MarkdownErrorBoundary>
-                  <span className="typing-cursor">|</span>
-                </div>
-              )}
-            </div>
+          <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+            {/* Streaming Indicator with cancel button */}
+            <StreamingIndicator
+              aiState={aiState}
+              streamingContent={streamingContent}
+              onCancel={handleStopChat}
+            />
+            
+            {/* Streaming content with fade-in animation */}
+            {aiState === "responding" && streamingContent && (
+              <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
+                <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                  <MarkdownRenderer
+                    content={streamingContent}
+                    customComponents={{...CleanDataTableComponents}}
+                  />
+                </MarkdownErrorBoundary>
+                <span className="typing-cursor">|</span>
+              </div>
+            )}
           </div>
         )}
         
@@ -3773,9 +3829,17 @@ IMPORTANTE:
           {/* Processing indicators when AI is working (even without messages) */}
           {!hasMessages && aiState !== "idle" && (
             <div className="flex-1 flex flex-col items-center justify-center px-4">
-              {streamingContent ? (
-                <div className="w-full max-w-3xl mx-auto">
-                  <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
+              <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
+                {/* Streaming Indicator with cancel button */}
+                <StreamingIndicator
+                  aiState={aiState}
+                  streamingContent={streamingContent}
+                  onCancel={handleStopChat}
+                />
+                
+                {/* Streaming content with fade-in animation */}
+                {streamingContent && (
+                  <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">
                     <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
                       <MarkdownErrorBoundary fallbackContent={streamingContent}>
                         <MarkdownRenderer
@@ -3783,28 +3847,11 @@ IMPORTANTE:
                           customComponents={{...CleanDataTableComponents}}
                         />
                       </MarkdownErrorBoundary>
-                      <span className="inline-block w-0.5 h-4 bg-primary animate-[pulse_0.33s_ease-in-out_infinite] ml-0.5" />
+                      <span className="typing-cursor">|</span>
                     </div>
                   </div>
-                </div>
-              ) : (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="w-full max-w-3xl mx-auto"
-                >
-                  <div className="flex items-center gap-3 py-3 px-4 text-sm text-muted-foreground bg-muted/30 rounded-lg">
-                    <div className="flex gap-1">
-                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
-                    <span className="font-medium">
-                      {aiState === "thinking" ? "Pensando..." : "Escribiendo..."}
-                    </span>
-                  </div>
-                </motion.div>
-              )}
+                )}
+              </div>
             </div>
           )}
 

@@ -123,3 +123,37 @@ export function ConnectionStatus() {
     </div>
   );
 }
+
+interface ConnectionDotProps {
+  className?: string;
+  showLabel?: boolean;
+}
+
+export function ConnectionDot({ className, showLabel = false }: ConnectionDotProps) {
+  const { isOnline } = useOnlineStatus();
+
+  return (
+    <div
+      className={cn('flex items-center gap-1.5', className)}
+      data-testid="connection-dot"
+      title={isOnline ? 'Online' : 'Offline'}
+    >
+      <span
+        className={cn(
+          'w-2 h-2 rounded-full transition-colors duration-300',
+          isOnline 
+            ? 'bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.5)]' 
+            : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)] animate-pulse'
+        )}
+      />
+      {showLabel && (
+        <span className={cn(
+          'text-xs',
+          isOnline ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+        )}>
+          {isOnline ? 'Online' : 'Offline'}
+        </span>
+      )}
+    </div>
+  );
+}

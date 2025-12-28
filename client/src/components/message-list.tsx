@@ -1,4 +1,5 @@
-import React, { memo, useState, useCallback, useRef } from "react";
+import React, { memo, useState, useCallback, useRef, useMemo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   CheckCircle2,
   Loader2,
@@ -99,6 +100,55 @@ const isNumericValue = (text: string): boolean => {
     cleaned.length > 0
   );
 };
+
+const ImageSkeleton = memo(function ImageSkeleton({ className }: { className?: string }) {
+  return (
+    <div className={cn(
+      "animate-pulse bg-gradient-to-br from-muted/80 via-muted to-muted/80 rounded-lg flex items-center justify-center",
+      className
+    )}>
+      <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
+    </div>
+  );
+});
+
+const LazyImage = memo(function LazyImage({ 
+  src, 
+  alt, 
+  className, 
+  style,
+  onClick,
+  "data-testid": testId
+}: { 
+  src: string; 
+  alt: string; 
+  className?: string;
+  style?: React.CSSProperties;
+  onClick?: () => void;
+  "data-testid"?: string;
+}) {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
+
+  return (
+    <div className="relative">
+      {!isLoaded && !hasError && (
+        <ImageSkeleton className={cn(className, "absolute inset-0")} />
+      )}
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        className={cn(className, !isLoaded && "opacity-0")}
+        style={style}
+        onClick={onClick}
+        onLoad={() => setIsLoaded(true)}
+        onError={() => setHasError(true)}
+        data-testid={testId}
+      />
+    </div>
+  );
+});
 
 const CleanDataTableWrapper = ({ children }: { children?: React.ReactNode }) => {
   const [copied, setCopied] = useState(false);
@@ -447,7 +497,7 @@ const AttachmentList = memo(function AttachmentList({
             onClick={() => onOpenPreview?.(att)}
             data-testid={`attachment-image-${i}`}
           >
-            <img
+            <LazyImage
               src={att.imageUrl}
               alt={att.name}
               className="w-full h-auto max-h-[200px] object-cover"
@@ -485,6 +535,11 @@ const AttachmentList = memo(function AttachmentList({
         )
       )}
     </div>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.variant === nextProps.variant &&
+    prevProps.attachments === nextProps.attachments
   );
 });
 
@@ -525,17 +580,17 @@ const ActionToolbar = memo(function ActionToolbar({
   const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [customInstruction, setCustomInstruction] = useState("");
 
-  const handleRegenerateOption = (instruction?: string) => {
+  const handleRegenerateOption = useCallback((instruction?: string) => {
     setRegenerateOpen(false);
     setCustomInstruction("");
     onRegenerate(msgIndex, instruction);
-  };
+  }, [msgIndex, onRegenerate]);
 
-  const handleCustomSubmit = () => {
+  const handleCustomSubmit = useCallback(() => {
     if (customInstruction.trim()) {
       handleRegenerateOption(customInstruction.trim());
     }
-  };
+  }, [customInstruction, handleRegenerateOption]);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -748,6 +803,18 @@ const ActionToolbar = memo(function ActionToolbar({
       </div>
     </TooltipProvider>
   );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.messageId === nextProps.messageId &&
+    prevProps.content === nextProps.content &&
+    prevProps.msgIndex === nextProps.msgIndex &&
+    prevProps.copiedMessageId === nextProps.copiedMessageId &&
+    prevProps.messageFeedback[prevProps.messageId] === nextProps.messageFeedback[nextProps.messageId] &&
+    prevProps.speakingMessageId === nextProps.speakingMessageId &&
+    prevProps.aiState === nextProps.aiState &&
+    prevProps.isRegenerating === nextProps.isRegenerating &&
+    prevProps.variant === nextProps.variant
+  );
 });
 
 interface UserMessageProps {
@@ -869,6 +936,16 @@ const UserMessage = memo(function UserMessage({
       )}
     </div>
   );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.message.content === nextProps.message.content &&
+    prevProps.variant === nextProps.variant &&
+    prevProps.isEditing === nextProps.isEditing &&
+    prevProps.editContent === nextProps.editContent &&
+    prevProps.copiedMessageId === nextProps.copiedMessageId &&
+    prevProps.message.attachments === nextProps.message.attachments
+  );
 });
 
 interface AssistantMessageProps {
@@ -922,6 +999,38 @@ const AssistantMessage = memo(function AssistantMessage({
   minimizedDocument,
   onRestoreDocument
 }: AssistantMessageProps) {
+  const parsedContent = useMemo(() => {
+    if (!message.content || message.isThinking) {
+      return { text: "", documents: [] };
+    }
+    return parseDocumentBlocks(message.content);
+  }, [message.content, message.isThinking]);
+
+  const contentBlocks = useMemo(() => {
+    return extractCodeBlocks(parsedContent.text || "");
+  }, [parsedContent.text]);
+
+  const imageData = useMemo(() => {
+    const msgImage = message.generatedImage;
+    const storeImage = getGeneratedImage(message.id);
+    const pendingMatch =
+      pendingGeneratedImage?.messageId === message.id
+        ? pendingGeneratedImage.imageData
+        : null;
+    const refMatch =
+      latestGeneratedImageRef.current?.messageId === message.id
+        ? latestGeneratedImageRef.current.imageData
+        : null;
+
+    const result = msgImage || storeImage || pendingMatch || refMatch;
+
+    if (result && !storeImage) {
+      storeGeneratedImage(message.id, result);
+    }
+
+    return result;
+  }, [message.id, message.generatedImage, pendingGeneratedImage, latestGeneratedImageRef]);
+
   if (variant === "compact") {
     return (
       <div className="bg-green-500/10 text-green-700 dark:text-green-400 px-3 py-1.5 rounded-lg max-w-[90%] text-xs flex items-center gap-1">
@@ -931,25 +1040,7 @@ const AssistantMessage = memo(function AssistantMessage({
     );
   }
 
-  const { text, documents } = parseDocumentBlocks(message.content);
-  const contentBlocks = extractCodeBlocks(text || "");
-
-  const msgImage = message.generatedImage;
-  const storeImage = getGeneratedImage(message.id);
-  const pendingMatch =
-    pendingGeneratedImage?.messageId === message.id
-      ? pendingGeneratedImage.imageData
-      : null;
-  const refMatch =
-    latestGeneratedImageRef.current?.messageId === message.id
-      ? latestGeneratedImageRef.current.imageData
-      : null;
-
-  let imageData = msgImage || storeImage || pendingMatch || refMatch;
-
-  if (imageData && !storeImage) {
-    storeGeneratedImage(message.id, imageData);
-  }
+  const { documents } = parsedContent;
 
   const showSkeleton =
     isGeneratingImage &&
@@ -1054,7 +1145,7 @@ const AssistantMessage = memo(function AssistantMessage({
 
       {imageData && (
         <div className="mt-3 relative group inline-block">
-          <img
+          <LazyImage
             src={imageData}
             alt="Imagen generada"
             className="max-w-full h-auto rounded-lg shadow-md cursor-pointer hover:opacity-95 transition-opacity"
@@ -1166,6 +1257,184 @@ const AssistantMessage = memo(function AssistantMessage({
       )}
     </div>
   );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.message.content === nextProps.message.content &&
+    prevProps.message.isThinking === nextProps.message.isThinking &&
+    prevProps.msgIndex === nextProps.msgIndex &&
+    prevProps.totalMessages === nextProps.totalMessages &&
+    prevProps.variant === nextProps.variant &&
+    prevProps.copiedMessageId === nextProps.copiedMessageId &&
+    prevProps.messageFeedback[prevProps.message.id] === nextProps.messageFeedback[nextProps.message.id] &&
+    prevProps.speakingMessageId === nextProps.speakingMessageId &&
+    prevProps.aiState === nextProps.aiState &&
+    prevProps.isRegenerating === nextProps.isRegenerating &&
+    prevProps.isGeneratingImage === nextProps.isGeneratingImage &&
+    prevProps.pendingGeneratedImage === nextProps.pendingGeneratedImage &&
+    prevProps.minimizedDocument === nextProps.minimizedDocument
+  );
+});
+
+interface MessageItemProps {
+  message: Message;
+  msgIndex: number;
+  totalMessages: number;
+  variant: "compact" | "default";
+  editingMessageId: string | null;
+  editContent: string;
+  copiedMessageId: string | null;
+  messageFeedback: Record<string, "up" | "down">;
+  speakingMessageId: string | null;
+  isGeneratingImage: boolean;
+  pendingGeneratedImage: { messageId: string; imageData: string } | null;
+  latestGeneratedImageRef: React.RefObject<{ messageId: string; imageData: string } | null>;
+  aiState: "idle" | "thinking" | "responding";
+  regeneratingMsgIndex: number | null;
+  handleCopyMessage: (content: string, id: string) => void;
+  handleStartEdit: (msg: Message) => void;
+  handleCancelEdit: () => void;
+  handleSendEdit: (id: string) => void;
+  handleFeedback: (id: string, type: "up" | "down") => void;
+  handleRegenerate: (index: number) => void;
+  handleShare: (content: string) => void;
+  handleReadAloud: (id: string, content: string) => void;
+  handleOpenDocumentPreview: (doc: DocumentBlock) => void;
+  handleOpenFileAttachmentPreview: (attachment: NonNullable<Message["attachments"]>[0]) => void;
+  handleDownloadImage: (imageData: string) => void;
+  setLightboxImage: (imageData: string | null) => void;
+  handleReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
+  minimizedDocument?: { type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null;
+  onRestoreDocument?: () => void;
+  setEditContent: (value: string) => void;
+}
+
+const MessageItem = memo(function MessageItem({
+  message,
+  msgIndex,
+  totalMessages,
+  variant,
+  editingMessageId,
+  editContent,
+  copiedMessageId,
+  messageFeedback,
+  speakingMessageId,
+  isGeneratingImage,
+  pendingGeneratedImage,
+  latestGeneratedImageRef,
+  aiState,
+  regeneratingMsgIndex,
+  handleCopyMessage,
+  handleStartEdit,
+  handleCancelEdit,
+  handleSendEdit,
+  handleFeedback,
+  handleRegenerate,
+  handleShare,
+  handleReadAloud,
+  handleOpenDocumentPreview,
+  handleOpenFileAttachmentPreview,
+  handleDownloadImage,
+  setLightboxImage,
+  handleReopenDocument,
+  minimizedDocument,
+  onRestoreDocument,
+  setEditContent
+}: MessageItemProps) {
+  return (
+    <div
+      className={cn(
+        "flex",
+        variant === "compact"
+          ? cn(
+              "gap-2 text-sm",
+              message.role === "user" ? "justify-end" : "justify-start"
+            )
+          : cn(
+              "w-full max-w-3xl mx-auto gap-4",
+              message.role === "user" ? "justify-end" : "justify-start"
+            )
+      )}
+    >
+      <div
+        className={cn(
+          "flex flex-col gap-2",
+          variant === "default" && "max-w-[85%]",
+          message.role === "user" ? "items-end" : "items-start"
+        )}
+      >
+        {message.role === "user" ? (
+          <UserMessage
+            message={message}
+            variant={variant}
+            isEditing={editingMessageId === message.id}
+            editContent={editContent}
+            copiedMessageId={copiedMessageId}
+            onEditContentChange={setEditContent}
+            onCancelEdit={handleCancelEdit}
+            onSendEdit={handleSendEdit}
+            onCopyMessage={handleCopyMessage}
+            onStartEdit={handleStartEdit}
+            onOpenPreview={handleOpenFileAttachmentPreview}
+            onReopenDocument={handleReopenDocument}
+          />
+        ) : message.role === "system" && message.attachments?.some(a => a.type === "document") ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <AttachmentList
+              attachments={message.attachments}
+              variant={variant}
+              onReopenDocument={handleReopenDocument}
+            />
+          </div>
+        ) : (
+          <AssistantMessage
+            message={message}
+            msgIndex={msgIndex}
+            totalMessages={totalMessages}
+            variant={variant}
+            copiedMessageId={copiedMessageId}
+            messageFeedback={messageFeedback}
+            speakingMessageId={speakingMessageId}
+            aiState={aiState}
+            isRegenerating={regeneratingMsgIndex === msgIndex}
+            isGeneratingImage={isGeneratingImage}
+            pendingGeneratedImage={pendingGeneratedImage}
+            latestGeneratedImageRef={latestGeneratedImageRef}
+            onCopyMessage={handleCopyMessage}
+            onFeedback={handleFeedback}
+            onRegenerate={handleRegenerate}
+            onShare={handleShare}
+            onReadAloud={handleReadAloud}
+            onOpenDocumentPreview={handleOpenDocumentPreview}
+            onDownloadImage={handleDownloadImage}
+            onOpenLightbox={setLightboxImage}
+            onReopenDocument={handleReopenDocument}
+            minimizedDocument={minimizedDocument}
+            onRestoreDocument={onRestoreDocument}
+          />
+        )}
+      </div>
+    </div>
+  );
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.message.content === nextProps.message.content &&
+    prevProps.message.role === nextProps.message.role &&
+    prevProps.msgIndex === nextProps.msgIndex &&
+    prevProps.totalMessages === nextProps.totalMessages &&
+    prevProps.variant === nextProps.variant &&
+    prevProps.editingMessageId === nextProps.editingMessageId &&
+    prevProps.editContent === nextProps.editContent &&
+    prevProps.copiedMessageId === nextProps.copiedMessageId &&
+    prevProps.messageFeedback === nextProps.messageFeedback &&
+    prevProps.speakingMessageId === nextProps.speakingMessageId &&
+    prevProps.isGeneratingImage === nextProps.isGeneratingImage &&
+    prevProps.pendingGeneratedImage === nextProps.pendingGeneratedImage &&
+    prevProps.aiState === nextProps.aiState &&
+    prevProps.regeneratingMsgIndex === nextProps.regeneratingMsgIndex &&
+    prevProps.minimizedDocument === nextProps.minimizedDocument
+  );
 });
 
 export interface MessageListProps {
@@ -1199,7 +1468,12 @@ export interface MessageListProps {
   minimizedDocument?: { type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null;
   onRestoreDocument?: () => void;
   onSelectSuggestedReply?: (text: string) => void;
+  parentRef?: React.RefObject<HTMLDivElement>;
+  enableVirtualization?: boolean;
 }
+
+const VIRTUALIZATION_THRESHOLD = 50;
+const ESTIMATED_MESSAGE_HEIGHT = 120;
 
 export function MessageList({
   messages,
@@ -1231,89 +1505,240 @@ export function MessageList({
   handleReopenDocument,
   minimizedDocument,
   onRestoreDocument,
-  onSelectSuggestedReply
+  onSelectSuggestedReply,
+  parentRef,
+  enableVirtualization = true
 }: MessageListProps) {
-  const lastAssistantMessage = messages.filter(m => m.role === "assistant").pop();
+  const internalParentRef = useRef<HTMLDivElement>(null);
+  const scrollRef = parentRef || internalParentRef;
+
+  const shouldVirtualize = enableVirtualization && messages.length > VIRTUALIZATION_THRESHOLD && variant === "default";
+
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ESTIMATED_MESSAGE_HEIGHT,
+    overscan: 5,
+    enabled: shouldVirtualize
+  });
+
+  const lastAssistantMessage = useMemo(() => {
+    return messages.filter(m => m.role === "assistant").pop();
+  }, [messages]);
+
   const isLastMessageAssistant = messages.length > 0 && messages[messages.length - 1].role === "assistant";
   const showSuggestedReplies = variant === "default" && aiState === "idle" && isLastMessageAssistant && lastAssistantMessage && !streamingContent;
-  const suggestions = showSuggestedReplies ? generateSuggestions(lastAssistantMessage.content) : [];
-  return (
-    <>
-      {messages.map((msg, msgIndex) => (
-        <div
-          key={msg.id}
-          className={cn(
-            "flex",
-            variant === "compact"
-              ? cn(
-                  "gap-2 text-sm",
-                  msg.role === "user" ? "justify-end" : "justify-start"
-                )
-              : cn(
-                  "w-full max-w-3xl mx-auto gap-4",
-                  msg.role === "user" ? "justify-end" : "justify-start"
-                )
-          )}
-        >
-          <div
-            className={cn(
-              "flex flex-col gap-2",
-              variant === "default" && "max-w-[85%]",
-              msg.role === "user" ? "items-end" : "items-start"
-            )}
-          >
-            {msg.role === "user" ? (
-              <UserMessage
+  
+  const suggestions = useMemo(() => {
+    return showSuggestedReplies && lastAssistantMessage ? generateSuggestions(lastAssistantMessage.content) : [];
+  }, [showSuggestedReplies, lastAssistantMessage?.content]);
+
+  if (shouldVirtualize) {
+    return (
+      <div
+        ref={!parentRef ? internalParentRef : undefined}
+        className="flex flex-col gap-4"
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          width: '100%',
+          position: 'relative',
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const msg = messages[virtualRow.index];
+          return (
+            <div
+              key={msg.id}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+              data-index={virtualRow.index}
+              ref={virtualizer.measureElement}
+            >
+              <MessageItem
                 message={msg}
-                variant={variant}
-                isEditing={editingMessageId === msg.id}
-                editContent={editContent}
-                copiedMessageId={copiedMessageId}
-                onEditContentChange={setEditContent}
-                onCancelEdit={handleCancelEdit}
-                onSendEdit={handleSendEdit}
-                onCopyMessage={handleCopyMessage}
-                onStartEdit={handleStartEdit}
-                onOpenPreview={handleOpenFileAttachmentPreview}
-                onReopenDocument={handleReopenDocument}
-              />
-            ) : msg.role === "system" && msg.attachments?.some(a => a.type === "document") ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <AttachmentList
-                  attachments={msg.attachments}
-                  variant={variant}
-                  onReopenDocument={handleReopenDocument}
-                />
-              </div>
-            ) : (
-              <AssistantMessage
-                message={msg}
-                msgIndex={msgIndex}
+                msgIndex={virtualRow.index}
                 totalMessages={messages.length}
                 variant={variant}
+                editingMessageId={editingMessageId}
+                editContent={editContent}
                 copiedMessageId={copiedMessageId}
                 messageFeedback={messageFeedback}
                 speakingMessageId={speakingMessageId}
-                aiState={aiState}
-                isRegenerating={regeneratingMsgIndex === msgIndex}
                 isGeneratingImage={isGeneratingImage}
                 pendingGeneratedImage={pendingGeneratedImage}
                 latestGeneratedImageRef={latestGeneratedImageRef}
-                onCopyMessage={handleCopyMessage}
-                onFeedback={handleFeedback}
-                onRegenerate={handleRegenerate}
-                onShare={handleShare}
-                onReadAloud={handleReadAloud}
-                onOpenDocumentPreview={handleOpenDocumentPreview}
-                onDownloadImage={handleDownloadImage}
-                onOpenLightbox={setLightboxImage}
-                onReopenDocument={handleReopenDocument}
+                aiState={aiState}
+                regeneratingMsgIndex={regeneratingMsgIndex}
+                handleCopyMessage={handleCopyMessage}
+                handleStartEdit={handleStartEdit}
+                handleCancelEdit={handleCancelEdit}
+                handleSendEdit={handleSendEdit}
+                handleFeedback={handleFeedback}
+                handleRegenerate={handleRegenerate}
+                handleShare={handleShare}
+                handleReadAloud={handleReadAloud}
+                handleOpenDocumentPreview={handleOpenDocumentPreview}
+                handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+                handleDownloadImage={handleDownloadImage}
+                setLightboxImage={setLightboxImage}
+                handleReopenDocument={handleReopenDocument}
                 minimizedDocument={minimizedDocument}
                 onRestoreDocument={onRestoreDocument}
+                setEditContent={setEditContent}
               />
-            )}
+            </div>
+          );
+        })}
+
+        {streamingContent && variant === "default" && (
+          <div 
+            className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${virtualizer.getTotalSize()}px)`,
+            }}
+          >
+            <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
+              <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
+                <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                  <MarkdownRenderer
+                    content={streamingContent}
+                    customComponents={{ ...CleanDataTableComponents }}
+                  />
+                </MarkdownErrorBoundary>
+                <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse ml-0.5" />
+              </div>
+            </div>
           </div>
-        </div>
+        )}
+
+        {showSuggestedReplies && suggestions.length > 0 && onSelectSuggestedReply && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="flex w-full max-w-3xl mx-auto gap-4 justify-start mt-2"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${virtualizer.getTotalSize() + 20}px)`,
+            }}
+          >
+            <SuggestedReplies
+              suggestions={suggestions}
+              onSelect={onSelectSuggestedReply}
+            />
+          </motion.div>
+        )}
+
+        {aiState !== "idle" && !streamingContent && variant === "default" && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${virtualizer.getTotalSize()}px)`,
+            }}
+          >
+            <div className="flex items-center gap-3 py-3 px-5 text-sm text-muted-foreground bg-gradient-to-r from-muted/40 to-muted/20 rounded-2xl border border-border/30 shadow-sm">
+              <div className="flex gap-1.5">
+                <motion.span
+                  className="w-2.5 h-2.5 bg-primary rounded-full"
+                  animate={{ 
+                    scale: [1, 1.2, 1],
+                    opacity: [0.5, 1, 0.5] 
+                  }}
+                  transition={{ 
+                    duration: 1,
+                    repeat: Infinity,
+                    delay: 0 
+                  }}
+                />
+                <motion.span
+                  className="w-2.5 h-2.5 bg-primary rounded-full"
+                  animate={{ 
+                    scale: [1, 1.2, 1],
+                    opacity: [0.5, 1, 0.5] 
+                  }}
+                  transition={{ 
+                    duration: 1,
+                    repeat: Infinity,
+                    delay: 0.2 
+                  }}
+                />
+                <motion.span
+                  className="w-2.5 h-2.5 bg-primary rounded-full"
+                  animate={{ 
+                    scale: [1, 1.2, 1],
+                    opacity: [0.5, 1, 0.5] 
+                  }}
+                  transition={{ 
+                    duration: 1,
+                    repeat: Infinity,
+                    delay: 0.4 
+                  }}
+                />
+              </div>
+              <span className="font-medium text-foreground/80">
+                {aiState === "thinking" ? "Pensando..." : "Escribiendo..."}
+              </span>
+            </div>
+          </motion.div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {messages.map((msg, msgIndex) => (
+        <MessageItem
+          key={msg.id}
+          message={msg}
+          msgIndex={msgIndex}
+          totalMessages={messages.length}
+          variant={variant}
+          editingMessageId={editingMessageId}
+          editContent={editContent}
+          copiedMessageId={copiedMessageId}
+          messageFeedback={messageFeedback}
+          speakingMessageId={speakingMessageId}
+          isGeneratingImage={isGeneratingImage}
+          pendingGeneratedImage={pendingGeneratedImage}
+          latestGeneratedImageRef={latestGeneratedImageRef}
+          aiState={aiState}
+          regeneratingMsgIndex={regeneratingMsgIndex}
+          handleCopyMessage={handleCopyMessage}
+          handleStartEdit={handleStartEdit}
+          handleCancelEdit={handleCancelEdit}
+          handleSendEdit={handleSendEdit}
+          handleFeedback={handleFeedback}
+          handleRegenerate={handleRegenerate}
+          handleShare={handleShare}
+          handleReadAloud={handleReadAloud}
+          handleOpenDocumentPreview={handleOpenDocumentPreview}
+          handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+          handleDownloadImage={handleDownloadImage}
+          setLightboxImage={setLightboxImage}
+          handleReopenDocument={handleReopenDocument}
+          minimizedDocument={minimizedDocument}
+          onRestoreDocument={onRestoreDocument}
+          setEditContent={setEditContent}
+        />
       ))}
 
       {streamingContent && variant === "default" && (
