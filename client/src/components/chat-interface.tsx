@@ -3802,7 +3802,7 @@ IMPORTANTE:
           </Panel>
         </PanelGroup>
       ) : (
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
           {/* Content Area - conditional based on whether we have messages */}
           {hasMessages ? (
             <>
