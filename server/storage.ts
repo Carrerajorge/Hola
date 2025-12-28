@@ -66,6 +66,11 @@ import {
   type GeneratedReport, type InsertGeneratedReport,
   type SettingsConfig, type InsertSettingsConfig,
   type AgentGapLog, type InsertAgentGapLog,
+  type LibraryFolder, type InsertLibraryFolder,
+  type LibraryFile, type InsertLibraryFile,
+  type LibraryCollection, type InsertLibraryCollection,
+  type LibraryStorageStats,
+  type LibraryActivityRecord,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
   gpts, gptCategories, gptVersions, gptKnowledge, gptActions, users,
@@ -75,11 +80,12 @@ import {
   consentLogs, sharedLinks, companyKnowledge, gmailOAuthTokens,
   responseQualityMetrics, connectorUsageHourly, offlineMessageQueue,
   providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents, securityPolicies,
-  reportTemplates, generatedReports, settingsConfig, agentGapLogs
+  reportTemplates, generatedReports, settingsConfig, agentGapLogs,
+  libraryFolders, libraryFiles, libraryCollections, libraryFileCollections, libraryActivity, libraryStorage
 } from "@shared/schema";
 import crypto, { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, sql, desc, and, isNull } from "drizzle-orm";
+import { eq, sql, desc, and, isNull, ilike, or } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -341,6 +347,34 @@ export interface IStorage {
   createAgentGapLog(log: InsertAgentGapLog): Promise<AgentGapLog>;
   getAgentGapLogs(status?: string): Promise<AgentGapLog[]>;
   updateAgentGapLog(id: string, updates: Partial<InsertAgentGapLog>): Promise<AgentGapLog | undefined>;
+  // Library Folder CRUD
+  getLibraryFolders(userId: string): Promise<LibraryFolder[]>;
+  getLibraryFolder(id: string, userId: string): Promise<LibraryFolder | null>;
+  createLibraryFolder(folder: InsertLibraryFolder): Promise<LibraryFolder>;
+  updateLibraryFolder(id: string, userId: string, updates: Partial<InsertLibraryFolder>): Promise<LibraryFolder | null>;
+  deleteLibraryFolder(id: string, userId: string): Promise<boolean>;
+  // Library Collection CRUD
+  getLibraryCollections(userId: string): Promise<LibraryCollection[]>;
+  getLibraryCollection(id: string, userId: string): Promise<LibraryCollection | null>;
+  createLibraryCollection(collection: InsertLibraryCollection): Promise<LibraryCollection>;
+  updateLibraryCollection(id: string, userId: string, updates: Partial<InsertLibraryCollection>): Promise<LibraryCollection | null>;
+  deleteLibraryCollection(id: string, userId: string): Promise<boolean>;
+  // Library File-Collection Relationship
+  addFileToCollection(fileId: string, collectionId: string): Promise<void>;
+  removeFileFromCollection(fileId: string, collectionId: string): Promise<boolean>;
+  getCollectionFiles(collectionId: string, userId: string): Promise<LibraryFile[]>;
+  // Enhanced Library File CRUD
+  getLibraryFile(id: string, userId: string): Promise<LibraryFile | null>;
+  getLibraryFiles(userId: string, options?: { type?: string; folderId?: string; search?: string }): Promise<LibraryFile[]>;
+  createLibraryFile(file: InsertLibraryFile): Promise<LibraryFile>;
+  updateLibraryFile(id: string, userId: string, updates: Partial<InsertLibraryFile>): Promise<LibraryFile | null>;
+  deleteLibraryFile(id: string, userId: string): Promise<boolean>;
+  // Library Storage Stats
+  getLibraryStorageStats(userId: string): Promise<LibraryStorageStats | null>;
+  upsertLibraryStorageStats(userId: string, stats: Partial<LibraryStorageStats>): Promise<LibraryStorageStats>;
+  // Library Activity
+  logLibraryActivity(activity: { userId: string; fileId?: number; folderId?: number; collectionId?: number; activityType: string; metadata?: object }): Promise<void>;
+  getLibraryActivity(userId: string, limit?: number): Promise<LibraryActivityRecord[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -2219,6 +2253,200 @@ export class MemStorage implements IStorage {
       .where(eq(agentGapLogs.id, id))
       .returning();
     return result;
+  }
+
+  // Library Folder CRUD
+  async getLibraryFolders(userId: string): Promise<LibraryFolder[]> {
+    return db.select().from(libraryFolders)
+      .where(eq(libraryFolders.userId, userId))
+      .orderBy(libraryFolders.name);
+  }
+
+  async getLibraryFolder(id: string, userId: string): Promise<LibraryFolder | null> {
+    const [result] = await db.select().from(libraryFolders)
+      .where(and(eq(libraryFolders.uuid, id), eq(libraryFolders.userId, userId)));
+    return result || null;
+  }
+
+  async createLibraryFolder(folder: InsertLibraryFolder): Promise<LibraryFolder> {
+    const [result] = await db.insert(libraryFolders).values(folder).returning();
+    return result;
+  }
+
+  async updateLibraryFolder(id: string, userId: string, updates: Partial<InsertLibraryFolder>): Promise<LibraryFolder | null> {
+    const [result] = await db.update(libraryFolders)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(libraryFolders.uuid, id), eq(libraryFolders.userId, userId)))
+      .returning();
+    return result || null;
+  }
+
+  async deleteLibraryFolder(id: string, userId: string): Promise<boolean> {
+    const result = await db.delete(libraryFolders)
+      .where(and(eq(libraryFolders.uuid, id), eq(libraryFolders.userId, userId)));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Library Collection CRUD
+  async getLibraryCollections(userId: string): Promise<LibraryCollection[]> {
+    return db.select().from(libraryCollections)
+      .where(eq(libraryCollections.userId, userId))
+      .orderBy(desc(libraryCollections.createdAt));
+  }
+
+  async getLibraryCollection(id: string, userId: string): Promise<LibraryCollection | null> {
+    const [result] = await db.select().from(libraryCollections)
+      .where(and(eq(libraryCollections.uuid, id), eq(libraryCollections.userId, userId)));
+    return result || null;
+  }
+
+  async createLibraryCollection(collection: InsertLibraryCollection): Promise<LibraryCollection> {
+    const [result] = await db.insert(libraryCollections).values(collection).returning();
+    return result;
+  }
+
+  async updateLibraryCollection(id: string, userId: string, updates: Partial<InsertLibraryCollection>): Promise<LibraryCollection | null> {
+    const [result] = await db.update(libraryCollections)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(libraryCollections.uuid, id), eq(libraryCollections.userId, userId)))
+      .returning();
+    return result || null;
+  }
+
+  async deleteLibraryCollection(id: string, userId: string): Promise<boolean> {
+    const collection = await this.getLibraryCollection(id, userId);
+    if (!collection) return false;
+    await db.delete(libraryFileCollections).where(eq(libraryFileCollections.collectionId, collection.id));
+    const result = await db.delete(libraryCollections)
+      .where(and(eq(libraryCollections.uuid, id), eq(libraryCollections.userId, userId)));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Library File-Collection Relationship
+  async addFileToCollection(fileId: string, collectionId: string): Promise<void> {
+    const [file] = await db.select().from(libraryFiles).where(eq(libraryFiles.uuid, fileId));
+    const [collection] = await db.select().from(libraryCollections).where(eq(libraryCollections.uuid, collectionId));
+    if (file && collection) {
+      await db.insert(libraryFileCollections)
+        .values({ fileId: file.id, collectionId: collection.id })
+        .onConflictDoNothing();
+    }
+  }
+
+  async removeFileFromCollection(fileId: string, collectionId: string): Promise<boolean> {
+    const [file] = await db.select().from(libraryFiles).where(eq(libraryFiles.uuid, fileId));
+    const [collection] = await db.select().from(libraryCollections).where(eq(libraryCollections.uuid, collectionId));
+    if (!file || !collection) return false;
+    const result = await db.delete(libraryFileCollections)
+      .where(and(eq(libraryFileCollections.fileId, file.id), eq(libraryFileCollections.collectionId, collection.id)));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getCollectionFiles(collectionId: string, userId: string): Promise<LibraryFile[]> {
+    const [collection] = await db.select().from(libraryCollections)
+      .where(and(eq(libraryCollections.uuid, collectionId), eq(libraryCollections.userId, userId)));
+    if (!collection) return [];
+    const fileLinks = await db.select().from(libraryFileCollections)
+      .where(eq(libraryFileCollections.collectionId, collection.id))
+      .orderBy(libraryFileCollections.order);
+    if (fileLinks.length === 0) return [];
+    const fileIds = fileLinks.map(fl => fl.fileId);
+    return db.select().from(libraryFiles)
+      .where(sql`${libraryFiles.id} IN (${sql.join(fileIds.map(id => sql`${id}`), sql`, `)})`);
+  }
+
+  // Enhanced Library File CRUD
+  async getLibraryFile(id: string, userId: string): Promise<LibraryFile | null> {
+    const [result] = await db.select().from(libraryFiles)
+      .where(and(eq(libraryFiles.uuid, id), eq(libraryFiles.userId, userId)));
+    return result || null;
+  }
+
+  async getLibraryFiles(userId: string, options?: { type?: string; folderId?: string; search?: string }): Promise<LibraryFile[]> {
+    const conditions = [eq(libraryFiles.userId, userId), isNull(libraryFiles.deletedAt)];
+    if (options?.type) {
+      conditions.push(eq(libraryFiles.type, options.type));
+    }
+    if (options?.folderId) {
+      const [folder] = await db.select().from(libraryFolders)
+        .where(and(eq(libraryFolders.uuid, options.folderId), eq(libraryFolders.userId, userId)));
+      if (folder) {
+        conditions.push(eq(libraryFiles.folderId, folder.id));
+      }
+    }
+    if (options?.search) {
+      conditions.push(
+        or(
+          ilike(libraryFiles.name, `%${options.search}%`),
+          ilike(libraryFiles.originalName, `%${options.search}%`),
+          ilike(libraryFiles.description, `%${options.search}%`)
+        ) as any
+      );
+    }
+    return db.select().from(libraryFiles)
+      .where(and(...conditions))
+      .orderBy(desc(libraryFiles.createdAt));
+  }
+
+  async createLibraryFile(file: InsertLibraryFile): Promise<LibraryFile> {
+    const [result] = await db.insert(libraryFiles).values(file).returning();
+    return result;
+  }
+
+  async updateLibraryFile(id: string, userId: string, updates: Partial<InsertLibraryFile>): Promise<LibraryFile | null> {
+    const [result] = await db.update(libraryFiles)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(libraryFiles.uuid, id), eq(libraryFiles.userId, userId)))
+      .returning();
+    return result || null;
+  }
+
+  async deleteLibraryFile(id: string, userId: string): Promise<boolean> {
+    const [result] = await db.update(libraryFiles)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(libraryFiles.uuid, id), eq(libraryFiles.userId, userId)))
+      .returning();
+    return !!result;
+  }
+
+  // Library Storage Stats
+  async getLibraryStorageStats(userId: string): Promise<LibraryStorageStats | null> {
+    const [result] = await db.select().from(libraryStorage).where(eq(libraryStorage.userId, userId));
+    return result || null;
+  }
+
+  async upsertLibraryStorageStats(userId: string, stats: Partial<LibraryStorageStats>): Promise<LibraryStorageStats> {
+    const existing = await this.getLibraryStorageStats(userId);
+    if (existing) {
+      const [result] = await db.update(libraryStorage)
+        .set({ ...stats, updatedAt: new Date() })
+        .where(eq(libraryStorage.userId, userId))
+        .returning();
+      return result;
+    }
+    const [result] = await db.insert(libraryStorage)
+      .values({ userId, ...stats })
+      .returning();
+    return result;
+  }
+
+  // Library Activity
+  async logLibraryActivity(activity: { userId: string; fileId?: number; folderId?: number; collectionId?: number; activityType: string; metadata?: object }): Promise<void> {
+    await db.insert(libraryActivity).values({
+      userId: activity.userId,
+      fileId: activity.fileId,
+      folderId: activity.folderId,
+      collectionId: activity.collectionId,
+      action: activity.activityType,
+      details: activity.metadata,
+    });
+  }
+
+  async getLibraryActivity(userId: string, limit: number = 50): Promise<LibraryActivityRecord[]> {
+    return db.select().from(libraryActivity)
+      .where(eq(libraryActivity.userId, userId))
+      .orderBy(desc(libraryActivity.createdAt))
+      .limit(limit);
   }
 }
 
