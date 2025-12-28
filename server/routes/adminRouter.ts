@@ -5,6 +5,7 @@ import { users, chats, chatMessages, aiModels, excelDocuments } from "@shared/sc
 import { llmGateway } from "../lib/llmGateway";
 import { eq, desc, and, gte, lte, ilike, sql, inArray, count } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { hashPassword } from "../utils/password";
 import { syncModelsForProvider, syncAllProviders, getAvailableProviders, getModelStats } from "../services/aiModelSyncService";
 import { toolRegistry, ToolDefinition } from "../services/toolRegistry";
 import { IntentToolMapper } from "../services/intentMapper";
@@ -15,6 +16,9 @@ import { progressTracker } from "../services/progressTracker";
 import { errorRecovery } from "../services/errorRecovery";
 import { FEATURES, setFeatureFlag } from "../config/features";
 import { chatAgenticCircuit } from "../services/chatAgenticCircuit";
+import { validateBody, validateParams } from "../middleware/validateRequest";
+import { asyncHandler } from "../middleware/errorHandler";
+import { createUserBodySchema, idParamSchema } from "../schemas/apiSchemas";
 
 const gapsStore: any[] = [];
 
@@ -260,35 +264,29 @@ export function createAdminRouter() {
     }
   });
 
-  router.post("/users", async (req, res) => {
-    try {
-      const { email, password, plan, role } = req.body;
-      if (!email || !password) {
-        return res.status(400).json({ message: "Email y contraseña son requeridos" });
-      }
-      const existingUsers = await storage.getAllUsers();
-      const existingUser = existingUsers.find(u => u.email === email);
-      if (existingUser) {
-        return res.status(400).json({ message: "Ya existe un usuario con este email" });
-      }
-      const [user] = await db.insert(users).values({
-        email,
-        password,
-        plan: plan || "free",
-        role: role || "user",
-        status: "active"
-      }).returning();
-      await storage.createAuditLog({
-        action: "user_create",
-        resource: "users",
-        resourceId: user.id,
-        details: { email, plan, role }
-      });
-      res.json(user);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
+  router.post("/users", validateBody(createUserBodySchema), asyncHandler(async (req, res) => {
+    const { email, password, plan, role } = req.body;
+    const existingUsers = await storage.getAllUsers();
+    const existingUser = existingUsers.find(u => u.email === email);
+    if (existingUser) {
+      return res.status(409).json({ message: "A user with this email already exists" });
     }
-  });
+    const hashedPassword = await hashPassword(password);
+    const [user] = await db.insert(users).values({
+      email,
+      password: hashedPassword,
+      plan: plan || "free",
+      role: role || "user",
+      status: "active"
+    }).returning();
+    await storage.createAuditLog({
+      action: "user_create",
+      resource: "users",
+      resourceId: user.id,
+      details: { email, plan, role }
+    });
+    res.json(user);
+  }));
 
   router.patch("/users/:id", async (req, res) => {
     try {

@@ -324,6 +324,8 @@ export const files = pgTable("files", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
   index("files_user_created_idx").on(table.userId, table.createdAt),
+  index("files_user_id_idx").on(table.userId),
+  index("files_status_idx").on(table.status),
 ]);
 
 export const insertFileSchema = createInsertSchema(files).omit({
@@ -513,6 +515,8 @@ export const chats = pgTable("chats", {
   index("chats_status_idx").on(table.conversationStatus),
   index("chats_flag_idx").on(table.flagStatus),
   index("chats_user_updated_idx").on(table.userId, table.updatedAt),
+  index("chats_user_archived_deleted_idx").on(table.userId, table.archived, table.deletedAt),
+  index("chats_updated_at_idx").on(table.updatedAt),
 ]);
 
 export const insertChatSchema = createInsertSchema(chats).omit({
@@ -548,6 +552,7 @@ export const chatMessages = pgTable("chat_messages", {
   index("chat_messages_status_idx").on(table.status),
   uniqueIndex("chat_messages_request_unique").on(table.requestId),
   index("chat_messages_chat_created_idx").on(table.chatId, table.createdAt),
+  index("chat_messages_created_at_idx").on(table.createdAt),
 ]);
 
 export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({

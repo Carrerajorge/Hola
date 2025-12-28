@@ -1,3 +1,21 @@
+/**
+ * @deprecated This monolithic storage layer is being refactored into modular repositories.
+ * 
+ * NEW MODULAR APPROACH:
+ * - User operations: import { userRepository } from './repositories/userRepository'
+ * - Chat operations: import { chatRepository } from './repositories/chatRepository'
+ * - Base utilities:  import { validateOwnership, validateUserId } from './repositories/baseRepository'
+ * 
+ * The new repositories provide:
+ * - Better multi-tenant security with userId validation
+ * - Ownership checks for resource access
+ * - Structured logging
+ * - Transaction helpers
+ * 
+ * This file is kept for backward compatibility. Gradually migrate to the new repositories.
+ * See: server/repositories/index.ts for all available exports.
+ */
+
 import { 
   type User, type InsertUser, 
   type File, type InsertFile, 

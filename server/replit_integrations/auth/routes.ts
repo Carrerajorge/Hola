@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { authStorage } from "./storage";
 import { isAuthenticated } from "./replitAuth";
 import { storage } from "../../storage";
+import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
 
 // Admin credentials from environment variables
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@gmail.com";
@@ -64,9 +65,32 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "Usuario no encontrado" });
       }
       
-      // Verify password
-      if (dbUser.password !== password) {
+      // Verify password - handle both hashed and legacy plain text passwords
+      let passwordValid = false;
+      let needsPasswordMigration = false;
+      
+      if (dbUser.password) {
+        if (isHashed(dbUser.password)) {
+          passwordValid = await verifyPassword(password, dbUser.password);
+        } else {
+          passwordValid = dbUser.password === password;
+          needsPasswordMigration = passwordValid;
+        }
+      }
+      
+      if (!passwordValid) {
         return res.status(401).json({ message: "Contraseña incorrecta" });
+      }
+      
+      // Migrate legacy plain text password to hashed version
+      if (needsPasswordMigration) {
+        try {
+          const hashedPassword = await hashPassword(password);
+          await storage.updateUser(dbUser.id, { password: hashedPassword });
+          console.log(`Password migrated to bcrypt hash for user: ${dbUser.email}`);
+        } catch (migrationError) {
+          console.error("Failed to migrate password to hash:", migrationError);
+        }
       }
       
       // Check if user is active
