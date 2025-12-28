@@ -336,5 +336,40 @@ export function createGptRouter() {
     }
   });
 
+  router.get("/gpts/:id/about", async (req, res) => {
+    try {
+      const gpt = await storage.getGpt(req.params.id);
+      if (!gpt) {
+        return res.status(404).json({ error: "GPT not found" });
+      }
+      
+      let creator = null;
+      if (gpt.creatorId) {
+        creator = await storage.getUser(gpt.creatorId);
+      }
+      
+      const conversationCount = await storage.getGptConversationCount(req.params.id);
+      
+      let relatedGpts: any[] = [];
+      if (gpt.creatorId) {
+        const allCreatorGpts = await storage.getGpts({ creatorId: gpt.creatorId });
+        relatedGpts = allCreatorGpts.filter(g => g.id !== gpt.id).slice(0, 10);
+      }
+      
+      res.json({
+        gpt,
+        creator: creator ? {
+          id: creator.id,
+          name: creator.fullName || creator.username || creator.email?.split('@')[0] || 'Usuario',
+          avatar: creator.profileImageUrl
+        } : null,
+        conversationCount,
+        relatedGpts
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return router;
 }

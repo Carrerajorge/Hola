@@ -154,6 +154,7 @@ export interface IStorage {
   updateGpt(id: string, updates: Partial<InsertGpt>): Promise<Gpt | undefined>;
   deleteGpt(id: string): Promise<void>;
   incrementGptUsage(id: string): Promise<void>;
+  getGptConversationCount(gptId: string): Promise<number>;
   // GPT Category operations
   createGptCategory(category: InsertGptCategory): Promise<GptCategory>;
   getGptCategories(): Promise<GptCategory[]>;
@@ -862,6 +863,13 @@ export class MemStorage implements IStorage {
 
   async incrementGptUsage(id: string): Promise<void> {
     await db.update(gpts).set({ usageCount: sql`${gpts.usageCount} + 1` }).where(eq(gpts.id, id));
+  }
+
+  async getGptConversationCount(gptId: string): Promise<number> {
+    const [result] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(chats)
+      .where(eq(chats.gptId, gptId));
+    return result?.count || 0;
   }
 
   // GPT Category operations
