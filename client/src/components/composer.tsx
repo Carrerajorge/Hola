@@ -748,13 +748,10 @@ export function Composer({
       )
     : "shrink-0 px-4 pb-4";
 
-  const hasMultilineText = input.includes('\n') || input.length > 60;
-  
   const inputContainerClass = isDocumentMode
-    ? "relative flex flex-col rounded-2xl bg-zinc-100/80 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-700/50 px-4 py-3 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-all duration-200"
+    ? "relative flex flex-col rounded-3xl bg-zinc-100/80 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-700/50 px-5 py-4 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-all duration-200"
     : cn(
-        "max-w-2xl mx-auto bg-zinc-100/80 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-700/50 relative transition-all duration-200",
-        hasMultilineText ? "rounded-2xl px-4 py-3" : "rounded-full px-4 py-2",
+        "max-w-2xl mx-auto bg-zinc-100/80 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-700/50 rounded-3xl px-5 py-4 relative transition-all duration-200",
         selectedDocText && "border-zinc-300 dark:border-zinc-600",
         isDraggingOver && "border-primary/50 bg-primary/5"
       );
@@ -881,7 +878,7 @@ export function Composer({
         {renderAttachmentPreview()}
 
         {isDocumentMode && selectedDocText && handleDocTextDeselect && (
-          <div className="mb-2 animate-in fade-in duration-150" data-testid="selected-doc-text-banner">
+          <div className="mb-3 animate-in fade-in duration-150" data-testid="selected-doc-text-banner">
             <div className="bg-zinc-200/60 dark:bg-zinc-700/40 rounded-lg px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-300 flex items-center gap-2">
               <FileText className="h-3.5 w-3.5 flex-shrink-0 opacity-70" />
               <span className="truncate flex-1" data-testid="selected-doc-text-preview">
@@ -899,101 +896,121 @@ export function Composer({
           </div>
         )}
         
-        {hasMultilineText ? (
-          <div className="flex flex-col gap-2 relative">
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={handleInputChange}
-              onFocus={onTextareaFocus}
-              onKeyDown={(e) => {
-                handleMentionKeyDown(e);
-                if (showMentionPopover) return;
-                handleHistoryNavigation(e);
-                const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
-                  e.preventDefault();
-                  handleSubmitWithHistory();
-                  return;
-                }
-                if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
-                  e.preventDefault();
-                  handleSubmitWithHistory();
-                }
-              }}
-              onPaste={handlePaste}
-              placeholder={placeholder}
-              aria-label="Message input"
-              aria-describedby="composer-hint"
-              className="min-h-[60px] max-h-[200px] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed"
-              rows={3}
-            />
-            
-            <div className="flex items-center justify-between pt-2">
-              <div className="flex items-center">
-                {renderToolsPopover()}
-                {!isDocumentMode && renderSelectedToolLogo()}
-                {renderSelectedDocToolLogo()}
-              </div>
+        <div className="flex flex-col relative">
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInputChange}
+            onFocus={onTextareaFocus}
+            onKeyDown={(e) => {
+              handleMentionKeyDown(e);
+              if (showMentionPopover) return;
+              handleHistoryNavigation(e);
+              const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
+                e.preventDefault();
+                handleSubmitWithHistory();
+                return;
+              }
+              if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
+                e.preventDefault();
+                handleSubmitWithHistory();
+              }
+            }}
+            onPaste={handlePaste}
+            placeholder={placeholder}
+            aria-label="Message input"
+            aria-describedby="composer-hint"
+            className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-600"
+            rows={1}
+          />
+          
+          <div className="flex items-center justify-between mt-3">
+            <div className="flex items-center gap-2">
+              {renderToolsPopover()}
+              {!isDocumentMode && renderSelectedToolLogo()}
+              {renderSelectedDocToolLogo()}
               
-              <div className="flex items-center gap-2">
-                <RecordingPanel
-                  isRecording={isRecording}
-                  isPaused={isPaused}
-                  recordingTime={recordingTime}
-                  canSend={hasContent}
-                  onDiscard={discardVoiceRecording}
-                  onPause={pauseVoiceRecording}
-                  onResume={resumeVoiceRecording}
-                  onSend={sendVoiceRecording}
-                  onToggleRecording={toggleVoiceRecording}
-                  onOpenVoiceChat={() => setIsVoiceChatOpen(true)}
-                  onStopChat={handleStopChat}
-                  onSubmit={handleSubmit}
-                  aiState={aiState}
-                  hasContent={hasContent}
-                />
-              </div>
+              {showKnowledgeBase && (
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-100/80 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 text-[13px] font-medium" data-testid="knowledge-base-active">
+                    <Users className="h-4 w-4" />
+                    <span className="max-w-[140px] truncate" data-testid="knowledge-base-label">Conocimientos de la e...</span>
+                    <button 
+                      onClick={() => setShowKnowledgeBase(false)}
+                      className="ml-0.5 hover:bg-sky-200/50 dark:hover:bg-sky-800/50 rounded p-0.5 transition-colors focus:outline-none"
+                      aria-label="Close knowledge base"
+                      data-testid="button-close-knowledge-base"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                  
+                  {connectedSources.filter(s => getSourceActive(s.id)).map(source => (
+                    <div key={source.id} className="flex items-center justify-center w-7 h-7 rounded-lg bg-sky-100/60 dark:bg-sky-900/20 text-sky-600 dark:text-sky-400">
+                      {source.icon}
+                    </div>
+                  ))}
+                  
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button 
+                        className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-sky-100/60 dark:hover:bg-sky-900/30 text-sky-600 dark:text-sky-400 transition-colors"
+                        data-testid="button-fuentes-dropdown"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-52 p-1 bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" data-testid="fuentes-popover">
+                      <div className="grid gap-0.5">
+                        <div className="px-2 py-1 text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
+                          Fuentes conectadas
+                        </div>
+                        
+                        {connectedSources.length === 0 ? (
+                          <div className="px-2 py-2 text-xs text-zinc-400 text-center">
+                            No hay fuentes
+                          </div>
+                        ) : (
+                          connectedSources.map(source => (
+                            <SourceListItem
+                              key={source.id}
+                              icon={source.icon}
+                              label={source.name}
+                              variant="toggle"
+                              checked={getSourceActive(source.id)}
+                              onCheckedChange={() => toggleKnowledgeSource(source.id)}
+                              data-testid={`source-${source.id}`}
+                            />
+                          ))
+                        )}
+                        
+                        <div className="border-t border-zinc-100 dark:border-zinc-700 mt-0.5 pt-0.5">
+                          <SourceListItem
+                            icon={
+                              <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                                <circle cx="4" cy="8" r="1.5" />
+                                <circle cx="8" cy="8" r="1.5" />
+                                <circle cx="12" cy="8" r="1.5" />
+                                <circle cx="4" cy="4" r="1.5" />
+                                <circle cx="8" cy="4" r="1.5" />
+                                <circle cx="12" cy="4" r="1.5" />
+                              </svg>
+                            }
+                            label="Conectar más"
+                            variant="connect"
+                            onConnect={() => onOpenApps?.()}
+                            data-testid="source-connect-more"
+                          />
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              )}
             </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3 relative">
-            {renderToolsPopover()}
             
-            <div className="flex-1 min-w-0">
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={handleInputChange}
-                onFocus={onTextareaFocus}
-                onKeyDown={(e) => {
-                  handleMentionKeyDown(e);
-                  if (showMentionPopover) return;
-                  handleHistoryNavigation(e);
-                  const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
-                    e.preventDefault();
-                    handleSubmitWithHistory();
-                    return;
-                  }
-                  if (e.key === "Enter" && !e.shiftKey && !filesStillLoading) {
-                    e.preventDefault();
-                    handleSubmitWithHistory();
-                  }
-                }}
-                onPaste={handlePaste}
-                placeholder={placeholder}
-                aria-label="Message input"
-                aria-describedby="composer-hint"
-                className="min-h-[24px] w-full resize-none border-0 bg-transparent py-0.5 px-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-normal"
-                rows={1}
-              />
-            </div>
-            
-            {!isDocumentMode && renderSelectedToolLogo()}
-            {renderSelectedDocToolLogo()}
-            
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2">
               <RecordingPanel
                 isRecording={isRecording}
                 isPaused={isPaused}
@@ -1012,7 +1029,7 @@ export function Composer({
               />
             </div>
           </div>
-        )}
+        </div>
         
         {showMentionPopover && filteredSources.length > 0 && (
           <div 
@@ -1046,78 +1063,6 @@ export function Composer({
           </div>
         )}
         
-        {showKnowledgeBase && (
-          <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-700/50">
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-200/60 dark:bg-zinc-700/50 text-zinc-500 dark:text-zinc-400 text-[11px]" data-testid="knowledge-base-active">
-              <Users className="h-3 w-3" />
-              <span data-testid="knowledge-base-label">Conocimientos</span>
-              <button 
-                onClick={() => setShowKnowledgeBase(false)}
-                className="ml-0.5 hover:bg-zinc-300/50 dark:hover:bg-zinc-600/50 rounded p-0.5 transition-colors focus:outline-none"
-                aria-label="Close knowledge base"
-                data-testid="button-close-knowledge-base"
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
-            </div>
-            
-            <Popover>
-              <PopoverTrigger asChild>
-                <button 
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50 text-[11px] text-zinc-500 transition-colors"
-                  data-testid="button-fuentes-dropdown"
-                >
-                  <span>Fuentes</span>
-                  <ChevronDown className="h-2.5 w-2.5" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-52 p-1 bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700" data-testid="fuentes-popover">
-                <div className="grid gap-0.5">
-                  <div className="px-2 py-1 text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
-                    Fuentes conectadas
-                  </div>
-                  
-                  {connectedSources.length === 0 ? (
-                    <div className="px-2 py-2 text-xs text-zinc-400 text-center">
-                      No hay fuentes
-                    </div>
-                  ) : (
-                    connectedSources.map(source => (
-                      <SourceListItem
-                        key={source.id}
-                        icon={source.icon}
-                        label={source.name}
-                        variant="toggle"
-                        checked={getSourceActive(source.id)}
-                        onCheckedChange={() => toggleKnowledgeSource(source.id)}
-                        data-testid={`source-${source.id}`}
-                      />
-                    ))
-                  )}
-                  
-                  <div className="border-t border-zinc-100 dark:border-zinc-700 mt-0.5 pt-0.5">
-                    <SourceListItem
-                      icon={
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
-                          <circle cx="4" cy="8" r="1.5" />
-                          <circle cx="8" cy="8" r="1.5" />
-                          <circle cx="12" cy="8" r="1.5" />
-                          <circle cx="4" cy="4" r="1.5" />
-                          <circle cx="8" cy="4" r="1.5" />
-                          <circle cx="12" cy="4" r="1.5" />
-                        </svg>
-                      }
-                      label="Conectar más"
-                      variant="connect"
-                      onConnect={() => onOpenApps?.()}
-                      data-testid="source-connect-more"
-                    />
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-        )}
       </div>
 
       <div id="composer-hint" className="text-center text-[11px] text-muted-foreground/50 mt-2 tracking-wide">
