@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Loader2 } from "lucide-react";
 import type { OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
+import { EditorErrorBoundary } from "@/components/error-boundaries";
 
 const MonacoEditorLazy = React.lazy(() => import("@monaco-editor/react"));
 
@@ -253,9 +254,11 @@ function MonacoEditorInner({
 export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
   return (
     <div className={cn("rounded-lg overflow-hidden border border-zinc-800", props.className)}>
-      <Suspense fallback={<EditorSkeleton height={props.height || "400px"} />}>
-        <MonacoEditorInner {...props} />
-      </Suspense>
+      <EditorErrorBoundary editorType="monaco" fallbackContent={props.code}>
+        <Suspense fallback={<EditorSkeleton height={props.height || "400px"} />}>
+          <MonacoEditorInner {...props} />
+        </Suspense>
+      </EditorErrorBoundary>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useMemo } from 'react';
 import { detectCapabilities, type WebGLConfig, type Canvas2DConfig } from '@shared/schemas/graphics';
 import { CanvasEngine, type CanvasEngineRef } from '../canvas';
 import type { ThreeEngineRef } from './three-engine-impl';
+import { ThreeJSErrorBoundary } from '@/components/error-boundaries';
 
 const ThreeEngineImpl = lazy(() => import('./three-engine-impl'));
 
@@ -116,15 +117,17 @@ export const ThreeEngine = React.forwardRef<ThreeEngineRef | CanvasEngineRef, Th
     }
 
     return (
-      <Suspense fallback={<LoadingState width={width} height={height} />}>
-        <ThreeEngineImpl
-          ref={ref as React.Ref<ThreeEngineRef>}
-          config={config}
-          className={className}
-          onReady={onReady}
-          onFrame={onFrame}
-        />
-      </Suspense>
+      <ThreeJSErrorBoundary onError={(err) => console.error('ThreeJS Error:', err)}>
+        <Suspense fallback={<LoadingState width={width} height={height} />}>
+          <ThreeEngineImpl
+            ref={ref as React.Ref<ThreeEngineRef>}
+            config={config}
+            className={className}
+            onReady={onReady}
+            onFrame={onFrame}
+          />
+        </Suspense>
+      </ThreeJSErrorBoundary>
     );
   }
 );

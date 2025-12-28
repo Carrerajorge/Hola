@@ -1,6 +1,7 @@
 import React, { Suspense, ComponentType } from 'react';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { LazyLoadErrorBoundary } from '@/components/error-boundaries';
 
 interface LoadingFallbackProps {
   height?: string | number;
@@ -64,8 +65,11 @@ export const LazyPPTEditorShell = React.lazy(() => import('@/components/ppt/PPTE
 
 export function PPTEditorShellLazy(props: { onClose: () => void; onInsertContent?: (insertFn: (content: string) => void) => void; initialShowInstructions?: boolean }) {
   return (
-    <Suspense fallback={<EditorLoadingFallback />}>
+    <LazyLoadErrorBoundary 
+      componentName="Editor de Presentaciones"
+      loadingComponent={<EditorLoadingFallback />}
+    >
       <LazyPPTEditorShell {...props} />
-    </Suspense>
+    </LazyLoadErrorBoundary>
   );
 }
