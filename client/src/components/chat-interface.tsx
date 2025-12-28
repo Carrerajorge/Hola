@@ -64,7 +64,6 @@ import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
 import { VirtualComputer } from "@/components/virtual-computer";
-import { DocumentEditor } from "@/components/document-editor";
 import { EnhancedDocumentEditor } from "@/components/ribbon";
 import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
 import { PPTEditorShellLazy } from "@/lib/lazyComponents";
