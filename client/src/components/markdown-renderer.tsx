@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState, useCallback, useRef, useEffect } from "react";
+import React, { memo, useMemo, useState, useCallback, useRef, useEffect, Component, ErrorInfo, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -6,11 +6,82 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { cn } from "@/lib/utils";
-import { Check, Copy, Loader2, Download, Maximize2, Minimize2, FileText, FileSpreadsheet, Presentation, ChevronRight } from "lucide-react";
+import { Check, Copy, Loader2, Download, Maximize2, Minimize2, FileText, FileSpreadsheet, Presentation, ChevronRight, AlertTriangle, RefreshCw } from "lucide-react";
 import { preprocessMathInMarkdown } from "@/lib/mathParser";
 import { CodeBlockShell } from "./code-block-shell";
 import { isLanguageRunnable } from "@/lib/sandboxApi";
 import { useSandboxExecution } from "@/hooks/useSandboxExecution";
+
+interface MarkdownErrorBoundaryProps {
+  children: ReactNode;
+  fallbackContent?: string;
+}
+
+interface MarkdownErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+export class MarkdownErrorBoundary extends Component<MarkdownErrorBoundaryProps, MarkdownErrorBoundaryState> {
+  constructor(props: MarkdownErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): MarkdownErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('[MarkdownErrorBoundary] Rendering error caught:', {
+      error: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+    });
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div 
+          className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-4"
+          data-testid="markdown-error-fallback"
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                Error al renderizar el contenido
+              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                Hubo un problema al mostrar este mensaje. Mostrando contenido sin formato.
+              </p>
+              {this.props.fallbackContent && (
+                <pre className="mt-3 text-xs text-muted-foreground bg-muted/50 rounded p-3 overflow-x-auto whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
+                  {this.props.fallbackContent}
+                </pre>
+              )}
+              <button
+                onClick={this.handleRetry}
+                className="mt-3 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 hover:underline"
+                data-testid="button-retry-render"
+              >
+                <RefreshCw className="h-3 w-3" />
+                Reintentar
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 type GenerationState = 'analyzing' | 'structuring' | 'generating' | 'completing' | 'done';
 

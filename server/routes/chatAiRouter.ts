@@ -5,6 +5,99 @@ import { llmGateway } from "../lib/llmGateway";
 import { generateImage, detectImageRequest, extractImagePrompt } from "../services/imageGeneration";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../etl";
 
+type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
+
+interface CategorizedError {
+  category: ErrorCategory;
+  userMessage: string;
+  technicalDetails: string;
+  requestId: string;
+  retryable: boolean;
+  statusCode: number;
+}
+
+function categorizeError(error: any, requestId: string): CategorizedError {
+  const errorMessage = error?.message?.toLowerCase() || '';
+  const errorCode = error?.code || error?.statusCode;
+  
+  if (errorMessage.includes('rate limit') || errorMessage.includes('too many requests') || errorCode === 429) {
+    return {
+      category: 'rate_limit',
+      userMessage: 'Has excedido el límite de solicitudes. Por favor espera unos segundos e intenta de nuevo.',
+      technicalDetails: error.message,
+      requestId,
+      retryable: true,
+      statusCode: 429
+    };
+  }
+  
+  if (errorMessage.includes('timeout') || errorMessage.includes('timed out') || errorCode === 'ETIMEDOUT') {
+    return {
+      category: 'timeout',
+      userMessage: 'La solicitud tardó demasiado tiempo. Por favor intenta de nuevo.',
+      technicalDetails: error.message,
+      requestId,
+      retryable: true,
+      statusCode: 504
+    };
+  }
+  
+  if (errorMessage.includes('network') || errorMessage.includes('econnrefused') || 
+      errorMessage.includes('enotfound') || errorCode === 'ECONNREFUSED') {
+    return {
+      category: 'network',
+      userMessage: 'Error de conexión. Verifica tu conexión a internet e intenta de nuevo.',
+      technicalDetails: error.message,
+      requestId,
+      retryable: true,
+      statusCode: 503
+    };
+  }
+  
+  if (errorMessage.includes('unauthorized') || errorMessage.includes('authentication') || 
+      errorCode === 401 || errorCode === 403) {
+    return {
+      category: 'auth',
+      userMessage: 'Error de autenticación. Por favor inicia sesión de nuevo.',
+      technicalDetails: error.message,
+      requestId,
+      retryable: false,
+      statusCode: 401
+    };
+  }
+  
+  if (errorMessage.includes('invalid') || errorMessage.includes('validation') || errorCode === 400) {
+    return {
+      category: 'validation',
+      userMessage: 'Los datos enviados no son válidos. Por favor verifica tu solicitud.',
+      technicalDetails: error.message,
+      requestId,
+      retryable: false,
+      statusCode: 400
+    };
+  }
+  
+  if (error?.response?.status >= 500 || errorMessage.includes('internal') || errorMessage.includes('server error')) {
+    return {
+      category: 'api_error',
+      userMessage: 'El servicio de IA está experimentando problemas. Por favor intenta de nuevo en unos minutos.',
+      technicalDetails: error.message,
+      requestId,
+      retryable: true,
+      statusCode: 502
+    };
+  }
+  
+  return {
+    category: 'unknown',
+    userMessage: 'Ocurrió un error inesperado. Por favor intenta de nuevo.',
+    technicalDetails: error.message || 'Unknown error',
+    requestId,
+    retryable: true,
+    statusCode: 500
+  };
+}
+
 export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update: any) => void) {
   const router = Router();
 
@@ -62,10 +155,16 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       
       res.json(response);
     } catch (error: any) {
-      console.error("Chat API error:", error);
-      res.status(500).json({ 
-        error: "Failed to get AI response",
-        details: error.message 
+      const requestId = `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      console.error(`[Chat API Error] requestId=${requestId}:`, error);
+      
+      const categorized = categorizeError(error, requestId);
+      res.status(categorized.statusCode).json({ 
+        error: categorized.userMessage,
+        category: categorized.category,
+        details: categorized.technicalDetails,
+        requestId: categorized.requestId,
+        retryable: categorized.retryable
       });
     }
   });

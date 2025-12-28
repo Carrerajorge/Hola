@@ -170,12 +170,40 @@ export function markRequestPersisted(requestId: string): void {
 // Separate in-memory store for generated images (not persisted to localStorage)
 const generatedImagesStore = new Map<string, string>();
 
-export function storeGeneratedImage(messageId: string, imageData: string): void {
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB limit for base64 images
+const MAX_STORED_IMAGES = 50; // Maximum number of images to keep in memory
+
+export function storeGeneratedImage(messageId: string, imageData: string): boolean {
+  if (!imageData || !messageId) {
+    console.warn('[storeGeneratedImage] Invalid messageId or imageData provided');
+    return false;
+  }
+
+  const estimatedSizeBytes = imageData.length * 0.75;
+  
+  if (estimatedSizeBytes > MAX_IMAGE_SIZE_BYTES) {
+    console.warn(`[storeGeneratedImage] Image too large (${(estimatedSizeBytes / 1024 / 1024).toFixed(2)}MB > ${MAX_IMAGE_SIZE_BYTES / 1024 / 1024}MB limit) for message ${messageId}`);
+    return false;
+  }
+
+  if (generatedImagesStore.size >= MAX_STORED_IMAGES && !generatedImagesStore.has(messageId)) {
+    const oldestKey = generatedImagesStore.keys().next().value;
+    if (oldestKey) {
+      generatedImagesStore.delete(oldestKey);
+      console.debug(`[storeGeneratedImage] Evicted oldest image to make room for new one`);
+    }
+  }
+
   generatedImagesStore.set(messageId, imageData);
+  return true;
 }
 
 export function getGeneratedImage(messageId: string): string | undefined {
   return generatedImagesStore.get(messageId);
+}
+
+export function clearGeneratedImages(): void {
+  generatedImagesStore.clear();
 }
 
 export function useChats() {

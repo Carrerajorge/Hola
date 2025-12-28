@@ -889,12 +889,29 @@ export function ChatInterface({
   const prevChatIdRef = useRef<string | null | undefined>(chatId);
   useEffect(() => {
     if (prevChatIdRef.current !== chatId) {
-      // Clear streaming content for this chat instance
+      console.debug(`[ChatInterface] Chat switched from ${prevChatIdRef.current} to ${chatId}`);
+      
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+        streamIntervalRef.current = null;
+        console.debug('[ChatInterface] Cleared stream interval due to chat switch');
+      }
+      
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+        console.debug('[ChatInterface] Aborted pending request due to chat switch');
+      }
+      
       setStreamingContent("");
       streamingContentRef.current = "";
-      // Don't reset aiState here - parent handles it
+      
       prevChatIdRef.current = chatId;
     }
+  }, [chatId]);
+  
+  const validateStreamingChatId = useCallback(() => {
+    return streamingChatIdRef.current === null || streamingChatIdRef.current === chatId;
   }, [chatId]);
   
   // Auto-save document when component unmounts (chat switch, new chat, etc.)
@@ -1780,6 +1797,22 @@ export function ChatInterface({
     } catch (error: any) {
       if (error.name === "AbortError") return;
       console.error("Regenerate error:", error);
+      
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: `Lo siento, hubo un error al regenerar la respuesta: ${error.message || 'Error desconocido'}. Por favor intenta de nuevo.`,
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+      };
+      onSendMessage(errorMsg);
+      
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+        streamIntervalRef.current = null;
+      }
+      streamingContentRef.current = "";
+      setStreamingContent("");
       setAiState("idle");
       abortControllerRef.current = null;
     }

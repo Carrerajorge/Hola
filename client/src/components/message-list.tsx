@@ -49,9 +49,10 @@ import {
 } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
+import { z } from "zod";
 
 import { Message, storeGeneratedImage, getGeneratedImage } from "@/hooks/use-chats";
-import { MarkdownRenderer } from "@/components/markdown-renderer";
+import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
 import { FigmaBlock } from "@/components/figma-block";
 import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
@@ -242,9 +243,20 @@ const CleanDataTableComponents = {
   }
 };
 
+const DocumentBlockSchema = z.object({
+  type: z.enum(["word", "excel", "ppt"]),
+  title: z.string().min(1),
+  content: z.string()
+});
+
 const parseDocumentBlocks = (
   content: string
 ): { text: string; documents: DocumentBlock[] } => {
+  if (!content || typeof content !== 'string') {
+    console.warn('[parseDocumentBlocks] Invalid content provided:', typeof content);
+    return { text: content || '', documents: [] };
+  }
+
   const documents: DocumentBlock[] = [];
   const regex = /```document\s*\n([\s\S]*?)```/g;
   let match;
@@ -253,7 +265,12 @@ const parseDocumentBlocks = (
 
   while ((match = regex.exec(content)) !== null) {
     try {
-      let jsonStr = match[1].trim();
+      let jsonStr = match[1]?.trim();
+      if (!jsonStr) {
+        console.warn('[parseDocumentBlocks] Empty document block found');
+        continue;
+      }
+
       jsonStr = jsonStr.replace(
         /"content"\s*:\s*"([\s\S]*?)"\s*\}/,
         (m, contentValue) => {
@@ -265,17 +282,32 @@ const parseDocumentBlocks = (
         }
       );
 
-      const doc = JSON.parse(jsonStr);
-      if (doc.type && doc.title && doc.content) {
+      const parsed = JSON.parse(jsonStr);
+      const validated = DocumentBlockSchema.safeParse(parsed);
+      
+      if (validated.success) {
+        const doc = validated.data;
         doc.content = doc.content
           .replace(/\\n/g, "\n")
           .replace(/\\\\n/g, "\n");
-        documents.push(doc as DocumentBlock);
+        documents.push(doc);
         successfulBlocks.push(match[0]);
+      } else {
+        console.warn('[parseDocumentBlocks] Schema validation failed:', {
+          errors: validated.error.errors,
+          rawContent: jsonStr.substring(0, 100) + '...'
+        });
       }
     } catch (e) {
+      console.warn('[parseDocumentBlocks] JSON parse failed, attempting regex fallback:', {
+        error: e instanceof Error ? e.message : 'Unknown error',
+        blockPreview: match[1]?.substring(0, 50) + '...'
+      });
+      
       try {
         const blockContent = match[1];
+        if (!blockContent) continue;
+        
         const typeMatch = blockContent.match(
           /"type"\s*:\s*"(word|excel|ppt)"/
         );
@@ -293,9 +325,13 @@ const parseDocumentBlocks = (
               .replace(/\\\\n/g, "\n")
           });
           successfulBlocks.push(match[0]);
+        } else {
+          console.warn('[parseDocumentBlocks] Regex fallback could not extract all required fields');
         }
       } catch (fallbackError) {
-        console.error("Fallback parsing also failed:", fallbackError);
+        console.error('[parseDocumentBlocks] Fallback parsing also failed:', {
+          error: fallbackError instanceof Error ? fallbackError.message : 'Unknown error'
+        });
       }
     }
   }
@@ -310,6 +346,10 @@ const parseDocumentBlocks = (
 const extractCodeBlocks = (
   content: string
 ): { type: "text" | "python"; content: string }[] => {
+  if (!content || typeof content !== 'string') {
+    return [{ type: "text" as const, content: content || "" }];
+  }
+
   const pythonBlockRegex = /```(?:python|py)\n([\s\S]*?)```/g;
   const blocks: { type: "text" | "python"; content: string }[] = [];
   let lastIndex = 0;
@@ -317,20 +357,27 @@ const extractCodeBlocks = (
 
   while ((match = pythonBlockRegex.exec(content)) !== null) {
     if (match.index > lastIndex) {
-      blocks.push({
-        type: "text",
-        content: content.slice(lastIndex, match.index)
-      });
+      const textContent = content.slice(lastIndex, match.index);
+      if (textContent) {
+        blocks.push({
+          type: "text",
+          content: textContent
+        });
+      }
     }
-    blocks.push({ type: "python", content: match[1] });
+    const codeContent = match[1] ?? "";
+    blocks.push({ type: "python", content: codeContent });
     lastIndex = match.index + match[0].length;
   }
 
   if (lastIndex < content.length) {
-    blocks.push({ type: "text", content: content.slice(lastIndex) });
+    const remainingContent = content.slice(lastIndex);
+    if (remainingContent) {
+      blocks.push({ type: "text", content: remainingContent });
+    }
   }
 
-  return blocks.length > 0 ? blocks : [{ type: "text" as const, content }];
+  return blocks.length > 0 ? blocks : [{ type: "text" as const, content: content || "" }];
 };
 
 interface AttachmentListProps {
@@ -952,16 +999,18 @@ const AssistantMessage = memo(function AssistantMessage({
                   language="python"
                 />
               </div>
-            ) : block.content.trim() ? (
+            ) : block.content?.trim() ? (
               <div
                 key={blockIdx}
                 className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0"
               >
-                <MarkdownRenderer
-                  content={block.content}
-                  customComponents={{ ...CleanDataTableComponents }}
-                  onOpenDocument={onOpenDocumentPreview}
-                />
+                <MarkdownErrorBoundary fallbackContent={block.content}>
+                  <MarkdownRenderer
+                    content={block.content}
+                    customComponents={{ ...CleanDataTableComponents }}
+                    onOpenDocument={onOpenDocumentPreview}
+                  />
+                </MarkdownErrorBoundary>
               </div>
             ) : null
           )}
