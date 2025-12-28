@@ -38,7 +38,12 @@ import {
   Pause,
   Play,
   Trash2,
-  Circle
+  Circle,
+  Info,
+  EyeOff,
+  Link,
+  Star,
+  Settings
 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
@@ -46,9 +51,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useToast } from "@/hooks/use-toast";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -736,6 +742,10 @@ interface ChatInterfaceProps {
   onEditMessageAndTruncate?: (chatId: string, messageId: string, newContent: string, messageIndex: number) => void;
   onTruncateAndReplaceMessage?: (chatId: string, messageIndex: number, newMessage: Message) => void;
   onTruncateMessagesAt?: (chatId: string, messageIndex: number) => void;
+  onNewChat?: () => void;
+  onEditGpt?: (gpt: ActiveGpt) => void;
+  onHideGptFromSidebar?: (gptId: string) => void;
+  onAboutGpt?: (gpt: ActiveGpt) => void;
 }
 
 interface UploadedFile {
@@ -766,9 +776,14 @@ export function ChatInterface({
   onUpdateMessageAttachments,
   onEditMessageAndTruncate,
   onTruncateAndReplaceMessage,
-  onTruncateMessagesAt
+  onTruncateMessagesAt,
+  onNewChat,
+  onEditGpt,
+  onHideGptFromSidebar,
+  onAboutGpt
 }: ChatInterfaceProps) {
   const { user } = useAuth();
+  const { toast } = useToast();
   const { initialDraft, saveDraftDebounced, clearDraft, currentTextRef } = useDraft(chatId);
   const [input, setInputRaw] = useState(initialDraft);
   
@@ -3228,7 +3243,93 @@ IMPORTANTE:
       {/* Header */}
       <header className="flex h-14 items-center justify-between px-2 sm:px-4 border-b border-white/20 dark:border-white/10 glass-card-light dark:glass-card rounded-none z-10 sticky top-0 flex-shrink-0 safe-area-top">
         <div ref={modelSelectorRef} className="flex items-center gap-1 sm:gap-2 relative min-w-0 ml-12 sm:ml-0">
-          {!isAnyModelAvailable ? (
+          {activeGpt ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <div 
+                  className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
+                  data-testid="button-gpt-menu"
+                >
+                  <span className="font-semibold text-xs sm:text-sm truncate max-w-[150px] sm:max-w-[250px]">
+                    {activeGpt.name}
+                  </span>
+                  <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                </div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="flex items-center gap-2">
+                    <span className="flex-1">Modelo</span>
+                    <span className="text-xs text-muted-foreground">{selectedModelData?.name?.split(" ")[0] || "Auto"}</span>
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent className="w-56">
+                      {Object.entries(modelsByProvider).map(([provider, models], providerIndex) => (
+                        <React.Fragment key={provider}>
+                          {providerIndex > 0 && <DropdownMenuSeparator />}
+                          <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
+                            {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
+                          </div>
+                          {models.map((model) => (
+                            <DropdownMenuItem
+                              key={model.id}
+                              className={cn("flex items-center gap-2", selectedModelData?.id === model.id && "bg-muted")}
+                              onClick={() => setSelectedModelId(model.id)}
+                            >
+                              {selectedModelData?.id === model.id && <Check className="h-4 w-4" />}
+                              <span className={cn(selectedModelData?.id !== model.id && "pl-6")}>{model.name}</span>
+                            </DropdownMenuItem>
+                          ))}
+                        </React.Fragment>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={onNewChat} className="flex items-center gap-2">
+                  <Pencil className="h-4 w-4" />
+                  <span>Nuevo chat</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onAboutGpt?.(activeGpt)} className="flex items-center gap-2">
+                  <Info className="h-4 w-4" />
+                  <span>Acerca de</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onEditGpt?.(activeGpt)} className="flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  <span>Editar GPT</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onHideGptFromSidebar?.(activeGpt.id)} className="flex items-center gap-2">
+                  <EyeOff className="h-4 w-4" />
+                  <span>Ocultar de la barra lateral</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/gpts/${activeGpt.id}`);
+                    toast({ title: "Enlace copiado", description: "El enlace del GPT se ha copiado al portapapeles" });
+                  }} 
+                  className="flex items-center gap-2"
+                >
+                  <Link className="h-4 w-4" />
+                  <span>Copiar enlace</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={() => toast({ title: "Valorar GPT", description: "Esta función estará disponible próximamente" })}
+                  className="flex items-center gap-2"
+                >
+                  <Star className="h-4 w-4" />
+                  <span>Valorar GPT</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={() => toast({ title: "Denunciar GPT", description: "Puedes reportar contenido inapropiado a soporte" })}
+                  className="flex items-center gap-2 text-destructive"
+                >
+                  <Flag className="h-4 w-4" />
+                  <span>Denunciar GPT</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : !isAnyModelAvailable ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <div 

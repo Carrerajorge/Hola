@@ -216,6 +216,21 @@ export default function Home() {
     setIsGptBuilderOpen(true);
   };
 
+  const handleEditGptFromChat = useCallback((gpt: { id: string; name: string; description: string | null; systemPrompt: string }) => {
+    if (activeGpt) {
+      setEditingGpt(activeGpt);
+      setIsGptBuilderOpen(true);
+    }
+  }, [activeGpt]);
+
+  const handleHideGptFromSidebar = (gptId: string) => {
+    toast.success("GPT ocultado de la barra lateral");
+  };
+
+  const handleAboutGptFromChat = useCallback((gpt: { id: string; name: string; description: string | null }) => {
+    toast.info(`${gpt.name}: ${gpt.description || "Sin descripción"}`);
+  }, []);
+
   // Keyboard shortcuts
   useKeyboardShortcuts([
     {
@@ -386,6 +401,10 @@ export default function Home() {
             onEditMessageAndTruncate={editMessageAndTruncate}
             onTruncateAndReplaceMessage={truncateAndReplaceMessage}
             onTruncateMessagesAt={truncateMessagesAt}
+            onNewChat={handleNewChat}
+            onEditGpt={handleEditGptFromChat}
+            onHideGptFromSidebar={handleHideGptFromSidebar}
+            onAboutGpt={handleAboutGptFromChat}
           />
         )}
       </main>
