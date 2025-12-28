@@ -14,14 +14,16 @@ interface KeyboardShortcutsDialogProps {
 }
 
 const shortcuts = [
-  { keys: ["Ctrl", "N"], description: "Nuevo chat" },
-  { keys: ["Ctrl", "K"], description: "Búsqueda rápida" },
-  { keys: ["Ctrl", ","], description: "Configuración" },
-  { keys: ["Ctrl", "E"], description: "Exportar chat actual" },
-  { keys: ["Ctrl", "T"], description: "Plantillas de prompts" },
-  { keys: ["Ctrl", "Shift", "F"], description: "Favoritos" },
-  { keys: ["Ctrl", "/"], description: "Mostrar atajos" },
-  { keys: ["Escape"], description: "Cerrar diálogo" },
+  { keys: ["Ctrl/⌘", "Enter"], description: "Enviar mensaje", category: "chat" },
+  { keys: ["Escape"], description: "Cancelar generación", category: "chat" },
+  { keys: ["Ctrl", "N"], description: "Nuevo chat", category: "navigation" },
+  { keys: ["Ctrl", "K"], description: "Búsqueda rápida", category: "navigation" },
+  { keys: ["Ctrl", ","], description: "Configuración", category: "navigation" },
+  { keys: ["Ctrl", "E"], description: "Exportar chat actual", category: "actions" },
+  { keys: ["Ctrl", "T"], description: "Plantillas de prompts", category: "actions" },
+  { keys: ["Ctrl", "Shift", "F"], description: "Favoritos", category: "actions" },
+  { keys: ["Ctrl", "/"], description: "Mostrar atajos", category: "help" },
+  { keys: ["Shift", "Enter"], description: "Nueva línea", category: "chat" },
 ];
 
 export function KeyboardShortcutsDialog({

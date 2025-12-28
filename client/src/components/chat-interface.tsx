@@ -87,6 +87,7 @@ import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { RecordingPanel } from "@/components/recording-panel";
 import { Composer } from "@/components/composer";
 import { MessageList, parseDocumentBlocks, type DocumentBlock } from "@/components/message-list";
+import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
@@ -915,6 +916,8 @@ export function ChatInterface({
   const [isGoogleFormsActive, setIsGoogleFormsActive] = useState(true);
   const [isGmailActive, setIsGmailActive] = useState(true);
   const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false);
+  const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
+  const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -1159,6 +1162,27 @@ export function ChatInterface({
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
   }, [previewFileAttachment]);
+
+  // Global keyboard shortcuts for accessibility
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      // Ctrl+/ or Cmd+/ to show keyboard shortcuts dialog
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setIsKeyboardShortcutsOpen(true);
+      }
+      
+      // Escape to cancel streaming (only when actively streaming)
+      if (e.key === "Escape" && aiState !== "idle") {
+        e.preventDefault();
+        handleStopChatRef.current?.();
+        setScreenReaderAnnouncement("Generación cancelada");
+      }
+    };
+    
+    document.addEventListener("keydown", handleGlobalShortcuts);
+    return () => document.removeEventListener("keydown", handleGlobalShortcuts);
+  }, [aiState]);
   
   // Keep refs in sync with state
   useEffect(() => {
@@ -1372,6 +1396,7 @@ export function ChatInterface({
   const streamingContentRef = useRef<string>("");
   const aiStateRef = useRef<"idle" | "thinking" | "responding">("idle");
   const composerRef = useRef<HTMLDivElement>(null);
+  const handleStopChatRef = useRef<(() => void) | null>(null);
   
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
@@ -1395,6 +1420,17 @@ export function ChatInterface({
   // Keep aiStateRef in sync with aiState for reliable access
   useEffect(() => {
     aiStateRef.current = aiState;
+  }, [aiState]);
+
+  // Announce AI state changes for screen readers
+  useEffect(() => {
+    if (aiState === "thinking") {
+      setScreenReaderAnnouncement("Procesando tu mensaje...");
+    } else if (aiState === "responding") {
+      setScreenReaderAnnouncement("Generando respuesta...");
+    } else if (aiState === "idle" && screenReaderAnnouncement && !screenReaderAnnouncement.includes("cancelada")) {
+      setScreenReaderAnnouncement("Respuesta completada");
+    }
   }, [aiState]);
   
   // Note: We intentionally do NOT abort requests on unmount
@@ -1454,6 +1490,11 @@ export function ChatInterface({
     setAiState("idle");
     setStreamingContent("");
   };
+
+  // Keep handleStopChatRef in sync for keyboard shortcut access
+  useEffect(() => {
+    handleStopChatRef.current = handleStopChat;
+  });
 
   const handleCopyMessage = (content: string, msgId?: string) => {
     navigator.clipboard.writeText(content);
@@ -4270,6 +4311,7 @@ IMPORTANTE:
               onClick={() => setPreviewUploadedImage(null)}
               className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors"
               data-testid="button-close-image-preview"
+              aria-label="Cerrar vista previa de imagen"
             >
               <X className="h-5 w-5" />
             </button>
@@ -4279,6 +4321,22 @@ IMPORTANTE:
           </motion.div>
         </motion.div>
       )}
+
+      {/* Screen reader announcements */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {screenReaderAnnouncement}
+      </div>
+
+      {/* Keyboard shortcuts dialog */}
+      <KeyboardShortcutsDialog
+        open={isKeyboardShortcutsOpen}
+        onOpenChange={setIsKeyboardShortcutsOpen}
+      />
     </div>
   );
 }

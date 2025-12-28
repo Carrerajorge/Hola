@@ -67,18 +67,35 @@ export class ChunkedFileUploader {
     return this.config!;
   }
 
+  private async readFileHeaderBytes(file: File, numBytes: number = 16): Promise<number[]> {
+    try {
+      const slice = file.slice(0, numBytes);
+      const buffer = await slice.arrayBuffer();
+      return Array.from(new Uint8Array(buffer));
+    } catch (error) {
+      console.warn('Failed to read file header bytes:', error);
+      return [];
+    }
+  }
+
   async validateFile(file: File): Promise<ValidationResult> {
     const config = await this.fetchConfig();
+    const headerBytes = await this.readFileHeaderBytes(file);
     
     if (!this.worker) {
       const errors: string[] = [];
       const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
       
-      if (!config.allowedMimeTypes.includes(file.type)) {
+      const detectedMimeType = this.detectMimeTypeFromBytes(headerBytes, file.type, extension);
+      
+      if (!this.isValidMimeType(detectedMimeType, file.type, config.allowedMimeTypes)) {
         errors.push('Tipo de archivo no permitido');
       }
       if (file.size > config.maxFileSize) {
         errors.push(`El archivo excede el tamaño máximo de ${config.maxFileSize / (1024 * 1024)}MB`);
+      }
+      if (file.size === 0) {
+        errors.push('El archivo está vacío');
       }
       
       return {
@@ -108,8 +125,48 @@ export class ChunkedFileUploader {
           allowedExtensions: config.allowedExtensions,
           maxFileSize: config.maxFileSize,
         },
+        headerBytes,
       });
     });
+  }
+
+  private detectMimeTypeFromBytes(headerBytes: number[], declaredType: string, extension: string): string | null {
+    const MAGIC_BYTES: Record<string, number[]> = {
+      'image/jpeg': [0xFF, 0xD8, 0xFF],
+      'image/png': [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+      'image/gif': [0x47, 0x49, 0x46, 0x38],
+      'application/pdf': [0x25, 0x50, 0x44, 0x46],
+      'application/zip': [0x50, 0x4B, 0x03, 0x04],
+    };
+
+    if (!headerBytes || headerBytes.length === 0) return null;
+
+    for (const [mimeType, signature] of Object.entries(MAGIC_BYTES)) {
+      if (headerBytes.length >= signature.length) {
+        const matches = signature.every((byte, i) => headerBytes[i] === byte);
+        if (matches) return mimeType;
+      }
+    }
+    return null;
+  }
+
+  private isValidMimeType(detectedType: string | null, declaredType: string, allowedTypes: string[]): boolean {
+    if (!detectedType) {
+      return allowedTypes.includes(declaredType);
+    }
+    if (allowedTypes.includes(detectedType)) return true;
+    
+    const zipBasedTypes = [
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ];
+    
+    if (detectedType === 'application/zip' && zipBasedTypes.includes(declaredType)) {
+      return allowedTypes.some(t => zipBasedTypes.includes(t) || t === declaredType);
+    }
+    
+    return false;
   }
 
   async uploadFile(

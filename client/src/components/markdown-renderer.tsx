@@ -5,12 +5,40 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
 import { Check, Copy, Loader2, Download, Maximize2, Minimize2, FileText, FileSpreadsheet, Presentation, ChevronRight, AlertTriangle, RefreshCw } from "lucide-react";
 import { preprocessMathInMarkdown } from "@/lib/mathParser";
 import { CodeBlockShell } from "./code-block-shell";
 import { isLanguageRunnable } from "@/lib/sandboxApi";
 import { useSandboxExecution } from "@/hooks/useSandboxExecution";
+
+const purifyConfig: DOMPurify.Config = {
+  ALLOWED_TAGS: [
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr',
+    'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
+    'strong', 'em', 'b', 'i', 'u', 's', 'del', 'ins', 'mark',
+    'a', 'img', 'span', 'div',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+    'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac', 'mroot', 'msqrt', 'mtext', 'mspace', 'mtable', 'mtr', 'mtd', 'annotation', 'annotation-xml', 'semantics',
+    'svg', 'path', 'circle', 'rect', 'line', 'polygon', 'polyline', 'g', 'defs', 'use', 'symbol'
+  ],
+  ALLOWED_ATTR: [
+    'href', 'src', 'alt', 'title', 'class', 'className', 'id', 'style',
+    'target', 'rel', 'width', 'height', 'loading', 'decoding',
+    'colspan', 'rowspan', 'scope',
+    'xmlns', 'display', 'viewBox', 'fill', 'stroke', 'd', 'strokeWidth', 'strokeLinecap', 'strokeLinejoin',
+    'aria-hidden', 'data-testid'
+  ],
+  ALLOW_DATA_ATTR: false,
+  FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'select', 'textarea'],
+  FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur']
+};
+
+export function sanitizeContent(content: string): string {
+  if (!content || typeof content !== 'string') return '';
+  return DOMPurify.sanitize(content, purifyConfig);
+}
 
 interface MarkdownErrorBoundaryProps {
   children: ReactNode;
@@ -712,8 +740,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 }: MarkdownRendererProps) {
   const processedContent = useMemo(() => {
     if (!content) return "";
-    return enableMath ? preprocessMathInMarkdown(content) : content;
-  }, [content, enableMath]);
+    const sanitized = sanitize ? sanitizeContent(content) : content;
+    return enableMath ? preprocessMathInMarkdown(sanitized) : sanitized;
+  }, [content, enableMath, sanitize]);
 
   const remarkPlugins = useMemo(() => {
     const plugins: any[] = [];

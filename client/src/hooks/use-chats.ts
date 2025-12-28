@@ -88,6 +88,54 @@ export function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+// Rate limiting configuration
+const RATE_LIMIT_MAX_MESSAGES = 3;
+const RATE_LIMIT_WINDOW_MS = 10000; // 10 seconds
+const messageTimestamps: number[] = [];
+
+export interface RateLimitResult {
+  allowed: boolean;
+  remainingMessages: number;
+  resetInMs: number;
+}
+
+export function checkRateLimit(): RateLimitResult {
+  const now = Date.now();
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  
+  // Remove timestamps outside the window
+  while (messageTimestamps.length > 0 && messageTimestamps[0] < windowStart) {
+    messageTimestamps.shift();
+  }
+  
+  const remaining = RATE_LIMIT_MAX_MESSAGES - messageTimestamps.length;
+  const resetInMs = messageTimestamps.length > 0 
+    ? Math.max(0, messageTimestamps[0] + RATE_LIMIT_WINDOW_MS - now)
+    : 0;
+  
+  return {
+    allowed: remaining > 0,
+    remainingMessages: Math.max(0, remaining),
+    resetInMs
+  };
+}
+
+export function recordMessageSent(): void {
+  messageTimestamps.push(Date.now());
+}
+
+export function useRateLimiter() {
+  const check = useCallback((): RateLimitResult => {
+    return checkRateLimit();
+  }, []);
+  
+  const record = useCallback((): void => {
+    recordMessageSent();
+  }, []);
+  
+  return { checkRateLimit: check, recordMessageSent: record };
+}
+
 // Generate a unique client request ID for run-based idempotency
 export function generateClientRequestId(): string {
   return `cri_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
