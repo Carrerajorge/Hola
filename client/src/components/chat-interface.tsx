@@ -3802,7 +3802,7 @@ IMPORTANTE:
           </Panel>
         </PanelGroup>
       ) : (
-        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full">
           {/* Content Area - conditional based on whether we have messages */}
           {hasMessages ? (
             <>
@@ -3810,7 +3810,7 @@ IMPORTANTE:
               <div 
                 ref={messagesContainerRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 md:p-10 space-y-6"
+                className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
               >
                 <MessageList
                   messages={messages}
@@ -3867,7 +3867,7 @@ IMPORTANTE:
             </>
           ) : (
             /* No messages - center content vertically */
-            <div className="flex-1 flex flex-col items-center justify-center px-4">
+            <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
               {aiState !== "idle" ? (
                 /* Processing indicators when AI is working */
                 <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
@@ -3954,7 +3954,7 @@ IMPORTANTE:
             </div>
           )}
           
-          {/* Input Bar - always at bottom, outside scroll container */}
+          {/* Input Bar - flex shrink-0, stays at bottom */}
           <Composer
             input={input}
             setInput={setInput}

@@ -376,7 +376,7 @@ export default function Home() {
       </div>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col h-full w-full">
+      <main className="flex-1 flex flex-col h-full w-full min-h-0">
         {isAppsDialogOpen ? (
           <AppsView 
             onClose={() => setIsAppsDialogOpen(false)}
