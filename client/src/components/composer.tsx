@@ -749,11 +749,11 @@ export function Composer({
     : "shrink-0 px-4 pb-4";
 
   const inputContainerClass = isDocumentMode
-    ? "relative flex flex-col rounded-3xl liquid-input-light dark:liquid-input p-2 focus-within:shadow-lg transition-all duration-300"
+    ? "relative flex flex-col rounded-2xl bg-muted/30 dark:bg-muted/20 border border-border/50 p-3 focus-within:border-border focus-within:bg-muted/40 dark:focus-within:bg-muted/30 transition-all duration-200"
     : cn(
-        "max-w-3xl mx-auto glass-card-light dark:glass-card rounded-2xl border border-white/30 dark:border-white/10 p-3 relative",
-        selectedDocText && "ring-2 ring-primary/50",
-        isDraggingOver && "ring-2 ring-primary border-primary"
+        "max-w-3xl mx-auto bg-background/80 dark:bg-background/60 backdrop-blur-sm rounded-2xl border border-border/60 dark:border-border/40 p-4 relative shadow-sm hover:shadow-md focus-within:shadow-md focus-within:border-border transition-all duration-200",
+        selectedDocText && "border-primary/40 bg-primary/5",
+        isDraggingOver && "border-primary bg-primary/5"
       );
 
   return (
@@ -897,7 +897,7 @@ export function Composer({
             </div>
           )}
           
-          <div className="flex flex-col gap-2 relative">
+          <div className="flex flex-col gap-3 relative">
             <Textarea
               ref={textareaRef}
               value={input}
@@ -927,18 +927,18 @@ export function Composer({
               aria-label="Message input"
               aria-describedby="composer-hint"
               className={cn(
-                "min-h-[40px] w-full resize-none border-0 bg-transparent py-3 shadow-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-0 text-base transition-shadow",
-                !isDocumentMode && "leading-relaxed"
+                "min-h-[44px] w-full resize-none border-0 bg-transparent py-3 px-1 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-foreground placeholder:text-muted-foreground/60 transition-colors",
+                !isDocumentMode && "leading-relaxed tracking-[-0.01em]"
               )}
               rows={1}
             />
             
             {showMentionPopover && filteredSources.length > 0 && (
               <div 
-                className="absolute bottom-full left-0 mb-2 w-64 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden"
+                className="absolute bottom-full left-0 mb-2 w-60 bg-popover/95 backdrop-blur-sm border border-border/60 rounded-xl shadow-lg z-50 overflow-hidden"
                 data-testid="mention-popover"
               >
-                <div className="px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border">
+                <div className="px-3 py-2 text-xs font-medium text-muted-foreground/80 border-b border-border/40">
                   Fuentes conectadas
                 </div>
                 <div className="py-1">
@@ -947,17 +947,17 @@ export function Composer({
                       key={source.id}
                       onClick={() => insertMention(source)}
                       className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-accent transition-colors text-left",
-                        index === mentionIndex && "bg-accent"
+                        "w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors text-left",
+                        index === mentionIndex && "bg-muted/80"
                       )}
                       data-testid={`mention-${source.id}`}
                     >
-                      <div className="flex items-center justify-center w-6 h-6 rounded bg-purple-100 dark:bg-purple-900/30">
+                      <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-muted/80 text-muted-foreground">
                         {source.icon}
                       </div>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{source.name}</span>
-                        <span className="text-xs text-muted-foreground">{source.mention}</span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-medium text-foreground">{source.name}</span>
+                        <span className="text-xs text-muted-foreground/70">{source.mention}</span>
                       </div>
                     </button>
                   ))}
@@ -965,8 +965,8 @@ export function Composer({
               </div>
             )}
 
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/30">
+              <div className="flex items-center gap-1.5">
                 {renderToolsPopover()}
                 
                 {!isDocumentMode && renderSelectedToolLogo()}
@@ -974,18 +974,17 @@ export function Composer({
                 
                 {showKnowledgeBase && (
                   <>
-                    <div className="liquid-badge flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-purple-700 dark:text-purple-300 text-sm" data-testid="knowledge-base-active">
-                      <span className="liquid-blob" />
-                      <Users className="h-3.5 w-3.5 relative z-[3]" />
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted/60 border border-border/40 text-muted-foreground text-xs" data-testid="knowledge-base-active">
+                      <Users className="h-3 w-3" />
                       <span 
-                        className="max-w-[120px] truncate relative z-[3]"
+                        className="max-w-[100px] truncate"
                         data-testid="knowledge-base-label"
                       >
-                        Conocimientos de la e...
+                        Conocimientos
                       </span>
                       <button 
                         onClick={() => setShowKnowledgeBase(false)}
-                        className="ml-0.5 hover:bg-purple-200/50 dark:hover:bg-purple-800/50 rounded-full p-0.5 transition-colors relative z-[3] focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        className="ml-0.5 hover:bg-muted rounded p-0.5 transition-colors focus:outline-none"
                         aria-label="Close knowledge base"
                         data-testid="button-close-knowledge-base"
                       >
@@ -996,17 +995,17 @@ export function Composer({
                     <Popover>
                       <PopoverTrigger asChild>
                         <button 
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-muted hover:bg-muted/80 border border-border text-sm font-medium transition-colors"
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-transparent hover:bg-muted/60 text-xs text-muted-foreground transition-colors"
                           data-testid="button-fuentes-dropdown"
                         >
-                          <Users className="h-3.5 w-3.5" />
+                          <Users className="h-3 w-3" />
                           <span>Fuentes</span>
-                          <ChevronDown className="h-3.5 w-3.5" />
+                          <ChevronDown className="h-3 w-3" />
                         </button>
                       </PopoverTrigger>
-                      <PopoverContent align="start" className="w-64 p-2" data-testid="fuentes-popover">
-                        <div className="grid gap-1">
-                          <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                      <PopoverContent align="start" className="w-56 p-1.5 bg-popover/95 backdrop-blur-sm border-border/60" data-testid="fuentes-popover">
+                        <div className="grid gap-0.5">
+                          <div className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground/70 uppercase tracking-wider">
                             Fuentes conectadas
                           </div>
                           
@@ -1053,7 +1052,7 @@ export function Composer({
                 )}
               </div>
 
-              <div className={cn("flex items-center gap-1", isDocumentMode ? "pb-1" : "pb-1")}>
+              <div className="flex items-center gap-1">
                 <RecordingPanel
                   isRecording={isRecording}
                   isPaused={isPaused}
@@ -1076,9 +1075,9 @@ export function Composer({
         </div>
       </div>
 
-      <div id="composer-hint" className="text-center text-xs text-muted-foreground mt-3">
+      <div id="composer-hint" className="text-center text-[11px] text-muted-foreground/50 mt-2 tracking-wide">
         <span className="sr-only">Press Enter to send, Shift+Enter for new line, or Cmd+Enter to send quickly. </span>
-        MICHAT can make mistakes. Check important info.
+        MICHAT puede cometer errores. Verifica la información importante.
       </div>
 
     </div>
