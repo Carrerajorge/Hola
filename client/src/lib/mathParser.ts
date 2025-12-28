@@ -191,78 +191,6 @@ export function parseMathContent(text: string): ParsedMathContent {
   return { segments };
 }
 
-function convertPlainMathToLatex(text: string): string {
-  let result = text;
-  result = result
-    .replace(/²/g, '^2')
-    .replace(/³/g, '^3')
-    .replace(/⁴/g, '^4')
-    .replace(/⁵/g, '^5')
-    .replace(/⁶/g, '^6')
-    .replace(/⁷/g, '^7')
-    .replace(/⁸/g, '^8')
-    .replace(/⁹/g, '^9')
-    .replace(/⁰/g, '^0')
-    .replace(/⁺/g, '^+')
-    .replace(/⁻/g, '^-')
-    .replace(/ⁿ/g, '^n');
-  result = result
-    .replace(/₀/g, '_0')
-    .replace(/₁/g, '_1')
-    .replace(/₂/g, '_2')
-    .replace(/₃/g, '_3')
-    .replace(/₄/g, '_4')
-    .replace(/₅/g, '_5')
-    .replace(/₆/g, '_6')
-    .replace(/₇/g, '_7')
-    .replace(/₈/g, '_8')
-    .replace(/₉/g, '_9');
-  result = result
-    .replace(/×/g, ' \\times ')
-    .replace(/÷/g, ' \\div ')
-    .replace(/±/g, ' \\pm ')
-    .replace(/≈/g, ' \\approx ')
-    .replace(/≠/g, ' \\neq ')
-    .replace(/≤/g, ' \\leq ')
-    .replace(/≥/g, ' \\geq ')
-    .replace(/∞/g, ' \\infty ')
-    .replace(/√/g, '\\sqrt')
-    .replace(/π/g, '\\pi ')
-    .replace(/α/g, '\\alpha ')
-    .replace(/β/g, '\\beta ')
-    .replace(/γ/g, '\\gamma ')
-    .replace(/δ/g, '\\delta ')
-    .replace(/θ/g, '\\theta ')
-    .replace(/λ/g, '\\lambda ')
-    .replace(/μ/g, '\\mu ')
-    .replace(/σ/g, '\\sigma ')
-    .replace(/Σ/g, '\\Sigma ')
-    .replace(/∑/g, '\\sum ')
-    .replace(/∏/g, '\\prod ')
-    .replace(/∫/g, '\\int ');
-  result = result.replace(/\s*\*\s*/g, ' \\times ');
-  return result;
-}
-
-function detectAndWrapMathExpressions(text: string): string {
-  const mathLinePattern = /^(\s*)([a-zA-Z]+\s*=\s*[\d\.\(\)\+\-\*\/\^\s×÷±≈≠≤≥∞√πα-ωΑ-Ω²³⁴⁵⁶⁷⁸⁹⁰⁺⁻ⁿ₀-₉,]+)$/gm;
-  
-  let result = text.replace(mathLinePattern, (match, indent, expr) => {
-    if (expr.includes('$')) return match;
-    const latex = convertPlainMathToLatex(expr.trim());
-    return `${indent}$${latex}$`;
-  });
-  const complexMathPattern = /([a-zA-Z]+\s*=\s*\([^)]+\)\s*\/\s*\([^)]+\))/g;
-  result = result.replace(complexMathPattern, (match) => {
-    if (match.includes('$')) return match;
-    if (/^https?:\/\//.test(match)) return match;
-    const latex = convertPlainMathToLatex(match);
-    return `$${latex}$`;
-  });
-
-  return result;
-}
-
 export function preprocessMathInMarkdown(markdown: string): string {
   if (!markdown) return markdown;
   let processed = markdown
@@ -274,7 +202,6 @@ export function preprocessMathInMarkdown(markdown: string): string {
     const latex = asciiMathToLatex(asciiMath);
     return `$${latex}$`;
   });
-  processed = detectAndWrapMathExpressions(processed);
 
   return processed;
 }
