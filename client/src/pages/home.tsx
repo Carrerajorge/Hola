@@ -4,6 +4,7 @@ import { ChatInterface } from "@/components/chat-interface";
 import { NewChatFab } from "@/components/chat/NewChatButton";
 import { GptExplorer, Gpt } from "@/components/gpt-explorer";
 import { GptBuilder } from "@/components/gpt-builder";
+import { AboutGptDialog } from "@/components/about-gpt-dialog";
 import { UserLibrary } from "@/components/user-library";
 import { AppsView } from "@/components/apps-view";
 import { SearchModal } from "@/components/search-modal";
@@ -52,6 +53,7 @@ export default function Home() {
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
   const [isGptExplorerOpen, setIsGptExplorerOpen] = useState(false);
   const [isGptBuilderOpen, setIsGptBuilderOpen] = useState(false);
+  const [aboutGptId, setAboutGptId] = useState<string | null>(null);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
   const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
@@ -228,7 +230,7 @@ export default function Home() {
   };
 
   const handleAboutGptFromChat = useCallback((gpt: { id: string; name: string; description: string | null }) => {
-    toast.info(`${gpt.name}: ${gpt.description || "Sin descripción"}`);
+    setAboutGptId(gpt.id);
   }, []);
 
   // Keyboard shortcuts
@@ -415,6 +417,38 @@ export default function Home() {
         onOpenChange={setIsGptExplorerOpen}
         onSelectGpt={handleSelectGpt}
         onCreateGpt={handleCreateGpt}
+      />
+
+      {/* About GPT Dialog */}
+      <AboutGptDialog
+        open={!!aboutGptId}
+        onOpenChange={(open) => !open && setAboutGptId(null)}
+        gptId={aboutGptId}
+        onSelectGpt={async (gpt) => {
+          setAboutGptId(null);
+          try {
+            const res = await fetch(`/api/gpts/${gpt.id}`);
+            if (res.ok) {
+              const fullGpt = await res.json();
+              handleSelectGpt(fullGpt);
+            }
+          } catch (error) {
+            console.error("Error fetching GPT:", error);
+          }
+        }}
+        onEditGpt={() => {
+          if (activeGpt) {
+            setAboutGptId(null);
+            setEditingGpt(activeGpt);
+            setIsGptBuilderOpen(true);
+          }
+        }}
+        onCopyLink={() => {
+          if (aboutGptId) {
+            navigator.clipboard.writeText(`${window.location.origin}/gpts/${aboutGptId}`);
+            toast.success("Enlace copiado al portapapeles");
+          }
+        }}
       />
 
       {/* GPT Builder Modal */}
