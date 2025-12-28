@@ -704,14 +704,14 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           Recomienda al usuario un modelo que debería usarse de manera predeterminada para obtener los mejores resultados.
                         </p>
                         <Select
-                          value={formData.recommendedModel}
-                          onValueChange={(value) => handleFormChange({ recommendedModel: value })}
+                          value={formData.recommendedModel || "none"}
+                          onValueChange={(value) => handleFormChange({ recommendedModel: value === "none" ? "" : value })}
                         >
                           <SelectTrigger data-testid="select-model">
                             <SelectValue placeholder="Ningún modelo recomendado: los usuarios podrán usar el modelo que prefieran." />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Ningún modelo recomendado</SelectItem>
+                            <SelectItem value="none">Ningún modelo recomendado</SelectItem>
                             <SelectItem value="gpt-4o">GPT-4o</SelectItem>
                             <SelectItem value="gpt-4o-mini">GPT-4o mini</SelectItem>
                             <SelectItem value="gpt-o1">GPT-o1</SelectItem>
