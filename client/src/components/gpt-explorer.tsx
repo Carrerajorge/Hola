@@ -124,9 +124,12 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
     return filtered;
   }, [gpts, myGpts, searchQuery, view]);
 
-  const popularGpts = useMemo(() => {
+  const displayGpts = useMemo(() => {
+    if (activeTab === "destacados") {
+      return myGpts.slice(0, 6);
+    }
     return [...gpts].sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0)).slice(0, 6);
-  }, [gpts]);
+  }, [gpts, myGpts, activeTab]);
 
   const handleSelectGpt = (gpt: Gpt) => {
     onSelectGpt(gpt);
@@ -216,8 +219,14 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
 
                   {!searchQuery && (
                     <div className="mb-8">
-                      <h2 className="text-lg font-semibold mb-2">Popular en tu espacio de trabajo</h2>
-                      <p className="text-sm text-muted-foreground mb-4">Los GPTs más populares en tu espacio de trabajo</p>
+                      <h2 className="text-lg font-semibold mb-2">
+                        {activeTab === "destacados" ? "Tus GPTs creados" : "Popular en tu espacio de trabajo"}
+                      </h2>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        {activeTab === "destacados" 
+                          ? "Los GPTs que has creado en tu cuenta" 
+                          : "Los GPTs más populares en tu espacio de trabajo"}
+                      </p>
                       
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {loading ? (
@@ -230,19 +239,20 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
                               </div>
                             </div>
                           ))
-                        ) : popularGpts.length > 0 ? (
-                          popularGpts.map((gpt, index) => (
+                        ) : displayGpts.length > 0 ? (
+                          displayGpts.map((gpt, index) => (
                             <GptCard 
                               key={gpt.id}
                               gpt={gpt}
                               index={index + 1}
                               onClick={() => handleSelectGpt(gpt)}
+                              showEdit={activeTab === "destacados"}
                             />
                           ))
                         ) : (
                           <div className="col-span-2 text-center py-8 text-muted-foreground">
                             <Bot className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                            <p>No hay GPTs disponibles todavía.</p>
+                            <p>{activeTab === "destacados" ? "No has creado ningún GPT todavía." : "No hay GPTs disponibles todavía."}</p>
                             <Button variant="link" onClick={handleCreateNew} className="mt-2">
                               Crea tu primer GPT
                             </Button>
