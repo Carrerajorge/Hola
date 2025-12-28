@@ -93,7 +93,10 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
       webBrowsing: true,
       canvas: true,
       imageGeneration: true,
-      codeInterpreter: false
+      codeInterpreter: false,
+      wordCreation: true,
+      excelCreation: true,
+      pptCreation: true
     }
   });
 
@@ -117,7 +120,10 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           webBrowsing: true,
           canvas: true,
           imageGeneration: true,
-          codeInterpreter: false
+          codeInterpreter: false,
+          wordCreation: true,
+          excelCreation: true,
+          pptCreation: true
         }
       });
       loadKnowledgeAndActions(editingGpt.id);
@@ -139,7 +145,10 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
           webBrowsing: true,
           canvas: true,
           imageGeneration: true,
-          codeInterpreter: false
+          codeInterpreter: false,
+          wordCreation: true,
+          excelCreation: true,
+          pptCreation: true
         }
       });
       setKnowledgeFiles([]);
@@ -783,6 +792,51 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           <label htmlFor="code-interpreter" className="text-sm flex items-center gap-1">
                             Intérprete de código y análisis de datos
                             <HelpCircle className="h-4 w-4 text-muted-foreground" />
+                          </label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="word-creation"
+                            checked={formData.capabilities.wordCreation}
+                            onCheckedChange={(checked) => 
+                              handleFormChange({ 
+                                capabilities: { ...formData.capabilities, wordCreation: !!checked }
+                              })
+                            }
+                          />
+                          <label htmlFor="word-creation" className="text-sm">
+                            Creación de Word
+                          </label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="excel-creation"
+                            checked={formData.capabilities.excelCreation}
+                            onCheckedChange={(checked) => 
+                              handleFormChange({ 
+                                capabilities: { ...formData.capabilities, excelCreation: !!checked }
+                              })
+                            }
+                          />
+                          <label htmlFor="excel-creation" className="text-sm">
+                            Creación de Excel
+                          </label>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="ppt-creation"
+                            checked={formData.capabilities.pptCreation}
+                            onCheckedChange={(checked) => 
+                              handleFormChange({ 
+                                capabilities: { ...formData.capabilities, pptCreation: !!checked }
+                              })
+                            }
+                          />
+                          <label htmlFor="ppt-creation" className="text-sm">
+                            Creación de PowerPoint
                           </label>
                         </div>
                       </div>
