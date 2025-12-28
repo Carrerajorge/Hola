@@ -27,7 +27,18 @@ function AuthCallbackHandler() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("auth") === "success") {
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      fetch("/api/auth/user", { credentials: "include" })
+        .then(res => res.ok ? res.json() : null)
+        .then(user => {
+          if (user) {
+            localStorage.setItem("siragpt_auth_user", JSON.stringify(user));
+            queryClient.setQueryData(["/api/auth/user"], user);
+          }
+          queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+        })
+        .catch(() => {
+          queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+        });
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
