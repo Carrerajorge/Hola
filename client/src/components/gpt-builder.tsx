@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -430,6 +430,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-screen h-screen max-w-none rounded-none p-0 gap-0 overflow-hidden" data-testid="gpt-builder-dialog">
+        <DialogTitle className="sr-only">Configurar GPT</DialogTitle>
+        <DialogDescription className="sr-only">Constructor de GPT personalizado</DialogDescription>
         <div className="flex flex-col h-full bg-background">
           <header className="flex items-center justify-between px-4 py-3 border-b">
             <div className="flex items-center gap-3">
@@ -546,8 +548,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto">
-                <div className="p-6 max-w-2xl mx-auto space-y-6">
+              <div className="flex-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
+                <div className="p-6 max-w-2xl mx-auto space-y-6 pb-10">
                   {activeTab === "crear" ? (
                     <div className="space-y-4">
                       <p className="text-muted-foreground text-sm">
