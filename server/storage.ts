@@ -73,7 +73,7 @@ import {
   type LibraryActivityRecord,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
-  gpts, gptCategories, gptVersions, gptKnowledge, gptActions, users,
+  gpts, gptCategories, gptVersions, gptKnowledge, gptActions, sidebarPinnedGpts, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
   notificationEventTypes, notificationPreferences, userSettings,
   integrationProviders, integrationAccounts, integrationTools, integrationPolicies, toolCallLogs,
@@ -181,6 +181,11 @@ export interface IStorage {
   updateGptAction(id: string, updates: Partial<InsertGptAction>): Promise<GptAction | undefined>;
   deleteGptAction(id: string): Promise<void>;
   incrementGptActionUsage(id: string): Promise<void>;
+  // Sidebar Pinned GPTs
+  getSidebarPinnedGpts(userId: string): Promise<any[]>;
+  pinGptToSidebar(userId: string, gptId: string, displayOrder?: number): Promise<any>;
+  unpinGptFromSidebar(userId: string, gptId: string): Promise<void>;
+  isGptPinnedToSidebar(userId: string, gptId: string): Promise<boolean>;
   // Admin: User management
   getAllUsers(): Promise<User[]>;
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
@@ -996,6 +1001,50 @@ export class MemStorage implements IStorage {
     await db.update(gptActions)
       .set({ usageCount: sql`${gptActions.usageCount} + 1`, lastUsedAt: new Date() })
       .where(eq(gptActions.id, id));
+  }
+
+  // Sidebar Pinned GPTs
+  async getSidebarPinnedGpts(userId: string): Promise<any[]> {
+    const pinnedRecords = await db.select()
+      .from(sidebarPinnedGpts)
+      .where(eq(sidebarPinnedGpts.userId, userId))
+      .orderBy(sidebarPinnedGpts.displayOrder);
+    
+    const gptDetails = await Promise.all(
+      pinnedRecords.map(async (record) => {
+        const gpt = await this.getGpt(record.gptId);
+        return gpt ? { ...record, gpt } : null;
+      })
+    );
+    
+    return gptDetails.filter(Boolean);
+  }
+
+  async pinGptToSidebar(userId: string, gptId: string, displayOrder: number = 0): Promise<any> {
+    const existing = await db.select()
+      .from(sidebarPinnedGpts)
+      .where(and(eq(sidebarPinnedGpts.userId, userId), eq(sidebarPinnedGpts.gptId, gptId)));
+    
+    if (existing.length > 0) {
+      return existing[0];
+    }
+    
+    const [result] = await db.insert(sidebarPinnedGpts)
+      .values({ userId, gptId, displayOrder })
+      .returning();
+    return result;
+  }
+
+  async unpinGptFromSidebar(userId: string, gptId: string): Promise<void> {
+    await db.delete(sidebarPinnedGpts)
+      .where(and(eq(sidebarPinnedGpts.userId, userId), eq(sidebarPinnedGpts.gptId, gptId)));
+  }
+
+  async isGptPinnedToSidebar(userId: string, gptId: string): Promise<boolean> {
+    const [result] = await db.select()
+      .from(sidebarPinnedGpts)
+      .where(and(eq(sidebarPinnedGpts.userId, userId), eq(sidebarPinnedGpts.gptId, gptId)));
+    return !!result;
   }
 
   // Admin: User management

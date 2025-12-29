@@ -371,5 +371,53 @@ export function createGptRouter() {
     }
   });
 
+  // Sidebar Pinned GPTs - get pinned GPTs for a user
+  router.get("/users/:userId/sidebar-gpts", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const pinnedGpts = await storage.getSidebarPinnedGpts(userId);
+      res.json(pinnedGpts);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Pin a GPT to sidebar
+  router.post("/users/:userId/sidebar-gpts", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { gptId, displayOrder } = req.body;
+      if (!gptId) {
+        return res.status(400).json({ error: "gptId is required" });
+      }
+      const pinned = await storage.pinGptToSidebar(userId, gptId, displayOrder || 0);
+      res.json(pinned);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Unpin a GPT from sidebar
+  router.delete("/users/:userId/sidebar-gpts/:gptId", async (req, res) => {
+    try {
+      const { userId, gptId } = req.params;
+      await storage.unpinGptFromSidebar(userId, gptId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Check if a GPT is pinned
+  router.get("/users/:userId/sidebar-gpts/:gptId", async (req, res) => {
+    try {
+      const { userId, gptId } = req.params;
+      const isPinned = await storage.isGptPinnedToSidebar(userId, gptId);
+      res.json({ isPinned });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return router;
 }
