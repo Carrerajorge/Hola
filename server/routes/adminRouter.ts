@@ -1022,11 +1022,11 @@ export function createAdminRouter() {
       `);
 
       // Get row count using sanitized table name
-      const countResult = await db.execute(sql`SELECT COUNT(*) as total FROM ${sql.raw(`"${safeTableName}"`)}`);
+      const countResult = await db.execute(sql`SELECT COUNT(*) as total FROM ${sql.identifier(safeTableName)}`);
       const total = parseInt(countResult.rows[0]?.total || "0");
 
       // Get data with pagination using parameterized queries for LIMIT and OFFSET
-      const data = await db.execute(sql`SELECT * FROM ${sql.raw(`"${safeTableName}"`)} LIMIT ${limitNum} OFFSET ${offset}`);
+      const data = await db.execute(sql`SELECT * FROM ${sql.identifier(safeTableName)} LIMIT ${limitNum} OFFSET ${offset}`);
 
       res.json({
         table: tableName,
@@ -1077,7 +1077,7 @@ export function createAdminRouter() {
       }
 
       const startTime = Date.now();
-      const result = await db.execute(sql.raw(query));
+      const result = await db.execute(sql`${sql.raw(query)}`);
       const executionTime = Date.now() - startTime;
 
       await storage.createAuditLog({
