@@ -33,6 +33,13 @@ Preferred communication style: Simple, everyday language.
 - **Multi-Intent Pipeline**: Processes complex user prompts through stages: Plan, Decompose, Execute, and Aggregate, with automatic detection and parallel execution.
 - **Document Generation System**: Generates Excel (.xlsx) and Word (.docx) files based on Zod schemas (`shared/documentSpecs.ts`), using LLM-driven orchestration with repair loops for validation. Includes dedicated services for rendering Excel and Word documents.
 - **Professional CV/Resume Generation System**: A three-layer architecture for structured CV generation, featuring a `CvSpec` schema, a template engine with multiple layouts and styling options, and an intelligent mapping layer for data formatting and visual elements. It uses dedicated prompts for CV content generation.
+- **Spreadsheet Analyzer Module**: An AI-powered spreadsheet analysis system with three-tier architecture:
+  - **Upload & Introspection**: File validation (25MB limit, .xlsx/.xls/.csv), checksum generation, ExcelJS-based parsing with column type inference, multi-sheet support.
+  - **LLM Agent** (`server/services/spreadsheetLlmAgent.ts`): Generates Python analysis code via LLM Gateway with AST-based security validation (blocks dangerous modules: os, subprocess, eval, exec).
+  - **Python Sandbox** (`server/services/pythonSandbox.ts`): Secure code execution with resource limits (512MB RAM, 60s timeout, 10 process limit), allowed modules only (pandas, numpy, json, datetime, math).
+  - **Database Tables**: `spreadsheet_uploads`, `spreadsheet_sheets`, `spreadsheet_analysis_sessions`, `spreadsheet_analysis_outputs`.
+  - **Frontend** (`client/src/pages/SpreadsheetAnalyzer.tsx`): Drag-drop upload, virtualized TanStack Table with filters, analysis panel with code preview and results display.
+  - **Security Note**: Current MVP uses process-level isolation; future hardening should add filesystem isolation (chroot/container), runtime import whitelist enforcement.
 - **System Observability**: Implements structured JSON logging with correlation IDs (`server/utils/logger.ts`), health monitoring for AI providers and the database, an alert manager, and request tracing middleware with AsyncLocalStorage context propagation.
 - **Connector Management**: Tracks usage and provides threshold-based alerting for various connectors (e.g., Gmail, Gemini).
 
