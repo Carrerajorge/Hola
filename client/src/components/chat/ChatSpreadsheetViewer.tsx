@@ -7,7 +7,7 @@ import {
   ColumnDef,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Download, Maximize2, Loader2, AlertCircle, ChevronDown } from 'lucide-react';
+import { Download, Maximize2, Loader2, AlertCircle, ChevronDown, Sparkles, Code } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import {
@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 
 interface SheetInfo {
@@ -60,6 +61,17 @@ export function ChatSpreadsheetViewer({
   );
   const [cachedData, setCachedData] = useState<CachedSheetData>({});
   const tableContainerRef = useRef<HTMLDivElement>(null);
+
+  const [analysisState, setAnalysisState] = useState<'idle' | 'analyzing' | 'complete' | 'error'>('idle');
+  const [analysisSessionId, setAnalysisSessionId] = useState<string | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<{
+    generatedCode?: string;
+    summary?: string;
+    metrics?: Array<{ label: string; value: string }>;
+    tables?: Array<{ title: string; headers: string[]; rows: any[][] }>;
+    error?: string;
+  } | null>(null);
+  const [showCode, setShowCode] = useState(false);
 
   const { data, isLoading, error } = useQuery<SheetDataResponse>({
     queryKey: ['chatSheetData', uploadId, activeSheet],
@@ -172,6 +184,51 @@ export function ChatSpreadsheetViewer({
   const handleSheetChange = useCallback((sheetName: string) => {
     setActiveSheet(sheetName);
   }, []);
+
+  const handleAnalyze = async () => {
+    if (!uploadId || !activeSheet) return;
+    setAnalysisState('analyzing');
+    setAnalysisResult(null);
+    
+    try {
+      const startRes = await fetch('/api/spreadsheet/analyze/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uploadId,
+          sheetName: activeSheet,
+          analysisMode: 'full',
+        }),
+      });
+      if (!startRes.ok) throw new Error('Failed to start analysis');
+      const { sessionId } = await startRes.json();
+      setAnalysisSessionId(sessionId);
+      
+      const pollResult = async () => {
+        const statusRes = await fetch(`/api/spreadsheet/analyze/status/${sessionId}`);
+        const status = await statusRes.json();
+        
+        if (status.status === 'complete') {
+          setAnalysisResult({
+            generatedCode: status.generatedCode,
+            summary: status.outputs?.summary,
+            metrics: status.outputs?.metrics,
+            tables: status.outputs?.tables,
+          });
+          setAnalysisState('complete');
+        } else if (status.status === 'error') {
+          setAnalysisResult({ error: status.error });
+          setAnalysisState('error');
+        } else {
+          setTimeout(pollResult, 1500);
+        }
+      };
+      pollResult();
+    } catch (err: any) {
+      setAnalysisResult({ error: err.message });
+      setAnalysisState('error');
+    }
+  };
 
   const displayFilename = useMemo(() => {
     const maxLen = 35;
@@ -352,6 +409,102 @@ export function ChatSpreadsheetViewer({
           {displayData.totalRows.toLocaleString()} rows × {displayData.columns?.length || 0} columns
         </div>
       )}
+
+      {/* Analysis Section */}
+      <div className="border-t">
+        {analysisState === 'idle' && (
+          <div className="px-3 py-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={handleAnalyze}
+              data-testid="analyze-button"
+            >
+              <Sparkles className="h-3.5 w-3.5 mr-2" />
+              Analyze with AI
+            </Button>
+          </div>
+        )}
+
+        {analysisState === 'analyzing' && (
+          <div className="px-3 py-4 flex items-center justify-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm text-muted-foreground">Analyzing...</span>
+          </div>
+        )}
+
+        {analysisState === 'complete' && analysisResult && (
+          <div className="p-3 space-y-3">
+            {/* Code toggle */}
+            <Collapsible open={showCode} onOpenChange={setShowCode}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="w-full justify-between">
+                  <span className="flex items-center gap-2">
+                    <Code className="h-3.5 w-3.5" />
+                    Generated Code
+                  </span>
+                  <ChevronDown className={cn("h-4 w-4 transition-transform", showCode && "rotate-180")} />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className="mt-2 p-3 bg-muted rounded-lg text-xs overflow-x-auto max-h-[200px]">
+                  <code>{analysisResult.generatedCode}</code>
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
+
+            {/* Summary */}
+            {analysisResult.summary && (
+              <p className="text-sm">{analysisResult.summary}</p>
+            )}
+
+            {/* Metrics */}
+            {analysisResult.metrics && analysisResult.metrics.length > 0 && (
+              <div className="grid grid-cols-2 gap-2">
+                {analysisResult.metrics.map((m, i) => (
+                  <div key={i} className="bg-muted/50 rounded-lg p-2">
+                    <div className="text-xs text-muted-foreground">{m.label}</div>
+                    <div className="text-sm font-medium">{m.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Tables */}
+            {analysisResult.tables?.map((t, i) => (
+              <div key={i} className="rounded-lg border">
+                <div className="px-2 py-1 bg-muted/30 text-xs font-medium">{t.title}</div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr>
+                      {t.headers.map((h, j) => (
+                        <th key={j} className="px-2 py-1 text-left border-b">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {t.rows.slice(0, 10).map((row, ri) => (
+                      <tr key={ri}>
+                        {row.map((cell, ci) => (
+                          <td key={ci} className="px-2 py-1 border-b">{cell}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {analysisState === 'error' && analysisResult?.error && (
+          <div className="px-3 py-2 text-destructive text-sm flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" />
+            {analysisResult.error}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }
