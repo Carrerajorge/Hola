@@ -122,31 +122,31 @@ export function ChatSpreadsheetViewer({
 
     const rowNumColumn: ColumnDef<Record<string, any>> = {
       id: '__rowNum',
-      header: () => <span className="text-gray-500">#</span>,
+      header: () => <span className="text-gray-400 text-xs">#</span>,
       cell: ({ row }) => (
-        <span className="text-gray-500 text-sm font-mono">
+        <span className="text-gray-400 text-xs font-mono">
           {row.index + 1}
         </span>
       ),
-      size: 50,
+      size: 36,
     };
 
     const dataColumns = displayData.columns.map((col) => ({
       id: col.name,
       accessorKey: col.name,
       header: () => (
-        <span className="text-sm font-medium text-gray-900">{col.name}</span>
+        <span className="text-xs font-medium text-gray-700 truncate block" title={col.name}>{col.name}</span>
       ),
       cell: ({ getValue }: { getValue: () => any }) => {
         const value = getValue();
         if (value === null || value === undefined || value === '') {
-          return <span className="text-gray-400">—</span>;
+          return <span className="text-gray-300 text-xs">—</span>;
         }
         const strValue = String(value);
         return (
           <span 
-            className="text-sm text-gray-700 block max-w-[250px] truncate" 
-            title={strValue.length > 50 ? strValue : undefined}
+            className="text-xs text-gray-600 block line-clamp-2" 
+            title={strValue.length > 40 ? strValue : undefined}
           >
             {strValue}
           </span>
@@ -172,7 +172,7 @@ export function ChatSpreadsheetViewer({
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => tableContainerRef.current,
-    estimateSize: () => 40,
+    estimateSize: () => 38,
     overscan: 10,
   });
 
@@ -245,13 +245,13 @@ export function ChatSpreadsheetViewer({
 
   return (
     <div 
-      className="w-full max-w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm" 
+      className="w-full max-w-2xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm" 
       data-testid="chat-spreadsheet-viewer"
     >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-gray-50/50">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <span 
-            className="text-base font-semibold text-gray-900 truncate" 
+            className="text-xs font-medium text-gray-700 truncate max-w-[180px] sm:max-w-[280px]" 
             title={filename}
             data-testid="spreadsheet-filename"
           >
@@ -259,25 +259,25 @@ export function ChatSpreadsheetViewer({
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {validSheets.length > 1 ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button 
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded transition-colors"
                   data-testid="sheet-selector"
                 >
-                  <span>{activeSheet}</span>
-                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                  <span className="truncate max-w-[80px] sm:max-w-[120px]">{activeSheet}</span>
+                  <ChevronDown className="h-3 w-3 text-gray-400 shrink-0" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[120px]">
+              <DropdownMenuContent align="end" className="min-w-[100px] max-w-[200px]">
                 {validSheets.map((sheet) => (
                   <DropdownMenuItem 
                     key={`dropdown-sheet-${sheet.name}`}
                     onClick={() => handleSheetChange(sheet.name)}
                     className={cn(
-                      "text-sm cursor-pointer",
+                      "text-xs cursor-pointer truncate",
                       activeSheet === sheet.name && "bg-gray-100"
                     )}
                     data-testid={`sheet-option-${sheet.name}`}
@@ -288,30 +288,30 @@ export function ChatSpreadsheetViewer({
               </DropdownMenuContent>
             </DropdownMenu>
           ) : validSheets.length === 1 ? (
-            <span className="text-sm text-gray-600 px-2">
+            <span className="text-xs text-gray-500 px-1 truncate max-w-[100px]">
               {validSheets[0].name}
             </span>
           ) : null}
 
           {onDownload && (
             <button
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
               onClick={onDownload}
               title="Download"
               data-testid="download-button"
             >
-              <Download className="h-4 w-4" />
+              <Download className="h-3.5 w-3.5" />
             </button>
           )}
 
           {onExpand && (
             <button
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
               onClick={onExpand}
               title="Expand"
               data-testid="expand-button"
             >
-              <Maximize2 className="h-4 w-4" />
+              <Maximize2 className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
@@ -319,7 +319,7 @@ export function ChatSpreadsheetViewer({
 
       <div
         ref={tableContainerRef}
-        className="max-h-[600px] overflow-auto bg-white"
+        className="max-h-[320px] sm:max-h-[420px] overflow-auto bg-white"
         data-testid="spreadsheet-table-container"
       >
         {isLoading && !displayData && (
@@ -341,7 +341,7 @@ export function ChatSpreadsheetViewer({
         )}
 
         {displayData && (
-          <table className="w-full text-sm border-collapse">
+          <table className="w-full text-xs border-collapse">
             <thead className="sticky top-0 bg-gray-50 z-10">
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id}>
@@ -349,9 +349,9 @@ export function ChatSpreadsheetViewer({
                     <th
                       key={header.id}
                       className={cn(
-                        "text-left px-4 py-2.5 border-b border-gray-200 font-medium whitespace-nowrap",
-                        idx === 0 && "w-12 text-center bg-gray-100 border-r border-gray-200",
-                        idx > 0 && "border-l border-gray-200 bg-gray-50"
+                        "text-left px-2 py-1.5 border-b border-gray-200 font-medium whitespace-nowrap",
+                        idx === 0 && "w-9 text-center bg-gray-100 border-r border-gray-100",
+                        idx > 0 && "bg-gray-50"
                       )}
                       style={header.column.getSize() ? { width: header.column.getSize() } : undefined}
                     >
@@ -378,15 +378,14 @@ export function ChatSpreadsheetViewer({
                   <tr
                     key={row.id}
                     data-index={virtualRow.index}
-                    className="hover:bg-gray-50 transition-colors"
+                    className="hover:bg-gray-50/50 transition-colors"
                   >
                     {row.getVisibleCells().map((cell, idx) => (
                       <td 
                         key={cell.id} 
                         className={cn(
-                          "px-4 py-2.5 border-b border-gray-200 bg-white",
-                          idx === 0 && "text-center bg-gray-50 border-r border-gray-200",
-                          idx > 0 && "border-l border-gray-200"
+                          "px-2 py-1 border-b border-gray-100 bg-white align-top",
+                          idx === 0 && "text-center bg-gray-50/50 border-r border-gray-100"
                         )}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -412,31 +411,31 @@ export function ChatSpreadsheetViewer({
       </div>
 
       {displayData && displayData.totalRows > 0 && (
-        <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 text-sm text-gray-600">
+        <div className="px-3 py-1.5 border-t border-gray-100 bg-gray-50/50 text-xs text-gray-500">
           {displayData.totalRows.toLocaleString()} rows × {displayData.columns?.length || 0} columns
         </div>
       )}
 
-      <div className="border-t border-gray-200">
+      <div className="border-t border-gray-100">
         {analysisState === 'idle' && (
-          <div className="px-4 py-3">
+          <div className="px-3 py-2">
             <Button
               variant="outline"
               size="sm"
-              className="w-full border-gray-200 hover:bg-gray-50"
+              className="w-full h-7 text-xs border-gray-200 hover:bg-gray-50"
               onClick={handleAnalyze}
               data-testid="analyze-button"
             >
-              <Sparkles className="h-4 w-4 mr-2" />
+              <Sparkles className="h-3 w-3 mr-1.5" />
               Analyze with AI
             </Button>
           </div>
         )}
 
         {analysisState === 'analyzing' && (
-          <div className="px-4 py-4 flex items-center justify-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm text-gray-600">Analyzing...</span>
+          <div className="px-3 py-2.5 flex items-center justify-center gap-1.5">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span className="text-xs text-gray-500">Analyzing...</span>
           </div>
         )}
 
