@@ -116,9 +116,8 @@ Your code must produce JSON output with this structure:
 {
   "tables": [
     {
-      "title": "Table Title",
-      "headers": ["col1", "col2", ...],
-      "rows": [[val1, val2, ...], ...]
+      "name": "Table Name",
+      "data": [{col1: val1, col2: val2, ...}, ...]
     }
   ],
   "metrics": {
@@ -135,32 +134,74 @@ Your code must produce JSON output with this structure:
       "data": {...chart-specific data...}
     }
   ],
+  "logs": ["Log message 1", "Log message 2", ...],
   "summary": "Brief text summary of findings"
 }
 
+## IMPORTANT
+The generated code will be shown to the user as 'Generated Code', so make it readable and well-commented.
+
 ## CODE TEMPLATE
-Generate code following this pattern:
+Generate code following this ChatGPT-style pattern with helper functions:
 
 \`\`\`python
 import pandas as pd
 import numpy as np
 import json
-from datetime import datetime
 
 def analyze_spreadsheet(file_path: str, sheet_name: str) -> dict:
-    # Read the data
-    df = pd.read_excel(file_path, sheet_name=sheet_name)
+    """
+    Analyze spreadsheet data and return structured results.
+    """
+    # Helpers to register outputs
+    tables = []
+    metrics = {}
+    charts = []
+    logs = []
     
-    result = {
-        "tables": [],
-        "metrics": {},
-        "charts": [],
-        "summary": ""
+    def register_table(name: str, df: pd.DataFrame, max_rows: int = 50):
+        """Register a DataFrame as a result table."""
+        tables.append({
+            "name": name,
+            "data": df.head(max_rows).to_dict(orient='records')
+        })
+    
+    def register_metric(key: str, value):
+        """Register a metric value."""
+        metrics[key] = value
+    
+    def log(message: str):
+        """Log a message during analysis."""
+        logs.append(message)
+    
+    # Load the workbook and explore sheets
+    xlsx = pd.ExcelFile(file_path)
+    log(f"Available sheets: {xlsx.sheet_names}")
+    
+    # Read the target sheet
+    # Use df.head() and df.info() for exploration
+    df = pd.read_excel(xlsx, sheet_name=sheet_name)
+    log(f"Loaded {len(df)} rows and {len(df.columns)} columns")
+    
+    # Basic data overview
+    register_metric("total_rows", len(df))
+    register_metric("total_columns", len(df.columns))
+    register_metric("missing_values", int(df.isnull().sum().sum()))
+    register_metric("duplicate_rows", int(df.duplicated().sum()))
+    
+    # Register first rows preview
+    register_table("Data Preview", df.head(10))
+    
+    # YOUR ANALYSIS CODE HERE...
+    # Use register_table(), register_metric(), and log() to record results
+    
+    return {
+        "tables": tables,
+        "metrics": metrics,
+        "charts": charts,
+        "logs": logs,
+        "summary": "Analysis completed successfully."
     }
-    
-    # Your analysis code here...
-    
-    return result
 
 if __name__ == "__main__":
     import sys
