@@ -16,22 +16,28 @@ export const AVAILABLE_MODELS = {
   xai: {
     name: "xAI Grok",
     models: [
-      { id: "grok-3-fast", name: "Grok 3 Fast", description: "Fastest responses" },
-      { id: "grok-2-vision-1212", name: "Grok 2 Vision", description: "Image understanding" },
+      { id: "grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast", description: "Respuestas rápidas con 2M de contexto", default: true },
+      { id: "grok-4-1-fast-reasoning", name: "Grok 4.1 Fast Reasoning", description: "Razonamiento avanzado con 2M de contexto" },
+      { id: "grok-4-fast-non-reasoning", name: "Grok 4 Fast", description: "Modelo rápido y eficiente" },
+      { id: "grok-4-fast-reasoning", name: "Grok 4 Fast Reasoning", description: "Razonamiento paso a paso" },
+      { id: "grok-code-fast-1", name: "Grok Code", description: "Especializado en código" },
+      { id: "grok-4-0709", name: "Grok 4 Premium", description: "Modelo premium de alta calidad" },
+      { id: "grok-3-fast", name: "Grok 3 Fast", description: "Respuestas rápidas" },
+      { id: "grok-2-vision-1212", name: "Grok 2 Vision", description: "Comprensión de imágenes" },
     ]
   },
   gemini: {
     name: "Google Gemini",
     models: [
-      { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", description: "Newest and fastest", default: true },
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Fast and efficient" },
-      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "Most capable" },
+      { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview", description: "El más nuevo y rápido" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Rápido y eficiente" },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "El más capaz" },
     ]
   }
 } as const;
 
-export const DEFAULT_PROVIDER = "gemini";
-export const DEFAULT_MODEL = "gemini-3-flash-preview";
+export const DEFAULT_PROVIDER = "xai";
+export const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
