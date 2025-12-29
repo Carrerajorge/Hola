@@ -48,14 +48,16 @@ interface CachedSheetData {
 export function ChatSpreadsheetViewer({
   uploadId,
   filename,
-  sheets,
+  sheets = [],
   initialSheet,
   previewData,
   onDownload,
   onExpand,
 }: ChatSpreadsheetViewerProps) {
+  const validSheets = Array.isArray(sheets) ? sheets.filter(s => s && s.name) : [];
+  
   const [activeSheet, setActiveSheet] = useState<string>(
-    initialSheet || sheets[0]?.name || ''
+    initialSheet || validSheets[0]?.name || ''
   );
   const [cachedData, setCachedData] = useState<CachedSheetData>({});
   const tableContainerRef = useRef<HTMLDivElement>(null);
@@ -99,7 +101,7 @@ export function ChatSpreadsheetViewer({
   const displayData = useMemo(() => {
     if (cachedData[activeSheet]) return cachedData[activeSheet];
     if (data) return data;
-    if (previewData && activeSheet === (initialSheet || sheets[0]?.name)) {
+    if (previewData && activeSheet === (initialSheet || validSheets[0]?.name)) {
       return {
         rows: previewData.data.map((row, idx) => {
           const rowObj: Record<string, any> = { __rowNum: idx + 1 };
@@ -113,7 +115,7 @@ export function ChatSpreadsheetViewer({
       };
     }
     return null;
-  }, [cachedData, activeSheet, data, previewData, initialSheet, sheets]);
+  }, [cachedData, activeSheet, data, previewData, initialSheet, validSheets]);
 
   const columns = useMemo<ColumnDef<Record<string, any>>[]>(() => {
     if (!displayData?.columns) return [];
@@ -254,7 +256,7 @@ export function ChatSpreadsheetViewer({
         </div>
 
         <div className="flex items-center gap-2">
-          {sheets.length > 1 ? (
+          {validSheets.length > 1 ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button 
@@ -266,7 +268,7 @@ export function ChatSpreadsheetViewer({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[120px]">
-                {sheets.map((sheet) => (
+                {validSheets.map((sheet) => (
                   <DropdownMenuItem 
                     key={`dropdown-sheet-${sheet.name}`}
                     onClick={() => handleSheetChange(sheet.name)}
@@ -281,11 +283,11 @@ export function ChatSpreadsheetViewer({
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : (
+          ) : validSheets.length === 1 ? (
             <span className="text-sm text-gray-600 px-2">
-              {sheets[0]?.name}
+              {validSheets[0].name}
             </span>
-          )}
+          ) : null}
 
           {onDownload && (
             <button

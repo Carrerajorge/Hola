@@ -2207,29 +2207,24 @@ export function ChatInterface({
             
             if (spreadsheetRes.ok) {
               const spreadsheetResult = await spreadsheetRes.json();
-              const uploadId = spreadsheetResult.uploadId;
-              const sheets = spreadsheetResult.sheets || [];
+              const uploadId = spreadsheetResult.id;
+              const sheetDetails = spreadsheetResult.sheetDetails || [];
+              const sheets = sheetDetails.map((s: any) => ({
+                name: s.name,
+                rowCount: s.rowCount,
+                columnCount: s.columnCount,
+              }));
               
               spreadsheetData = {
                 uploadId,
                 sheets,
               };
               
-              if (sheets.length > 0) {
-                try {
-                  const firstSheetName = sheets[0].name;
-                  const previewRes = await fetch(`/api/spreadsheet/${uploadId}/sheet/${encodeURIComponent(firstSheetName)}/data?limit=10`);
-                  
-                  if (previewRes.ok) {
-                    const previewResult = await previewRes.json();
-                    spreadsheetData.previewData = {
-                      headers: previewResult.headers || [],
-                      data: previewResult.data || [],
-                    };
-                  }
-                } catch (previewError) {
-                  console.warn("Failed to fetch spreadsheet preview:", previewError);
-                }
+              if (spreadsheetResult.firstSheetPreview) {
+                spreadsheetData.previewData = {
+                  headers: spreadsheetResult.firstSheetPreview.headers || [],
+                  data: spreadsheetResult.firstSheetPreview.data || [],
+                };
               }
             }
           } catch (spreadsheetError) {
