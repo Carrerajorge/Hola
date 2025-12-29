@@ -60,6 +60,7 @@ import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { SuggestedReplies, generateSuggestions } from "@/components/suggested-replies";
 import { getFileTheme, getFileCategory } from "@/lib/fileTypeTheme";
+import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -503,6 +504,16 @@ const AttachmentList = memo(function AttachmentList({
               className="w-full h-auto max-h-[200px] object-cover"
             />
           </div>
+        ) : att.spreadsheetData ? (
+          <ChatSpreadsheetViewer
+            key={i}
+            uploadId={att.spreadsheetData.uploadId}
+            filename={att.name}
+            sheets={att.spreadsheetData.sheets}
+            previewData={att.spreadsheetData.previewData}
+            onDownload={() => onOpenPreview?.(att)}
+            onExpand={() => window.open(`/spreadsheet-analyzer?uploadId=${att.spreadsheetData!.uploadId}`, '_blank')}
+          />
         ) : (
           (() => {
             const attTheme = getFileTheme(att.name, att.mimeType);

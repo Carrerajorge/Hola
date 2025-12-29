@@ -34,6 +34,7 @@ import { useConnectedSources } from "@/hooks/use-connected-sources";
 import { useCommandHistory } from "@/hooks/use-command-history";
 import { VirtualComputer } from "@/components/virtual-computer";
 import { getFileTheme } from "@/lib/fileTypeTheme";
+import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 import "@/components/ui/glass-effects.css";
 
 interface UploadedFile {
@@ -46,6 +47,11 @@ interface UploadedFile {
   storagePath?: string;
   status?: string;
   content?: string;
+  spreadsheetData?: {
+    uploadId: string;
+    sheets: Array<{ name: string; rowCount: number; columnCount: number }>;
+    previewData?: { headers: string[]; data: any[][] };
+  };
 }
 
 interface BrowserSession {
@@ -405,6 +411,29 @@ export function Composer({
                 </div>
                 <button
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shadow-md focus:outline-none focus:ring-2 focus:ring-destructive/50"
+                  onClick={(e) => { e.stopPropagation(); removeFile(index); }}
+                  aria-label={`Remove file ${file.name}`}
+                  data-testid={`button-remove-file-${index}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            );
+          }
+          
+          if (file.spreadsheetData) {
+            return (
+              <div key={file.id} className="relative group">
+                <ChatSpreadsheetViewer
+                  uploadId={file.spreadsheetData.uploadId}
+                  filename={file.name}
+                  sheets={file.spreadsheetData.sheets}
+                  previewData={file.spreadsheetData.previewData}
+                  onDownload={() => {}}
+                  onExpand={() => window.open(`/spreadsheet-analyzer?uploadId=${file.spreadsheetData!.uploadId}`, '_blank')}
+                />
+                <button
+                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shadow-md focus:outline-none focus:ring-2 focus:ring-destructive/50 z-10"
                   onClick={(e) => { e.stopPropagation(); removeFile(index); }}
                   aria-label={`Remove file ${file.name}`}
                   data-testid={`button-remove-file-${index}`}

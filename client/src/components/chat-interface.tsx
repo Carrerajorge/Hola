@@ -2495,6 +2495,7 @@ export function ChatInterface({
         imageUrl: f.dataUrl,
         storagePath: f.storagePath,
         fileId: f.id,
+        spreadsheetData: f.spreadsheetData,
       }));
     
     // Set thinking state FIRST to show stop button immediately
