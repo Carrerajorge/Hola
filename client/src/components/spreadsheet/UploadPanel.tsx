@@ -15,10 +15,24 @@ const ALLOWED_TYPES = [
 ];
 const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
 
+interface SheetDetail {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  headers: string[];
+}
+
+interface FirstSheetPreview {
+  headers: string[];
+  data: any[][];
+}
+
 interface UploadedFile {
   id: string;
   filename: string;
   sheets: string[];
+  sheetDetails: SheetDetail[];
+  firstSheetPreview: FirstSheetPreview | null;
   uploadedAt: string;
 }
 
@@ -248,18 +262,23 @@ export function UploadPanel({
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium">Select a sheet:</p>
               <div className="flex flex-col gap-1">
-                {currentUpload.sheets.map((sheet) => (
+                {currentUpload.sheetDetails.map((sheetDetail) => (
                   <Button
-                    key={sheet}
-                    variant={selectedSheet === sheet ? "default" : "outline"}
-                    className="justify-start text-left"
-                    onClick={() => onSheetSelect(currentUpload.id, sheet)}
-                    data-testid={`sheet-button-${sheet}`}
+                    key={sheetDetail.name}
+                    variant={selectedSheet === sheetDetail.name ? "default" : "outline"}
+                    className="justify-start text-left h-auto py-2"
+                    onClick={() => onSheetSelect(currentUpload.id, sheetDetail.name)}
+                    data-testid={`sheet-button-${sheetDetail.name}`}
                   >
                     <FileSpreadsheet className="h-4 w-4 mr-2 flex-shrink-0" />
-                    <span className="truncate">{sheet}</span>
-                    {selectedSheet === sheet && (
-                      <Badge variant="secondary" className="ml-auto">
+                    <div className="flex-1 min-w-0">
+                      <span className="truncate block">{sheetDetail.name}</span>
+                      <span className="text-xs opacity-70">
+                        {sheetDetail.rowCount.toLocaleString()} rows × {sheetDetail.columnCount} cols
+                      </span>
+                    </div>
+                    {selectedSheet === sheetDetail.name && (
+                      <Badge variant="secondary" className="ml-2 flex-shrink-0">
                         Selected
                       </Badge>
                     )}

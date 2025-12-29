@@ -7,10 +7,24 @@ import { SheetViewer } from '@/components/spreadsheet/SheetViewer';
 import { AnalysisPanel } from '@/components/spreadsheet/AnalysisPanel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
+interface SheetDetail {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  headers: string[];
+}
+
+interface FirstSheetPreview {
+  headers: string[];
+  data: any[][];
+}
+
 interface UploadedFile {
   id: string;
   filename: string;
   sheets: string[];
+  sheetDetails: SheetDetail[];
+  firstSheetPreview: FirstSheetPreview | null;
   uploadedAt: string;
 }
 
@@ -48,8 +62,12 @@ export default function SpreadsheetAnalyzer() {
 
   const handleUploadComplete = useCallback((upload: UploadedFile) => {
     setCurrentUpload(upload);
-    setSelectedSheet(null);
     setAnalysisSession(null);
+    if (upload.sheets.length > 0) {
+      setSelectedSheet(upload.sheets[0]);
+    } else {
+      setSelectedSheet(null);
+    }
   }, []);
 
   const handleSheetSelect = useCallback((uploadId: string, sheetName: string) => {

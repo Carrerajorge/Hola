@@ -86,7 +86,7 @@ export function createSpreadsheetRouter(): Router {
         status: "ready",
       });
 
-      const sheetsResponse: { name: string; rowCount: number; columnCount: number }[] = [];
+      const sheetsResponse: { name: string; rowCount: number; columnCount: number; headers: string[] }[] = [];
 
       for (const sheetInfo of parsed.sheets) {
         await createSheet({
@@ -100,11 +100,30 @@ export function createSpreadsheetRouter(): Router {
           previewData: sheetInfo.previewData,
         });
 
+        const headers = sheetInfo.inferredHeaders.length > 0
+          ? sheetInfo.inferredHeaders
+          : Array.from({ length: sheetInfo.columnCount }, (_, i) => `Column${i + 1}`);
+
         sheetsResponse.push({
           name: sheetInfo.name,
           rowCount: sheetInfo.rowCount,
           columnCount: sheetInfo.columnCount,
+          headers,
         });
+      }
+
+      let firstSheetPreview: { headers: string[]; data: any[][] } | null = null;
+      if (parsed.sheets.length > 0) {
+        const firstSheet = parsed.sheets[0];
+        const headers = firstSheet.inferredHeaders.length > 0
+          ? firstSheet.inferredHeaders
+          : Array.from({ length: firstSheet.columnCount }, (_, i) => `Column${i + 1}`);
+        const dataStartRow = firstSheet.inferredHeaders.length > 0 ? 1 : 0;
+        const previewRows = firstSheet.previewData.slice(dataStartRow, dataStartRow + 100);
+        firstSheetPreview = {
+          headers,
+          data: previewRows,
+        };
       }
 
       res.json({
@@ -112,6 +131,7 @@ export function createSpreadsheetRouter(): Router {
         filename: originalName,
         sheets: sheetsResponse.map(s => s.name),
         sheetDetails: sheetsResponse,
+        firstSheetPreview,
         uploadedAt: uploadRecord.createdAt?.toISOString() || new Date().toISOString(),
       });
     } catch (error: any) {
