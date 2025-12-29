@@ -82,12 +82,17 @@ export function SVGRenderer({ config, className, onReady, onExport }: SVGRendere
 
     if (config.content) {
       const sanitizedContent = sanitizeSVG(config.content);
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = sanitizedContent;
+      const parser = new DOMParser();
+      const parsedDoc = parser.parseFromString(
+        `<svg xmlns="http://www.w3.org/2000/svg">${sanitizedContent}</svg>`,
+        'image/svg+xml'
+      );
       
+      const parsedSvg = parsedDoc.documentElement;
       const fragment = document.createDocumentFragment();
-      while (tempDiv.firstChild) {
-        fragment.appendChild(tempDiv.firstChild);
+      
+      while (parsedSvg.firstChild) {
+        fragment.appendChild(parsedSvg.firstChild);
       }
       contentGroup.node()?.appendChild(fragment);
     }
