@@ -630,7 +630,7 @@ export function Sidebar({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 opacity-70 hover:opacity-100 transition-opacity"
+                        className="h-6 w-6 flex-shrink-0"
                         data-testid={`button-pinned-gpt-menu-${pinned.gptId}`}
                       >
                         <MoreHorizontal className="h-4 w-4" />
