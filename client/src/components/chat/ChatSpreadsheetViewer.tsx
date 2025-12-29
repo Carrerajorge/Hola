@@ -9,14 +9,12 @@ import {
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Download, Maximize2, Loader2, AlertCircle, ChevronDown, Sparkles, Code } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 
@@ -122,28 +120,28 @@ export function ChatSpreadsheetViewer({
 
     const rowNumColumn: ColumnDef<Record<string, any>> = {
       id: '__rowNum',
-      header: () => <span className="text-muted-foreground">#</span>,
+      header: () => <span className="text-gray-500">#</span>,
       cell: ({ row }) => (
-        <span className="text-muted-foreground text-xs font-mono">
+        <span className="text-gray-500 text-sm font-mono">
           {row.index + 1}
         </span>
       ),
-      size: 40,
+      size: 50,
     };
 
     const dataColumns = displayData.columns.map((col) => ({
       id: col.name,
       accessorKey: col.name,
       header: () => (
-        <span className="truncate text-xs font-medium">{col.name}</span>
+        <span className="text-sm font-medium text-gray-900">{col.name}</span>
       ),
       cell: ({ getValue }: { getValue: () => any }) => {
         const value = getValue();
         if (value === null || value === undefined || value === '') {
-          return <span className="text-muted-foreground/50">—</span>;
+          return <span className="text-gray-400">—</span>;
         }
         return (
-          <span className="truncate block text-xs max-w-[150px]">
+          <span className="text-sm text-gray-700">
             {String(value)}
           </span>
         );
@@ -168,7 +166,7 @@ export function ChatSpreadsheetViewer({
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => tableContainerRef.current,
-    estimateSize: () => 32,
+    estimateSize: () => 40,
     overscan: 10,
   });
 
@@ -231,7 +229,7 @@ export function ChatSpreadsheetViewer({
   };
 
   const displayFilename = useMemo(() => {
-    const maxLen = 35;
+    const maxLen = 40;
     if (filename.length <= maxLen) return filename;
     const ext = filename.split('.').pop() || '';
     const name = filename.slice(0, filename.length - ext.length - 1);
@@ -240,11 +238,14 @@ export function ChatSpreadsheetViewer({
   }, [filename]);
 
   return (
-    <Card className="w-full max-w-2xl overflow-hidden border bg-card/50" data-testid="chat-spreadsheet-viewer">
-      <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30">
+    <div 
+      className="w-full max-w-3xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm" 
+      data-testid="chat-spreadsheet-viewer"
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <span 
-            className="text-sm font-medium truncate" 
+            className="text-base font-semibold text-gray-900 truncate" 
             title={filename}
             data-testid="spreadsheet-filename"
           >
@@ -252,99 +253,99 @@ export function ChatSpreadsheetViewer({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {sheets.length > 1 && (
-            <Select value={activeSheet} onValueChange={handleSheetChange}>
-              <SelectTrigger 
-                className="h-7 w-auto min-w-[100px] max-w-[150px] text-xs border-0 bg-transparent hover:bg-accent/50"
-                data-testid="sheet-selector"
-              >
-                <SelectValue placeholder="Select sheet" />
-              </SelectTrigger>
-              <SelectContent>
+        <div className="flex items-center gap-2">
+          {sheets.length > 1 ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button 
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+                  data-testid="sheet-selector"
+                >
+                  <span>{activeSheet}</span>
+                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[120px]">
                 {sheets.map((sheet) => (
-                  <SelectItem 
-                    key={sheet.name} 
-                    value={sheet.name}
-                    className="text-xs"
+                  <DropdownMenuItem 
+                    key={`dropdown-sheet-${sheet.name}`}
+                    onClick={() => handleSheetChange(sheet.name)}
+                    className={cn(
+                      "text-sm cursor-pointer",
+                      activeSheet === sheet.name && "bg-gray-100"
+                    )}
                     data-testid={`sheet-option-${sheet.name}`}
                   >
                     {sheet.name}
-                  </SelectItem>
+                  </DropdownMenuItem>
                 ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {sheets.length === 1 && (
-            <span className="text-xs text-muted-foreground px-2">
-              {sheets[0].name}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <span className="text-sm text-gray-600 px-2">
+              {sheets[0]?.name}
             </span>
           )}
 
           {onDownload && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
+            <button
+              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
               onClick={onDownload}
               title="Download"
               data-testid="download-button"
             >
-              <Download className="h-3.5 w-3.5" />
-            </Button>
+              <Download className="h-4 w-4" />
+            </button>
           )}
 
           {onExpand && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
+            <button
+              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
               onClick={onExpand}
               title="Expand"
               data-testid="expand-button"
             >
-              <Maximize2 className="h-3.5 w-3.5" />
-            </Button>
+              <Maximize2 className="h-4 w-4" />
+            </button>
           )}
         </div>
       </div>
 
       <div
         ref={tableContainerRef}
-        className="max-h-[300px] overflow-auto scroll-smooth"
+        className="max-h-[320px] overflow-auto bg-white"
         data-testid="spreadsheet-table-container"
       >
         {isLoading && !displayData && (
           <div className="flex items-center justify-center h-[200px]">
             <div className="flex flex-col items-center gap-2">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              <span className="text-xs text-muted-foreground">Loading...</span>
+              <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
+              <span className="text-sm text-gray-500">Loading...</span>
             </div>
           </div>
         )}
 
         {error && !displayData && (
           <div className="flex items-center justify-center h-[200px]">
-            <div className="flex flex-col items-center gap-2 text-destructive">
+            <div className="flex flex-col items-center gap-2 text-red-500">
               <AlertCircle className="h-5 w-5" />
-              <span className="text-xs">{(error as Error).message}</span>
+              <span className="text-sm">{(error as Error).message}</span>
             </div>
           </div>
         )}
 
         {displayData && (
-          <table className="w-full text-xs border-collapse">
-            <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
+          <table className="w-full text-sm border-collapse">
+            <thead className="sticky top-0 bg-gray-50 z-10">
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id}>
                   {headerGroup.headers.map((header, idx) => (
                     <th
                       key={header.id}
                       className={cn(
-                        "text-left px-2 py-1.5 border-b font-medium whitespace-nowrap",
-                        idx === 0 && "w-10 text-center bg-muted/90",
-                        idx > 0 && "border-l border-border/50"
+                        "text-left px-4 py-2.5 border-b border-gray-200 font-medium whitespace-nowrap",
+                        idx === 0 && "w-12 text-center bg-gray-100 border-r border-gray-200",
+                        idx > 0 && "border-l border-gray-200 bg-gray-50"
                       )}
                       style={header.column.getSize() ? { width: header.column.getSize() } : undefined}
                     >
@@ -371,15 +372,15 @@ export function ChatSpreadsheetViewer({
                   <tr
                     key={row.id}
                     data-index={virtualRow.index}
-                    className="hover:bg-muted/30 transition-colors"
+                    className="hover:bg-gray-50 transition-colors"
                   >
                     {row.getVisibleCells().map((cell, idx) => (
                       <td 
                         key={cell.id} 
                         className={cn(
-                          "px-2 py-1 border-b border-border/30",
-                          idx === 0 && "text-center bg-muted/20 border-r border-border/50",
-                          idx > 0 && "border-l border-border/20"
+                          "px-4 py-2.5 border-b border-gray-200 bg-white",
+                          idx === 0 && "text-center bg-gray-50 border-r border-gray-200",
+                          idx > 0 && "border-l border-gray-200"
                         )}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -398,96 +399,91 @@ export function ChatSpreadsheetViewer({
         )}
 
         {displayData && displayData.rows.length === 0 && (
-          <div className="flex items-center justify-center h-[100px] text-muted-foreground text-xs">
+          <div className="flex items-center justify-center h-[100px] text-gray-500 text-sm">
             No data in this sheet
           </div>
         )}
       </div>
 
       {displayData && displayData.totalRows > 0 && (
-        <div className="px-3 py-1.5 border-t bg-muted/20 text-xs text-muted-foreground">
+        <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 text-sm text-gray-600">
           {displayData.totalRows.toLocaleString()} rows × {displayData.columns?.length || 0} columns
         </div>
       )}
 
-      {/* Analysis Section */}
-      <div className="border-t">
+      <div className="border-t border-gray-200">
         {analysisState === 'idle' && (
-          <div className="px-3 py-2">
+          <div className="px-4 py-3">
             <Button
               variant="outline"
               size="sm"
-              className="w-full"
+              className="w-full border-gray-200 hover:bg-gray-50"
               onClick={handleAnalyze}
               data-testid="analyze-button"
             >
-              <Sparkles className="h-3.5 w-3.5 mr-2" />
+              <Sparkles className="h-4 w-4 mr-2" />
               Analyze with AI
             </Button>
           </div>
         )}
 
         {analysisState === 'analyzing' && (
-          <div className="px-3 py-4 flex items-center justify-center gap-2">
+          <div className="px-4 py-4 flex items-center justify-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm text-muted-foreground">Analyzing...</span>
+            <span className="text-sm text-gray-600">Analyzing...</span>
           </div>
         )}
 
         {analysisState === 'complete' && analysisResult && (
-          <div className="p-3 space-y-3">
-            {/* Code toggle */}
+          <div className="p-4 space-y-3">
             <Collapsible open={showCode} onOpenChange={setShowCode}>
               <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm" className="w-full justify-between">
+                <Button variant="ghost" size="sm" className="w-full justify-between hover:bg-gray-50">
                   <span className="flex items-center gap-2">
-                    <Code className="h-3.5 w-3.5" />
+                    <Code className="h-4 w-4" />
                     Generated Code
                   </span>
                   <ChevronDown className={cn("h-4 w-4 transition-transform", showCode && "rotate-180")} />
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <pre className="mt-2 p-3 bg-muted rounded-lg text-xs overflow-x-auto max-h-[200px]">
+                <pre className="mt-2 p-3 bg-gray-100 rounded-lg text-sm overflow-x-auto max-h-[200px]">
                   <code>{analysisResult.generatedCode}</code>
                 </pre>
               </CollapsibleContent>
             </Collapsible>
 
-            {/* Summary */}
             {analysisResult.summary && (
-              <p className="text-sm">{analysisResult.summary}</p>
+              <p className="text-sm text-gray-700">{analysisResult.summary}</p>
             )}
 
-            {/* Metrics */}
             {analysisResult.metrics && analysisResult.metrics.length > 0 && (
               <div className="grid grid-cols-2 gap-2">
                 {analysisResult.metrics.map((m, i) => (
-                  <div key={i} className="bg-muted/50 rounded-lg p-2">
-                    <div className="text-xs text-muted-foreground">{m.label}</div>
-                    <div className="text-sm font-medium">{m.value}</div>
+                  <div key={i} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                    <div className="text-sm text-gray-500">{m.label}</div>
+                    <div className="text-sm font-medium text-gray-900">{m.value}</div>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Tables */}
             {analysisResult.tables?.map((t, i) => (
-              <div key={i} className="rounded-lg border">
-                <div className="px-2 py-1 bg-muted/30 text-xs font-medium">{t.title}</div>
-                <table className="w-full text-xs">
+              <div key={i} className="rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-3 py-2 bg-gray-50 text-sm font-medium text-gray-700 border-b border-gray-200">{t.title}</div>
+                <table className="w-full text-sm">
                   <thead>
-                    <tr>
+                    <tr className="bg-gray-50">
                       {t.headers.map((h, j) => (
-                        <th key={j} className="px-2 py-1 text-left border-b">{h}</th>
+                        <th key={j} className="px-3 py-2 text-left border-b border-gray-200 font-medium">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {t.rows.slice(0, 10).map((row, ri) => (
-                      <tr key={ri}>
+                      <tr key={ri} className="hover:bg-gray-50">
                         {row.map((cell, ci) => (
-                          <td key={ci} className="px-2 py-1 border-b">{cell}</td>
+                          <td key={ci} className="px-3 py-2 border-b border-gray-200">{cell}</td>
                         ))}
                       </tr>
                     ))}
@@ -499,12 +495,12 @@ export function ChatSpreadsheetViewer({
         )}
 
         {analysisState === 'error' && analysisResult?.error && (
-          <div className="px-3 py-2 text-destructive text-sm flex items-center gap-2">
+          <div className="px-4 py-3 text-red-500 text-sm flex items-center gap-2">
             <AlertCircle className="h-4 w-4" />
             {analysisResult.error}
           </div>
         )}
       </div>
-    </Card>
+    </div>
   );
 }
