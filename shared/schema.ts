@@ -1948,3 +1948,121 @@ export const libraryStorage = pgTable('library_storage', {
 ]);
 
 export type LibraryStorageStats = typeof libraryStorage.$inferSelect;
+
+// ==================== SPREADSHEET ANALYZER ====================
+
+export const spreadsheetUploadStatusEnum = ['pending', 'scanning', 'ready', 'error', 'expired'] as const;
+export type SpreadsheetUploadStatus = typeof spreadsheetUploadStatusEnum[number];
+
+export const spreadsheetUploads = pgTable('spreadsheet_uploads', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar('user_id').notNull(),
+  fileName: text('file_name').notNull(),
+  mimeType: text('mime_type').notNull(),
+  size: integer('size').notNull(),
+  storageKey: text('storage_key').notNull(),
+  checksum: text('checksum'),
+  status: text('status').$type<SpreadsheetUploadStatus>().default('pending'),
+  errorMessage: text('error_message'),
+  expiresAt: timestamp('expires_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  index('spreadsheet_uploads_user_idx').on(table.userId),
+  index('spreadsheet_uploads_status_idx').on(table.status),
+]);
+
+export const insertSpreadsheetUploadSchema = createInsertSchema(spreadsheetUploads).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertSpreadsheetUpload = z.infer<typeof insertSpreadsheetUploadSchema>;
+export type SpreadsheetUpload = typeof spreadsheetUploads.$inferSelect;
+
+export const columnTypeSchema = z.object({
+  name: z.string(),
+  type: z.enum(['text', 'number', 'date', 'boolean', 'mixed', 'empty']),
+  sampleValues: z.array(z.any()).optional(),
+  nullCount: z.number().optional(),
+});
+
+export const spreadsheetSheets = pgTable('spreadsheet_sheets', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  uploadId: varchar('upload_id').notNull().references(() => spreadsheetUploads.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  sheetIndex: integer('sheet_index').notNull(),
+  rowCount: integer('row_count').default(0),
+  columnCount: integer('column_count').default(0),
+  inferredHeaders: jsonb('inferred_headers').$type<string[]>(),
+  columnTypes: jsonb('column_types').$type<z.infer<typeof columnTypeSchema>[]>(),
+  previewData: jsonb('preview_data').$type<any[][]>(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  index('spreadsheet_sheets_upload_idx').on(table.uploadId),
+]);
+
+export const insertSpreadsheetSheetSchema = createInsertSchema(spreadsheetSheets).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertSpreadsheetSheet = z.infer<typeof insertSpreadsheetSheetSchema>;
+export type SpreadsheetSheet = typeof spreadsheetSheets.$inferSelect;
+
+export const analysisStatusEnum = ['pending', 'generating_code', 'executing', 'succeeded', 'failed'] as const;
+export type AnalysisStatus = typeof analysisStatusEnum[number];
+
+export const analysisModeEnum = ['full', 'text_only', 'numbers_only', 'custom'] as const;
+export type AnalysisMode = typeof analysisModeEnum[number];
+
+export const spreadsheetAnalysisSessions = pgTable('spreadsheet_analysis_sessions', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  uploadId: varchar('upload_id').notNull().references(() => spreadsheetUploads.id, { onDelete: 'cascade' }),
+  userId: varchar('user_id').notNull(),
+  sheetName: text('sheet_name').notNull(),
+  mode: text('mode').$type<AnalysisMode>().default('full'),
+  userPrompt: text('user_prompt'),
+  generatedCode: text('generated_code'),
+  codeHash: text('code_hash'),
+  status: text('status').$type<AnalysisStatus>().default('pending'),
+  errorMessage: text('error_message'),
+  executionTimeMs: integer('execution_time_ms'),
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  index('spreadsheet_analysis_user_idx').on(table.userId),
+  index('spreadsheet_analysis_upload_idx').on(table.uploadId),
+  index('spreadsheet_analysis_status_idx').on(table.status),
+]);
+
+export const insertSpreadsheetAnalysisSessionSchema = createInsertSchema(spreadsheetAnalysisSessions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertSpreadsheetAnalysisSession = z.infer<typeof insertSpreadsheetAnalysisSessionSchema>;
+export type SpreadsheetAnalysisSession = typeof spreadsheetAnalysisSessions.$inferSelect;
+
+export const outputTypeEnum = ['table', 'metric', 'chart', 'log', 'error'] as const;
+export type OutputType = typeof outputTypeEnum[number];
+
+export const spreadsheetAnalysisOutputs = pgTable('spreadsheet_analysis_outputs', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar('session_id').notNull().references(() => spreadsheetAnalysisSessions.id, { onDelete: 'cascade' }),
+  outputType: text('output_type').$type<OutputType>().notNull(),
+  title: text('title'),
+  payload: jsonb('payload').notNull(),
+  order: integer('order').default(0),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  index('spreadsheet_outputs_session_idx').on(table.sessionId),
+]);
+
+export const insertSpreadsheetAnalysisOutputSchema = createInsertSchema(spreadsheetAnalysisOutputs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertSpreadsheetAnalysisOutput = z.infer<typeof insertSpreadsheetAnalysisOutputSchema>;
+export type SpreadsheetAnalysisOutput = typeof spreadsheetAnalysisOutputs.$inferSelect;
