@@ -3,19 +3,11 @@ import { useQuery } from '@tanstack/react-query';
 import {
   useReactTable,
   getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
   flexRender,
-  createColumnHelper,
   ColumnDef,
-  FilterFn,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   Type,
   Hash,
   Calendar,
@@ -28,8 +20,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { cn } from '@/lib/utils';
 
 interface ColumnInfo {
   name: string;
@@ -41,16 +31,12 @@ interface SheetDataResponse {
   rows: Record<string, any>[];
   columns: ColumnInfo[];
   totalRows: number;
-  offset: number;
-  limit: number;
 }
 
 interface SheetViewerProps {
   uploadId: string;
   sheetName: string;
 }
-
-const PAGE_SIZES = [25, 50, 100, 250];
 
 const getColumnIcon = (type: string) => {
   switch (type) {
@@ -65,20 +51,14 @@ const getColumnIcon = (type: string) => {
 };
 
 export function SheetViewer({ uploadId, sheetName }: SheetViewerProps) {
-  const [offset, setOffset] = useState(0);
-  const [limit, setLimit] = useState(50);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
-  const { data, isLoading, error, isFetching } = useQuery<SheetDataResponse>({
-    queryKey: ['sheetData', uploadId, sheetName, offset, limit],
+  const { data, isLoading, error } = useQuery<SheetDataResponse>({
+    queryKey: ['sheetData', uploadId, sheetName],
     queryFn: async () => {
-      const params = new URLSearchParams({
-        offset: offset.toString(),
-        limit: limit.toString(),
-      });
       const res = await fetch(
-        `/api/spreadsheet/${uploadId}/sheet/${encodeURIComponent(sheetName)}/data?${params}`
+        `/api/spreadsheet/${uploadId}/sheet/${encodeURIComponent(sheetName)}/data`
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -86,7 +66,7 @@ export function SheetViewer({ uploadId, sheetName }: SheetViewerProps) {
       }
       return res.json();
     },
-    staleTime: 30000,
+    staleTime: 60000,
   });
 
   const columns = useMemo<ColumnDef<Record<string, any>>[]>(() => {
@@ -111,11 +91,6 @@ export function SheetViewer({ uploadId, sheetName }: SheetViewerProps) {
         }
         return <span className="truncate block max-w-[200px]">{String(value)}</span>;
       },
-      filterFn: (row, columnId, filterValue) => {
-        const value = row.getValue(columnId);
-        if (!filterValue) return true;
-        return String(value).toLowerCase().includes(filterValue.toLowerCase());
-      },
     }));
   }, [data?.columns]);
 
@@ -135,8 +110,6 @@ export function SheetViewer({ uploadId, sheetName }: SheetViewerProps) {
     data: filteredData,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    manualPagination: true,
-    pageCount: Math.ceil((data?.totalRows ?? 0) / limit),
   });
 
   const { rows } = table.getRowModel();
@@ -145,7 +118,7 @@ export function SheetViewer({ uploadId, sheetName }: SheetViewerProps) {
     count: rows.length,
     getScrollElement: () => tableContainerRef.current,
     estimateSize: () => 40,
-    overscan: 10,
+    overscan: 15,
   });
 
   const virtualRows = rowVirtualizer.getVirtualItems();
@@ -169,14 +142,6 @@ export function SheetViewer({ uploadId, sheetName }: SheetViewerProps) {
   }, []);
 
   const hasActiveFilters = Object.values(columnFilters).some((v) => v);
-
-  const currentPage = Math.floor(offset / limit) + 1;
-  const totalPages = Math.ceil((data?.totalRows ?? 0) / limit);
-
-  const goToPage = useCallback((page: number) => {
-    const newOffset = (page - 1) * limit;
-    setOffset(Math.max(0, newOffset));
-  }, [limit]);
 
   if (isLoading) {
     return (
@@ -205,12 +170,12 @@ export function SheetViewer({ uploadId, sheetName }: SheetViewerProps) {
       <CardHeader className="pb-3 flex-shrink-0">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg">{sheetName}</CardTitle>
-          <div className="flex items-center gap-2">
-            {isFetching && <Loader2 className="h-4 w-4 animate-spin" />}
-            <Badge variant="secondary">
-              {data?.totalRows?.toLocaleString() ?? 0} rows
-            </Badge>
-          </div>
+          <Badge variant="secondary">
+            {filteredData.length === data?.totalRows 
+              ? `${data?.totalRows?.toLocaleString() ?? 0} rows`
+              : `${filteredData.length} of ${data?.totalRows?.toLocaleString() ?? 0} rows`
+            }
+          </Badge>
         </div>
       </CardHeader>
 
@@ -245,7 +210,7 @@ export function SheetViewer({ uploadId, sheetName }: SheetViewerProps) {
 
         <div
           ref={tableContainerRef}
-          className="flex-1 overflow-auto border rounded-lg"
+          className="flex-1 overflow-auto border rounded-lg scroll-smooth"
           data-testid="sheet-table-container"
         >
           <table className="w-full text-sm">
@@ -297,76 +262,6 @@ export function SheetViewer({ uploadId, sheetName }: SheetViewerProps) {
               )}
             </tbody>
           </table>
-        </div>
-
-        <div className="flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Rows per page:</span>
-            <Select
-              value={limit.toString()}
-              onValueChange={(val) => {
-                setLimit(Number(val));
-                setOffset(0);
-              }}
-            >
-              <SelectTrigger className="w-20 h-8" data-testid="page-size-select">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAGE_SIZES.map((size) => (
-                  <SelectItem key={size} value={size.toString()}>
-                    {size}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <span className="text-sm text-muted-foreground mr-2">
-              Page {currentPage} of {totalPages}
-            </span>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => goToPage(1)}
-              disabled={currentPage === 1}
-              data-testid="first-page-button"
-            >
-              <ChevronsLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => goToPage(currentPage - 1)}
-              disabled={currentPage === 1}
-              data-testid="prev-page-button"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => goToPage(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              data-testid="next-page-button"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => goToPage(totalPages)}
-              disabled={currentPage === totalPages}
-              data-testid="last-page-button"
-            >
-              <ChevronsRight className="h-4 w-4" />
-            </Button>
-          </div>
         </div>
       </CardContent>
     </Card>

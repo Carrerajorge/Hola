@@ -171,8 +171,6 @@ export function createSpreadsheetRouter(): Router {
   router.get("/:uploadId/sheet/:sheetName/data", async (req: Request, res: Response) => {
     try {
       const { uploadId, sheetName } = req.params;
-      const offset = parseInt(req.query.offset as string) || 0;
-      const limit = parseInt(req.query.limit as string) || 100;
 
       const upload = await getUpload(uploadId);
       if (!upload) {
@@ -196,13 +194,26 @@ export function createSpreadsheetRouter(): Router {
         : Array.from({ length: sheet.columnCount }, (_, i) => `Column${i + 1}`);
 
       const dataStartRow = sheet.inferredHeaders.length > 0 ? 1 : 0;
-      const allData = sheet.previewData.slice(dataStartRow);
+      const allData = sheet.previewData.slice(dataStartRow, dataStartRow + 100);
       const totalRows = allData.length;
-      const paginatedData = allData.slice(offset, offset + limit);
+
+      const rows = allData.map((rowArray: any[]) => {
+        const rowObj: Record<string, any> = {};
+        headers.forEach((header, idx) => {
+          rowObj[header] = rowArray[idx] ?? null;
+        });
+        return rowObj;
+      });
+
+      const columnTypes = sheet.columnTypes || {};
+      const columns = headers.map((header) => ({
+        name: header,
+        type: columnTypes[header] || 'text',
+      }));
 
       res.json({
-        data: paginatedData,
-        headers,
+        rows,
+        columns,
         totalRows,
       });
     } catch (error: any) {
