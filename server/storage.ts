@@ -2068,32 +2068,22 @@ export class MemStorage implements IStorage {
   }
 
   async getUserGrowthData(granularity: '1h' | '24h' | '7d' | '30d' | '90d' | '1y'): Promise<{ date: Date; count: number }[]> {
-    const intervalMap: Record<string, string> = {
-      '1h': '1 hour',
-      '24h': '1 day',
-      '7d': '7 days',
-      '30d': '30 days',
-      '90d': '90 days',
-      '1y': '1 year',
+    const configMap: Record<string, { interval: string; trunc: string }> = {
+      '1h': { interval: '1 hour', trunc: 'hour' },
+      '24h': { interval: '1 day', trunc: 'hour' },
+      '7d': { interval: '7 days', trunc: 'day' },
+      '30d': { interval: '30 days', trunc: 'day' },
+      '90d': { interval: '90 days', trunc: 'week' },
+      '1y': { interval: '1 year', trunc: 'month' },
     };
+
+    const config = configMap[granularity];
     
-    const truncMap: Record<string, string> = {
-      '1h': 'hour',
-      '24h': 'hour',
-      '7d': 'day',
-      '30d': 'day',
-      '90d': 'week',
-      '1y': 'month',
-    };
-
-    const interval = intervalMap[granularity];
-    const trunc = truncMap[granularity];
-
     const result = await db.execute(sql`
-      SELECT date_trunc(${sql.raw(`'${trunc}'`)}, created_at) as date, COUNT(*) as count
+      SELECT date_trunc(${config.trunc}, created_at) as date, COUNT(*) as count
       FROM users
-      WHERE created_at >= NOW() - ${sql.raw(`INTERVAL '${interval}'`)}
-      GROUP BY date_trunc(${sql.raw(`'${trunc}'`)}, created_at)
+      WHERE created_at >= NOW() - INTERVAL ${config.interval}
+      GROUP BY date_trunc(${config.trunc}, created_at)
       ORDER BY date ASC
     `);
 
