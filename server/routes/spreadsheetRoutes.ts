@@ -16,7 +16,11 @@ import {
   createAnalysisSession,
   getAnalysisSession,
   getAnalysisOutputs,
+  updateAnalysisSession,
+  createAnalysisOutput,
 } from "../services/spreadsheetAnalyzer";
+import { generateAnalysisCode, validatePythonCode } from "../services/spreadsheetLlmAgent";
+import { executePythonCode, initializeSandbox } from "../services/pythonSandbox";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -74,11 +78,11 @@ export function createSpreadsheetRouter(): Router {
       const uploadRecord = await createUpload({
         id: uploadId,
         userId,
-        originalFilename: originalName,
+        fileName: originalName,
         mimeType,
-        fileSize: buffer.length,
+        size: buffer.length,
+        storageKey: tempFilePath,
         checksum,
-        tempFilePath,
         status: "ready",
       });
 
@@ -104,8 +108,11 @@ export function createSpreadsheetRouter(): Router {
       }
 
       res.json({
-        uploadId: uploadRecord.id,
-        sheets: sheetsResponse,
+        id: uploadRecord.id,
+        filename: originalName,
+        sheets: sheetsResponse.map(s => s.name),
+        sheetDetails: sheetsResponse,
+        uploadedAt: uploadRecord.createdAt?.toISOString() || new Date().toISOString(),
       });
     } catch (error: any) {
       console.error("[SpreadsheetRoutes] Upload error:", error);
@@ -152,11 +159,11 @@ export function createSpreadsheetRouter(): Router {
         return res.status(404).json({ error: "Upload not found" });
       }
 
-      if (!upload.tempFilePath) {
+      if (!upload.storageKey) {
         return res.status(400).json({ error: "File not available" });
       }
 
-      const buffer = await fs.readFile(upload.tempFilePath);
+      const buffer = await fs.readFile(upload.storageKey);
       const parsed = await parseSpreadsheet(buffer, upload.mimeType);
 
       const sheet = parsed.sheets.find((s) => s.name === sheetName);
@@ -202,8 +209,8 @@ export function createSpreadsheetRouter(): Router {
 
       const { sheetName, mode, prompt } = validation.data;
 
-      const upload = await getUpload(uploadId);
-      if (!upload) {
+      const uploadData = await getUpload(uploadId);
+      if (!uploadData) {
         return res.status(404).json({ error: "Upload not found" });
       }
 
@@ -226,11 +233,153 @@ export function createSpreadsheetRouter(): Router {
         sessionId: session.id,
         status: session.status,
       });
+
+      // Execute analysis asynchronously
+      executeAnalysis(session.id, uploadData, sheet, mode, prompt).catch((error) => {
+        console.error("[SpreadsheetRoutes] Async analysis error:", error);
+      });
     } catch (error: any) {
       console.error("[SpreadsheetRoutes] Analyze error:", error);
       res.status(500).json({ error: error.message || "Failed to start analysis" });
     }
   });
+
+  async function executeAnalysis(
+    sessionId: string,
+    uploadData: Awaited<ReturnType<typeof getUpload>>,
+    sheet: Awaited<ReturnType<typeof getSheets>>[0],
+    mode: "full" | "text_only" | "numbers_only",
+    prompt?: string
+  ) {
+    try {
+      await updateAnalysisSession(sessionId, { status: "generating_code", startedAt: new Date() });
+
+      const headers = sheet.inferredHeaders || [];
+      const columnTypes = sheet.columnTypes || [];
+      const sampleData = sheet.previewData?.slice(0, 10) || [];
+
+      // Generate Python code using LLM
+      const { code, intent } = await generateAnalysisCode({
+        sheetName: sheet.name,
+        headers,
+        columnTypes,
+        sampleData,
+        mode,
+        userPrompt: prompt,
+      });
+
+      // Validate the generated code
+      const codeValidation = validatePythonCode(code);
+      if (!codeValidation.valid) {
+        await updateAnalysisSession(sessionId, {
+          status: "failed",
+          errorMessage: `Code validation failed: ${codeValidation.errors.join(", ")}`,
+          completedAt: new Date(),
+        });
+        return;
+      }
+
+      await updateAnalysisSession(sessionId, { status: "executing", generatedCode: code });
+
+      // Initialize sandbox and execute
+      await initializeSandbox();
+
+      const executionResult = await executePythonCode({
+        code,
+        filePath: uploadData!.storageKey,
+        sheetName: sheet.name,
+        timeoutMs: 30000,
+      });
+
+      if (!executionResult.success) {
+        await updateAnalysisSession(sessionId, {
+          status: "failed",
+          errorMessage: executionResult.error || "Execution failed",
+          executionTimeMs: executionResult.executionTimeMs,
+          completedAt: new Date(),
+        });
+        return;
+      }
+
+      // Save outputs
+      const output = executionResult.output;
+      let outputOrder = 0;
+
+      // Save summary as metric
+      if (output?.summary) {
+        await createAnalysisOutput({
+          sessionId,
+          outputType: "metric",
+          title: "Summary",
+          payload: { summary: output.summary },
+          order: outputOrder++,
+        });
+      }
+
+      // Save metrics
+      if (output?.metrics && Object.keys(output.metrics).length > 0) {
+        await createAnalysisOutput({
+          sessionId,
+          outputType: "metric",
+          title: "Metrics",
+          payload: output.metrics,
+          order: outputOrder++,
+        });
+      }
+
+      // Save tables
+      if (output?.tables?.length > 0) {
+        for (const table of output.tables) {
+          await createAnalysisOutput({
+            sessionId,
+            outputType: "table",
+            title: table.name || "Data Table",
+            payload: { data: table.data },
+            order: outputOrder++,
+          });
+        }
+      }
+
+      // Save charts
+      if (output?.charts?.length > 0) {
+        for (const chart of output.charts) {
+          await createAnalysisOutput({
+            sessionId,
+            outputType: "chart",
+            title: chart.title || "Chart",
+            payload: chart,
+            order: outputOrder++,
+          });
+        }
+      }
+
+      // Save logs
+      if (output?.logs?.length > 0) {
+        await createAnalysisOutput({
+          sessionId,
+          outputType: "log",
+          title: "Execution Logs",
+          payload: { logs: output.logs },
+          order: outputOrder++,
+        });
+      }
+
+      await updateAnalysisSession(sessionId, {
+        status: "succeeded",
+        executionTimeMs: executionResult.executionTimeMs,
+        completedAt: new Date(),
+      });
+
+      console.log(`[SpreadsheetRoutes] Analysis completed for session ${sessionId}`);
+    } catch (error: any) {
+      console.error(`[SpreadsheetRoutes] Analysis execution error:`, error);
+      await updateAnalysisSession(sessionId, {
+        status: "failed",
+        errorMessage: error.message || "Analysis execution failed",
+        completedAt: new Date(),
+      });
+    }
+  }
 
   router.get("/analysis/:sessionId", async (req: Request, res: Response) => {
     try {
@@ -252,11 +401,13 @@ export function createSpreadsheetRouter(): Router {
           userPrompt: session.userPrompt,
           status: session.status,
           errorMessage: session.errorMessage,
+          generatedCode: session.generatedCode,
+          executionTimeMs: session.executionTimeMs,
           createdAt: session.createdAt,
           completedAt: session.completedAt,
         },
         outputs: outputs.map((output) => ({
-          type: output.type,
+          type: output.outputType,
           title: output.title,
           payload: output.payload,
         })),
@@ -276,9 +427,9 @@ export function createSpreadsheetRouter(): Router {
         return res.status(404).json({ error: "Upload not found" });
       }
 
-      if (upload.tempFilePath) {
+      if (upload.storageKey) {
         try {
-          await fs.unlink(upload.tempFilePath);
+          await fs.unlink(upload.storageKey);
         } catch (error) {
         }
       }

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Play,
@@ -76,6 +76,65 @@ export function AnalysisPanel({
   const [prompt, setPrompt] = useState('');
   const [codeExpanded, setCodeExpanded] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
+  // Poll for analysis results when there's an active session
+  const isPolling = !!currentSessionId;
+  
+  const { data: sessionData } = useQuery({
+    queryKey: ['analysis-session', currentSessionId],
+    queryFn: async () => {
+      if (!currentSessionId) return null;
+      const res = await fetch(`/api/spreadsheet/analysis/${currentSessionId}`);
+      if (!res.ok) throw new Error('Failed to fetch analysis');
+      return res.json();
+    },
+    enabled: isPolling,
+    refetchInterval: isPolling ? 2000 : false,
+  });
+
+  // Update parent when analysis completes
+  useEffect(() => {
+    if (sessionData?.session) {
+      const status = sessionData.session.status;
+      const mappedStatus: AnalysisStatus = 
+        status === 'generating_code' ? 'generating' :
+        status === 'executing' ? 'executing' :
+        status === 'succeeded' ? 'success' :
+        status === 'failed' ? 'error' :
+        status === 'pending' ? 'pending' : 'idle';
+
+      // Build results from outputs
+      const outputs = sessionData.outputs || [];
+      const summaryOutput = outputs.find((o: any) => o.type === 'metric' && o.payload?.summary);
+      const metricsOutput = outputs.find((o: any) => o.type === 'metric' && !o.payload?.summary);
+      const tableOutputs = outputs.filter((o: any) => o.type === 'table');
+      const chartOutputs = outputs.filter((o: any) => o.type === 'chart');
+
+      const result: AnalysisResult = {
+        sessionId: sessionData.session.id,
+        status: mappedStatus,
+        generatedCode: sessionData.session.generatedCode,
+        error: sessionData.session.errorMessage,
+        results: {
+          summary: summaryOutput?.payload?.summary,
+          metrics: metricsOutput ? Object.entries(metricsOutput.payload).map(([label, value]) => ({ label, value })) : [],
+          tables: tableOutputs.map((o: any) => ({
+            title: o.title,
+            headers: o.payload?.data?.[0] ? Object.keys(o.payload.data[0]) : [],
+            rows: o.payload?.data?.map((row: any) => Object.values(row)) || [],
+          })),
+          charts: chartOutputs.map((o: any) => o.payload),
+        },
+      };
+      onAnalysisComplete(result);
+
+      // Stop polling when complete
+      if (status === 'succeeded' || status === 'failed') {
+        setCurrentSessionId(null);
+      }
+    }
+  }, [sessionData, onAnalysisComplete]);
 
   const analyzeMutation = useMutation({
     mutationFn: async () => {
@@ -92,10 +151,11 @@ export function AnalysisPanel({
         const err = await res.json().catch(() => ({}));
         throw new Error(err.message || 'Analysis failed');
       }
-      return res.json() as Promise<AnalysisResult>;
+      return res.json();
     },
     onSuccess: (data) => {
-      onAnalysisComplete(data);
+      setCurrentSessionId(data.sessionId);
+      onAnalysisComplete({ sessionId: data.sessionId, status: 'pending' });
     },
   });
 
@@ -113,6 +173,10 @@ export function AnalysisPanel({
 
   const currentStatus: AnalysisStatus = analyzeMutation.isPending
     ? 'generating'
+    : currentSessionId
+    ? (sessionData?.session?.status === 'generating_code' ? 'generating' :
+       sessionData?.session?.status === 'executing' ? 'executing' :
+       'pending')
     : analysisSession?.status ?? 'idle';
   const statusConfig = STATUS_CONFIG[currentStatus];
 

@@ -59,11 +59,14 @@ def set_resource_limits():
     resource.setrlimit(resource.RLIMIT_CPU, (${MAX_CPU_TIME_SECONDS}, ${MAX_CPU_TIME_SECONDS}))
     # Limit memory to ${MAX_MEMORY_MB}MB
     memory_bytes = ${MAX_MEMORY_MB} * 1024 * 1024
-    resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-    # Limit number of processes
-    resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
-    # Limit file size creation
-    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
+    except (ValueError, OSError):
+        pass  # May not be available on all systems
+    # Allow limited subprocesses for pandas internals (e.g., numexpr)
+    resource.setrlimit(resource.RLIMIT_NPROC, (10, 10))
+    # Limit file size creation to 10MB
+    resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 1024 * 1024, 10 * 1024 * 1024))
 
 try:
     set_resource_limits()
