@@ -795,6 +795,26 @@ export const insertGptActionSchema = createInsertSchema(gptActions).omit({
 export type InsertGptAction = z.infer<typeof insertGptActionSchema>;
 export type GptAction = typeof gptActions.$inferSelect;
 
+// Sidebar Pinned GPTs - user preferences for GPTs shown in sidebar
+export const sidebarPinnedGpts = pgTable("sidebar_pinned_gpts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  gptId: varchar("gpt_id").references(() => gpts.id).notNull(),
+  displayOrder: integer("display_order").default(0),
+  pinnedAt: timestamp("pinned_at").defaultNow().notNull(),
+}, (table) => [
+  index("sidebar_pinned_gpts_user_idx").on(table.userId),
+  index("sidebar_pinned_gpts_gpt_idx").on(table.gptId),
+]);
+
+export const insertSidebarPinnedGptSchema = createInsertSchema(sidebarPinnedGpts).omit({
+  id: true,
+  pinnedAt: true,
+});
+
+export type InsertSidebarPinnedGpt = z.infer<typeof insertSidebarPinnedGptSchema>;
+export type SidebarPinnedGpt = typeof sidebarPinnedGpts.$inferSelect;
+
 // Admin Tables
 
 // AI Models Registry
