@@ -3493,15 +3493,15 @@ IMPORTANTE:
           )}
         </div>
         <div className="flex items-center gap-0.5 sm:gap-1">
-          {user?.email !== "infosiragpt@gmail.com" && (
+          {user?.role === "admin" && (
             <Button
               size="sm"
               className="rounded-full text-[10px] sm:text-xs px-2 sm:px-4 bg-purple-600 hover:bg-purple-700 text-white border-0"
               onClick={() => setIsUpgradeDialogOpen(true)}
               data-testid="button-upgrade-header"
             >
-              <span className="hidden sm:inline">Mejorar el plan a Go</span>
-              <span className="sm:hidden">Mejorar</span>
+              <span className="hidden sm:inline">Gestión de Planes</span>
+              <span className="sm:hidden">Planes</span>
             </Button>
           )}
           {chatId && !chatId.startsWith("pending-") ? (

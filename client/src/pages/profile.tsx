@@ -47,7 +47,7 @@ export default function ProfilePage() {
 
   const quickActions = [
     { label: "Privacidad y seguridad", icon: Shield, path: "/privacy" },
-    { label: "Facturación", icon: Calendar, path: "/billing" },
+    ...(user?.role === "admin" ? [{ label: "Facturación", icon: Calendar, path: "/billing" }] : []),
     { label: "Configuración", icon: Globe, path: "/workspace-settings" },
   ];
 

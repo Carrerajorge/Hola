@@ -1,11 +1,41 @@
 import { useLocation } from "wouter";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, CreditCard, Calendar, CheckCircle, Download } from "lucide-react";
+import { ArrowLeft, CreditCard, Calendar, CheckCircle, Download, ShieldAlert } from "lucide-react";
+import { useUser } from "@/hooks/use-user";
 
 export default function BillingPage() {
   const [, setLocation] = useLocation();
+  const { user, isLoading } = useUser();
+
+  useEffect(() => {
+    if (!isLoading && user?.role !== "admin") {
+      setLocation("/");
+    }
+  }, [user, isLoading, setLocation]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-muted-foreground">Cargando...</div>
+      </div>
+    );
+  }
+
+  if (user?.role !== "admin") {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <ShieldAlert className="h-16 w-16 text-muted-foreground mx-auto" />
+          <h1 className="text-xl font-semibold">Acceso restringido</h1>
+          <p className="text-muted-foreground">Esta página solo está disponible para administradores.</p>
+          <Button onClick={() => setLocation("/")}>Volver al inicio</Button>
+        </div>
+      </div>
+    );
+  }
 
   const invoices = [
     { date: "15 Dic 2024", amount: "€99.00", status: "Pagado" },
@@ -27,7 +57,7 @@ export default function BillingPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <h1 className="text-xl font-semibold">Facturación</h1>
+          <h1 className="text-xl font-semibold">Facturación (Admin)</h1>
         </div>
       </div>
       

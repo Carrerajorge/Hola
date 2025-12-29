@@ -683,10 +683,12 @@ export function Sidebar({
                 <User className="h-4 w-4" />
                 Perfil
               </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/billing"); }} data-testid="button-billing">
-                <CreditCard className="h-4 w-4" />
-                Facturación
-              </Button>
+              {user?.role === "admin" && (
+                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/billing"); }} data-testid="button-billing">
+                  <CreditCard className="h-4 w-4" />
+                  Facturación
+                </Button>
+              )}
               <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/workspace-settings"); }} data-testid="button-workspace-settings">
                 <Monitor className="h-4 w-4" />
                 Configuración del espacio de trabajo
@@ -713,14 +715,14 @@ export function Sidebar({
             </div>
           </PopoverContent>
           </Popover>
-          {user?.email !== "infosiragpt@gmail.com" && (
+          {user?.role === "admin" && (
             <Button
               size="sm"
               className="rounded-full text-xs px-4 py-1 h-auto whitespace-nowrap bg-purple-600 hover:bg-purple-700 text-white border-0 flex-shrink-0"
               onClick={() => setIsUpgradeDialogOpen(true)}
               data-testid="button-upgrade-plan"
             >
-              Mejorar el plan
+              Gestión de Planes
             </Button>
           )}
         </div>
