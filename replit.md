@@ -99,3 +99,22 @@ Preferred communication style: Simple, everyday language.
 - **Piston API**: Used for multi-language code execution.
 - **World Bank API V2**: Integrated for economic data retrieval by the ETL Agent.
 - **Gmail API**: Utilized for the Gmail chat integration, including email fetching and parsing.
+
+## Security
+
+### Dependency Vulnerability Status (2025-12-29)
+
+**Production: 0 vulnerabilities** (`npm audit --omit=dev`)
+
+**Development-only vulnerabilities (4 moderate):**
+- **CVE**: GHSA-67mh-4wv8-2f99 (esbuild <= 0.24.2)
+- **Impact**: Allows any website to send requests to development server and read responses
+- **Affected dependency chain**: `drizzle-kit@0.31.8` → `@esbuild-kit/esm-loader@2.6.5` → `@esbuild-kit/core-utils@3.3.2` → `esbuild@0.18.20`
+- **Risk acceptance**: This vulnerability only affects local development environment, not production. The `drizzle-kit` package is in `devDependencies` and is not installed in production (`npm ci --omit=dev`).
+- **Mitigation plan**: Monitor drizzle-kit releases for updates that remove the `@esbuild-kit` dependency (deprecated in favor of tsx). Track issue at: https://github.com/drizzle-team/drizzle-kit-mirror/issues
+
+### Resolved Vulnerabilities (2025-12-29)
+- `form-data@2.3.3` (CRITICAL) - Removed by uninstalling `@hungknguyen/docx-math-converter`
+- `jszip@2.7.0` (CRITICAL) - Removed by uninstalling `xlsx-chart`
+- `tough-cookie<4.1.3` (MODERATE) - Removed with above packages
+- `xml2js` (MODERATE) - Removed by uninstalling `office-chart`
