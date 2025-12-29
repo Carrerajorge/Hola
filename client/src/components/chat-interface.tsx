@@ -819,6 +819,11 @@ interface UploadedFile {
   storagePath?: string;
   status?: string;
   content?: string;
+  spreadsheetData?: {
+    uploadId: string;
+    sheets: Array<{ name: string; rowCount: number; columnCount: number }>;
+    previewData?: { headers: string[]; data: any[][] };
+  };
 }
 
 export function ChatInterface({ 
@@ -2150,6 +2155,11 @@ export function ChatInterface({
     const uploadPromises = validFiles.map(async (file) => {
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`;
       const isImage = file.type.startsWith("image/");
+      const isExcel = [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'text/csv'
+      ].includes(file.type) || !!file.name.match(/\.(xlsx|xls|csv)$/i);
       
       let dataUrl: string | undefined;
       if (isImage) {
@@ -2183,6 +2193,50 @@ export function ChatInterface({
         });
         if (!uploadRes.ok) throw new Error("Upload failed");
 
+        let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
+        
+        if (isExcel) {
+          try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const spreadsheetRes = await fetch('/api/spreadsheet/upload', {
+              method: 'POST',
+              body: formData,
+            });
+            
+            if (spreadsheetRes.ok) {
+              const spreadsheetResult = await spreadsheetRes.json();
+              const uploadId = spreadsheetResult.uploadId;
+              const sheets = spreadsheetResult.sheets || [];
+              
+              spreadsheetData = {
+                uploadId,
+                sheets,
+              };
+              
+              if (sheets.length > 0) {
+                try {
+                  const firstSheetName = sheets[0].name;
+                  const previewRes = await fetch(`/api/spreadsheet/${uploadId}/sheet/${encodeURIComponent(firstSheetName)}/data?limit=10`);
+                  
+                  if (previewRes.ok) {
+                    const previewResult = await previewRes.json();
+                    spreadsheetData.previewData = {
+                      headers: previewResult.headers || [],
+                      data: previewResult.data || [],
+                    };
+                  }
+                } catch (previewError) {
+                  console.warn("Failed to fetch spreadsheet preview:", previewError);
+                }
+              }
+            }
+          } catch (spreadsheetError) {
+            console.warn("Failed to parse spreadsheet:", spreadsheetError);
+          }
+        }
+
         if (isImage) {
           const registerRes = await fetch("/api/files/quick", {
             method: "POST",
@@ -2197,7 +2251,7 @@ export function ChatInterface({
           );
         } else {
           setUploadedFiles((prev) =>
-            prev.map((f) => f.id === tempId ? { ...f, status: "processing" } : f)
+            prev.map((f) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
           );
           
           const registerRes = await fetch("/api/files", {
@@ -2209,7 +2263,7 @@ export function ChatInterface({
           if (!registerRes.ok) throw new Error(registeredFile.error);
 
           setUploadedFiles((prev) =>
-            prev.map((f) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath } : f)
+            prev.map((f) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
           );
 
           pollFileStatusFast(registeredFile.id, tempId);
