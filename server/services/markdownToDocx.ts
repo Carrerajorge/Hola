@@ -1,9 +1,8 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType, convertInchesToTwip, IRunOptions, Math as DocxMath } from "docx";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType, convertInchesToTwip, IRunOptions, Math as DocxMath, MathRun } from "docx";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import { convertLatex2Math, mathJaxReady } from "@hungknguyen/docx-math-converter";
 import type { Root, Content, Text, Strong, Emphasis, InlineCode, Paragraph as MdParagraph, Heading, List, ListItem, Table as MdTable, TableRow as MdTableRow, TableCell as MdTableCell, Blockquote, Code, ThematicBreak, Link } from "mdast";
 
 interface MathNode {
@@ -11,12 +10,10 @@ interface MathNode {
   value: string;
 }
 
-let mathJaxInitialized = false;
-async function ensureMathJaxReady(): Promise<void> {
-  if (!mathJaxInitialized) {
-    await mathJaxReady;
-    mathJaxInitialized = true;
-  }
+function convertLatexToMath(latex: string): DocxMath {
+  return new DocxMath({
+    children: [new MathRun(latex)]
+  });
 }
 
 function normalizeMarkdown(text: string): string {
@@ -127,7 +124,7 @@ async function createParagraphChildren(children: ParagraphChild[]): Promise<(Tex
   for (const child of children) {
     if (isMathRunMarker(child)) {
       try {
-        const mathElement = await convertLatex2Math(child.latex);
+        const mathElement = convertLatexToMath(child.latex);
         result.push(mathElement);
       } catch (error) {
         console.error('[markdownToDocx] Math conversion error:', error);

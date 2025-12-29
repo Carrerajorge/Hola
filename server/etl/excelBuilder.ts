@@ -1,6 +1,4 @@
 import ExcelJS from 'exceljs';
-// @ts-ignore - xlsx-chart doesn't have type definitions
-import XLSXChart from 'xlsx-chart';
 import JSZip from 'jszip';
 import { 
   WorkbookSheets, 
@@ -45,7 +43,11 @@ ${new Date().toISOString()}
 }
 
 async function generateChartWorkbook(clean: NormalizedRecord[], dashboard: WorkbookSheets['dashboard']): Promise<Buffer> {
-  const xlsxChart = new XLSXChart();
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Sira GPT ETL Agent';
+  workbook.created = new Date();
+  
+  const sheet = workbook.addWorksheet('Chart Data');
   
   const byCountry = new Map<string, { records: number; valueSum: number; valueCount: number }>();
   for (const r of clean) {
@@ -60,37 +62,32 @@ async function generateChartWorkbook(clean: NormalizedRecord[], dashboard: Workb
     }
   }
 
-  const titles = Array.from(byCountry.keys()).slice(0, 10);
-  const chartData: Record<string, Record<string, number>> = {};
+  const headerRow = sheet.addRow(['Country', 'Total Records', 'Avg Value (M)']);
+  headerRow.font = { bold: true };
+  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
+  headerRow.eachCell(cell => { cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; });
+
+  const countries = Array.from(byCountry.keys()).slice(0, 10);
   
-  for (const country of titles) {
+  for (const country of countries) {
     const entry = byCountry.get(country)!;
     const avgValue = entry.valueCount > 0 ? entry.valueSum / entry.valueCount : 0;
-    chartData[country] = {
-      'Total Records': entry.records,
-      'Avg Value (M)': Math.round(avgValue / 1000000)
-    };
+    sheet.addRow([country, entry.records, Math.round(avgValue / 1000000)]);
   }
 
-  if (titles.length === 0) {
-    chartData['No Data'] = { 'Total Records': 0, 'Avg Value (M)': 0 };
-    titles.push('No Data');
+  if (countries.length === 0) {
+    sheet.addRow(['No Data', 0, 0]);
   }
 
-  const opts = {
-    chart: 'column' as const,
-    titles,
-    fields: ['Total Records', 'Avg Value (M)'],
-    data: chartData,
-    chartTitle: 'Economic Data Summary by Country'
-  };
+  sheet.getColumn(1).width = 15;
+  sheet.getColumn(2).width = 15;
+  sheet.getColumn(3).width = 15;
 
-  return new Promise((resolve, reject) => {
-    xlsxChart.generate(opts, (err: Error | null, data: Buffer) => {
-      if (err) reject(err);
-      else resolve(data);
-    });
-  });
+  sheet.addRow([]);
+  sheet.addRow(['Note: Select data above and Insert > Chart in Excel to create visualization']);
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
 }
 
 async function generateDataWorkbook(sheets: WorkbookSheets): Promise<Buffer> {
