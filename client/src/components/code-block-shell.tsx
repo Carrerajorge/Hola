@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -254,7 +255,7 @@ function LineRow({
       )}
       <code
         className="flex-1 px-4 text-sm font-mono whitespace-pre overflow-hidden text-ellipsis"
-        dangerouslySetInnerHTML={{ __html: htmlLine || "&nbsp;" }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(htmlLine || "&nbsp;") }}
       />
     </div>
   );
