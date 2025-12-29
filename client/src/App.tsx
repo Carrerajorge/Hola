@@ -20,6 +20,7 @@ import SystemHealthPage from "@/pages/admin/SystemHealth";
 import WorkspaceSettingsPage from "@/pages/workspace-settings";
 import WorkspacePage from "@/pages/workspace";
 import SkillsPage from "@/pages/skills";
+import SpreadsheetAnalyzerPage from "@/pages/SpreadsheetAnalyzer";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
@@ -108,6 +109,7 @@ function Router() {
       <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
       <Route path="/workspace" component={WorkspacePage} />
       <Route path="/skills" component={SkillsPage} />
+      <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
       <Route component={NotFound} />
     </Switch>
   );
