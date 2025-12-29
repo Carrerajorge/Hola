@@ -108,7 +108,7 @@ export function convertToLatex(input: string): { latex: string; isBlock: boolean
       return { latex: asciiMathToLatex(detected.content), isBlock: false };
     case "plain":
     default:
-      return { latex: input, isBlock: false };
+      return { latex: sanitizeMathInput(input), isBlock: false };
   }
 }
 
