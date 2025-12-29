@@ -31,7 +31,8 @@ import {
   Folder,
   FolderOpen,
   Zap,
-  SquarePen
+  SquarePen,
+  Pin
 } from "lucide-react";
 import { SiraLogo } from "@/components/sira-logo";
 import { cn } from "@/lib/utils";
@@ -629,7 +630,7 @@ export function Sidebar({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="h-6 w-6 opacity-70 hover:opacity-100 transition-opacity"
                         data-testid={`button-pinned-gpt-menu-${pinned.gptId}`}
                       >
                         <MoreHorizontal className="h-4 w-4" />
@@ -644,8 +645,8 @@ export function Sidebar({
                         className="flex items-center gap-2"
                         data-testid={`button-unpin-gpt-${pinned.gptId}`}
                       >
-                        <EyeOff className="h-4 w-4" />
-                        <span>Ocultar de la barra lateral</span>
+                        <Pin className="h-4 w-4" />
+                        <span>Desfijar</span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
