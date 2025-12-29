@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { storage } from "../storage";
 import { db } from "../db";
 import { users, chats, chatMessages, aiModels, excelDocuments } from "@shared/schema";
@@ -19,6 +19,29 @@ import { chatAgenticCircuit } from "../services/chatAgenticCircuit";
 import { validateBody, validateParams } from "../middleware/validateRequest";
 import { asyncHandler } from "../middleware/errorHandler";
 import { createUserBodySchema, idParamSchema } from "../schemas/apiSchemas";
+import { isAuthenticated } from "../replit_integrations/auth/replitAuth";
+import { authStorage } from "../replit_integrations/auth/storage";
+
+async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userReq = req as any;
+    if (!userReq.user?.claims?.sub) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    const user = await authStorage.getUser(userReq.user.claims.sub);
+    if (!user || user.role !== "admin") {
+      await storage.createAuditLog({
+        action: "admin_access_denied",
+        resource: "admin_panel",
+        details: { userId: userReq.user.claims.sub, path: req.path }
+      });
+      return res.status(403).json({ error: "Admin access required" });
+    }
+    next();
+  } catch (error) {
+    return res.status(500).json({ error: "Authorization check failed" });
+  }
+}
 
 const gapsStore: any[] = [];
 
@@ -160,6 +183,9 @@ async function seedDefaultExcelDocuments() {
 
 export function createAdminRouter() {
   const router = Router();
+
+  // Apply authentication and admin role check to ALL admin routes
+  router.use(isAuthenticated, requireAdmin);
 
   router.get("/dashboard", async (req, res) => {
     try {
