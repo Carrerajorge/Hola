@@ -2492,6 +2492,7 @@ export function ChatInterface({
               f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
               "word" as const,
         name: f.name,
+        mimeType: f.type,
         imageUrl: f.dataUrl,
         storagePath: f.storagePath,
         fileId: f.id,

@@ -412,6 +412,40 @@ export function createSpreadsheetRouter(): Router {
     }
   }
 
+  router.get("/analyze/status/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+
+      const session = await getAnalysisSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+
+      let outputs = null;
+      if (session.status === "succeeded") {
+        const outputRows = await getAnalysisOutputs(sessionId);
+        
+        outputs = {
+          summary: outputRows.find(o => o.outputType === "summary")?.payload,
+          metrics: outputRows.filter(o => o.outputType === "metric").map(o => o.payload || {}),
+          tables: outputRows.filter(o => o.outputType === "table").map(o => o.payload || {}),
+          charts: outputRows.filter(o => o.outputType === "chart").map(o => o.payload || {}),
+        };
+      }
+
+      res.json({
+        sessionId,
+        status: session.status,
+        generatedCode: session.generatedCode,
+        outputs,
+        error: session.errorMessage,
+      });
+    } catch (error: any) {
+      console.error("[SpreadsheetRoutes] Get analysis status error:", error);
+      res.status(500).json({ error: error.message || "Failed to get analysis status" });
+    }
+  });
+
   router.get("/analysis/:sessionId", async (req: Request, res: Response) => {
     try {
       const { sessionId } = req.params;
