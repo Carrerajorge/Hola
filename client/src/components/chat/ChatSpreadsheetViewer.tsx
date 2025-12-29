@@ -142,9 +142,13 @@ export function ChatSpreadsheetViewer({
         if (value === null || value === undefined || value === '') {
           return <span className="text-gray-400">—</span>;
         }
+        const strValue = String(value);
         return (
-          <span className="text-sm text-gray-700">
-            {String(value)}
+          <span 
+            className="text-sm text-gray-700 block max-w-[250px] truncate" 
+            title={strValue.length > 50 ? strValue : undefined}
+          >
+            {strValue}
           </span>
         );
       },
@@ -241,7 +245,7 @@ export function ChatSpreadsheetViewer({
 
   return (
     <div 
-      className="w-full max-w-3xl overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm" 
+      className="w-full max-w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm" 
       data-testid="chat-spreadsheet-viewer"
     >
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white">
@@ -315,7 +319,7 @@ export function ChatSpreadsheetViewer({
 
       <div
         ref={tableContainerRef}
-        className="max-h-[320px] overflow-auto bg-white"
+        className="max-h-[600px] overflow-auto bg-white"
         data-testid="spreadsheet-table-container"
       >
         {isLoading && !displayData && (
