@@ -1022,11 +1022,11 @@ export function createAdminRouter() {
       `);
 
       // Get row count using sanitized table name
-      const countResult = await db.execute(sql.raw(`SELECT COUNT(*) as total FROM "${safeTableName}"`));
+      const countResult = await db.execute(sql`SELECT COUNT(*) as total FROM ${sql.raw(`"${safeTableName}"`)}`);
       const total = parseInt(countResult.rows[0]?.total || "0");
 
-      // Get data with pagination using sanitized table name
-      const data = await db.execute(sql.raw(`SELECT * FROM "${safeTableName}" LIMIT ${limitNum} OFFSET ${offset}`));
+      // Get data with pagination using parameterized queries for LIMIT and OFFSET
+      const data = await db.execute(sql`SELECT * FROM ${sql.raw(`"${safeTableName}"`)} LIMIT ${limitNum} OFFSET ${offset}`);
 
       res.json({
         table: tableName,
