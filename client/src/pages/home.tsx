@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useChats, Message } from "@/hooks/use-chats";
 import { useChatFolders } from "@/hooks/use-chat-folders";
+import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
@@ -225,8 +226,32 @@ export default function Home() {
     }
   }, [activeGpt]);
 
-  const handleHideGptFromSidebar = (gptId: string) => {
-    toast.success("GPT ocultado de la barra lateral");
+  const { isPinned, pinGpt, unpinGpt } = usePinnedGpts();
+
+  const handleHideGptFromSidebar = async (gptId: string) => {
+    try {
+      await unpinGpt(gptId);
+      toast.success("GPT ocultado de la barra lateral");
+    } catch (error) {
+      toast.error("Error al ocultar el GPT");
+    }
+  };
+
+  const handlePinGptToSidebar = async (gptId: string) => {
+    try {
+      await pinGpt(gptId);
+      toast.success("GPT fijado en la barra lateral");
+    } catch (error) {
+      toast.error("Error al fijar el GPT");
+    }
+  };
+
+  const handleToggleGptPin = async (gptId: string) => {
+    if (isPinned(gptId)) {
+      await handleHideGptFromSidebar(gptId);
+    } else {
+      await handlePinGptToSidebar(gptId);
+    }
   };
 
   const handleAboutGptFromChat = useCallback((gpt: { id: string; name: string; description: string | null }) => {
@@ -406,6 +431,8 @@ export default function Home() {
             onNewChat={handleNewChat}
             onEditGpt={handleEditGptFromChat}
             onHideGptFromSidebar={handleHideGptFromSidebar}
+            onPinGptToSidebar={handlePinGptToSidebar}
+            isGptPinned={isPinned}
             onAboutGpt={handleAboutGptFromChat}
           />
         )}

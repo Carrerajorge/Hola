@@ -41,6 +41,8 @@ import {
   Circle,
   Info,
   EyeOff,
+  Eye,
+  Pin,
   Link,
   Star,
   Settings
@@ -802,6 +804,8 @@ interface ChatInterfaceProps {
   onNewChat?: () => void;
   onEditGpt?: (gpt: ActiveGpt) => void;
   onHideGptFromSidebar?: (gptId: string) => void;
+  onPinGptToSidebar?: (gptId: string) => void;
+  isGptPinned?: (gptId: string) => boolean;
   onAboutGpt?: (gpt: ActiveGpt) => void;
 }
 
@@ -837,6 +841,8 @@ export function ChatInterface({
   onNewChat,
   onEditGpt,
   onHideGptFromSidebar,
+  onPinGptToSidebar,
+  isGptPinned,
   onAboutGpt
 }: ChatInterfaceProps) {
   const { user } = useAuth();
@@ -3394,10 +3400,17 @@ IMPORTANTE:
                   <Settings className="h-4 w-4" />
                   <span>Editar GPT</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onHideGptFromSidebar?.(activeGpt.id)} className="flex items-center gap-2">
-                  <EyeOff className="h-4 w-4" />
-                  <span>Ocultar de la barra lateral</span>
-                </DropdownMenuItem>
+                {isGptPinned?.(activeGpt.id) ? (
+                  <DropdownMenuItem onClick={() => onHideGptFromSidebar?.(activeGpt.id)} className="flex items-center gap-2">
+                    <EyeOff className="h-4 w-4" />
+                    <span>Ocultar de la barra lateral</span>
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem onClick={() => onPinGptToSidebar?.(activeGpt.id)} className="flex items-center gap-2">
+                    <Pin className="h-4 w-4" />
+                    <span>Fijar en la barra lateral</span>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   onClick={() => {
