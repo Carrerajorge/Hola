@@ -338,10 +338,7 @@ export function CodeBlockShell({
 
   const highlightedHtmlLines = useMemo(() => {
     if (!html) return lines.map(() => "");
-    const tempDiv = document.createElement("div");
-    tempDiv.innerHTML = html;
-    const text = tempDiv.innerHTML;
-    return text.split("\n");
+    return html.split("\n");
   }, [html, lines]);
 
   const errorLineSet = useMemo(() => new Set(errorLines), [errorLines]);
