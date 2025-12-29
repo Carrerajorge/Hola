@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
 import { 
   Menu, 
   Search, 
@@ -150,6 +151,7 @@ export function Sidebar({
 }: SidebarProps) {
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
+  const { pinnedGpts, unpinGpt } = usePinnedGpts();
   const handleLogout = () => {
     logout();
   };
@@ -592,6 +594,63 @@ export function Sidebar({
                   </Button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Pinned GPTs Section */}
+          {pinnedGpts.length > 0 && (
+            <div className="flex flex-col gap-0.5">
+              <div className="px-2 py-1.5">
+                <h3 className="text-xs font-medium text-muted-foreground">GPTs</h3>
+              </div>
+              {pinnedGpts.map((pinned) => (
+                <div
+                  key={pinned.gptId}
+                  className="group flex w-full items-center justify-between px-2 py-2 rounded-xl cursor-pointer hover:bg-accent transition-all duration-300"
+                  onClick={() => setLocation(`/gpts/${pinned.gpt.slug || pinned.gptId}`)}
+                  data-testid={`pinned-gpt-${pinned.gptId}`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    {pinned.gpt.avatar ? (
+                      <img 
+                        src={pinned.gpt.avatar} 
+                        alt={pinned.gpt.name} 
+                        className="h-6 w-6 rounded-md object-cover flex-shrink-0" 
+                      />
+                    ) : (
+                      <div className="h-6 w-6 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
+                        <Bot className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    )}
+                    <span className="truncate text-sm">{pinned.gpt.name}</span>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                        data-testid={`button-pinned-gpt-menu-${pinned.gptId}`}
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          unpinGpt(pinned.gptId);
+                        }}
+                        className="flex items-center gap-2"
+                        data-testid={`button-unpin-gpt-${pinned.gptId}`}
+                      >
+                        <EyeOff className="h-4 w-4" />
+                        <span>Ocultar de la barra lateral</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ))}
             </div>
           )}
 
