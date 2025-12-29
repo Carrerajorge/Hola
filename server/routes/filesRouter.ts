@@ -257,7 +257,7 @@ export function createFilesRouter() {
           try {
             await bucket.file(partPath).delete();
           } catch (e) {
-            console.warn(`Failed to delete part ${partPath}:`, e);
+            console.warn("Failed to delete part:", partPath, e);
           }
         }
       } catch (composeError: any) {
