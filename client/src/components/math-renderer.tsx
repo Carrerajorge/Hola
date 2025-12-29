@@ -168,10 +168,11 @@ export const MathRenderer = memo(function MathRenderer({
         await loadMathJax();
         if (versionRef.current !== currentVersion || !containerRef.current) return;
         
+        const sanitizedLatex = sanitizeMathInput(state.latex);
         const mathContent = state.displayMode 
-          ? `$$${state.latex}$$` 
-          : `$${state.latex}$`;
-        containerRef.current.innerHTML = mathContent;
+          ? `$$${sanitizedLatex}$$` 
+          : `$${sanitizedLatex}$`;
+        containerRef.current.textContent = mathContent;
         
         if (window.MathJax?.typesetPromise) {
           await window.MathJax.typesetPromise([containerRef.current]);
