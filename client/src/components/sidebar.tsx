@@ -43,7 +43,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { SearchModal } from "@/components/search-modal";
 import { SettingsDialog } from "@/components/settings-dialog";
-import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 
 import { Chat } from "@/hooks/use-chats";
 import { Folder as FolderType } from "@/hooks/use-chat-folders";
@@ -160,7 +159,6 @@ export function Sidebar({
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
@@ -715,16 +713,6 @@ export function Sidebar({
             </div>
           </PopoverContent>
           </Popover>
-          {user?.role === "admin" && (
-            <Button
-              size="sm"
-              className="rounded-full text-xs px-4 py-1 h-auto whitespace-nowrap bg-purple-600 hover:bg-purple-700 text-white border-0 flex-shrink-0"
-              onClick={() => setIsUpgradeDialogOpen(true)}
-              data-testid="button-upgrade-plan"
-            >
-              Gestión de Planes
-            </Button>
-          )}
         </div>
       </div>
 
@@ -741,10 +729,6 @@ export function Sidebar({
         onOpenChange={setIsSettingsOpen}
       />
 
-      <UpgradePlanDialog
-        open={isUpgradeDialogOpen}
-        onOpenChange={setIsUpgradeDialogOpen}
-      />
     </div>
   );
 }

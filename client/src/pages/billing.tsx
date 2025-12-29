@@ -4,11 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, CreditCard, Calendar, CheckCircle, Download, ShieldAlert } from "lucide-react";
-import { useUser } from "@/hooks/use-user";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function BillingPage() {
   const [, setLocation] = useLocation();
-  const { user, isLoading } = useUser();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
     if (!isLoading && user?.role !== "admin") {

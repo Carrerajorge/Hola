@@ -74,7 +74,6 @@ import { FigmaBlock } from "@/components/figma-block";
 import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { SiraLogo } from "@/components/sira-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
-import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";
 import { GoogleFormsDialog } from "@/components/google-forms-dialog";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
@@ -908,7 +907,6 @@ export function ChatInterface({
     });
     return grouped;
   }, [availableModels]);
-  const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [isDocGeneratorOpen, setIsDocGeneratorOpen] = useState(false);
   const [docGeneratorType, setDocGeneratorType] = useState<"word" | "excel">("word");
   const [isGoogleFormsOpen, setIsGoogleFormsOpen] = useState(false);
@@ -3493,17 +3491,6 @@ IMPORTANTE:
           )}
         </div>
         <div className="flex items-center gap-0.5 sm:gap-1">
-          {user?.role === "admin" && (
-            <Button
-              size="sm"
-              className="rounded-full text-[10px] sm:text-xs px-2 sm:px-4 bg-purple-600 hover:bg-purple-700 text-white border-0"
-              onClick={() => setIsUpgradeDialogOpen(true)}
-              data-testid="button-upgrade-header"
-            >
-              <span className="hidden sm:inline">Gestión de Planes</span>
-              <span className="sm:hidden">Planes</span>
-            </Button>
-          )}
           {chatId && !chatId.startsWith("pending-") ? (
             <ShareChatDialog chatId={chatId} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
               <Button variant="ghost" size="icon" data-testid="button-share-chat">
@@ -4021,10 +4008,6 @@ IMPORTANTE:
             timestamp: new Date()
           });
         }}
-      />
-      <UpgradePlanDialog 
-        open={isUpgradeDialogOpen} 
-        onOpenChange={setIsUpgradeDialogOpen} 
       />
       <DocumentGeneratorDialog
         open={isDocGeneratorOpen}
