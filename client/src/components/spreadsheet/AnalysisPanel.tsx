@@ -46,6 +46,7 @@ interface AnalysisResult {
       data: any;
     }>;
     summary?: string;
+    logs?: string[];
   };
   error?: string;
 }
@@ -106,10 +107,22 @@ export function AnalysisPanel({
 
       // Build results from outputs
       const outputs = sessionData.outputs || [];
-      const summaryOutput = outputs.find((o: any) => o.type === 'metric' && o.payload?.summary);
-      const metricsOutput = outputs.find((o: any) => o.type === 'metric' && !o.payload?.summary);
+      // Look for summary with type='summary' - payload can be string or object with summary key
+      const summaryOutput = outputs.find((o: any) => o.type === 'summary');
+      const metricsOutput = outputs.find((o: any) => o.type === 'metric');
       const tableOutputs = outputs.filter((o: any) => o.type === 'table');
       const chartOutputs = outputs.filter((o: any) => o.type === 'chart');
+      const logOutput = outputs.find((o: any) => o.type === 'log');
+
+      // Extract summary - handle both string and object with summary key
+      const summaryValue = summaryOutput?.payload 
+        ? (typeof summaryOutput.payload === 'string' ? summaryOutput.payload : summaryOutput.payload?.summary)
+        : undefined;
+
+      // Extract logs - payload is array directly or object with logs key
+      const logsValue = logOutput?.payload
+        ? (Array.isArray(logOutput.payload) ? logOutput.payload : logOutput.payload?.logs)
+        : undefined;
 
       const result: AnalysisResult = {
         sessionId: sessionData.session.id,
@@ -117,14 +130,15 @@ export function AnalysisPanel({
         generatedCode: sessionData.session.generatedCode,
         error: sessionData.session.errorMessage,
         results: {
-          summary: summaryOutput?.payload?.summary,
-          metrics: metricsOutput ? Object.entries(metricsOutput.payload).map(([label, value]) => ({ label, value })) : [],
+          summary: summaryValue,
+          metrics: metricsOutput ? Object.entries(metricsOutput.payload).map(([label, value]) => ({ label, value: value as string | number })) : [],
           tables: tableOutputs.map((o: any) => ({
-            title: o.title,
+            title: o.payload?.name || o.title || 'Data Table',
             headers: o.payload?.data?.[0] ? Object.keys(o.payload.data[0]) : [],
             rows: o.payload?.data?.map((row: any) => Object.values(row)) || [],
           })),
           charts: chartOutputs.map((o: any) => o.payload),
+          logs: logsValue,
         },
       };
       onAnalysisComplete(result);
@@ -388,6 +402,20 @@ export function AnalysisPanel({
                         <BarChart3 className="h-12 w-12" />
                         <span className="ml-2 text-sm">Chart: {chart.type}</span>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {analysisSession.results.logs && analysisSession.results.logs.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2">Execution Logs</h4>
+                <div className="bg-zinc-900 text-zinc-100 rounded-lg p-3 font-mono text-xs overflow-x-auto max-h-[200px] overflow-y-auto">
+                  {analysisSession.results.logs.map((log, idx) => (
+                    <div key={idx} className="py-0.5 text-zinc-300 whitespace-pre-wrap">
+                      <span className="text-zinc-500 mr-2 select-none">{`>`}</span>
+                      {log}
                     </div>
                   ))}
                 </div>

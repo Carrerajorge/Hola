@@ -336,13 +336,13 @@ export function createSpreadsheetRouter(): Router {
       const output = executionResult.output;
       let outputOrder = 0;
 
-      // Save summary as metric
+      // Save summary as separate output with type='summary'
       if (output?.summary) {
         await createAnalysisOutput({
           sessionId,
-          outputType: "metric",
+          outputType: "summary",
           title: "Summary",
-          payload: { summary: output.summary },
+          payload: output.summary,
           order: outputOrder++,
         });
       }
@@ -358,14 +358,14 @@ export function createSpreadsheetRouter(): Router {
         });
       }
 
-      // Save tables
+      // Save tables with name field as title
       if (output?.tables?.length > 0) {
         for (const table of output.tables) {
           await createAnalysisOutput({
             sessionId,
             outputType: "table",
             title: table.name || "Data Table",
-            payload: { data: table.data },
+            payload: { data: table.data, name: table.name },
             order: outputOrder++,
           });
         }
@@ -384,13 +384,13 @@ export function createSpreadsheetRouter(): Router {
         }
       }
 
-      // Save logs
+      // Save logs as type='log'
       if (output?.logs?.length > 0) {
         await createAnalysisOutput({
           sessionId,
           outputType: "log",
           title: "Execution Logs",
-          payload: { logs: output.logs },
+          payload: output.logs,
           order: outputOrder++,
         });
       }
