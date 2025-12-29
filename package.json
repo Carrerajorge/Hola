@@ -171,11 +171,11 @@
     "vitest": "^4.0.16",
     "wouter": "^3.3.5",
     "ws": "^8.18.0",
+    "xlsx": "npm:@e965/xlsx@^0.20.3",
     "xlsx-chart": "^0.4.3",
     "zod": "^3.25.76",
     "zod-validation-error": "^3.4.0",
-    "zustand": "^5.0.9",
-    "xlsx": "npm:@e965/xlsx@^0.20.3"
+    "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@replit/vite-plugin-cartographer": "^0.4.4",
@@ -197,7 +197,7 @@
     "esbuild": "^0.25.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.14",
-    "tsx": "^4.20.5",
+    "tsx": "^4.21.0",
     "typescript": "5.6.3",
     "vite": "^7.1.9"
   },
