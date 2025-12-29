@@ -253,11 +253,15 @@ export function createFilesRouter() {
         
         await destinationFile.setMetadata({ contentType: session.mimeType });
 
-        for (const partPath of partPaths) {
+        for (const objectPath of partPaths) {
           try {
-            await bucket.file(partPath).delete();
-          } catch (e) {
-            console.warn("Failed to delete part:", partPath, e);
+            const fileRef = bucket.file(objectPath);
+            await fileRef.delete();
+          } catch (cleanupErr) {
+            console.warn(JSON.stringify({ 
+              event: "multipart_cleanup_failed", 
+              path: objectPath 
+            }));
           }
         }
       } catch (composeError: any) {
@@ -312,11 +316,12 @@ export function createFilesRouter() {
       const bucket = objectStorageClient.bucket(bucketName);
 
       for (let i = 1; i <= session.totalChunks; i++) {
-        const partPath = `${session.basePath}_part_${i}`;
-        const { objectName } = parseObjectPath(partPath);
+        const chunkPath = session.basePath.concat("_part_", String(i));
+        const { objectName } = parseObjectPath(chunkPath);
         try {
-          await bucket.file(objectName).delete();
-        } catch (e) {
+          const fileRef = bucket.file(objectName);
+          await fileRef.delete();
+        } catch (cleanupErr) {
         }
       }
 
