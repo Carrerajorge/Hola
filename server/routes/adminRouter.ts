@@ -21,6 +21,7 @@ import { asyncHandler } from "../middleware/errorHandler";
 import { createUserBodySchema, idParamSchema } from "../schemas/apiSchemas";
 import { isAuthenticated } from "../replit_integrations/auth/replitAuth";
 import { authStorage } from "../replit_integrations/auth/storage";
+import { getSeedStatus } from "../seed-production";
 
 async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
@@ -186,6 +187,22 @@ export function createAdminRouter() {
 
   // Apply authentication and admin role check to ALL admin routes
   router.use(isAuthenticated, requireAdmin);
+
+  router.get("/seed-status", async (req, res) => {
+    try {
+      const status = await getSeedStatus();
+      res.json({
+        success: true,
+        data: status,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Unknown error" 
+      });
+    }
+  });
 
   router.get("/dashboard", async (req, res) => {
     try {
