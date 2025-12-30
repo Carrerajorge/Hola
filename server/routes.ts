@@ -75,6 +75,11 @@ export async function registerRoutes(
 
   // ===== Public Models Endpoint (for user-facing selector) =====
   app.get("/api/models/available", async (req: Request, res: Response) => {
+    res.set({
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0"
+    });
     try {
       const allModels = await storage.getAiModels();
       const models = allModels

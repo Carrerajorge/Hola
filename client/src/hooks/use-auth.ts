@@ -76,12 +76,15 @@ export function useAuth() {
     }
     setStoredUser(null);
     queryClient.setQueryData(["/api/auth/user"], null);
+    queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
+    queryClient.clear();
     window.location.href = "/welcome";
   }, [queryClient]);
 
   const refreshAuth = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
     refetch();
-  }, [refetch]);
+  }, [refetch, queryClient]);
 
   return {
     user,

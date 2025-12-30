@@ -40,11 +40,18 @@ export function ModelAvailabilityProvider({ children }: { children: ReactNode })
   const { data: modelsData, isLoading, refetch } = useQuery<{ models: AvailableModel[] }>({
     queryKey: ["/api/models/available"],
     queryFn: async () => {
-      const res = await fetch("/api/models/available");
+      const res = await fetch("/api/models/available", {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" }
+      });
       if (!res.ok) throw new Error("Failed to fetch models");
       return res.json();
     },
     refetchInterval: 30000,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 
   const allModels = modelsData?.models || [];
