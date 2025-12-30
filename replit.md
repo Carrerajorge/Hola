@@ -76,3 +76,139 @@ Preferred communication style: Simple, everyday language.
 - **Piston API**: Used for multi-language code execution.
 - **World Bank API V2**: Integrated for economic data retrieval by the ETL Agent.
 - **Gmail API**: Utilized for Gmail chat integration.
+
+## Security
+
+### Production Vulnerabilities
+```
+npm audit --omit=dev
+found 0 vulnerabilities
+```
+
+## Testing
+
+### Prerequisites
+- Node.js 18+ installed
+- `npm install` completed
+- Playwright: `npx playwright install chromium`
+- Ports 5000/5173 available (script auto-kills conflicts)
+
+### Running Tests
+```bash
+# All tests (recommended)
+npm run test:all
+
+# Individual suites:
+npm run test:run -- server/__tests__/documentAnalysis.test.ts  # 38 unit tests
+npm run test:run -- server/__tests__/stressTest.test.ts        # 9 stress tests
+npm run test:run -- server/__tests__/sandboxLimits.test.ts     # 10 sandbox tests
+npx playwright test --reporter=list                             # 13 E2E tests
+```
+
+### Test Files
+```
+test_fixtures/
+├── multi-sheet.xlsx      # 3 sheets (Sales, Employees, Summary)
+├── large-10k-rows.xlsx   # 10,000 rows stress test
+├── data.csv, document.docx, report.pdf
+
+server/__tests__/
+├── documentAnalysis.test.ts  # API contract tests
+├── stressTest.test.ts        # 10k row performance
+├── sandboxLimits.test.ts     # Security boundary tests
+└── mocks/llmMock.ts          # Deterministic LLM mock
+
+e2e/documentAnalysis.spec.ts  # Browser tests with route mocking
+
+shared/analysisContract.ts    # Zod schemas for runtime validation
+```
+
+### LLM Mock Strategy (Zero Real Calls)
+**E2E Tests**: Playwright `page.route()` intercepts all API calls
+**Unit Tests**: `server/__tests__/mocks/llmMock.ts` provides deterministic responses
+
+```typescript
+// Import in tests:
+import { getMockLLMResponse, mockLLMGatewayModule } from './mocks/llmMock';
+mockLLMGatewayModule(); // Replaces llmGateway with mock
+```
+
+### API Contract Validation
+The `shared/analysisContract.ts` exports Zod schemas that validate response shapes at runtime:
+
+```typescript
+import { validateAnalysisResponse } from '@shared/analysisContract';
+
+// Frontend usage - throws clear error if shape mismatches:
+const data = await fetch('/api/chat/uploads/123/analysis').then(r => r.json());
+const validated = validateAnalysisResponse(data); // Throws if invalid
+```
+
+## Python Sandbox Limits
+
+### Configuration
+| Resource | Limit | Notes |
+|----------|-------|-------|
+| Network | **Disabled** | No socket/HTTP allowed |
+| Timeout | 60s (hard: 120s) | Auto-kill on timeout |
+| Memory | 512 MB | Per-process: 256 MB |
+| CPU | 10 processes max | Nice level 19 (low priority) |
+
+### Blocked Modules
+`os`, `subprocess`, `shutil`, `socket`, `multiprocessing`, `threading`, `ctypes`, `eval`, `exec`
+
+### Allowed Modules
+`pandas`, `numpy`, `json`, `datetime`, `math`, `statistics`, `re`, `collections`
+
+### Sandbox Tests
+```bash
+npm run test:run -- server/__tests__/sandboxLimits.test.ts
+```
+Tests verify: network isolation, timeout enforcement, memory limits, blocked imports.
+
+## How to Demo
+
+### Quick Demo (3 min)
+1. Open chat interface
+2. Upload `test_fixtures/multi-sheet.xlsx` (drag or click attachment)
+3. **Observe**: File chip appears in composer with sheet count badge
+4. Send message: "Analyze this spreadsheet"
+5. **Observe**: 
+   - Analysis card appears (minimalist design)
+   - Progress bar with sheet status indicators
+   - Tabs appear when complete: Summary | Sales | Employees | Summary
+
+### Stress Test Demo (5 min)
+1. Upload `test_fixtures/large-10k-rows.xlsx` (445 KB, 10k rows)
+2. Send: "Analyze all data in this spreadsheet"
+3. **Observe**:
+   - No UI freeze during upload/parsing
+   - Progress updates smoothly via polling
+   - Results load with virtualized preview (first 100 rows)
+
+### Acceptance Criteria (UI)
+- [ ] **Composer**: File chip shows filename + sheet count badge
+- [ ] **Post-send**: Minimalist analysis card (collapsed by default)
+- [ ] **Progress**: Sheet-by-sheet status (✓ done, ⟳ running, ○ queued)
+- [ ] **Results**: Tabbed interface with Summary (global) + per-sheet tabs
+- [ ] **Per-sheet content**: Generated code (collapsible), metrics, data preview
+- [ ] **Error handling**: Failed sheets show error message, others still display
+
+### Test Fixtures
+| File | Description | Use Case |
+|------|-------------|----------|
+| `multi-sheet.xlsx` | 3 sheets, ~20 rows each | Standard multi-sheet analysis |
+| `large-10k-rows.xlsx` | 10,000 rows, 9 columns | Performance/virtualization test |
+| `data.csv` | Simple CSV | Single-sheet fallback test |
+| `document.docx` | Word doc | Non-spreadsheet handling |
+| `report.pdf` | PDF | Non-spreadsheet handling |
+
+### Relevant Commits
+```
+f62b2bc Add comprehensive testing for large file processing
+4ed85b6 Add comprehensive testing documentation
+9f9ed3f Improve automated testing for document analysis
+62f1ccb Add end-to-end tests for document analysis
+34d44d1 Adapt document analysis for multiple file types
+480739b Add automatic document analysis in chat
+```

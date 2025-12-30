@@ -13,7 +13,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:agentic": "vitest run tests/agentic"
+    "test:agentic": "vitest run tests/agentic",
+    "test:all": "bash ./scripts/test-all.sh"
   },
   "dependencies": {
     "@aarkue/tiptap-math-extension": "^1.4.0",
