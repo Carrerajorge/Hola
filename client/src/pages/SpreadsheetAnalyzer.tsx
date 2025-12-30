@@ -56,7 +56,8 @@ interface AnalysisResult {
 export default function SpreadsheetAnalyzer() {
   const [, setLocation] = useLocation();
   const [currentUpload, setCurrentUpload] = useState<UploadedFile | null>(null);
-  const [selectedSheet, setSelectedSheet] = useState<string | null>(null);
+  const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
+  const [viewingSheet, setViewingSheet] = useState<string | null>(null);
   const [analysisSession, setAnalysisSession] = useState<AnalysisResult | null>(null);
   const [activeTab, setActiveTab] = useState<'data' | 'analysis'>('data');
 
@@ -64,16 +65,22 @@ export default function SpreadsheetAnalyzer() {
     setCurrentUpload(upload);
     setAnalysisSession(null);
     if (upload.sheets.length > 0) {
-      setSelectedSheet(upload.sheets[0]);
+      setSelectedSheets([upload.sheets[0]]);
+      setViewingSheet(upload.sheets[0]);
     } else {
-      setSelectedSheet(null);
+      setSelectedSheets([]);
+      setViewingSheet(null);
     }
   }, []);
 
-  const handleSheetSelect = useCallback((uploadId: string, sheetName: string) => {
-    setSelectedSheet(sheetName);
+  const handleSheetView = useCallback((uploadId: string, sheetName: string) => {
+    setViewingSheet(sheetName);
     setAnalysisSession(null);
     setActiveTab('data');
+  }, []);
+
+  const handleSheetSelectionChange = useCallback((sheetNames: string[]) => {
+    setSelectedSheets(sheetNames);
   }, []);
 
   const handleAnalysisComplete = useCallback((result: AnalysisResult) => {
@@ -102,14 +109,16 @@ export default function SpreadsheetAnalyzer() {
         <aside className="w-80 border-r p-4 flex-shrink-0 overflow-auto">
           <UploadPanel
             onUploadComplete={handleUploadComplete}
-            onSheetSelect={handleSheetSelect}
+            onSheetView={handleSheetView}
+            onSelectionChange={handleSheetSelectionChange}
             currentUpload={currentUpload}
-            selectedSheet={selectedSheet}
+            selectedSheets={selectedSheets}
+            viewingSheet={viewingSheet}
           />
         </aside>
 
         <main className="flex-1 flex flex-col min-h-0 p-4">
-          {currentUpload && selectedSheet ? (
+          {currentUpload && viewingSheet ? (
             <Tabs
               value={activeTab}
               onValueChange={(val) => setActiveTab(val as 'data' | 'analysis')}
@@ -125,13 +134,15 @@ export default function SpreadsheetAnalyzer() {
               </TabsList>
 
               <TabsContent value="data" className="flex-1 min-h-0 mt-0">
-                <SheetViewer uploadId={currentUpload.id} sheetName={selectedSheet} />
+                <SheetViewer uploadId={currentUpload.id} sheetName={viewingSheet} />
               </TabsContent>
 
               <TabsContent value="analysis" className="flex-1 min-h-0 mt-0">
                 <AnalysisPanel
                   uploadId={currentUpload.id}
-                  sheetName={selectedSheet}
+                  sheetName={viewingSheet}
+                  selectedSheets={selectedSheets}
+                  allSheets={currentUpload.sheets}
                   analysisSession={analysisSession}
                   onAnalysisComplete={handleAnalysisComplete}
                 />

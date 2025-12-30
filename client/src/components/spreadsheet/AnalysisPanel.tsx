@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Play,
@@ -13,6 +13,7 @@ import {
   Table,
   FileText,
   Sparkles,
+  Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,40 +21,65 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 
 type AnalysisMode = 'full' | 'text_only' | 'numbers_only';
 type AnalysisStatus = 'idle' | 'pending' | 'generating' | 'executing' | 'success' | 'error';
+type AnalysisScope = 'active' | 'selected' | 'all';
+
+interface SheetJobResult {
+  tables?: Array<{
+    title: string;
+    headers: string[];
+    rows: any[][];
+  }>;
+  metrics?: Array<{
+    label: string;
+    value: string | number;
+    change?: string;
+  }>;
+  charts?: Array<{
+    type: 'bar' | 'line' | 'pie';
+    title: string;
+    data: any;
+  }>;
+  summary?: string;
+  logs?: string[];
+}
+
+interface AnalysisJob {
+  sheetName: string;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  result?: SheetJobResult;
+  error?: string;
+}
+
+interface MultiSheetProgress {
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: { completedJobs: number; totalJobs: number };
+  jobs: AnalysisJob[];
+  summary?: string;
+}
 
 interface AnalysisResult {
   sessionId: string;
   status: AnalysisStatus;
   generatedCode?: string;
-  results?: {
-    tables?: Array<{
-      title: string;
-      headers: string[];
-      rows: any[][];
-    }>;
-    metrics?: Array<{
-      label: string;
-      value: string | number;
-      change?: string;
-    }>;
-    charts?: Array<{
-      type: 'bar' | 'line' | 'pie';
-      title: string;
-      data: any;
-    }>;
-    summary?: string;
-    logs?: string[];
-  };
+  results?: SheetJobResult;
   error?: string;
+  multiSheet?: {
+    jobs: AnalysisJob[];
+    crossSheetSummary?: string;
+  };
 }
 
 interface AnalysisPanelProps {
   uploadId: string;
   sheetName: string;
+  selectedSheets: string[];
+  allSheets: string[];
   analysisSession: AnalysisResult | null;
   onAnalysisComplete: (result: AnalysisResult) => void;
 }
@@ -70,23 +96,30 @@ const STATUS_CONFIG: Record<AnalysisStatus, { label: string; variant: 'default' 
 export function AnalysisPanel({
   uploadId,
   sheetName,
+  selectedSheets,
+  allSheets,
   analysisSession,
   onAnalysisComplete,
 }: AnalysisPanelProps) {
   const [mode, setMode] = useState<AnalysisMode>('full');
+  const [scope, setScope] = useState<AnalysisScope>('active');
   const [prompt, setPrompt] = useState('');
   const [codeExpanded, setCodeExpanded] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [isMultiSheetAnalysis, setIsMultiSheetAnalysis] = useState(false);
+  const [activeResultTab, setActiveResultTab] = useState<string>('summary');
 
-  // Poll for analysis results when there's an active session
   const isPolling = !!currentSessionId;
   
   const { data: sessionData } = useQuery({
-    queryKey: ['analysis-session', currentSessionId],
+    queryKey: ['analysis-session', currentSessionId, isMultiSheetAnalysis],
     queryFn: async () => {
       if (!currentSessionId) return null;
-      const res = await fetch(`/api/spreadsheet/analysis/${currentSessionId}`);
+      const endpoint = isMultiSheetAnalysis 
+        ? `/api/spreadsheet/analyze/progress/${currentSessionId}`
+        : `/api/spreadsheet/analysis/${currentSessionId}`;
+      const res = await fetch(endpoint);
       if (!res.ok) throw new Error('Failed to fetch analysis');
       return res.json();
     },
@@ -94,9 +127,31 @@ export function AnalysisPanel({
     refetchInterval: isPolling ? 2000 : false,
   });
 
-  // Update parent when analysis completes
   useEffect(() => {
-    if (sessionData?.session) {
+    if (!sessionData) return;
+
+    if (isMultiSheetAnalysis) {
+      const progress = sessionData as MultiSheetProgress;
+      const mappedStatus: AnalysisStatus = 
+        progress.status === 'completed' ? 'success' :
+        progress.status === 'failed' ? 'error' :
+        progress.status === 'running' ? 'executing' :
+        'pending';
+
+      const result: AnalysisResult = {
+        sessionId: currentSessionId!,
+        status: mappedStatus,
+        multiSheet: {
+          jobs: progress.jobs,
+          crossSheetSummary: progress.summary,
+        },
+      };
+      onAnalysisComplete(result);
+
+      if (progress.status === 'completed' || progress.status === 'failed') {
+        setCurrentSessionId(null);
+      }
+    } else if (sessionData.session) {
       const status = sessionData.session.status;
       const mappedStatus: AnalysisStatus = 
         status === 'generating_code' ? 'generating' :
@@ -105,21 +160,17 @@ export function AnalysisPanel({
         status === 'failed' ? 'error' :
         status === 'pending' ? 'pending' : 'idle';
 
-      // Build results from outputs
       const outputs = sessionData.outputs || [];
-      // Look for summary with type='summary' - payload can be string or object with summary key
       const summaryOutput = outputs.find((o: any) => o.type === 'summary');
       const metricsOutput = outputs.find((o: any) => o.type === 'metric');
       const tableOutputs = outputs.filter((o: any) => o.type === 'table');
       const chartOutputs = outputs.filter((o: any) => o.type === 'chart');
       const logOutput = outputs.find((o: any) => o.type === 'log');
 
-      // Extract summary - handle both string and object with summary key
       const summaryValue = summaryOutput?.payload 
         ? (typeof summaryOutput.payload === 'string' ? summaryOutput.payload : summaryOutput.payload?.summary)
         : undefined;
 
-      // Extract logs - payload is array directly or object with logs key
       const logsValue = logOutput?.payload
         ? (Array.isArray(logOutput.payload) ? logOutput.payload : logOutput.payload?.logs)
         : undefined;
@@ -143,29 +194,48 @@ export function AnalysisPanel({
       };
       onAnalysisComplete(result);
 
-      // Stop polling when complete
       if (status === 'succeeded' || status === 'failed') {
         setCurrentSessionId(null);
       }
     }
-  }, [sessionData, onAnalysisComplete]);
+  }, [sessionData, onAnalysisComplete, isMultiSheetAnalysis, currentSessionId]);
 
   const analyzeMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/spreadsheet/${uploadId}/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sheetName,
-          mode,
-          prompt: prompt.trim() || undefined,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || 'Analysis failed');
+      const useMultiSheet = scope !== 'active';
+      setIsMultiSheetAnalysis(useMultiSheet);
+
+      if (useMultiSheet) {
+        const res = await fetch(`/api/spreadsheet/${uploadId}/analyze/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scope,
+            selectedSheets: scope === 'selected' ? selectedSheets : allSheets,
+            prompt: prompt.trim() || undefined,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || 'Analysis failed');
+        }
+        return res.json();
+      } else {
+        const res = await fetch(`/api/spreadsheet/${uploadId}/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sheetName,
+            mode,
+            prompt: prompt.trim() || undefined,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || 'Analysis failed');
+        }
+        return res.json();
       }
-      return res.json();
     },
     onSuccess: (data) => {
       setCurrentSessionId(data.sessionId);
@@ -188,11 +258,140 @@ export function AnalysisPanel({
   const currentStatus: AnalysisStatus = analyzeMutation.isPending
     ? 'generating'
     : currentSessionId
-    ? (sessionData?.session?.status === 'generating_code' ? 'generating' :
-       sessionData?.session?.status === 'executing' ? 'executing' :
-       'pending')
+    ? (isMultiSheetAnalysis 
+       ? ((sessionData as MultiSheetProgress)?.status === 'running' ? 'executing' : 'pending')
+       : (sessionData?.session?.status === 'generating_code' ? 'generating' :
+          sessionData?.session?.status === 'executing' ? 'executing' :
+          'pending'))
     : analysisSession?.status ?? 'idle';
   const statusConfig = STATUS_CONFIG[currentStatus];
+
+  const multiSheetProgress = useMemo(() => {
+    if (!isMultiSheetAnalysis || !sessionData) return null;
+    const progress = sessionData as MultiSheetProgress;
+    return {
+      completed: progress.progress?.completedJobs || 0,
+      total: progress.progress?.totalJobs || 0,
+      percentage: progress.progress?.totalJobs 
+        ? Math.round((progress.progress.completedJobs / progress.progress.totalJobs) * 100)
+        : 0,
+      currentSheet: progress.jobs?.find(j => j.status === 'running')?.sheetName,
+    };
+  }, [isMultiSheetAnalysis, sessionData]);
+
+  const scopeLabel = useMemo(() => {
+    switch (scope) {
+      case 'active':
+        return 'Active sheet';
+      case 'selected':
+        return `Selected sheets (${selectedSheets.length})`;
+      case 'all':
+        return `All sheets (${allSheets.length})`;
+      default:
+        return 'Active sheet';
+    }
+  }, [scope, selectedSheets.length, allSheets.length]);
+
+  const renderSheetResult = (result: SheetJobResult) => (
+    <div className="space-y-4">
+      {result.summary && (
+        <div className="p-3 bg-muted/50 rounded-lg">
+          <h4 className="text-sm font-medium mb-1">Summary</h4>
+          <p className="text-sm text-muted-foreground">{result.summary}</p>
+        </div>
+      )}
+
+      {result.metrics && result.metrics.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium mb-2">Key Metrics</h4>
+          <div className="grid grid-cols-2 gap-2">
+            {result.metrics.map((metric, idx) => (
+              <div key={idx} className="p-3 bg-muted/50 rounded-lg">
+                <p className="text-xs text-muted-foreground">{metric.label}</p>
+                <p className="text-lg font-semibold">{metric.value}</p>
+                {metric.change && (
+                  <p className={cn(
+                    "text-xs",
+                    metric.change.startsWith('+') ? 'text-green-500' : 'text-red-500'
+                  )}>
+                    {metric.change}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {result.tables && result.tables.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium mb-2">Data Tables</h4>
+          {result.tables.map((table, idx) => (
+            <div key={idx} className="border rounded-lg overflow-hidden mb-2">
+              <div className="bg-muted/50 px-3 py-2 border-b">
+                <p className="text-sm font-medium">{table.title}</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/30">
+                    <tr>
+                      {table.headers.map((header, hIdx) => (
+                        <th key={hIdx} className="text-left p-2 border-b font-medium">
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {table.rows.map((row, rIdx) => (
+                      <tr key={rIdx} className="hover:bg-muted/20">
+                        {row.map((cell, cIdx) => (
+                          <td key={cIdx} className="p-2 border-b">
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {result.charts && result.charts.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium mb-2">Charts</h4>
+          <div className="grid gap-2">
+            {result.charts.map((chart, idx) => (
+              <div key={idx} className="p-3 bg-muted/50 rounded-lg">
+                <p className="text-sm font-medium mb-2">{chart.title}</p>
+                <div className="h-48 flex items-center justify-center text-muted-foreground">
+                  <BarChart3 className="h-12 w-12" />
+                  <span className="ml-2 text-sm">Chart: {chart.type}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {result.logs && result.logs.length > 0 && (
+        <div>
+          <h4 className="text-sm font-medium mb-2">Execution Logs</h4>
+          <div className="bg-zinc-900 text-zinc-100 rounded-lg p-3 font-mono text-xs overflow-x-auto max-h-[200px] overflow-y-auto">
+            {result.logs.map((log, idx) => (
+              <div key={idx} className="py-0.5 text-zinc-300 whitespace-pre-wrap">
+                <span className="text-zinc-500 mr-2 select-none">{`>`}</span>
+                {log}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <Card className="h-full flex flex-col">
@@ -212,33 +411,64 @@ export function AnalysisPanel({
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-3">
             <div className="flex-1">
-              <label className="text-sm font-medium mb-1.5 block">Analysis Mode</label>
-              <Select value={mode} onValueChange={(val) => setMode(val as AnalysisMode)}>
-                <SelectTrigger data-testid="mode-select">
+              <label className="text-sm font-medium mb-1.5 block">Analysis Scope</label>
+              <Select value={scope} onValueChange={(val) => setScope(val as AnalysisScope)}>
+                <SelectTrigger data-testid="scope-select">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="full">
-                    <div className="flex items-center gap-2">
-                      <Table className="h-4 w-4" />
-                      Full Analysis
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="text_only">
+                  <SelectItem value="active">
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4" />
-                      Text Only
+                      Active sheet
                     </div>
                   </SelectItem>
-                  <SelectItem value="numbers_only">
+                  <SelectItem value="selected" disabled={selectedSheets.length === 0}>
                     <div className="flex items-center gap-2">
-                      <BarChart3 className="h-4 w-4" />
-                      Numbers Only
+                      <Layers className="h-4 w-4" />
+                      Selected sheets ({selectedSheets.length})
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="all">
+                    <div className="flex items-center gap-2">
+                      <Table className="h-4 w-4" />
+                      All sheets ({allSheets.length})
                     </div>
                   </SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {scope === 'active' && (
+              <div className="flex-1">
+                <label className="text-sm font-medium mb-1.5 block">Analysis Mode</label>
+                <Select value={mode} onValueChange={(val) => setMode(val as AnalysisMode)}>
+                  <SelectTrigger data-testid="mode-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="full">
+                      <div className="flex items-center gap-2">
+                        <Table className="h-4 w-4" />
+                        Full Analysis
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="text_only">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4" />
+                        Text Only
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="numbers_only">
+                      <div className="flex items-center gap-2">
+                        <BarChart3 className="h-4 w-4" />
+                        Numbers Only
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <div>
@@ -256,7 +486,7 @@ export function AnalysisPanel({
 
           <Button
             onClick={handleAnalyze}
-            disabled={analyzeMutation.isPending}
+            disabled={analyzeMutation.isPending || (scope === 'selected' && selectedSheets.length === 0)}
             className="w-full"
             data-testid="analyze-button"
           >
@@ -268,11 +498,28 @@ export function AnalysisPanel({
             ) : (
               <>
                 <Play className="h-4 w-4 mr-2" />
-                Analyze Sheet
+                {scope === 'active' ? 'Analyze Sheet' : `Analyze ${scopeLabel}`}
               </>
             )}
           </Button>
         </div>
+
+        {isPolling && isMultiSheetAnalysis && multiSheetProgress && (
+          <div className="p-3 bg-muted/50 rounded-lg space-y-2" data-testid="multi-sheet-progress">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium">
+                Analyzing sheet {multiSheetProgress.completed + 1} of {multiSheetProgress.total}
+              </span>
+              <span className="text-muted-foreground">{multiSheetProgress.percentage}%</span>
+            </div>
+            <Progress value={multiSheetProgress.percentage} className="h-2" />
+            {multiSheetProgress.currentSheet && (
+              <p className="text-xs text-muted-foreground">
+                Currently processing: {multiSheetProgress.currentSheet}
+              </p>
+            )}
+          </div>
+        )}
 
         {analyzeMutation.isError && (
           <div className="flex items-center gap-2 p-3 bg-destructive/10 text-destructive rounded-lg">
@@ -323,113 +570,103 @@ export function AnalysisPanel({
           </Collapsible>
         )}
 
-        {analysisSession?.results && (
-          <div className="flex-1 overflow-auto space-y-4">
-            {analysisSession.results.summary && (
-              <div className="p-3 bg-muted/50 rounded-lg">
-                <h4 className="text-sm font-medium mb-1">Summary</h4>
-                <p className="text-sm text-muted-foreground">{analysisSession.results.summary}</p>
-              </div>
-            )}
+        {analysisSession?.multiSheet && (
+          <div className="flex-1 overflow-auto">
+            <Tabs value={activeResultTab} onValueChange={setActiveResultTab} className="h-full flex flex-col">
+              <TabsList className="w-full justify-start overflow-x-auto flex-shrink-0" data-testid="result-tabs">
+                <TabsTrigger value="summary" data-testid="result-tab-summary">
+                  Summary
+                </TabsTrigger>
+                {analysisSession.multiSheet.jobs.map((job) => (
+                  <TabsTrigger 
+                    key={job.sheetName} 
+                    value={job.sheetName}
+                    data-testid={`result-tab-${job.sheetName}`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      {job.sheetName}
+                      {job.status === 'done' && <Check className="h-3 w-3 text-green-500" />}
+                      {job.status === 'failed' && <AlertCircle className="h-3 w-3 text-red-500" />}
+                      {job.status === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
+                    </span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
 
-            {analysisSession.results.metrics && analysisSession.results.metrics.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium mb-2">Key Metrics</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  {analysisSession.results.metrics.map((metric, idx) => (
-                    <div key={idx} className="p-3 bg-muted/50 rounded-lg">
-                      <p className="text-xs text-muted-foreground">{metric.label}</p>
-                      <p className="text-lg font-semibold">{metric.value}</p>
-                      {metric.change && (
-                        <p className={cn(
-                          "text-xs",
-                          metric.change.startsWith('+') ? 'text-green-500' : 'text-red-500'
-                        )}>
-                          {metric.change}
-                        </p>
+              <TabsContent value="summary" className="flex-1 overflow-auto mt-4">
+                {analysisSession.multiSheet.crossSheetSummary ? (
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <h4 className="text-sm font-medium mb-2">Cross-Sheet Summary</h4>
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                      {analysisSession.multiSheet.crossSheetSummary}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="text-center p-4 text-muted-foreground">
+                    <p className="text-sm">Cross-sheet summary will appear here when analysis completes.</p>
+                  </div>
+                )}
+
+                <div className="mt-4 space-y-2">
+                  <h4 className="text-sm font-medium">Sheet Status</h4>
+                  {analysisSession.multiSheet.jobs.map((job) => (
+                    <div 
+                      key={job.sheetName}
+                      className="flex items-center justify-between p-2 bg-muted/30 rounded-lg"
+                    >
+                      <span className="text-sm">{job.sheetName}</span>
+                      <Badge 
+                        variant={
+                          job.status === 'done' ? 'success' :
+                          job.status === 'failed' ? 'destructive' :
+                          job.status === 'running' ? 'warning' :
+                          'secondary'
+                        }
+                      >
+                        {job.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </TabsContent>
+
+              {analysisSession.multiSheet.jobs.map((job) => (
+                <TabsContent key={job.sheetName} value={job.sheetName} className="flex-1 overflow-auto mt-4">
+                  {job.status === 'failed' && job.error && (
+                    <div className="flex items-center gap-2 p-3 bg-destructive/10 text-destructive rounded-lg mb-4">
+                      <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                      <p className="text-sm">{job.error}</p>
+                    </div>
+                  )}
+                  {job.result ? renderSheetResult(job.result) : (
+                    <div className="text-center p-4 text-muted-foreground">
+                      {job.status === 'queued' && <p className="text-sm">Waiting to analyze...</p>}
+                      {job.status === 'running' && (
+                        <div className="flex flex-col items-center gap-2">
+                          <Loader2 className="h-8 w-8 animate-spin" />
+                          <p className="text-sm">Analyzing {job.sheetName}...</p>
+                        </div>
                       )}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {analysisSession.results.tables && analysisSession.results.tables.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium mb-2">Data Tables</h4>
-                {analysisSession.results.tables.map((table, idx) => (
-                  <div key={idx} className="border rounded-lg overflow-hidden mb-2">
-                    <div className="bg-muted/50 px-3 py-2 border-b">
-                      <p className="text-sm font-medium">{table.title}</p>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/30">
-                          <tr>
-                            {table.headers.map((header, hIdx) => (
-                              <th key={hIdx} className="text-left p-2 border-b font-medium">
-                                {header}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {table.rows.map((row, rIdx) => (
-                            <tr key={rIdx} className="hover:bg-muted/20">
-                              {row.map((cell, cIdx) => (
-                                <td key={cIdx} className="p-2 border-b">
-                                  {cell}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {analysisSession.results.charts && analysisSession.results.charts.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium mb-2">Charts</h4>
-                <div className="grid gap-2">
-                  {analysisSession.results.charts.map((chart, idx) => (
-                    <div key={idx} className="p-3 bg-muted/50 rounded-lg">
-                      <p className="text-sm font-medium mb-2">{chart.title}</p>
-                      <div className="h-48 flex items-center justify-center text-muted-foreground">
-                        <BarChart3 className="h-12 w-12" />
-                        <span className="ml-2 text-sm">Chart: {chart.type}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {analysisSession.results.logs && analysisSession.results.logs.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium mb-2">Execution Logs</h4>
-                <div className="bg-zinc-900 text-zinc-100 rounded-lg p-3 font-mono text-xs overflow-x-auto max-h-[200px] overflow-y-auto">
-                  {analysisSession.results.logs.map((log, idx) => (
-                    <div key={idx} className="py-0.5 text-zinc-300 whitespace-pre-wrap">
-                      <span className="text-zinc-500 mr-2 select-none">{`>`}</span>
-                      {log}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                  )}
+                </TabsContent>
+              ))}
+            </Tabs>
           </div>
         )}
 
-        {!analysisSession?.results && currentStatus === 'idle' && (
+        {analysisSession?.results && !analysisSession?.multiSheet && (
+          <div className="flex-1 overflow-auto">
+            {renderSheetResult(analysisSession.results)}
+          </div>
+        )}
+
+        {!analysisSession?.results && !analysisSession?.multiSheet && currentStatus === 'idle' && (
           <div className="flex-1 flex items-center justify-center text-center p-4">
             <div className="text-muted-foreground">
               <Sparkles className="h-12 w-12 mx-auto mb-3 opacity-50" />
               <p className="text-sm">
-                Configure your analysis options and click "Analyze Sheet" to get insights.
+                Configure your analysis options and click "Analyze" to get insights.
               </p>
             </div>
           </div>

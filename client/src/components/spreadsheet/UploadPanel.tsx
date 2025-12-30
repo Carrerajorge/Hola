@@ -5,14 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
-const ALLOWED_TYPES = [
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-excel',
-  'text/csv',
-];
 const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
 
 interface SheetDetail {
@@ -38,16 +34,20 @@ interface UploadedFile {
 
 interface UploadPanelProps {
   onUploadComplete: (upload: UploadedFile) => void;
-  onSheetSelect: (uploadId: string, sheetName: string) => void;
+  onSheetView: (uploadId: string, sheetName: string) => void;
+  onSelectionChange: (sheetNames: string[]) => void;
   currentUpload: UploadedFile | null;
-  selectedSheet: string | null;
+  selectedSheets: string[];
+  viewingSheet: string | null;
 }
 
 export function UploadPanel({
   onUploadComplete,
-  onSheetSelect,
+  onSheetView,
+  onSelectionChange,
   currentUpload,
-  selectedSheet,
+  selectedSheets,
+  viewingSheet,
 }: UploadPanelProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -171,6 +171,26 @@ export function UploadPanel({
     uploadMutation.reset();
   }, [uploadMutation]);
 
+  const handleSheetCheckboxChange = useCallback((sheetName: string, checked: boolean) => {
+    if (checked) {
+      onSelectionChange([...selectedSheets, sheetName]);
+    } else {
+      onSelectionChange(selectedSheets.filter(s => s !== sheetName));
+    }
+  }, [selectedSheets, onSelectionChange]);
+
+  const handleSelectAllChange = useCallback((checked: boolean) => {
+    if (checked && currentUpload) {
+      onSelectionChange(currentUpload.sheets);
+    } else {
+      onSelectionChange([]);
+    }
+  }, [currentUpload, onSelectionChange]);
+
+  const allSelected = currentUpload && currentUpload.sheets.length > 0 && 
+    selectedSheets.length === currentUpload.sheets.length;
+  const someSelected = selectedSheets.length > 0 && !allSelected;
+
   return (
     <Card className="h-full flex flex-col">
       <CardHeader className="pb-3">
@@ -260,30 +280,77 @@ export function UploadPanel({
             </div>
 
             <div className="flex flex-col gap-2">
-              <p className="text-sm font-medium">Select a sheet:</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">Sheets:</p>
+                {selectedSheets.length > 0 && (
+                  <Badge variant="secondary" data-testid="selected-count-badge">
+                    {selectedSheets.length} selected
+                  </Badge>
+                )}
+              </div>
+
+              {currentUpload.sheets.length > 1 && (
+                <div className="flex items-center gap-2 px-2 py-1.5 border-b">
+                  <Checkbox
+                    id="select-all"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el && 'indeterminate' in el) {
+                        (el as any).indeterminate = someSelected;
+                      }
+                    }}
+                    onCheckedChange={(checked) => handleSelectAllChange(checked === true)}
+                    data-testid="select-all-checkbox"
+                  />
+                  <label htmlFor="select-all" className="text-sm text-muted-foreground cursor-pointer">
+                    Select All
+                  </label>
+                </div>
+              )}
+
               <div className="flex flex-col gap-1">
-                {currentUpload.sheetDetails.map((sheetDetail) => (
-                  <Button
-                    key={sheetDetail.name}
-                    variant={selectedSheet === sheetDetail.name ? "default" : "outline"}
-                    className="justify-start text-left h-auto py-2"
-                    onClick={() => onSheetSelect(currentUpload.id, sheetDetail.name)}
-                    data-testid={`sheet-button-${sheetDetail.name}`}
-                  >
-                    <FileSpreadsheet className="h-4 w-4 mr-2 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <span className="truncate block">{sheetDetail.name}</span>
-                      <span className="text-xs opacity-70">
-                        {sheetDetail.rowCount.toLocaleString()} rows × {sheetDetail.columnCount} cols
-                      </span>
+                {currentUpload.sheetDetails.map((sheetDetail) => {
+                  const isViewing = viewingSheet === sheetDetail.name;
+                  const isSelected = selectedSheets.includes(sheetDetail.name);
+
+                  return (
+                    <div
+                      key={sheetDetail.name}
+                      className={cn(
+                        "flex items-center gap-2 p-2 rounded-lg transition-colors",
+                        isViewing && "bg-primary/10 border border-primary/20",
+                        !isViewing && "hover:bg-muted/50"
+                      )}
+                    >
+                      <Checkbox
+                        id={`sheet-${sheetDetail.name}`}
+                        checked={isSelected}
+                        onCheckedChange={(checked) => handleSheetCheckboxChange(sheetDetail.name, checked === true)}
+                        onClick={(e) => e.stopPropagation()}
+                        data-testid={`sheet-checkbox-${sheetDetail.name}`}
+                      />
+                      <Button
+                        variant="ghost"
+                        className="flex-1 justify-start text-left h-auto py-1.5 px-2"
+                        onClick={() => onSheetView(currentUpload.id, sheetDetail.name)}
+                        data-testid={`sheet-button-${sheetDetail.name}`}
+                      >
+                        <FileSpreadsheet className="h-4 w-4 mr-2 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <span className="truncate block">{sheetDetail.name}</span>
+                          <span className="text-xs opacity-70">
+                            {sheetDetail.rowCount.toLocaleString()} rows × {sheetDetail.columnCount} cols
+                          </span>
+                        </div>
+                      </Button>
+                      {isViewing && (
+                        <Badge variant="outline" className="flex-shrink-0 text-xs">
+                          Viewing
+                        </Badge>
+                      )}
                     </div>
-                    {selectedSheet === sheetDetail.name && (
-                      <Badge variant="secondary" className="ml-2 flex-shrink-0">
-                        Selected
-                      </Badge>
-                    )}
-                  </Button>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
