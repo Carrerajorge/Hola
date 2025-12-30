@@ -1,81 +1,53 @@
 # Sira GPT
 
 ## Overview
-Sira GPT is an AI-powered chat application designed as an intelligent assistant for autonomous web browsing and document creation. It features a modern chat UI with rich content rendering and integrates with various AI APIs to provide generative responses. The project's core purpose is to offer a versatile platform for AI-driven tasks, including economic data analysis, multi-intent prompt processing, and professional document generation.
+Sira GPT is an AI-powered chat application designed as an intelligent assistant for autonomous web browsing and document creation. Its core purpose is to offer a versatile platform for AI-driven tasks, including economic data analysis, multi-intent prompt processing, and professional document generation.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 ### Frontend
-- **Frameworks**: React with TypeScript, Vite for bundling.
+- **Frameworks**: React with TypeScript, Vite.
 - **UI/UX**: shadcn/ui (Radix UI) and Tailwind CSS for a modern, themable interface (light/dark mode).
-- **Routing**: Wouter for client-side navigation.
-- **State Management**: TanStack React Query for server state synchronization, React `useState` for local component state.
-- **Content Rendering**: `react-markdown` with extensive plugins for Markdown, code highlighting (Prism.js with Web Worker), and mathematical expressions (KaTeX). Monaco Editor is integrated for interactive code.
-- **Data Visualization**: Utilizes Recharts (bar, line, area, pie, scatter), ECharts (maps, heatmaps), and TanStack Table for interactive data grids with sorting, filtering, and virtualization.
-- **Graphics Rendering**: A multi-layer system supports SVG (D3.js), Canvas 2D, and 3D (Three.js) with capability detection and fallbacks.
-- **Professional Features**: Includes PWA support, keyboard shortcuts, conversation export (TXT, JSON, Markdown), message favorites, and prompt templates.
-- **Productivity Features**: Offers chat folders, command history, draft auto-save, and context-aware suggested replies.
-- **Background Processing System**: An enterprise-grade system using Web Workers, IndexedDB for task persistence, and BroadcastChannel for multi-tab coordination, ensuring task completion even when the user navigates away.
-- **Enterprise Features**: Offline mode with IndexedDB queuing and auto-sync, a unified workspace with resizable panels and an AI Steps Rail, and an AI quality system for response analysis and content filtering.
-- **Performance Optimizations**: Message virtualization with @tanstack/react-virtual (threshold: 50+ messages), React.memo with custom comparison functions, lazy image loading with skeleton placeholders, useMemo for expensive computations.
-- **Streaming UX**: StreamingIndicator component with typing animation (3 dots), token counter display, prominent cancel button with pulsing animation, and smooth content fade-in effects.
-- **Resilience Features**: Exponential backoff retry logic (base 1s, max 30s with jitter), offline message queuing with auto-sync, ConnectionDot status indicator, user-friendly error toasts.
-- **Security Hardening**: DOMPurify sanitization for all markdown content, frontend rate limiting (3 messages per 10 seconds), MIME type validation with magic byte detection for file uploads.
-- **Accessibility**: Keyboard shortcuts (Escape to cancel streaming, Ctrl+/ for shortcuts dialog), ARIA live regions for screen reader announcements, proper focus management.
+- **Content Rendering**: `react-markdown` with plugins for Markdown, code highlighting, and mathematical expressions. Monaco Editor for interactive code.
+- **Data Visualization**: Recharts, ECharts, and TanStack Table for interactive data grids.
+- **Graphics Rendering**: Multi-layer system supporting SVG (D3.js), Canvas 2D, and 3D (Three.js).
+- **Productivity Features**: Chat folders, command history, draft auto-save, context-aware suggested replies, conversation export, message favorites, and prompt templates.
+- **Enterprise Features**: PWA support, keyboard shortcuts, offline mode with IndexedDB queuing and auto-sync, unified workspace with resizable panels, and an AI quality system.
+- **Performance**: Message virtualization, React.memo, lazy image loading, `useMemo`.
+- **Streaming UX**: Indicators, token counter, cancel button, smooth content fade-in.
+- **Resilience**: Exponential backoff retry logic, offline message queuing, connection status indicator, error toasts.
+- **Security**: DOMPurify sanitization, frontend rate limiting, MIME type validation for file uploads.
+- **Accessibility**: Keyboard shortcuts, ARIA live regions, focus management.
 
 ### Backend
-- **Runtime**: Node.js with Express.js for RESTful API endpoints.
-- **Build System**: esbuild for server, Vite for client.
-- **LLM Gateway**: A centralized `llmGateway.ts` manages AI model interactions, providing multi-provider fallback (e.g., xAI to Gemini), request deduplication, streaming recovery, token usage tracking, circuit breakers, exponential backoff, per-user rate limiting, request timeouts, response caching, and context truncation.
-- **ETL Agent**: Automates economic data processing from external sources into normalized schemas and generates ZIP bundles with Excel workbooks and audit reports.
-- **Multi-Intent Pipeline**: Processes complex user prompts through stages: Plan, Decompose, Execute, and Aggregate, with automatic detection and parallel execution.
-- **Document Generation System**: Generates Excel (.xlsx) and Word (.docx) files based on Zod schemas (`shared/documentSpecs.ts`), using LLM-driven orchestration with repair loops for validation. Includes dedicated services for rendering Excel and Word documents.
-- **Professional CV/Resume Generation System**: A three-layer architecture for structured CV generation, featuring a `CvSpec` schema, a template engine with multiple layouts and styling options, and an intelligent mapping layer for data formatting and visual elements. It uses dedicated prompts for CV content generation.
-- **Spreadsheet Analyzer Module**: An AI-powered spreadsheet analysis system with three-tier architecture:
-  - **Upload & Introspection**: File validation (25MB limit, .xlsx/.xls/.csv), checksum generation, ExcelJS-based parsing with column type inference, multi-sheet support.
-  - **LLM Agent** (`server/services/spreadsheetLlmAgent.ts`): Generates Python analysis code via LLM Gateway with AST-based security validation (blocks dangerous modules: os, subprocess, eval, exec).
-  - **Python Sandbox** (`server/services/pythonSandbox.ts`): Secure code execution with resource limits (512MB RAM, 60s timeout, 10 process limit), allowed modules only (pandas, numpy, json, datetime, math).
-  - **Database Tables**: `spreadsheet_uploads`, `spreadsheet_sheets`, `spreadsheet_analysis_sessions`, `spreadsheet_analysis_outputs`.
-  - **Frontend** (`client/src/pages/SpreadsheetAnalyzer.tsx`): Drag-drop upload, virtualized TanStack Table with filters, analysis panel with code preview and results display.
-  - **Security Note**: Current MVP uses process-level isolation; future hardening should add filesystem isolation (chroot/container), runtime import whitelist enforcement.
-- **System Observability**: Implements structured JSON logging with correlation IDs (`server/utils/logger.ts`), health monitoring for AI providers and the database, an alert manager, and request tracing middleware with AsyncLocalStorage context propagation.
-- **Connector Management**: Tracks usage and provides threshold-based alerting for various connectors (e.g., Gmail, Gemini).
+- **Runtime**: Node.js with Express.js.
+- **LLM Gateway**: Centralized management of AI model interactions, providing multi-provider fallback, request deduplication, streaming recovery, token usage tracking, circuit breakers, exponential backoff, per-user rate limiting, request timeouts, response caching, and context truncation.
+- **ETL Agent**: Automates economic data processing and generates ZIP bundles with Excel workbooks and audit reports.
+- **Multi-Intent Pipeline**: Processes complex user prompts through Plan, Decompose, Execute, and Aggregate stages.
+- **Document Generation System**: Generates Excel (.xlsx) and Word (.docx) files based on Zod schemas, using LLM-driven orchestration with repair loops for validation.
+- **Professional CV/Resume Generation System**: Three-layer architecture for structured CV generation with schema, template engine, and intelligent mapping.
+- **Spreadsheet Analyzer Module**: AI-powered analysis system with upload/introspection, LLM agent for Python code generation (with AST-based security validation), and a secure Python sandbox for execution.
+- **System Observability**: Structured JSON logging with correlation IDs, health monitoring, alert manager, and request tracing.
+- **Connector Management**: Tracks usage and provides threshold-based alerting for various connectors.
 
-### Infrastructure (Enterprise-Grade)
-- **Security**:
-  - Password hashing with bcrypt (12 salt rounds) via `server/utils/password.ts`
-  - Backwards-compatible password migration on login
-  - Multi-tenant validation in repository layer
-- **Modular Repositories** (`server/repositories/`):
-  - `baseRepository.ts`: Ownership validation, custom errors (OwnershipError, ValidationError, NotFoundError), transaction helpers, structured logging
-  - `userRepository.ts`: User CRUD with validation
-  - `chatRepository.ts`: Chat/message operations with ownership checks
-- **Error Handling** (`server/utils/`):
-  - Custom error classes: AppError, ValidationError, NotFoundError, AuthenticationError, AuthorizationError, RateLimitError, ExternalServiceError
-  - Retry utility with exponential backoff (`retry.ts`)
-  - Circuit breaker pattern for external service calls (`circuitBreaker.ts`)
-  - Global Express error handler middleware (`server/middleware/errorHandler.ts`)
-- **Structured Logging**:
-  - JSON logger with log levels via LOG_LEVEL env var (`server/utils/logger.ts`)
-  - Request correlation with traceId via AsyncLocalStorage (`server/middleware/correlationContext.ts`)
-  - Request logging middleware with duration tracking (`server/middleware/requestLogger.ts`)
-- **API Validation**:
-  - Zod validation middleware for body/query/params (`server/middleware/validateRequest.ts`)
-  - Common API schemas with pagination, sorting, UUID validation (`server/schemas/apiSchemas.ts`)
-- **Database Performance**:
-  - Optimized indices for frequently queried fields (chatMessages.chatId, chats.userId, aiModels.provider, etc.)
-  - Migration file: `server/migrations/add_performance_indices.sql`
+### Infrastructure
+- **Security**: Password hashing with bcrypt, multi-tenant validation.
+- **Modular Repositories**: Generic base repository with ownership validation, custom errors, and transaction helpers.
+- **Error Handling**: Custom error classes and global Express error handler.
+- **Structured Logging**: JSON logger with log levels and request correlation.
+- **API Validation**: Zod validation middleware for requests.
+- **Database Performance**: Optimized indices for frequently queried fields.
 
 ### Data Storage
-- **Database**: PostgreSQL, managed with Drizzle ORM for schema definition and migrations.
-- **Client-side Persistence**: `localStorage` for chat history and user preferences, IndexedDB for background task persistence and offline queue.
+- **Database**: PostgreSQL, managed with Drizzle ORM.
+- **Client-side Persistence**: `localStorage` for chat history/preferences, IndexedDB for background tasks and offline queue.
 - **Session Storage**: In-memory `MemStorage`.
 
 ### Key Design Patterns
-- **Monorepo Structure**: Organized into `client/`, `server/`, and `shared/` directories.
-- **Type Safety**: Enforced using Zod schemas for runtime validation across the stack.
+- **Monorepo Structure**: `client/`, `server/`, `shared/` directories.
+- **Type Safety**: Zod schemas for runtime validation.
 
 ## External Dependencies
 ### AI Services
@@ -83,20 +55,18 @@ Preferred communication style: Simple, everyday language.
 - **Google Gemini API**: Default AI model provider (e.g., `gemini-3-flash-preview`, `gemini-2.5-flash`, `gemini-2.5-pro`) via `@google/genai` SDK.
 
 ### Database
-- **PostgreSQL**: The relational database used for persistent storage.
-- **Drizzle Kit**: Utilized for database schema migrations.
+- **PostgreSQL**: Relational database for persistent storage.
+- **Drizzle Kit**: For database schema migrations.
 
 ### CDN Resources
 - **KaTeX**: For rendering mathematical expressions.
 - **Highlight.js**: Provides code syntax highlighting themes.
-- **Google Fonts**: Used for custom font families (Geist, Inter).
+- **Google Fonts**: Custom font families (Geist, Inter).
 
-### Key npm Packages
+### Key npm Packages (Examples)
 - `openai`: For communication with xAI API.
 - `drizzle-orm`, `drizzle-zod`: For database interaction and schema validation.
 - `react-markdown`: For rich text rendering.
-- `framer-motion`: For UI animations.
-- `date-fns`: For date manipulation.
 - `recharts`, `echarts`: Charting and data visualization libraries.
 - `@tanstack/react-table`, `@tanstack/react-virtual`: For advanced table functionalities.
 - `three`: For 3D graphics rendering.
@@ -105,77 +75,4 @@ Preferred communication style: Simple, everyday language.
 ### External APIs
 - **Piston API**: Used for multi-language code execution.
 - **World Bank API V2**: Integrated for economic data retrieval by the ETL Agent.
-- **Gmail API**: Utilized for the Gmail chat integration, including email fetching and parsing.
-
-## Security
-
-### Dependency Vulnerability Status (2025-12-29)
-
-**Production: 0 vulnerabilities** (`npm audit --omit=dev`)
-
-**Development-only vulnerabilities (4 moderate):**
-- **CVE**: GHSA-67mh-4wv8-2f99 (esbuild <= 0.24.2)
-- **Impact**: Allows any website to send requests to development server and read responses
-- **Affected dependency chain**: `drizzle-kit@0.31.8` → `@esbuild-kit/esm-loader@2.6.5` → `@esbuild-kit/core-utils@3.3.2` → `esbuild@0.18.20`
-- **Risk acceptance**: This vulnerability only affects local development environment, not production. The `drizzle-kit` package is in `devDependencies` and is not installed in production (`npm ci --omit=dev`).
-- **Mitigation plan**: Monitor drizzle-kit releases for updates that remove the `@esbuild-kit` dependency (deprecated in favor of tsx). Track issue at: https://github.com/drizzle-team/drizzle-kit-mirror/issues
-
-### Resolved Vulnerabilities (2025-12-29)
-- `form-data@2.3.3` (CRITICAL) - Removed by uninstalling `@hungknguyen/docx-math-converter`
-- `jszip@2.7.0` (CRITICAL) - Removed by uninstalling `xlsx-chart`
-- `tough-cookie<4.1.3` (MODERATE) - Removed with above packages
-- `xml2js` (MODERATE) - Removed by uninstalling `office-chart`
-
-## Testing
-
-### Test Architecture
-The project uses a comprehensive two-layer testing strategy:
-
-1. **Unit Tests (Vitest)**: Backend service tests with mocked dependencies
-2. **E2E Tests (Playwright)**: Full browser automation with API route interception
-
-### Running Tests
-
-```bash
-# Run all unit tests
-npm run test:run
-
-# Run document analysis unit tests specifically (38 tests)
-npm run test:run -- server/__tests__/documentAnalysis.test.ts
-
-# Run E2E tests (13 tests)
-npx playwright test
-
-# Run E2E tests with UI
-npx playwright test --ui
-
-# Run all tests together
-npm run test:run && npx playwright test
-```
-
-### Test Coverage Summary
-
-#### Backend Unit Tests (`server/__tests__/documentAnalysis.test.ts`) - 38 tests
-- **File Type Detection**: `isSpreadsheetFile()` helper for xlsx/xls/csv/tsv vs pdf/docx
-- **POST /uploads/:uploadId/analyze**: Request validation, scope handling (all/selected/active), non-spreadsheet file support
-- **GET /uploads/:uploadId/analysis**: Progress format, results format, status transitions
-- **Analysis States**: State machine transitions (queued → running → done/failed)
-- **Edge Cases**: Unicode filenames, special characters, empty sheets, custom prompts
-
-#### E2E Tests (`e2e/documentAnalysis.spec.ts`) - 13 tests
-- Uses Playwright route interception to mock all API responses
-- **No real LLM calls**: All tests are deterministic with mocked responses
-- **Response Format Validation**: Verifies API contract between backend and frontend
-- **Component Rendering**: Progress cards, results tabs, metrics, code blocks, previews
-- **State Transitions**: Validates polling behavior and status updates
-
-### Test Fixtures
-Located in `test_fixtures/`:
-- `multi-sheet.xlsx` - 3-sheet Excel file (Sales, Employees, Summary)
-- `data.csv` - UTF-8 CSV with sample data
-- Generated programmatically via `scripts/generateTestFixtures.ts`
-
-### Mock Strategy
-- **Backend tests**: Use `vi.mock()` for storage, orchestrator, and analyzer services
-- **E2E tests**: Use `page.route()` to intercept API calls with deterministic responses
-- **LLM isolation**: E2E test confirms no calls to `/api/llm/**`, `/api/generate/**`, or `/v1/chat/completions`
+- **Gmail API**: Utilized for Gmail chat integration.
