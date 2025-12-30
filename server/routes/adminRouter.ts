@@ -1041,6 +1041,57 @@ export function createAdminRouter() {
     }
   });
 
+  // Database status endpoint for production monitoring
+  router.get("/db-status", isAuthenticated, requireAdmin, async (req, res) => {
+    try {
+      // Get database connection info
+      const dbInfo = await db.execute(sql`
+        SELECT 
+          current_database() as database_name,
+          inet_server_addr() as host,
+          current_timestamp as server_time
+      `);
+
+      // Get user count and latest user created
+      const userStats = await db.execute(sql`
+        SELECT 
+          COUNT(*) as total_users,
+          MAX(created_at) as latest_user_created
+        FROM users
+      `);
+
+      // Get enabled AI models count
+      const modelStats = await db.execute(sql`
+        SELECT COUNT(*) as enabled_models
+        FROM ai_models
+        WHERE is_enabled = 'true'
+      `);
+
+      res.json({
+        status: "connected",
+        database: dbInfo.rows[0]?.database_name || "unknown",
+        host: dbInfo.rows[0]?.host || process.env.PGHOST || "unknown",
+        serverTime: dbInfo.rows[0]?.server_time,
+        users: {
+          total: parseInt(userStats.rows[0]?.total_users || "0"),
+          latestCreatedAt: userStats.rows[0]?.latest_user_created
+        },
+        models: {
+          enabled: parseInt(modelStats.rows[0]?.enabled_models || "0")
+        },
+        environment: process.env.NODE_ENV || "development"
+      });
+    } catch (error: any) {
+      console.error("[AdminRouter] db-status error:", error.message);
+      res.status(500).json({ 
+        status: "error", 
+        error: error.message,
+        database: null,
+        host: null
+      });
+    }
+  });
+
   router.get("/database/tables", async (req, res) => {
     try {
       const tables = await db.execute(sql`
