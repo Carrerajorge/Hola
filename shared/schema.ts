@@ -1954,6 +1954,9 @@ export type LibraryStorageStats = typeof libraryStorage.$inferSelect;
 export const spreadsheetUploadStatusEnum = ['pending', 'scanning', 'ready', 'error', 'expired'] as const;
 export type SpreadsheetUploadStatus = typeof spreadsheetUploadStatusEnum[number];
 
+export const spreadsheetFileTypeEnum = ['xlsx', 'xls', 'csv', 'tsv', 'pdf', 'docx'] as const;
+export type SpreadsheetFileType = typeof spreadsheetFileTypeEnum[number];
+
 export const spreadsheetUploads = pgTable('spreadsheet_uploads', {
   id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar('user_id').notNull(),
@@ -1965,6 +1968,9 @@ export const spreadsheetUploads = pgTable('spreadsheet_uploads', {
   status: text('status').$type<SpreadsheetUploadStatus>().default('pending'),
   errorMessage: text('error_message'),
   expiresAt: timestamp('expires_at'),
+  fileType: text('file_type').$type<SpreadsheetFileType>(),
+  encoding: text('encoding'),
+  pageCount: integer('page_count'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => [
   index('spreadsheet_uploads_user_idx').on(table.userId),
@@ -2015,6 +2021,12 @@ export type AnalysisStatus = typeof analysisStatusEnum[number];
 export const analysisModeEnum = ['full', 'text_only', 'numbers_only', 'custom'] as const;
 export type AnalysisMode = typeof analysisModeEnum[number];
 
+export const analysisScopeEnum = ['active', 'selected', 'all'] as const;
+export type AnalysisScope = typeof analysisScopeEnum[number];
+
+export const sessionAnalysisModeEnum = ['full', 'summary', 'extract_tasks', 'text_only', 'custom'] as const;
+export type SessionAnalysisMode = typeof sessionAnalysisModeEnum[number];
+
 export const spreadsheetAnalysisSessions = pgTable('spreadsheet_analysis_sessions', {
   id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
   uploadId: varchar('upload_id').notNull().references(() => spreadsheetUploads.id, { onDelete: 'cascade' }),
@@ -2029,6 +2041,13 @@ export const spreadsheetAnalysisSessions = pgTable('spreadsheet_analysis_session
   executionTimeMs: integer('execution_time_ms'),
   startedAt: timestamp('started_at'),
   completedAt: timestamp('completed_at'),
+  scope: text('scope').$type<AnalysisScope>(),
+  targetSheets: jsonb('target_sheets').$type<string[]>(),
+  analysisMode: text('analysis_mode').$type<SessionAnalysisMode>(),
+  crossSheetSummary: text('cross_sheet_summary'),
+  totalJobs: integer('total_jobs'),
+  completedJobs: integer('completed_jobs').default(0),
+  failedJobs: integer('failed_jobs').default(0),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => [
   index('spreadsheet_analysis_user_idx').on(table.userId),
@@ -2044,7 +2063,33 @@ export const insertSpreadsheetAnalysisSessionSchema = createInsertSchema(spreads
 export type InsertSpreadsheetAnalysisSession = z.infer<typeof insertSpreadsheetAnalysisSessionSchema>;
 export type SpreadsheetAnalysisSession = typeof spreadsheetAnalysisSessions.$inferSelect;
 
-export const outputTypeEnum = ['table', 'metric', 'chart', 'log', 'error'] as const;
+export const analysisJobStatusEnum = ['queued', 'running', 'done', 'failed'] as const;
+export type AnalysisJobStatus = typeof analysisJobStatusEnum[number];
+
+export const spreadsheetAnalysisJobs = pgTable('spreadsheet_analysis_jobs', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar('session_id').notNull().references(() => spreadsheetAnalysisSessions.id, { onDelete: 'cascade' }),
+  sheetName: text('sheet_name').notNull(),
+  status: text('status').$type<AnalysisJobStatus>().default('queued'),
+  generatedCode: text('generated_code'),
+  error: text('error'),
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  index('spreadsheet_analysis_jobs_session_idx').on(table.sessionId),
+  index('spreadsheet_analysis_jobs_status_idx').on(table.status),
+]);
+
+export const insertSpreadsheetAnalysisJobSchema = createInsertSchema(spreadsheetAnalysisJobs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertSpreadsheetAnalysisJob = z.infer<typeof insertSpreadsheetAnalysisJobSchema>;
+export type SpreadsheetAnalysisJob = typeof spreadsheetAnalysisJobs.$inferSelect;
+
+export const outputTypeEnum = ['table', 'metric', 'chart', 'log', 'error', 'summary'] as const;
 export type OutputType = typeof outputTypeEnum[number];
 
 export const spreadsheetAnalysisOutputs = pgTable('spreadsheet_analysis_outputs', {
