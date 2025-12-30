@@ -102,8 +102,21 @@ npm run test:all
 npm run test:run -- server/__tests__/documentAnalysis.test.ts  # 38 unit tests
 npm run test:run -- server/__tests__/stressTest.test.ts        # 9 stress tests
 npm run test:run -- server/__tests__/sandboxLimits.test.ts     # 10 sandbox tests
-npx playwright test --reporter=list                             # 13 E2E tests
+npx playwright test --reporter=list                             # 20 E2E tests
+
+# Smoke tests (production verification)
+npm run test:smoke                                               # 7 smoke tests
 ```
+
+### Smoke Tests (Production Verification)
+```bash
+# Quick smoke test against dev server
+npm run test:smoke
+
+# Full production smoke test (build + start + test)
+./scripts/smoke-test-prod.sh
+```
+Smoke tests verify: page load, chat interface, file upload, API health, static assets, performance metrics.
 
 ### Test Files
 ```
@@ -118,9 +131,62 @@ server/__tests__/
 ├── sandboxLimits.test.ts     # Security boundary tests
 └── mocks/llmMock.ts          # Deterministic LLM mock
 
-e2e/documentAnalysis.spec.ts  # Browser tests with route mocking
+e2e/
+├── documentAnalysis.spec.ts  # Browser tests with route mocking
+└── smoke.spec.ts             # Production smoke tests
 
 shared/analysisContract.ts    # Zod schemas for runtime validation
+server/lib/analysisLogger.ts  # Telemetry with correlation IDs
+```
+
+## Preview Limits
+
+| Limit | Value | Purpose |
+|-------|-------|---------|
+| Max Preview Rows | 100 | Prevents UI lag with large datasets |
+| Max Preview Columns | 50 | Prevents horizontal scroll issues |
+| Truncation Indicator | `meta.truncated` | Frontend can show "Showing 100 of 10,000 rows" |
+
+The preview response includes metadata for UI rendering:
+```typescript
+preview: {
+  headers: string[];
+  rows: any[][];
+  meta?: { totalRows: number; totalCols: number; truncated: boolean };
+}
+```
+
+## Telemetry & Logging
+
+Structured JSON logs with correlation IDs for tracing analysis sessions:
+
+```typescript
+import { analysisLogger, createAnalysisContext } from '../lib/analysisLogger';
+
+// Track analysis start
+analysisLogger.trackAnalysisStart(uploadId, sessionId, sheetCount);
+
+// Track per-sheet job with timer
+const timer = analysisLogger.trackSheetJobStart(context);
+// ... work ...
+timer.endTimer(success, error?);
+
+// Track sandbox execution
+analysisLogger.trackSandboxExecution(context, durationMs, success, error?);
+```
+
+Log format:
+```json
+{
+  "timestamp": "2025-01-01T00:00:00.000Z",
+  "level": "info",
+  "correlationId": "abc12345-xyz789",
+  "uploadId": "upload-123",
+  "sessionId": "session-456",
+  "event": "sheet_job_completed",
+  "durationMs": 1234,
+  "status": "completed"
+}
 ```
 
 ### LLM Mock Strategy (Zero Real Calls)

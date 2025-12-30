@@ -7,6 +7,7 @@ import {
   getAnalysisProgress,
   getAnalysisResults,
 } from "../services/analysisOrchestrator";
+import { analysisLogger } from "../lib/analysisLogger";
 
 const analyzeRequestSchema = z.object({
   messageId: z.string().optional(),
@@ -180,17 +181,37 @@ export function createChatRoutes(): Router {
                   value: typeof value === 'object' ? JSON.stringify(value) : String(value),
                 }));
 
-                let preview: { headers: string[]; rows: any[][] } | undefined;
+                const PREVIEW_ROW_LIMIT = 100;
+                const PREVIEW_COL_LIMIT = 50;
+                
+                let preview: { headers: string[]; rows: any[][]; meta?: { totalRows: number; totalCols: number; truncated: boolean } } | undefined;
                 const tables = sheetResults.outputs?.tables || [];
                 if (tables.length > 0 && Array.isArray(tables[0])) {
                   const tableData = tables[0] as any[];
                   if (tableData.length > 0) {
                     const firstRow = tableData[0];
                     if (typeof firstRow === 'object' && firstRow !== null) {
+                      const allHeaders = Object.keys(firstRow);
+                      const limitedHeaders = allHeaders.slice(0, PREVIEW_COL_LIMIT);
+                      const totalRows = tableData.length;
+                      const totalCols = allHeaders.length;
+                      const truncated = totalRows > PREVIEW_ROW_LIMIT || totalCols > PREVIEW_COL_LIMIT;
+                      
                       preview = {
-                        headers: Object.keys(firstRow),
-                        rows: tableData.slice(0, 10).map(row => Object.values(row)),
+                        headers: limitedHeaders,
+                        rows: tableData.slice(0, PREVIEW_ROW_LIMIT).map(row => {
+                          const values = Object.values(row) as any[];
+                          return values.slice(0, PREVIEW_COL_LIMIT);
+                        }),
+                        meta: { totalRows, totalCols, truncated },
                       };
+                      
+                      analysisLogger.trackPreviewGeneration(
+                        { uploadId, sessionId: chatAnalysis.sessionId || undefined },
+                        Math.min(totalRows, PREVIEW_ROW_LIMIT),
+                        Math.min(totalCols, PREVIEW_COL_LIMIT),
+                        truncated
+                      );
                     }
                   }
                 }

@@ -26,6 +26,7 @@ import {
 } from "./spreadsheetLlmAgent";
 import { executePythonCode } from "./pythonSandbox";
 import { llmGateway } from "../lib/llmGateway";
+import { analysisLogger, createAnalysisContext, withCorrelationId } from "../lib/analysisLogger";
 
 export type AnalysisScope = "active" | "selected" | "all";
 export type SessionAnalysisMode = "full" | "summary" | "extract_tasks" | "text_only" | "custom";
@@ -121,6 +122,9 @@ export async function startAnalysis(params: StartAnalysisParams): Promise<{ sess
     failedJobs: 0,
   });
 
+  const logContext = createAnalysisContext(uploadId, session.id);
+  analysisLogger.trackAnalysisStart(uploadId, session.id, targetSheetNames.length);
+
   const jobPromises = targetSheetNames.map(sheetName =>
     createAnalysisJob({
       sessionId: session.id,
@@ -136,8 +140,11 @@ export async function startAnalysis(params: StartAnalysisParams): Promise<{ sess
   });
 
   for (const job of jobs) {
-    executeSheetJob(job.id, session.id, uploadId, analysisMode, userPrompt).catch(err => {
-      console.error(`[AnalysisOrchestrator] Job ${job.id} failed:`, err);
+    executeSheetJob(job.id, session.id, uploadId, analysisMode, userPrompt, logContext).catch(err => {
+      analysisLogger.error(
+        withCorrelationId(logContext, job.id),
+        { event: 'job_execution_error', status: 'failed', error: err.message }
+      );
     });
   }
 
@@ -149,15 +156,23 @@ async function executeSheetJob(
   sessionId: string,
   uploadId: string,
   analysisMode: SessionAnalysisMode,
-  userPrompt?: string
+  userPrompt?: string,
+  parentContext?: ReturnType<typeof createAnalysisContext>
 ): Promise<void> {
+  const job = await getAnalysisJob(jobId);
+  const jobContext = withCorrelationId(
+    parentContext || createAnalysisContext(uploadId, sessionId),
+    jobId,
+    job?.sheetName
+  );
+  const jobTimer = analysisLogger.trackSheetJobStart(jobContext);
+  
   try {
     await updateAnalysisJob(jobId, {
       status: "running",
       startedAt: new Date(),
     });
 
-    const job = await getAnalysisJob(jobId);
     if (!job) {
       throw new Error(`Job ${jobId} not found`);
     }
@@ -200,6 +215,13 @@ async function executeSheetJob(
       sheetName: job.sheetName,
       timeoutMs: 60000,
     });
+
+    analysisLogger.trackSandboxExecution(
+      jobContext,
+      executionResult.executionTimeMs,
+      executionResult.success,
+      executionResult.error
+    );
 
     if (!executionResult.success) {
       throw new Error(executionResult.error || "Execution failed");
@@ -268,6 +290,7 @@ async function executeSheetJob(
     });
 
     await updateSessionJobCounts(sessionId, true);
+    jobTimer.endTimer(true);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -286,6 +309,7 @@ async function executeSheetJob(
     });
 
     await updateSessionJobCounts(sessionId, false);
+    jobTimer.endTimer(false, errorMessage);
   }
 }
 

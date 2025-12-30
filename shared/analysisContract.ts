@@ -11,9 +11,16 @@ export const MetricSchema = z.object({
   value: z.string(),
 });
 
+export const PreviewMetaSchema = z.object({
+  totalRows: z.number(),
+  totalCols: z.number(),
+  truncated: z.boolean(),
+});
+
 export const PreviewSchema = z.object({
   headers: z.array(z.string()),
   rows: z.array(z.array(z.any())),
+  meta: PreviewMetaSchema.optional(),
 });
 
 export const SheetResultSchema = z.object({
