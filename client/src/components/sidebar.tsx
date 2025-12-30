@@ -32,7 +32,8 @@ import {
   FolderOpen,
   Zap,
   SquarePen,
-  Pin
+  Pin,
+  Sparkles
 } from "lucide-react";
 import { SiraLogo } from "@/components/sira-logo";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { SearchModal } from "@/components/search-modal";
 import { SettingsDialog } from "@/components/settings-dialog";
+import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 
 import { Chat } from "@/hooks/use-chats";
 import { Folder as FolderType } from "@/hooks/use-chat-folders";
@@ -162,6 +164,7 @@ export function Sidebar({
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
@@ -765,6 +768,17 @@ export function Sidebar({
                   Admin Panel
                 </Button>
               )}
+              {user?.plan === "free" && user?.role !== "admin" && (
+                <Button 
+                  variant="ghost" 
+                  className="justify-start gap-3 text-sm h-10 font-normal liquid-button text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:text-purple-400 dark:hover:text-purple-300 dark:hover:bg-purple-900/20" 
+                  onClick={() => { setIsUserMenuOpen(false); setIsUpgradeDialogOpen(true); }} 
+                  data-testid="button-upgrade-plan"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Mejorar plan
+                </Button>
+              )}
               <Separator className="my-1" />
               <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} data-testid="button-logout">
                 <LogOut className="h-4 w-4" />
@@ -787,6 +801,11 @@ export function Sidebar({
       <SettingsDialog
         open={isSettingsOpen}
         onOpenChange={setIsSettingsOpen}
+      />
+
+      <UpgradePlanDialog
+        open={isUpgradeDialogOpen}
+        onOpenChange={setIsUpgradeDialogOpen}
       />
 
     </div>
