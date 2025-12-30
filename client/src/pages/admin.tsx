@@ -331,7 +331,8 @@ function UsersSection() {
     queryKey: ["/api/admin/users"],
     queryFn: async () => {
       const res = await fetch("/api/admin/users");
-      return res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     }
   });
 
