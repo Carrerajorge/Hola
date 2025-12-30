@@ -6,6 +6,7 @@ import {
   spreadsheetUploads,
   spreadsheetSheets,
   spreadsheetAnalysisSessions,
+  spreadsheetAnalysisJobs,
   spreadsheetAnalysisOutputs,
   type InsertSpreadsheetUpload,
   type SpreadsheetUpload,
@@ -13,6 +14,8 @@ import {
   type SpreadsheetSheet,
   type InsertSpreadsheetAnalysisSession,
   type SpreadsheetAnalysisSession,
+  type InsertSpreadsheetAnalysisJob,
+  type SpreadsheetAnalysisJob,
   type InsertSpreadsheetAnalysisOutput,
   type SpreadsheetAnalysisOutput,
   type SpreadsheetUploadStatus,
@@ -199,6 +202,65 @@ export async function getAnalysisOutputs(
     .from(spreadsheetAnalysisOutputs)
     .where(eq(spreadsheetAnalysisOutputs.sessionId, sessionId))
     .orderBy(spreadsheetAnalysisOutputs.order);
+}
+
+export async function createAnalysisJob(
+  data: InsertSpreadsheetAnalysisJob
+): Promise<SpreadsheetAnalysisJob> {
+  const [job] = await db
+    .insert(spreadsheetAnalysisJobs)
+    .values(data)
+    .returning();
+  return job;
+}
+
+export async function getAnalysisJobsBySession(
+  sessionId: string
+): Promise<SpreadsheetAnalysisJob[]> {
+  return db
+    .select()
+    .from(spreadsheetAnalysisJobs)
+    .where(eq(spreadsheetAnalysisJobs.sessionId, sessionId))
+    .orderBy(spreadsheetAnalysisJobs.createdAt);
+}
+
+export async function getAnalysisJob(
+  id: string
+): Promise<SpreadsheetAnalysisJob | undefined> {
+  const [job] = await db
+    .select()
+    .from(spreadsheetAnalysisJobs)
+    .where(eq(spreadsheetAnalysisJobs.id, id))
+    .limit(1);
+  return job;
+}
+
+export async function updateAnalysisJob(
+  id: string,
+  updates: Partial<SpreadsheetAnalysisJob>
+): Promise<void> {
+  await db
+    .update(spreadsheetAnalysisJobs)
+    .set(updates)
+    .where(eq(spreadsheetAnalysisJobs.id, id));
+}
+
+export async function getSheetByName(
+  uploadId: string,
+  sheetName: string
+): Promise<SpreadsheetSheet | undefined> {
+  const [sheet] = await db
+    .select()
+    .from(spreadsheetSheets)
+    .where(eq(spreadsheetSheets.uploadId, uploadId))
+    .limit(1);
+  
+  const sheets = await db
+    .select()
+    .from(spreadsheetSheets)
+    .where(eq(spreadsheetSheets.uploadId, uploadId));
+  
+  return sheets.find(s => s.name === sheetName);
 }
 
 export async function parseSpreadsheet(
@@ -561,9 +623,14 @@ export const spreadsheetAnalyzer = {
   deleteUpload,
   createSheet,
   getSheets,
+  getSheetByName,
   createAnalysisSession,
   getAnalysisSession,
   updateAnalysisSession,
+  createAnalysisJob,
+  getAnalysisJob,
+  getAnalysisJobsBySession,
+  updateAnalysisJob,
   createAnalysisOutput,
   getAnalysisOutputs,
   parseSpreadsheet,

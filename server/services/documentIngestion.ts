@@ -1,7 +1,11 @@
 import ExcelJS from "exceljs";
-import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import path from "path";
+import { createRequire } from "module";
+
+// pdf-parse is CommonJS, use createRequire for ESM compatibility
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
 const PREVIEW_ROW_LIMIT = 100;

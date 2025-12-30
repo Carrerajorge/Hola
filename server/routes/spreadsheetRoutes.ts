@@ -21,6 +21,8 @@ import {
 } from "../services/spreadsheetAnalyzer";
 import { generateAnalysisCode, validatePythonCode } from "../services/spreadsheetLlmAgent";
 import { executePythonCode, initializeSandbox } from "../services/pythonSandbox";
+import { parseDocument, extractMetadata, detectFileType } from "../services/documentIngestion";
+import { startAnalysis, getAnalysisProgress, getAnalysisResults } from "../services/analysisOrchestrator";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -41,6 +43,9 @@ function getFileExtension(mimeType: string): string {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
     "application/vnd.ms-excel": "xls",
     "text/csv": "csv",
+    "text/tab-separated-values": "tsv",
+    "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   };
   return extensions[mimeType] || "xlsx";
 }
@@ -59,14 +64,23 @@ export function createSpreadsheetRouter(): Router {
       const mimeType = req.file.mimetype;
       const originalName = req.file.originalname;
 
-      const validation = validateSpreadsheetFile(buffer, mimeType);
-      if (!validation.valid) {
-        return res.status(400).json({ error: validation.error });
+      const detectedFileType = await detectFileType(buffer, mimeType);
+      if (!detectedFileType) {
+        return res.status(400).json({ error: "Unsupported file type" });
+      }
+
+      const isTabular = ["xlsx", "xls", "csv", "tsv"].includes(detectedFileType);
+      
+      if (isTabular) {
+        const validation = validateSpreadsheetFile(buffer, mimeType);
+        if (!validation.valid) {
+          return res.status(400).json({ error: validation.error });
+        }
       }
 
       const checksum = generateChecksum(buffer);
 
-      const parsed = await parseSpreadsheet(buffer, mimeType);
+      const parsed = await parseDocument(buffer, mimeType, originalName);
 
       const uploadId = nanoid();
       const ext = getFileExtension(mimeType);
@@ -84,24 +98,27 @@ export function createSpreadsheetRouter(): Router {
         storageKey: tempFilePath,
         checksum,
         status: "ready",
+        fileType: parsed.metadata.fileType,
+        encoding: parsed.metadata.encoding,
+        pageCount: parsed.metadata.pageCount,
       });
 
-      const sheetsResponse: { name: string; rowCount: number; columnCount: number; headers: string[] }[] = [];
+      const sheetsResponse: { name: string; rowCount: number; columnCount: number; headers: string[]; isTabular: boolean }[] = [];
 
       for (const sheetInfo of parsed.sheets) {
         await createSheet({
           uploadId: uploadRecord.id,
           name: sheetInfo.name,
-          sheetIndex: sheetInfo.sheetIndex,
+          sheetIndex: sheetInfo.index,
           rowCount: sheetInfo.rowCount,
           columnCount: sheetInfo.columnCount,
-          inferredHeaders: sheetInfo.inferredHeaders,
-          columnTypes: sheetInfo.columnTypes,
+          inferredHeaders: sheetInfo.headers,
+          columnTypes: {},
           previewData: sheetInfo.previewData,
         });
 
-        const headers = sheetInfo.inferredHeaders.length > 0
-          ? sheetInfo.inferredHeaders
+        const headers = sheetInfo.headers.length > 0
+          ? sheetInfo.headers
           : Array.from({ length: sheetInfo.columnCount }, (_, i) => `Column${i + 1}`);
 
         sheetsResponse.push({
@@ -109,16 +126,17 @@ export function createSpreadsheetRouter(): Router {
           rowCount: sheetInfo.rowCount,
           columnCount: sheetInfo.columnCount,
           headers,
+          isTabular: sheetInfo.isTabular,
         });
       }
 
       let firstSheetPreview: { headers: string[]; data: any[][] } | null = null;
       if (parsed.sheets.length > 0) {
         const firstSheet = parsed.sheets[0];
-        const headers = firstSheet.inferredHeaders.length > 0
-          ? firstSheet.inferredHeaders
+        const headers = firstSheet.headers.length > 0
+          ? firstSheet.headers
           : Array.from({ length: firstSheet.columnCount }, (_, i) => `Column${i + 1}`);
-        const dataStartRow = firstSheet.inferredHeaders.length > 0 ? 1 : 0;
+        const dataStartRow = firstSheet.headers.length > 0 && firstSheet.isTabular ? 1 : 0;
         const previewRows = firstSheet.previewData.slice(dataStartRow, dataStartRow + 100);
         firstSheetPreview = {
           headers,
@@ -129,14 +147,16 @@ export function createSpreadsheetRouter(): Router {
       res.json({
         id: uploadRecord.id,
         filename: originalName,
+        fileType: parsed.metadata.fileType,
         sheets: sheetsResponse.map(s => s.name),
         sheetDetails: sheetsResponse,
         firstSheetPreview,
+        pageCount: parsed.metadata.pageCount,
         uploadedAt: uploadRecord.createdAt?.toISOString() || new Date().toISOString(),
       });
     } catch (error: any) {
       console.error("[SpreadsheetRoutes] Upload error:", error);
-      res.status(500).json({ error: error.message || "Failed to upload spreadsheet" });
+      res.status(500).json({ error: error.message || "Failed to upload file" });
     }
   });
 
@@ -480,6 +500,68 @@ export function createSpreadsheetRouter(): Router {
     } catch (error: any) {
       console.error("[SpreadsheetRoutes] Get analysis error:", error);
       res.status(500).json({ error: error.message || "Failed to get analysis" });
+    }
+  });
+
+  const multiAnalyzeSchema = z.object({
+    uploadId: z.string(),
+    scope: z.enum(['active', 'selected', 'all']),
+    sheetNames: z.array(z.string()).optional().default([]),
+    analysisMode: z.enum(['full', 'summary', 'extract_tasks', 'text_only', 'custom']).default('full'),
+    userPrompt: z.string().optional(),
+  });
+
+  router.post("/analyze/start", async (req: Request, res: Response) => {
+    try {
+      const validation = multiAnalyzeSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ error: validation.error.message });
+      }
+
+      const { uploadId, scope, sheetNames, analysisMode, userPrompt } = validation.data;
+      const userId = (req as any).user?.id || "anonymous";
+
+      const result = await startAnalysis({
+        uploadId,
+        userId,
+        scope,
+        sheetNames,
+        analysisMode,
+        userPrompt,
+      });
+
+      res.json({ sessionId: result.sessionId });
+    } catch (error: any) {
+      console.error("[SpreadsheetRoutes] Start multi-analysis error:", error);
+      res.status(500).json({ error: error.message || "Failed to start analysis" });
+    }
+  });
+
+  router.get("/analyze/progress/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const progress = await getAnalysisProgress(sessionId);
+      res.json(progress);
+    } catch (error: any) {
+      if (error.message?.includes("not found")) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      console.error("[SpreadsheetRoutes] Get analysis progress error:", error);
+      res.status(500).json({ error: error.message || "Failed to get analysis progress" });
+    }
+  });
+
+  router.get("/analyze/results/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const results = await getAnalysisResults(sessionId);
+      if (!results) {
+        return res.status(404).json({ error: "Results not ready or session not found" });
+      }
+      res.json(results);
+    } catch (error: any) {
+      console.error("[SpreadsheetRoutes] Get analysis results error:", error);
+      res.status(500).json({ error: error.message || "Failed to get analysis results" });
     }
   });
 
