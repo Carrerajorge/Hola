@@ -3031,6 +3031,106 @@ export function createAdminRouter() {
     }
   });
 
+  // ===== Database Diagnostics Endpoint (Admin Only) =====
+  router.get("/db-status", isAuthenticated, requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const diagnostics: any = {
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || "development",
+        databaseConfigured: !!process.env.DATABASE_URL,
+      };
+
+      // Get database info using raw SQL
+      const dbInfoResult = await db.execute(sql`
+        SELECT 
+          current_database() as database_name,
+          inet_server_addr() as host,
+          inet_server_port() as port,
+          current_user as db_user,
+          version() as pg_version
+      `);
+      
+      if (dbInfoResult.rows && dbInfoResult.rows.length > 0) {
+        const dbInfo = dbInfoResult.rows[0] as any;
+        diagnostics.database = {
+          name: dbInfo.database_name,
+          host: dbInfo.host || "localhost",
+          port: dbInfo.port,
+          user: dbInfo.db_user,
+          version: dbInfo.pg_version?.split(" ")[0] + " " + (dbInfo.pg_version?.split(" ")[1] || ""),
+        };
+      }
+
+      // Get user count and latest created_at
+      const userStatsResult = await db.execute(sql`
+        SELECT 
+          COUNT(*) as user_count,
+          MAX(created_at) as latest_user_created_at
+        FROM users
+      `);
+      
+      if (userStatsResult.rows && userStatsResult.rows.length > 0) {
+        const stats = userStatsResult.rows[0] as any;
+        diagnostics.users = {
+          total: parseInt(stats.user_count) || 0,
+          latestCreatedAt: stats.latest_user_created_at,
+        };
+      }
+
+      // Get enabled AI models count
+      const modelStatsResult = await db.execute(sql`
+        SELECT COUNT(*) as enabled_count
+        FROM ai_models
+        WHERE is_enabled = 'true'
+      `);
+      
+      if (modelStatsResult.rows && modelStatsResult.rows.length > 0) {
+        const modelStats = modelStatsResult.rows[0] as any;
+        diagnostics.aiModels = {
+          enabledCount: parseInt(modelStats.enabled_count) || 0,
+        };
+      }
+
+      // Get sessions count
+      const sessionStatsResult = await db.execute(sql`
+        SELECT COUNT(*) as session_count
+        FROM sessions
+        WHERE expire > NOW()
+      `);
+      
+      if (sessionStatsResult.rows && sessionStatsResult.rows.length > 0) {
+        const sessionStats = sessionStatsResult.rows[0] as any;
+        diagnostics.sessions = {
+          activeCount: parseInt(sessionStats.session_count) || 0,
+        };
+      }
+
+      // Check if critical tables exist
+      const tablesResult = await db.execute(sql`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name IN ('users', 'ai_models', 'sessions', 'chats', 'chat_messages')
+      `);
+      
+      diagnostics.tables = {
+        existing: (tablesResult.rows as any[]).map(r => r.table_name),
+        required: ['users', 'ai_models', 'sessions', 'chats', 'chat_messages'],
+      };
+
+      console.log(`[Admin] DB status check by admin:`, JSON.stringify(diagnostics));
+      
+      res.json(diagnostics);
+    } catch (error: any) {
+      console.error("[Admin] DB status check failed:", error);
+      res.status(500).json({ 
+        error: "Database diagnostics failed", 
+        message: error.message,
+        databaseConfigured: !!process.env.DATABASE_URL,
+      });
+    }
+  }));
+
   return router;
 }
 

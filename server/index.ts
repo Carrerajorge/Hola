@@ -7,6 +7,7 @@ import { requestLoggerMiddleware } from "./middleware/requestLogger";
 import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
+import { verifyDatabaseConnection } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
@@ -72,6 +73,23 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const isProduction = process.env.NODE_ENV === "production";
+  
+  // Verify database connection before starting (critical in production)
+  log("Verifying database connection...");
+  const dbConnected = await verifyDatabaseConnection();
+  
+  if (!dbConnected && isProduction) {
+    log("[FATAL] Cannot start production server without database connection");
+    process.exit(1);
+  }
+  
+  if (dbConnected) {
+    log("Database connection verified successfully");
+  } else {
+    log("[WARNING] Database connection failed - some features may not work");
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use(errorHandler);
@@ -79,7 +97,7 @@ app.use((req, res, next) => {
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "production") {
+  if (isProduction) {
     serveStatic(app);
   } else {
     const { setupVite } = await import("./vite");
@@ -99,6 +117,8 @@ app.use((req, res, next) => {
     },
     async () => {
       log(`serving on port ${port}`);
+      log(`Environment: ${isProduction ? "PRODUCTION" : "development"}`);
+      log(`Database: ${dbConnected ? "connected" : "NOT CONNECTED"}`);
       startAggregator();
       await seedProductionData();
     },
