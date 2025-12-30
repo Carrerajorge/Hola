@@ -6,6 +6,7 @@ import { requestTracerMiddleware } from "./lib/requestTracer";
 import { requestLoggerMiddleware } from "./middleware/requestLogger";
 import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { seedProductionData } from "./seed-production";
 
 const app = express();
 const httpServer = createServer(app);
@@ -96,9 +97,10 @@ app.use((req, res, next) => {
       host: "0.0.0.0",
       reusePort: true,
     },
-    () => {
+    async () => {
       log(`serving on port ${port}`);
       startAggregator();
+      await seedProductionData();
     },
   );
 })();
