@@ -125,3 +125,57 @@ Preferred communication style: Simple, everyday language.
 - `jszip@2.7.0` (CRITICAL) - Removed by uninstalling `xlsx-chart`
 - `tough-cookie<4.1.3` (MODERATE) - Removed with above packages
 - `xml2js` (MODERATE) - Removed by uninstalling `office-chart`
+
+## Testing
+
+### Test Architecture
+The project uses a comprehensive two-layer testing strategy:
+
+1. **Unit Tests (Vitest)**: Backend service tests with mocked dependencies
+2. **E2E Tests (Playwright)**: Full browser automation with API route interception
+
+### Running Tests
+
+```bash
+# Run all unit tests
+npm run test:run
+
+# Run document analysis unit tests specifically (38 tests)
+npm run test:run -- server/__tests__/documentAnalysis.test.ts
+
+# Run E2E tests (13 tests)
+npx playwright test
+
+# Run E2E tests with UI
+npx playwright test --ui
+
+# Run all tests together
+npm run test:run && npx playwright test
+```
+
+### Test Coverage Summary
+
+#### Backend Unit Tests (`server/__tests__/documentAnalysis.test.ts`) - 38 tests
+- **File Type Detection**: `isSpreadsheetFile()` helper for xlsx/xls/csv/tsv vs pdf/docx
+- **POST /uploads/:uploadId/analyze**: Request validation, scope handling (all/selected/active), non-spreadsheet file support
+- **GET /uploads/:uploadId/analysis**: Progress format, results format, status transitions
+- **Analysis States**: State machine transitions (queued → running → done/failed)
+- **Edge Cases**: Unicode filenames, special characters, empty sheets, custom prompts
+
+#### E2E Tests (`e2e/documentAnalysis.spec.ts`) - 13 tests
+- Uses Playwright route interception to mock all API responses
+- **No real LLM calls**: All tests are deterministic with mocked responses
+- **Response Format Validation**: Verifies API contract between backend and frontend
+- **Component Rendering**: Progress cards, results tabs, metrics, code blocks, previews
+- **State Transitions**: Validates polling behavior and status updates
+
+### Test Fixtures
+Located in `test_fixtures/`:
+- `multi-sheet.xlsx` - 3-sheet Excel file (Sales, Employees, Summary)
+- `data.csv` - UTF-8 CSV with sample data
+- Generated programmatically via `scripts/generateTestFixtures.ts`
+
+### Mock Strategy
+- **Backend tests**: Use `vi.mock()` for storage, orchestrator, and analyzer services
+- **E2E tests**: Use `page.route()` to intercept API calls with deterministic responses
+- **LLM isolation**: E2E test confirms no calls to `/api/llm/**`, `/api/generate/**`, or `/v1/chat/completions`
