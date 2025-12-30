@@ -185,24 +185,58 @@ async function seedDefaultExcelDocuments() {
 export function createAdminRouter() {
   const router = Router();
 
-  // Apply authentication and admin role check to ALL admin routes
-  router.use(isAuthenticated, requireAdmin);
-
-  router.get("/seed-status", async (req, res) => {
+  router.get("/seed-status", isAuthenticated, async (req: any, res) => {
     try {
       const status = await getSeedStatus();
+      
+      if (!req.user?.claims?.sub) {
+        console.log(`[seed-status] Access denied: not authenticated`);
+        return res.status(401).json({
+          success: false,
+          error: "Authentication required - please login first",
+          hint: "Login at least once to create your user record, then the seed can set your admin role",
+        });
+      }
+
+      const user = await authStorage.getUser(req.user.claims.sub);
+      if (!user) {
+        console.log(`[seed-status] Access denied: user not found in database (userId=${req.user.claims.sub})`);
+        return res.status(403).json({
+          success: false,
+          error: "User not found in database",
+          hint: "Your user record doesn't exist yet. The seed will set admin role once you have a user record. Try refreshing and check seed logs.",
+          seedStatusLogged: true,
+        });
+      }
+
+      if (user.role !== "admin") {
+        console.log(`[seed-status] Access denied: user ${user.email} has role '${user.role}', not 'admin'. Seed may not have run yet or user was not updated.`);
+        return res.status(403).json({
+          success: false,
+          error: `You are not an admin yet (current role: '${user.role}')`,
+          hint: "The production seed should have set your role to 'admin'. Check deployment logs for '[seed] Completed:' message to verify seed ran successfully.",
+          userEmail: user.email,
+          currentRole: user.role,
+          seedStatusLogged: true,
+        });
+      }
+
       res.json({
         success: true,
         data: status,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
+      console.error(`[seed-status] Error: ${error instanceof Error ? error.message : String(error)}`);
       res.status(500).json({ 
         success: false, 
         error: error instanceof Error ? error.message : "Unknown error" 
       });
     }
   });
+
+  // Apply authentication and admin role check to ALL other admin routes
+  router.use(isAuthenticated, requireAdmin);
 
   router.get("/dashboard", async (req, res) => {
     try {

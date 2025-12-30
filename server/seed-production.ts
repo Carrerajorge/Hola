@@ -12,8 +12,10 @@ const GEMINI_MODELS_TO_ENABLE = [
 
 interface SeedResult {
   userUpdated: boolean;
+  userMissing: boolean;
   modelsEnabled: number;
   modelsAlreadyEnabled: number;
+  modelsMissing: number;
   errors: string[];
 }
 
@@ -26,8 +28,10 @@ function shouldRunSeed(): boolean {
 export async function seedProductionData(): Promise<SeedResult> {
   const result: SeedResult = {
     userUpdated: false,
+    userMissing: false,
     modelsEnabled: 0,
     modelsAlreadyEnabled: 0,
+    modelsMissing: 0,
     errors: [],
   };
 
@@ -57,7 +61,8 @@ export async function seedProductionData(): Promise<SeedResult> {
         console.log(`[seed] User ${ADMIN_EMAIL} already admin (no change)`);
       }
     } else {
-      console.log(`[seed] User ${ADMIN_EMAIL} not found - will be set on first login`);
+      result.userMissing = true;
+      console.log(`[seed] WARNING: User ${ADMIN_EMAIL} not found - user must login at least once before seed can set admin role`);
     }
   } catch (error) {
     const errMsg = `User update failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -80,6 +85,14 @@ export async function seedProductionData(): Promise<SeedResult> {
           inArray(aiModels.modelId, GEMINI_MODELS_TO_ENABLE)
         )
       );
+
+    const foundModelIds = geminiModels.map(m => m.modelId);
+    const missingModels = GEMINI_MODELS_TO_ENABLE.filter(id => !foundModelIds.includes(id));
+    result.modelsMissing = missingModels.length;
+
+    if (missingModels.length > 0) {
+      console.log(`[seed] WARNING: Missing ${missingModels.length} model rows: ${missingModels.join(", ")} - these must exist in ai_models table`);
+    }
 
     for (const model of geminiModels) {
       if (model.isEnabled === "true") {
@@ -104,7 +117,7 @@ export async function seedProductionData(): Promise<SeedResult> {
     }
 
     if (geminiModels.length === 0) {
-      console.log(`[seed] No Gemini models found in database`);
+      console.log(`[seed] WARNING: No Gemini models found in ai_models table - run initial migration/seed first`);
     }
   } catch (error) {
     const errMsg = `Models query failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -112,7 +125,7 @@ export async function seedProductionData(): Promise<SeedResult> {
     console.error(`[seed] ${errMsg}`);
   }
 
-  console.log(`[seed] Completed: userUpdated=${result.userUpdated}, modelsEnabled=${result.modelsEnabled}, modelsAlreadyEnabled=${result.modelsAlreadyEnabled}, errors=${result.errors.length}`);
+  console.log(`[seed] Completed: userUpdated=${result.userUpdated}, userMissing=${result.userMissing}, modelsEnabled=${result.modelsEnabled}, modelsAlreadyEnabled=${result.modelsAlreadyEnabled}, modelsMissing=${result.modelsMissing}, errors=${result.errors.length}`);
   
   return result;
 }
@@ -120,7 +133,14 @@ export async function seedProductionData(): Promise<SeedResult> {
 export async function getSeedStatus(): Promise<{
   adminUser: { email: string; role: string } | null;
   enabledModels: { name: string; provider: string; modelId: string }[];
-  geminiModelsStatus: { modelId: string; isEnabled: boolean }[];
+  geminiModelsStatus: { modelId: string; isEnabled: boolean; exists: boolean }[];
+  summary: {
+    userExists: boolean;
+    userIsAdmin: boolean;
+    geminiModelsTotal: number;
+    geminiModelsEnabled: number;
+    geminiModelsMissing: number;
+  };
 }> {
   const adminUser = await db
     .select({ email: users.email, role: users.role })
@@ -150,12 +170,33 @@ export async function getSeedStatus(): Promise<{
       )
     );
 
+  const foundModelIds = geminiModels.map(m => m.modelId);
+  const geminiModelsStatus = GEMINI_MODELS_TO_ENABLE.map(modelId => {
+    const found = geminiModels.find(m => m.modelId === modelId);
+    return {
+      modelId,
+      exists: !!found,
+      isEnabled: found?.isEnabled === "true",
+    };
+  });
+
+  const userExists = adminUser.length > 0;
+  const userIsAdmin = userExists && adminUser[0].role === "admin";
+  const geminiModelsEnabled = geminiModelsStatus.filter(m => m.isEnabled).length;
+  const geminiModelsMissing = geminiModelsStatus.filter(m => !m.exists).length;
+
+  console.log(`[seed-status] userExists=${userExists}, userIsAdmin=${userIsAdmin}, geminiModelsEnabled=${geminiModelsEnabled}/${GEMINI_MODELS_TO_ENABLE.length}, geminiModelsMissing=${geminiModelsMissing}`);
+
   return {
     adminUser: adminUser.length > 0 ? adminUser[0] : null,
     enabledModels,
-    geminiModelsStatus: geminiModels.map(m => ({
-      modelId: m.modelId,
-      isEnabled: m.isEnabled === "true"
-    })),
+    geminiModelsStatus,
+    summary: {
+      userExists,
+      userIsAdmin,
+      geminiModelsTotal: GEMINI_MODELS_TO_ENABLE.length,
+      geminiModelsEnabled,
+      geminiModelsMissing,
+    },
   };
 }
