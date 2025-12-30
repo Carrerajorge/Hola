@@ -71,6 +71,8 @@ import {
   type LibraryCollection, type InsertLibraryCollection,
   type LibraryStorageStats,
   type LibraryActivityRecord,
+  type ChatMessageAnalysis, type InsertChatMessageAnalysis,
+  chatMessageAnalysis,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
   chatRuns, toolInvocations,
   gpts, gptCategories, gptVersions, gptKnowledge, gptActions, sidebarPinnedGpts, users,
@@ -380,6 +382,10 @@ export interface IStorage {
   // Library Activity
   logLibraryActivity(activity: { userId: string; fileId?: number; folderId?: number; collectionId?: number; activityType: string; metadata?: object }): Promise<void>;
   getLibraryActivity(userId: string, limit?: number): Promise<LibraryActivityRecord[]>;
+  // Chat Message Analysis operations
+  createChatMessageAnalysis(data: InsertChatMessageAnalysis): Promise<ChatMessageAnalysis>;
+  getChatMessageAnalysisByUploadId(uploadId: string): Promise<ChatMessageAnalysis | undefined>;
+  updateChatMessageAnalysis(id: string, updates: Partial<InsertChatMessageAnalysis>): Promise<ChatMessageAnalysis | undefined>;
 }
 
 export class MemStorage implements IStorage {
@@ -2486,6 +2492,29 @@ export class MemStorage implements IStorage {
       .where(eq(libraryActivity.userId, userId))
       .orderBy(desc(libraryActivity.createdAt))
       .limit(limit);
+  }
+
+  // Chat Message Analysis operations
+  async createChatMessageAnalysis(data: InsertChatMessageAnalysis): Promise<ChatMessageAnalysis> {
+    const [result] = await db.insert(chatMessageAnalysis).values(data).returning();
+    return result;
+  }
+
+  async getChatMessageAnalysisByUploadId(uploadId: string): Promise<ChatMessageAnalysis | undefined> {
+    const [result] = await db.select()
+      .from(chatMessageAnalysis)
+      .where(eq(chatMessageAnalysis.uploadId, uploadId))
+      .orderBy(desc(chatMessageAnalysis.createdAt))
+      .limit(1);
+    return result;
+  }
+
+  async updateChatMessageAnalysis(id: string, updates: Partial<InsertChatMessageAnalysis>): Promise<ChatMessageAnalysis | undefined> {
+    const [result] = await db.update(chatMessageAnalysis)
+      .set(updates)
+      .where(eq(chatMessageAnalysis.id, id))
+      .returning();
+    return result;
   }
 }
 

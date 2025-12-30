@@ -2111,3 +2111,30 @@ export const insertSpreadsheetAnalysisOutputSchema = createInsertSchema(spreadsh
 
 export type InsertSpreadsheetAnalysisOutput = z.infer<typeof insertSpreadsheetAnalysisOutputSchema>;
 export type SpreadsheetAnalysisOutput = typeof spreadsheetAnalysisOutputs.$inferSelect;
+
+// Chat Message Analysis - Links chat messages with document analysis sessions
+export const chatMessageAnalysis = pgTable('chat_message_analysis', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  messageId: varchar('message_id').references(() => chatMessages.id, { onDelete: 'cascade' }),
+  uploadId: varchar('upload_id').references(() => spreadsheetUploads.id, { onDelete: 'cascade' }),
+  sessionId: varchar('session_id').references(() => spreadsheetAnalysisSessions.id, { onDelete: 'set null' }),
+  status: text('status').notNull().default('pending'), // pending, analyzing, completed, failed
+  scope: text('scope').notNull().default('all'), // active, selected, all
+  sheetsToAnalyze: text('sheets_to_analyze').array(),
+  startedAt: timestamp('started_at'),
+  completedAt: timestamp('completed_at'),
+  summary: text('summary'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => [
+  index('chat_message_analysis_message_idx').on(table.messageId),
+  index('chat_message_analysis_upload_idx').on(table.uploadId),
+  index('chat_message_analysis_session_idx').on(table.sessionId),
+]);
+
+export const insertChatMessageAnalysisSchema = createInsertSchema(chatMessageAnalysis).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertChatMessageAnalysis = z.infer<typeof insertChatMessageAnalysisSchema>;
+export type ChatMessageAnalysis = typeof chatMessageAnalysis.$inferSelect;
