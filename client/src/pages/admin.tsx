@@ -105,7 +105,7 @@ function DashboardSection() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/dashboard"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/dashboard");
+      const res = await fetch("/api/admin/dashboard", { credentials: "include" });
       return res.json();
     },
     refetchInterval: 30000
@@ -330,7 +330,7 @@ function UsersSection() {
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["/api/admin/users"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/users");
+      const res = await fetch("/api/admin/users", { credentials: "include" });
       const data = await res.json();
       return Array.isArray(data) ? data : [];
     }
@@ -341,7 +341,8 @@ function UsersSection() {
       const res = await fetch(`/api/admin/users/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates)
+        body: JSON.stringify(updates),
+        credentials: "include"
       });
       return res.json();
     },
@@ -353,7 +354,7 @@ function UsersSection() {
 
   const deleteUserMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/users/${id}`, { method: "DELETE" });
+      await fetch(`/api/admin/users/${id}`, { method: "DELETE", credentials: "include" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
@@ -365,7 +366,8 @@ function UsersSection() {
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(userData)
+        body: JSON.stringify(userData),
+        credentials: "include"
       });
       if (!res.ok) {
         const error = await res.json();
@@ -788,7 +790,7 @@ function ConversationsSection() {
   const { data: statsData } = useQuery({
     queryKey: ["/api/admin/conversations/stats/summary"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/conversations/stats/summary");
+      const res = await fetch("/api/admin/conversations/stats/summary", { credentials: "include" });
       return res.json();
     }
   });
@@ -805,7 +807,7 @@ function ConversationsSection() {
       if (filters.dateTo) params.set("dateTo", filters.dateTo);
       if (filters.minTokens) params.set("minTokens", filters.minTokens);
       if (filters.maxTokens) params.set("maxTokens", filters.maxTokens);
-      const res = await fetch(`/api/admin/conversations?${params}`);
+      const res = await fetch(`/api/admin/conversations?${params}`, { credentials: "include" });
       return res.json();
     }
   });
@@ -814,7 +816,7 @@ function ConversationsSection() {
     queryKey: ["/api/admin/conversations", viewingConversation?.id],
     queryFn: async () => {
       if (!viewingConversation?.id) return null;
-      const res = await fetch(`/api/admin/conversations/${viewingConversation.id}`);
+      const res = await fetch(`/api/admin/conversations/${viewingConversation.id}`, { credentials: "include" });
       return res.json();
     },
     enabled: !!viewingConversation?.id
@@ -825,7 +827,8 @@ function ConversationsSection() {
       const res = await fetch(`/api/admin/conversations/${id}/flag`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ flagStatus })
+        body: JSON.stringify({ flagStatus }),
+        credentials: "include"
       });
       return res.json();
     },
@@ -840,7 +843,8 @@ function ConversationsSection() {
       const res = await fetch(`/api/admin/conversations/${id}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note })
+        body: JSON.stringify({ note }),
+        credentials: "include"
       });
       return res.json();
     },
@@ -865,7 +869,8 @@ function ConversationsSection() {
         const res = await fetch("/api/admin/conversations/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query })
+          body: JSON.stringify({ query }),
+          credentials: "include"
         });
         const data = await res.json();
         setSearchResults(data.results || []);
@@ -1500,7 +1505,7 @@ function AIModelsSection() {
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ["/api/admin/models/stats"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/models/stats");
+      const res = await fetch("/api/admin/models/stats", { credentials: "include" });
       return res.json();
     }
   });
@@ -1513,7 +1518,7 @@ function AIModelsSection() {
       if (providerFilter !== "all") params.append("provider", providerFilter);
       if (typeFilter !== "all") params.append("type", typeFilter);
       if (statusFilter !== "all") params.append("status", statusFilter);
-      const res = await fetch(`/api/admin/models/filtered?${params}`);
+      const res = await fetch(`/api/admin/models/filtered?${params}`, { credentials: "include" });
       return res.json();
     }
   });
@@ -1530,7 +1535,7 @@ function AIModelsSection() {
   const syncAll = async () => {
     setIsSyncing(true);
     try {
-      await fetch("/api/admin/models/sync", { method: "POST" });
+      await fetch("/api/admin/models/sync", { method: "POST", credentials: "include" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models/stats"] });
       refetch();
@@ -1544,7 +1549,8 @@ function AIModelsSection() {
       const res = await fetch(`/api/admin/models/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates)
+        body: JSON.stringify(updates),
+        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to update model");
       return res.json();
@@ -1559,7 +1565,7 @@ function AIModelsSection() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/models/${id}`, { method: "DELETE" });
+      await fetch(`/api/admin/models/${id}`, { method: "DELETE", credentials: "include" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/models"] });
@@ -1909,7 +1915,7 @@ function PaymentsSection() {
   const { data: payments = [], isLoading } = useQuery({
     queryKey: ["/api/admin/payments"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/payments");
+      const res = await fetch("/api/admin/payments", { credentials: "include" });
       return res.json();
     }
   });
@@ -1917,7 +1923,7 @@ function PaymentsSection() {
   const { data: stats } = useQuery({
     queryKey: ["/api/admin/payments/stats"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/payments/stats");
+      const res = await fetch("/api/admin/payments/stats", { credentials: "include" });
       return res.json();
     }
   });
@@ -1981,7 +1987,7 @@ function InvoicesSection() {
   const { data: invoices = [], isLoading } = useQuery({
     queryKey: ["/api/admin/invoices"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/invoices");
+      const res = await fetch("/api/admin/invoices", { credentials: "include" });
       return res.json();
     }
   });
@@ -1991,7 +1997,8 @@ function InvoicesSection() {
       const res = await fetch("/api/admin/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(invoice)
+        body: JSON.stringify(invoice),
+        credentials: "include"
       });
       return res.json();
     },
@@ -2097,7 +2104,7 @@ function DatabaseSection() {
   const { data: healthData, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
     queryKey: ["/api/admin/database/health"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/database/health");
+      const res = await fetch("/api/admin/database/health", { credentials: "include" });
       return res.json();
     },
     refetchInterval: 30000
@@ -2106,7 +2113,7 @@ function DatabaseSection() {
   const { data: tablesData, isLoading: tablesLoading } = useQuery({
     queryKey: ["/api/admin/database/tables"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/database/tables");
+      const res = await fetch("/api/admin/database/tables", { credentials: "include" });
       return res.json();
     }
   });
@@ -2115,7 +2122,7 @@ function DatabaseSection() {
     queryKey: ["/api/admin/database/tables", selectedTable],
     queryFn: async () => {
       if (!selectedTable) return null;
-      const res = await fetch(`/api/admin/database/tables/${selectedTable}`);
+      const res = await fetch(`/api/admin/database/tables/${selectedTable}`, { credentials: "include" });
       return res.json();
     },
     enabled: !!selectedTable
@@ -2124,7 +2131,7 @@ function DatabaseSection() {
   const { data: indexesData } = useQuery({
     queryKey: ["/api/admin/database/indexes"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/database/indexes");
+      const res = await fetch("/api/admin/database/indexes", { credentials: "include" });
       return res.json();
     }
   });
@@ -2135,7 +2142,8 @@ function DatabaseSection() {
       const res = await fetch("/api/admin/database/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: sqlQuery })
+        body: JSON.stringify({ query: sqlQuery }),
+        credentials: "include"
       });
       const result = await res.json();
       setQueryResult(result);
@@ -2511,7 +2519,7 @@ function SecuritySection() {
   const { data: policies = [], isLoading } = useQuery({
     queryKey: ["/api/admin/security/policies"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/security/policies");
+      const res = await fetch("/api/admin/security/policies", { credentials: "include" });
       return res.json();
     }
   });
@@ -2519,7 +2527,7 @@ function SecuritySection() {
   const { data: stats } = useQuery({
     queryKey: ["/api/admin/security/stats"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/security/stats");
+      const res = await fetch("/api/admin/security/stats", { credentials: "include" });
       return res.json();
     }
   });
@@ -2534,7 +2542,7 @@ function SecuritySection() {
         ...(auditFilters.dateFrom && { date_from: auditFilters.dateFrom }),
         ...(auditFilters.dateTo && { date_to: auditFilters.dateTo }),
       });
-      const res = await fetch(`/api/admin/security/audit-logs?${params}`);
+      const res = await fetch(`/api/admin/security/audit-logs?${params}`, { credentials: "include" });
       return res.json();
     }
   });
@@ -2542,7 +2550,7 @@ function SecuritySection() {
   const { data: recentLogs = [] } = useQuery({
     queryKey: ["/api/admin/security/logs"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/security/logs?limit=10");
+      const res = await fetch("/api/admin/security/logs?limit=10", { credentials: "include" });
       return res.json();
     }
   });
@@ -2552,7 +2560,8 @@ function SecuritySection() {
       const res = await fetch("/api/admin/security/policies", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(policy)
+        body: JSON.stringify(policy),
+        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to create policy");
       return res.json();
@@ -2570,7 +2579,8 @@ function SecuritySection() {
       const res = await fetch(`/api/admin/security/policies/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
+        body: JSON.stringify(data),
+        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to update policy");
       return res.json();
@@ -2584,7 +2594,7 @@ function SecuritySection() {
 
   const deletePolicyMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/admin/security/policies/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/security/policies/${id}`, { method: "DELETE", credentials: "include" });
       if (!res.ok) throw new Error("Failed to delete policy");
     },
     onSuccess: () => {
@@ -2598,7 +2608,8 @@ function SecuritySection() {
       const res = await fetch(`/api/admin/security/policies/${id}/toggle`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isEnabled })
+        body: JSON.stringify({ isEnabled }),
+        credentials: "include"
       });
       if (!res.ok) throw new Error("Failed to toggle policy");
       return res.json();
@@ -3263,7 +3274,7 @@ function ReportsSection() {
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: ["/api/admin/reports/templates"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/reports/templates");
+      const res = await fetch("/api/admin/reports/templates", { credentials: "include" });
       return res.json();
     }
   });
@@ -3271,7 +3282,7 @@ function ReportsSection() {
   const { data: generatedReportsData, isLoading: reportsLoading, refetch: refetchReports } = useQuery({
     queryKey: ["/api/admin/reports/generated", historyPage],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/reports/generated?page=${historyPage}&limit=20`);
+      const res = await fetch(`/api/admin/reports/generated?page=${historyPage}&limit=20`, { credentials: "include" });
       return res.json();
     },
     refetchInterval: 5000
@@ -3282,7 +3293,8 @@ function ReportsSection() {
       const res = await fetch("/api/admin/reports/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
+        body: JSON.stringify(data),
+        credentials: "include"
       });
       return res.json();
     },
@@ -3294,7 +3306,7 @@ function ReportsSection() {
 
   const deleteReportMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/admin/reports/generated/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/reports/generated/${id}`, { method: "DELETE", credentials: "include" });
       return res.json();
     },
     onSuccess: () => {
@@ -3629,7 +3641,7 @@ function SettingsSection() {
   const { data: settingsData, isLoading } = useQuery({
     queryKey: ["/api/admin/settings"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/settings");
+      const res = await fetch("/api/admin/settings", { credentials: "include" });
       return res.json();
     }
   });
@@ -3637,7 +3649,7 @@ function SettingsSection() {
   const { data: aiModels = [] } = useQuery({
     queryKey: ["/api/ai-models"],
     queryFn: async () => {
-      const res = await fetch("/api/ai-models");
+      const res = await fetch("/api/ai-models", { credentials: "include" });
       return res.json();
     }
   });
@@ -3658,7 +3670,8 @@ function SettingsSection() {
       const res = await fetch(`/api/admin/settings/${key}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value })
+        body: JSON.stringify({ value }),
+        credentials: "include"
       });
       return res.json();
     },
@@ -3676,7 +3689,8 @@ function SettingsSection() {
       const res = await fetch("/api/admin/settings/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings })
+        body: JSON.stringify({ settings }),
+        credentials: "include"
       });
       return res.json();
     },
@@ -3694,7 +3708,8 @@ function SettingsSection() {
     mutationFn: async (key: string) => {
       const res = await fetch(`/api/admin/settings/reset/${key}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        credentials: "include"
       });
       return res.json();
     },
@@ -4116,7 +4131,7 @@ function AgenticEngineSection() {
   const { data: toolsData, isLoading: toolsLoading, refetch: refetchTools } = useQuery({
     queryKey: ["/api/admin/agent/tools"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/agent/tools");
+      const res = await fetch("/api/admin/agent/tools", { credentials: "include" });
       return res.json();
     }
   });
@@ -4124,7 +4139,7 @@ function AgenticEngineSection() {
   const { data: gapsData, refetch: refetchGaps } = useQuery({
     queryKey: ["/api/admin/agent/gaps"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/agent/gaps");
+      const res = await fetch("/api/admin/agent/gaps", { credentials: "include" });
       return res.json();
     }
   });
@@ -4132,7 +4147,7 @@ function AgenticEngineSection() {
   const { data: memoryData, refetch: refetchMemory } = useQuery({
     queryKey: ["/api/admin/agent/memory/stats"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/agent/memory/stats");
+      const res = await fetch("/api/admin/agent/memory/stats", { credentials: "include" });
       return res.json();
     }
   });
@@ -4140,7 +4155,7 @@ function AgenticEngineSection() {
   const { data: circuitsData, refetch: refetchCircuits } = useQuery({
     queryKey: ["/api/admin/agent/circuits"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/agent/circuits");
+      const res = await fetch("/api/admin/agent/circuits", { credentials: "include" });
       return res.json();
     }
   });
@@ -4157,7 +4172,8 @@ function AgenticEngineSection() {
       const res = await fetch("/api/admin/agent/complexity/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: analyzerPrompt })
+        body: JSON.stringify({ prompt: analyzerPrompt }),
+        credentials: "include"
       });
       const result = await res.json();
       setAnalysisResult(result);
@@ -4634,7 +4650,7 @@ function ExcelManagerSection() {
   const { data: documents = [], isLoading, refetch } = useQuery({
     queryKey: ["/api/admin/excel/list"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/excel/list");
+      const res = await fetch("/api/admin/excel/list", { credentials: "include" });
       if (!res.ok) {
         return [
           { id: '1', name: 'Reporte Q4 2024.xlsx', sheets: 3, size: 45000, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: 'Admin' },
@@ -4666,7 +4682,7 @@ function ExcelManagerSection() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await fetch(`/api/admin/excel/${id}`, { method: 'DELETE' });
+      await fetch(`/api/admin/excel/${id}`, { method: 'DELETE', credentials: 'include' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/excel/list"] });
@@ -4695,7 +4711,7 @@ function ExcelManagerSection() {
 
   const openDocument = async (doc: ExcelDocument) => {
     try {
-      const response = await fetch(`/api/admin/excel/${doc.id}`);
+      const response = await fetch(`/api/admin/excel/${doc.id}`, { credentials: "include" });
       if (response.ok) {
         const data = await response.json();
         setCurrentDoc({ ...doc, data: data.data });
