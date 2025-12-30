@@ -15,6 +15,15 @@ const analyzeRequestSchema = z.object({
   prompt: z.string().optional(),
 });
 
+function getFileExtension(filename: string): string {
+  return (filename.split('.').pop() || '').toLowerCase();
+}
+
+function isSpreadsheetFile(filename: string): boolean {
+  const ext = getFileExtension(filename);
+  return ['xlsx', 'xls', 'csv', 'tsv'].includes(ext);
+}
+
 export function createChatRoutes(): Router {
   const router = Router();
 
@@ -35,23 +44,28 @@ export function createChatRoutes(): Router {
         return res.status(404).json({ error: "Upload not found" });
       }
 
-      const sheets = await getSheets(uploadId);
-      if (sheets.length === 0) {
-        return res.status(400).json({ error: "No sheets found for this upload" });
-      }
-
       let targetSheets: string[];
-      if (scope === "selected" && sheetsToAnalyze && sheetsToAnalyze.length > 0) {
-        targetSheets = sheetsToAnalyze.filter(name =>
-          sheets.some(s => s.name === name)
-        );
-        if (targetSheets.length === 0) {
-          return res.status(400).json({ error: "No valid sheets specified for analysis" });
+      const isSpreadsheet = isSpreadsheetFile(upload.originalFilename || '');
+
+      if (isSpreadsheet) {
+        const sheets = await getSheets(uploadId);
+        if (sheets.length === 0) {
+          targetSheets = ["Sheet1"];
+        } else if (scope === "selected" && sheetsToAnalyze && sheetsToAnalyze.length > 0) {
+          targetSheets = sheetsToAnalyze.filter(name =>
+            sheets.some(s => s.name === name)
+          );
+          if (targetSheets.length === 0) {
+            return res.status(400).json({ error: "No valid sheets specified for analysis" });
+          }
+        } else if (scope === "active") {
+          targetSheets = [sheets[0].name];
+        } else {
+          targetSheets = sheets.map(s => s.name);
         }
-      } else if (scope === "active") {
-        targetSheets = [sheets[0].name];
       } else {
-        targetSheets = sheets.map(s => s.name);
+        const baseName = (upload.originalFilename || 'Document').replace(/\.[^.]+$/, '');
+        targetSheets = [baseName];
       }
 
       const chatAnalysis = await storage.createChatMessageAnalysis({
@@ -105,49 +119,89 @@ export function createChatRoutes(): Router {
         return res.status(404).json({ error: "Analysis not found for this upload" });
       }
 
-      let progress = { completedJobs: 0, totalJobs: 0 };
-      let perSheet: Array<{
+      interface SheetStatus {
         sheetName: string;
         status: "queued" | "running" | "done" | "failed";
-        results?: { tables: any[]; metrics: any; charts: any[]; summary: string };
         error?: string;
-      }> = [];
-      let crossSheetSummary: string | undefined;
+      }
+
+      interface SheetResult {
+        sheetName: string;
+        generatedCode?: string;
+        summary?: string;
+        metrics?: Array<{ label: string; value: string }>;
+        preview?: { headers: string[]; rows: any[][] };
+        error?: string;
+      }
+
+      let progressData = { 
+        currentSheet: 0, 
+        totalSheets: 0,
+        sheets: [] as SheetStatus[]
+      };
+      let resultsData: {
+        crossSheetSummary?: string;
+        sheets: SheetResult[];
+      } = { sheets: [] };
       let overallStatus: "pending" | "analyzing" | "completed" | "failed" = chatAnalysis.status as any;
+      let errorMessage: string | undefined;
 
       if (chatAnalysis.sessionId) {
         try {
           const analysisProgress = await getAnalysisProgress(chatAnalysis.sessionId);
-          progress = {
-            completedJobs: analysisProgress.completedJobs,
-            totalJobs: analysisProgress.totalJobs,
+          
+          progressData = {
+            currentSheet: analysisProgress.completedJobs,
+            totalSheets: analysisProgress.totalJobs,
+            sheets: analysisProgress.jobs.map(job => ({
+              sheetName: job.sheetName,
+              status: job.status,
+              error: job.error,
+            })),
           };
-
-          perSheet = analysisProgress.jobs.map(job => ({
-            sheetName: job.sheetName,
-            status: job.status,
-            error: job.error,
-          }));
 
           if (analysisProgress.status === "completed" || analysisProgress.status === "failed") {
             const results = await getAnalysisResults(chatAnalysis.sessionId);
             if (results) {
-              crossSheetSummary = results.crossSheetSummary;
+              resultsData.crossSheetSummary = results.crossSheetSummary;
               
-              perSheet = perSheet.map(sheet => {
-                const sheetResults = results.perSheet[sheet.sheetName];
-                if (sheetResults && sheet.status === "done") {
+              resultsData.sheets = analysisProgress.jobs.map(job => {
+                const sheetResults = results.perSheet[job.sheetName];
+                if (!sheetResults) {
                   return {
-                    ...sheet,
-                    results: {
-                      tables: sheetResults.outputs?.tables || [],
-                      metrics: sheetResults.outputs?.metrics || {},
-                      charts: sheetResults.outputs?.charts || [],
-                      summary: sheetResults.summary || "",
-                    },
+                    sheetName: job.sheetName,
+                    error: job.error || "No results available",
                   };
                 }
-                return sheet;
+
+                const metricsObj = sheetResults.outputs?.metrics || {};
+                const metricsArray = Object.entries(metricsObj).map(([label, value]) => ({
+                  label,
+                  value: typeof value === 'object' ? JSON.stringify(value) : String(value),
+                }));
+
+                let preview: { headers: string[]; rows: any[][] } | undefined;
+                const tables = sheetResults.outputs?.tables || [];
+                if (tables.length > 0 && Array.isArray(tables[0])) {
+                  const tableData = tables[0] as any[];
+                  if (tableData.length > 0) {
+                    const firstRow = tableData[0];
+                    if (typeof firstRow === 'object' && firstRow !== null) {
+                      preview = {
+                        headers: Object.keys(firstRow),
+                        rows: tableData.slice(0, 10).map(row => Object.values(row)),
+                      };
+                    }
+                  }
+                }
+
+                return {
+                  sheetName: job.sheetName,
+                  generatedCode: sheetResults.generatedCode,
+                  summary: sheetResults.summary,
+                  metrics: metricsArray.length > 0 ? metricsArray : undefined,
+                  preview,
+                };
               });
             }
 
@@ -157,7 +211,7 @@ export function createChatRoutes(): Router {
               await storage.updateChatMessageAnalysis(chatAnalysis.id, {
                 status: analysisProgress.status,
                 completedAt: new Date(),
-                summary: crossSheetSummary,
+                summary: resultsData.crossSheetSummary,
               });
             }
           } else {
@@ -165,15 +219,16 @@ export function createChatRoutes(): Router {
           }
         } catch (progressError: any) {
           console.error("[ChatRoutes] Error getting analysis progress:", progressError);
+          errorMessage = progressError.message;
         }
       }
 
       res.json({
         analysisId: chatAnalysis.id,
         status: overallStatus,
-        progress,
-        perSheet,
-        crossSheetSummary,
+        progress: progressData,
+        results: resultsData.sheets.length > 0 ? resultsData : undefined,
+        error: errorMessage,
         startedAt: chatAnalysis.startedAt?.toISOString(),
         completedAt: chatAnalysis.completedAt?.toISOString(),
       });
