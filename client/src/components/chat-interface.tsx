@@ -819,11 +819,42 @@ interface UploadedFile {
   storagePath?: string;
   status?: string;
   content?: string;
+  analysisId?: string;
   spreadsheetData?: {
     uploadId: string;
     sheets: Array<{ name: string; rowCount: number; columnCount: number }>;
     previewData?: { headers: string[]; data: any[][] };
   };
+}
+
+function isAnalyzableFile(filename: string): boolean {
+  const ext = filename.toLowerCase().split('.').pop();
+  return ['xlsx', 'xls', 'csv', 'pdf', 'docx'].includes(ext || '');
+}
+
+async function triggerDocumentAnalysis(
+  uploadId: string, 
+  filename: string,
+  onAnalysisStarted: (analysisId: string) => void
+): Promise<void> {
+  if (!isAnalyzableFile(filename)) return;
+  
+  try {
+    const response = await fetch(`/api/chat/uploads/${uploadId}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'all' })
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.sessionId || data.analysisId) {
+        onAnalysisStarted(data.sessionId || data.analysisId);
+      }
+    }
+  } catch (err) {
+    console.error('Analysis failed to start:', err);
+  }
 }
 
 export function ChatInterface({ 
@@ -2226,6 +2257,12 @@ export function ChatInterface({
                   data: spreadsheetResult.firstSheetPreview.data || [],
                 };
               }
+              
+              triggerDocumentAnalysis(uploadId, file.name, (analysisId) => {
+                setUploadedFiles((prev) =>
+                  prev.map((f) => f.id === tempId ? { ...f, analysisId } : f)
+                );
+              });
             }
           } catch (spreadsheetError) {
             console.warn("Failed to parse spreadsheet:", spreadsheetError);
@@ -2262,6 +2299,14 @@ export function ChatInterface({
           );
 
           pollFileStatusFast(registeredFile.id, tempId);
+          
+          if (isAnalyzableFile(file.name) && !isExcel) {
+            triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
+              setUploadedFiles((prev) =>
+                prev.map((f) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
+              );
+            });
+          }
         }
       } catch (error) {
         console.error("File upload error:", error);

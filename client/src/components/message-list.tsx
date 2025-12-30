@@ -61,6 +61,7 @@ import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { SuggestedReplies, generateSuggestions } from "@/components/suggested-replies";
 import { getFileTheme, getFileCategory } from "@/lib/fileTypeTheme";
 import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
+import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResults";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -505,15 +506,24 @@ const AttachmentList = memo(function AttachmentList({
             />
           </div>
         ) : att.spreadsheetData ? (
-          <ChatSpreadsheetViewer
-            key={i}
-            uploadId={att.spreadsheetData.uploadId}
-            filename={att.name}
-            sheets={att.spreadsheetData.sheets}
-            previewData={att.spreadsheetData.previewData}
-            onDownload={() => onOpenPreview?.(att)}
-            onExpand={() => window.open(`/spreadsheet-analyzer?uploadId=${att.spreadsheetData!.uploadId}`, '_blank')}
-          />
+          <div key={i} className="flex flex-col gap-3">
+            <ChatSpreadsheetViewer
+              uploadId={att.spreadsheetData.uploadId}
+              filename={att.name}
+              sheets={att.spreadsheetData.sheets}
+              previewData={att.spreadsheetData.previewData}
+              onDownload={() => onOpenPreview?.(att)}
+              onExpand={() => window.open(`/spreadsheet-analyzer?uploadId=${att.spreadsheetData!.uploadId}`, '_blank')}
+            />
+            {att.spreadsheetData.analysisId && (
+              <DocumentAnalysisResults
+                uploadId={att.spreadsheetData.uploadId}
+                filename={att.name}
+                analysisId={att.spreadsheetData.analysisId}
+                sessionId={att.spreadsheetData.sessionId}
+              />
+            )}
+          </div>
         ) : (
           (() => {
             const attTheme = getFileTheme(att.name, att.mimeType);
