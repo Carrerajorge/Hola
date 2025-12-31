@@ -44,6 +44,57 @@ export interface ColumnTypeInfo {
   type: "text" | "number" | "date" | "boolean" | "mixed" | "empty";
   sampleValues?: any[];
   nullCount?: number;
+  statistics?: ColumnStatistics;
+}
+
+export interface ColumnStatistics {
+  min?: number;
+  max?: number;
+  avg?: number;
+  sum?: number;
+  uniqueCount?: number;
+  uniqueValues?: any[];
+}
+
+export interface InterSheetReference {
+  formula: string;
+  sourceSheet: string;
+  sourceCell: string;
+  targetSheet: string;
+  targetCell?: string;
+}
+
+export interface CrossSheetRelationship {
+  sourceSheet: string;
+  targetSheet: string;
+  linkingColumns: string[];
+}
+
+export interface SheetSummary {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  columnTypes: Record<string, string>;
+}
+
+export interface CrossSheetSummary {
+  totalSheets: number;
+  totalRows: number;
+  totalColumns: number;
+  totalDataPoints: number;
+  commonHeaders: string[];
+  relationships: CrossSheetRelationship[];
+  naturalLanguageSummary: string;
+}
+
+export interface WorkbookSummary {
+  totalSheets: number;
+  totalRows: number;
+  totalColumns: number;
+  sheetSummaries: SheetSummary[];
+  crossSheetRelationships: CrossSheetRelationship[];
+  interSheetReferences: InterSheetReference[];
+  crossSheetSummary: CrossSheetSummary;
 }
 
 export interface FileValidationResult {
@@ -525,6 +576,7 @@ function analyzeColumnType(name: string, values: any[]): ColumnTypeInfo {
       type: "empty",
       sampleValues: [],
       nullCount,
+      statistics: { uniqueCount: 0 },
     };
   }
 
@@ -556,13 +608,39 @@ function analyzeColumnType(name: string, values: any[]): ColumnTypeInfo {
   }
 
   const sampleValues = nonNullValues.slice(0, 5);
+  const statistics = computeColumnStatistics(nonNullValues, inferredType);
 
   return {
     name,
     type: inferredType,
     sampleValues,
     nullCount,
+    statistics,
   };
+}
+
+function computeColumnStatistics(values: any[], type: string): ColumnStatistics {
+  const uniqueSet = new Set(values.map(v => String(v)));
+  const statistics: ColumnStatistics = {
+    uniqueCount: uniqueSet.size,
+  };
+
+  if (type === "number") {
+    const numericValues = values
+      .map(v => typeof v === "number" ? v : parseFloat(String(v)))
+      .filter(v => !isNaN(v));
+    
+    if (numericValues.length > 0) {
+      statistics.min = Math.min(...numericValues);
+      statistics.max = Math.max(...numericValues);
+      statistics.sum = numericValues.reduce((a, b) => a + b, 0);
+      statistics.avg = statistics.sum / numericValues.length;
+    }
+  } else if (type === "text" && uniqueSet.size <= 20) {
+    statistics.uniqueValues = Array.from(uniqueSet).slice(0, 20);
+  }
+
+  return statistics;
 }
 
 function detectValueType(value: any): "number" | "text" | "date" | "boolean" {
@@ -613,6 +691,175 @@ function isLikelyDateString(value: string): boolean {
   return datePatterns.some((pattern) => pattern.test(value.trim()));
 }
 
+export function generateCrossSheetSummary(sheets: SheetInfo[]): CrossSheetSummary {
+  const totalSheets = sheets.length;
+  const totalRows = sheets.reduce((sum, s) => sum + s.rowCount, 0);
+  const totalColumns = sheets.reduce((sum, s) => sum + s.columnCount, 0);
+  const totalDataPoints = sheets.reduce((sum, s) => sum + (s.rowCount * s.columnCount), 0);
+
+  const headersBySheet: Map<string, Set<string>> = new Map();
+  sheets.forEach(sheet => {
+    const normalizedHeaders = sheet.inferredHeaders.map(h => h.toLowerCase().trim());
+    headersBySheet.set(sheet.name, new Set(normalizedHeaders));
+  });
+
+  const allHeaders = sheets.flatMap(s => s.inferredHeaders.map(h => h.toLowerCase().trim()));
+  const headerCounts = new Map<string, number>();
+  allHeaders.forEach(h => {
+    headerCounts.set(h, (headerCounts.get(h) || 0) + 1);
+  });
+  const commonHeaders = Array.from(headerCounts.entries())
+    .filter(([_, count]) => count > 1)
+    .map(([header, _]) => header);
+
+  const relationships: CrossSheetRelationship[] = [];
+  const sheetNames = sheets.map(s => s.name);
+  
+  for (let i = 0; i < sheetNames.length; i++) {
+    for (let j = i + 1; j < sheetNames.length; j++) {
+      const sheet1Headers = headersBySheet.get(sheetNames[i]) || new Set();
+      const sheet2Headers = headersBySheet.get(sheetNames[j]) || new Set();
+      
+      const linkingColumns: string[] = [];
+      sheet1Headers.forEach(header => {
+        if (sheet2Headers.has(header)) {
+          linkingColumns.push(header);
+        }
+      });
+      
+      if (linkingColumns.length > 0) {
+        relationships.push({
+          sourceSheet: sheetNames[i],
+          targetSheet: sheetNames[j],
+          linkingColumns,
+        });
+      }
+    }
+  }
+
+  const sheetDescriptions = sheets.map(s => {
+    const columnInfo = s.columnTypes
+      .filter(c => c.type !== "empty")
+      .map(c => `${c.name} (${c.type})`)
+      .slice(0, 5)
+      .join(", ");
+    return `"${s.name}" with ${s.rowCount} rows and ${s.columnCount} columns (${columnInfo}${s.columnTypes.length > 5 ? "..." : ""})`;
+  });
+
+  let naturalLanguageSummary = `This workbook contains ${totalSheets} sheet${totalSheets > 1 ? "s" : ""} with a total of ${totalRows} rows and ${totalColumns} columns (${totalDataPoints.toLocaleString()} data points). `;
+  
+  if (sheets.length <= 3) {
+    naturalLanguageSummary += `Sheets: ${sheetDescriptions.join("; ")}. `;
+  } else {
+    naturalLanguageSummary += `Sheets include: ${sheetDescriptions.slice(0, 2).join("; ")}, and ${sheets.length - 2} more. `;
+  }
+
+  if (commonHeaders.length > 0) {
+    naturalLanguageSummary += `Common columns across sheets: ${commonHeaders.slice(0, 5).join(", ")}${commonHeaders.length > 5 ? ` and ${commonHeaders.length - 5} more` : ""}. `;
+  }
+
+  if (relationships.length > 0) {
+    const relationshipDesc = relationships.slice(0, 3).map(r => 
+      `${r.sourceSheet} ↔ ${r.targetSheet} (via ${r.linkingColumns.slice(0, 3).join(", ")})`
+    ).join("; ");
+    naturalLanguageSummary += `Potential relationships detected: ${relationshipDesc}${relationships.length > 3 ? ` and ${relationships.length - 3} more` : ""}.`;
+  }
+
+  return {
+    totalSheets,
+    totalRows,
+    totalColumns,
+    totalDataPoints,
+    commonHeaders,
+    relationships,
+    naturalLanguageSummary,
+  };
+}
+
+export function detectInterSheetReferences(workbook: ExcelJS.Workbook): InterSheetReference[] {
+  const references: InterSheetReference[] = [];
+  const crossSheetPattern = /(?:'([^']+)'|([A-Za-z0-9_]+))!(\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?)/g;
+
+  workbook.eachSheet((worksheet, sheetIndex) => {
+    const sourceSheet = worksheet.name;
+
+    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        if (cell.value && typeof cell.value === "object" && "formula" in cell.value) {
+          const formula = (cell.value as any).formula;
+          if (typeof formula === "string") {
+            const colLetter = columnIndexToLetter(colNumber);
+            const sourceCell = `${colLetter}${rowNumber}`;
+
+            let match;
+            crossSheetPattern.lastIndex = 0;
+            while ((match = crossSheetPattern.exec(formula)) !== null) {
+              const targetSheet = match[1] || match[2];
+              const targetCell = match[3];
+
+              if (targetSheet !== sourceSheet) {
+                references.push({
+                  formula,
+                  sourceSheet,
+                  sourceCell,
+                  targetSheet,
+                  targetCell,
+                });
+              }
+            }
+          }
+        }
+      });
+    });
+  });
+
+  return references;
+}
+
+function columnIndexToLetter(colIndex: number): string {
+  let result = "";
+  let index = colIndex;
+  while (index > 0) {
+    const remainder = (index - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    index = Math.floor((index - 1) / 26);
+  }
+  return result;
+}
+
+export async function analyzeWorkbook(buffer: Buffer): Promise<WorkbookSummary> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const sheets: SheetInfo[] = [];
+  workbook.eachSheet((worksheet, sheetIndex) => {
+    const sheetInfo = extractSheetInfo(worksheet, sheetIndex - 1);
+    sheets.push(sheetInfo);
+  });
+
+  const sheetSummaries: SheetSummary[] = sheets.map(sheet => ({
+    name: sheet.name,
+    rowCount: sheet.rowCount,
+    columnCount: sheet.columnCount,
+    columnTypes: Object.fromEntries(
+      sheet.columnTypes.map(ct => [ct.name, ct.type])
+    ),
+  }));
+
+  const crossSheetSummary = generateCrossSheetSummary(sheets);
+  const interSheetReferences = detectInterSheetReferences(workbook);
+
+  return {
+    totalSheets: sheets.length,
+    totalRows: sheets.reduce((sum, s) => sum + s.rowCount, 0),
+    totalColumns: sheets.reduce((sum, s) => sum + s.columnCount, 0),
+    sheetSummaries,
+    crossSheetRelationships: crossSheetSummary.relationships,
+    interSheetReferences,
+    crossSheetSummary,
+  };
+}
+
 export const spreadsheetAnalyzer = {
   validateSpreadsheetFile,
   generateChecksum,
@@ -635,6 +882,9 @@ export const spreadsheetAnalyzer = {
   getAnalysisOutputs,
   parseSpreadsheet,
   inferColumnTypes,
+  generateCrossSheetSummary,
+  detectInterSheetReferences,
+  analyzeWorkbook,
 };
 
 export default spreadsheetAnalyzer;
