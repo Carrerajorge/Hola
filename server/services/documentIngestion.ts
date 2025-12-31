@@ -4,6 +4,7 @@ import path from "path";
 import { createRequire } from "module";
 import officeParser from "officeparser";
 import { ocrService } from "./ocrService";
+import * as XLSX from "xlsx";
 
 // pdf-parse is CommonJS, use createRequire for ESM compatibility
 const require = createRequire(import.meta.url);
@@ -48,6 +49,32 @@ const MAGIC_BYTES: Record<string, { bytes: number[]; offset?: number }[]> = {
   ],
   docx: [
     { bytes: [0x50, 0x4B, 0x03, 0x04] }, // ZIP (OOXML)
+  ],
+  pptx: [
+    { bytes: [0x50, 0x4B, 0x03, 0x04] }, // ZIP (OOXML)
+  ],
+  png: [
+    { bytes: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] }, // PNG signature
+  ],
+  jpeg: [
+    { bytes: [0xFF, 0xD8, 0xFF] }, // JPEG
+  ],
+  gif: [
+    { bytes: [0x47, 0x49, 0x46, 0x38, 0x37, 0x61] }, // GIF87a
+    { bytes: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61] }, // GIF89a
+  ],
+  bmp: [
+    { bytes: [0x42, 0x4D] }, // BM
+  ],
+  tiff: [
+    { bytes: [0x49, 0x49, 0x2A, 0x00] }, // Little-endian
+    { bytes: [0x4D, 0x4D, 0x00, 0x2A] }, // Big-endian
+  ],
+  webp: [
+    { bytes: [0x52, 0x49, 0x46, 0x46] }, // RIFF (WebP container)
+  ],
+  rtf: [
+    { bytes: [0x7B, 0x5C, 0x72, 0x74, 0x66] }, // {\rtf
   ],
 };
 
@@ -127,24 +154,80 @@ export async function detectFileType(
 
   const mimeFileType = MIME_TYPE_MAP[mimeType];
 
-  if (checkMagicBytes(buffer, MAGIC_BYTES.pdf)) {
-    if (mimeFileType && mimeFileType !== 'pdf') {
-      throw new Error('MIME type mismatch: file appears to be PDF');
+  // Check image formats first (most specific magic bytes)
+  if (checkMagicBytes(buffer, MAGIC_BYTES.png)) {
+    return 'png';
+  }
+  if (checkMagicBytes(buffer, MAGIC_BYTES.jpeg)) {
+    return 'jpeg';
+  }
+  if (checkMagicBytes(buffer, MAGIC_BYTES.gif)) {
+    return 'gif';
+  }
+  if (checkMagicBytes(buffer, MAGIC_BYTES.bmp)) {
+    return 'bmp';
+  }
+  if (checkMagicBytes(buffer, MAGIC_BYTES.tiff)) {
+    return 'tiff';
+  }
+  if (checkMagicBytes(buffer, MAGIC_BYTES.webp)) {
+    // WebP has RIFF header, verify it's actually WebP
+    if (buffer.length > 11 && buffer.toString('ascii', 8, 12) === 'WEBP') {
+      return 'webp';
     }
+  }
+
+  // Check RTF
+  if (checkMagicBytes(buffer, MAGIC_BYTES.rtf)) {
+    return 'rtf';
+  }
+
+  // Check PDF
+  if (checkMagicBytes(buffer, MAGIC_BYTES.pdf)) {
     return 'pdf';
   }
 
+  // Check OLE2 (xls, ppt)
   if (checkMagicBytes(buffer, MAGIC_BYTES.xls)) {
-    if (mimeFileType && mimeFileType !== 'xls') {
-      throw new Error('MIME type mismatch: file appears to be XLS');
+    // OLE2 can be xls or ppt - trust MIME type first
+    if (mimeFileType === 'ppt') return 'ppt';
+    if (mimeFileType === 'xls') return 'xls';
+    
+    // Detect by content - look for OLE2 stream markers
+    // PowerPoint files contain "PowerPoint Document" stream
+    // Excel files contain "Workbook" or "Book" stream
+    const bufferStr = buffer.toString('binary');
+    
+    // Check for PowerPoint markers first (more distinctive)
+    const hasPowerPointMarker = bufferStr.includes('PowerPoint Document') || 
+      bufferStr.includes('P\x00o\x00w\x00e\x00r\x00P\x00o\x00i\x00n\x00t') ||
+      bufferStr.includes('Current User');
+    
+    // Check for Excel markers
+    const hasExcelMarker = bufferStr.includes('Workbook') || 
+      bufferStr.includes('W\x00o\x00r\x00k\x00b\x00o\x00o\x00k') ||
+      bufferStr.includes('Book');
+    
+    // If both are found, prioritize Excel (more common case)
+    if (hasExcelMarker && !hasPowerPointMarker) {
+      return 'xls';
     }
+    if (hasPowerPointMarker && !hasExcelMarker) {
+      return 'ppt';
+    }
+    
+    // Default to XLS for OLE2 files without clear markers (most common case)
     return 'xls';
   }
 
+  // Check ZIP-based formats (xlsx, docx, pptx)
   if (checkMagicBytes(buffer, MAGIC_BYTES.xlsx)) {
+    // Trust MIME type first for OOXML formats
     if (mimeFileType === 'xlsx') return 'xlsx';
     if (mimeFileType === 'docx') return 'docx';
+    if (mimeFileType === 'pptx') return 'pptx';
     
+    // Try to detect by content
     try {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer);
@@ -154,18 +237,27 @@ export async function detectFileType(
         await mammoth.extractRawText({ buffer });
         return 'docx';
       } catch {
-        return mimeFileType || null;
+        // Could be pptx - try officeParser
+        try {
+          await officeParser.parseOfficeAsync(buffer);
+          return 'pptx';
+        } catch {
+          return mimeFileType || null;
+        }
       }
     }
   }
 
+  // Check text-based formats
   if (isTextFile(buffer)) {
+    if (mimeFileType === 'rtf') return 'rtf';
     const delimiter = detectDelimiter(buffer);
     if (mimeFileType === 'tsv' || delimiter === 'tsv') return 'tsv';
     if (mimeFileType === 'csv' || delimiter === 'csv') return 'csv';
     return 'csv';
   }
 
+  // Fall back to MIME type
   return mimeFileType || null;
 }
 
@@ -195,11 +287,16 @@ export async function extractMetadata(
   };
 
   switch (fileType) {
-    case 'xlsx':
-    case 'xls': {
+    case 'xlsx': {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer);
       metadata.sheetCount = workbook.worksheets.length;
+      break;
+    }
+    case 'xls': {
+      // Use SheetJS for binary XLS files
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      metadata.sheetCount = workbook.SheetNames.length;
       break;
     }
     case 'pdf': {
@@ -222,7 +319,7 @@ export async function extractMetadata(
   return metadata;
 }
 
-async function parseExcel(buffer: Buffer): Promise<DocumentSheet[]> {
+async function parseExcelXlsx(buffer: Buffer): Promise<DocumentSheet[]> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
 
@@ -250,6 +347,36 @@ async function parseExcel(buffer: Buffer): Promise<DocumentSheet[]> {
     sheets.push({
       name: worksheet.name,
       index: sheetIndex - 1,
+      rowCount,
+      columnCount,
+      headers,
+      previewData,
+      isTabular: true,
+    });
+  });
+
+  return sheets;
+}
+
+function parseExcelXls(buffer: Buffer): DocumentSheet[] {
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const sheets: DocumentSheet[] = [];
+
+  workbook.SheetNames.forEach((sheetName, sheetIndex) => {
+    const worksheet = workbook.Sheets[sheetName];
+    const data: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null });
+    
+    const compactData = data.filter((row) => row && row.some((cell: any) => cell !== null && cell !== ''));
+    const headerInfo = detectHeaders(compactData);
+    const headers = headerInfo.headers;
+    
+    const rowCount = compactData.length;
+    const columnCount = Math.max(...compactData.map((row) => (row as any[]).length), 0);
+    const previewData = compactData.slice(0, PREVIEW_ROW_LIMIT);
+
+    sheets.push({
+      name: sheetName,
+      index: sheetIndex,
       rowCount,
       columnCount,
       headers,
@@ -637,8 +764,10 @@ export async function parseDocument(
 
   switch (metadata.fileType) {
     case 'xlsx':
+      sheets = await parseExcelXlsx(buffer);
+      break;
     case 'xls':
-      sheets = await parseExcel(buffer);
+      sheets = parseExcelXls(buffer);
       break;
     case 'csv':
       sheets = parseDelimitedText(buffer, ',');

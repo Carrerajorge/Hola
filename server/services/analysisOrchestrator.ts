@@ -211,7 +211,7 @@ async function executeSheetJob(
 
     const executionResult = await executePythonCode({
       code: codeResult.code,
-      filePath: upload.storagePath,
+      filePath: upload.storageKey,
       sheetName: job.sheetName,
       timeoutMs: 60000,
     });

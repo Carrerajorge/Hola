@@ -38,27 +38,25 @@ async function ensureTempDir(): Promise<void> {
   }
 }
 
-function getFileExtension(mimeType: string): string {
+function getFileExtensionFromType(fileType: string): string {
   const extensions: Record<string, string> = {
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-    "application/vnd.ms-excel": "xls",
-    "text/csv": "csv",
-    "text/tab-separated-values": "tsv",
-    "application/pdf": "pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
-    "application/vnd.ms-powerpoint": "ppt",
-    "application/rtf": "rtf",
-    "text/rtf": "rtf",
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/jpg": "jpg",
-    "image/gif": "gif",
-    "image/bmp": "bmp",
-    "image/tiff": "tiff",
-    "image/webp": "webp",
+    "xlsx": "xlsx",
+    "xls": "xls",
+    "csv": "csv",
+    "tsv": "tsv",
+    "pdf": "pdf",
+    "docx": "docx",
+    "pptx": "pptx",
+    "ppt": "ppt",
+    "rtf": "rtf",
+    "png": "png",
+    "jpeg": "jpg",
+    "gif": "gif",
+    "bmp": "bmp",
+    "tiff": "tiff",
+    "webp": "webp",
   };
-  return extensions[mimeType] || "bin";
+  return extensions[fileType] || fileType || "bin";
 }
 
 export function createSpreadsheetRouter(): Router {
@@ -94,7 +92,7 @@ export function createSpreadsheetRouter(): Router {
       const parsed = await parseDocument(buffer, mimeType, originalName);
 
       const uploadId = nanoid();
-      const ext = getFileExtension(mimeType);
+      const ext = getFileExtensionFromType(parsed.metadata.fileType);
       const tempFilePath = path.join(TEMP_DIR, `${uploadId}.${ext}`);
 
       await ensureTempDir();

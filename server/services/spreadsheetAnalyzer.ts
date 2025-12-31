@@ -2,6 +2,7 @@ import { db } from "../db";
 import { eq, desc } from "drizzle-orm";
 import crypto from "crypto";
 import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import {
   spreadsheetUploads,
   spreadsheetSheets,
@@ -26,6 +27,7 @@ const ALLOWED_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel",
   "text/csv",
+  "text/tab-separated-values",
 ];
 const PREVIEW_ROW_LIMIT = 100;
 
@@ -319,12 +321,19 @@ export async function parseSpreadsheet(
   mimeType: string
 ): Promise<ParsedSpreadsheet> {
   if (mimeType === "text/csv") {
-    return parseCsv(buffer);
+    return parseDelimited(buffer, ",");
   }
-  return parseExcel(buffer);
+  if (mimeType === "text/tab-separated-values") {
+    return parseDelimited(buffer, "\t");
+  }
+  // Check if it's binary XLS (OLE2) or XLSX (OOXML)
+  if (mimeType === "application/vnd.ms-excel") {
+    return parseExcelXls(buffer);
+  }
+  return parseExcelXlsx(buffer);
 }
 
-async function parseExcel(buffer: Buffer): Promise<ParsedSpreadsheet> {
+async function parseExcelXlsx(buffer: Buffer): Promise<ParsedSpreadsheet> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
 
@@ -338,7 +347,44 @@ async function parseExcel(buffer: Buffer): Promise<ParsedSpreadsheet> {
   return { sheets };
 }
 
-function parseCsv(buffer: Buffer): ParsedSpreadsheet {
+function parseExcelXls(buffer: Buffer): ParsedSpreadsheet {
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const sheets: SheetInfo[] = [];
+
+  workbook.SheetNames.forEach((sheetName, sheetIndex) => {
+    const worksheet = workbook.Sheets[sheetName];
+    const data: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null });
+    
+    const compactData = data.filter((row) => row && row.some((cell: any) => cell !== null && cell !== ''));
+    const headerInfo = detectHeaders(compactData);
+    const headers = headerInfo.headers;
+    const dataStartRow = headerInfo.dataStartRow;
+
+    const dataRows = compactData.slice(dataStartRow);
+    const rowCount = compactData.length;
+    const columnCount = Math.max(...compactData.map((row) => (row as any[]).length), 0);
+    const previewData = compactData.slice(0, PREVIEW_ROW_LIMIT);
+
+    const columnTypes = inferColumnTypes(
+      dataRows,
+      headers.length > 0 ? headers : undefined
+    );
+
+    sheets.push({
+      name: sheetName,
+      sheetIndex,
+      rowCount,
+      columnCount,
+      inferredHeaders: headers,
+      columnTypes,
+      previewData,
+    });
+  });
+
+  return { sheets };
+}
+
+function parseDelimited(buffer: Buffer, delimiter: string): ParsedSpreadsheet {
   const content = buffer.toString("utf-8");
   const lines = content.split(/\r?\n/).filter((line) => line.trim() !== "");
 
@@ -358,7 +404,7 @@ function parseCsv(buffer: Buffer): ParsedSpreadsheet {
     };
   }
 
-  const data: any[][] = lines.map((line) => parseCsvLine(line));
+  const data: any[][] = lines.map((line) => parseDelimitedLine(line, delimiter));
   const headerInfo = detectHeaders(data);
   const headers = headerInfo.headers;
   const dataStartRow = headerInfo.dataStartRow;
@@ -387,7 +433,13 @@ function parseCsv(buffer: Buffer): ParsedSpreadsheet {
   };
 }
 
-function parseCsvLine(line: string): string[] {
+function parseDelimitedLine(line: string, delimiter: string): string[] {
+  // For tabs, use simple split
+  if (delimiter === "\t") {
+    return line.split("\t").map(cell => cell.trim());
+  }
+  
+  // For commas, handle quoted values
   const result: string[] = [];
   let current = "";
   let inQuotes = false;
@@ -408,7 +460,7 @@ function parseCsvLine(line: string): string[] {
     } else {
       if (char === '"') {
         inQuotes = true;
-      } else if (char === ",") {
+      } else if (char === delimiter) {
         result.push(current.trim());
         current = "";
       } else {
