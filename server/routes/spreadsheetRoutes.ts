@@ -46,8 +46,19 @@ function getFileExtension(mimeType: string): string {
     "text/tab-separated-values": "tsv",
     "application/pdf": "pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "application/vnd.ms-powerpoint": "ppt",
+    "application/rtf": "rtf",
+    "text/rtf": "rtf",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/gif": "gif",
+    "image/bmp": "bmp",
+    "image/tiff": "tiff",
+    "image/webp": "webp",
   };
-  return extensions[mimeType] || "xlsx";
+  return extensions[mimeType] || "bin";
 }
 
 export function createSpreadsheetRouter(): Router {
@@ -90,7 +101,6 @@ export function createSpreadsheetRouter(): Router {
       await fs.writeFile(tempFilePath, buffer);
 
       const uploadRecord = await createUpload({
-        id: uploadId,
         userId,
         fileName: originalName,
         mimeType,
@@ -98,7 +108,7 @@ export function createSpreadsheetRouter(): Router {
         storageKey: tempFilePath,
         checksum,
         status: "ready",
-        fileType: parsed.metadata.fileType,
+        fileType: parsed.metadata.fileType as any,
         encoding: parsed.metadata.encoding,
         pageCount: parsed.metadata.pageCount,
       });
@@ -113,7 +123,7 @@ export function createSpreadsheetRouter(): Router {
           rowCount: sheetInfo.rowCount,
           columnCount: sheetInfo.columnCount,
           inferredHeaders: sheetInfo.headers,
-          columnTypes: {},
+          columnTypes: [],
           previewData: sheetInfo.previewData,
         });
 
@@ -225,10 +235,11 @@ export function createSpreadsheetRouter(): Router {
         return rowObj;
       });
 
-      const columnTypes = sheet.columnTypes || {};
+      const columnTypesArray = sheet.columnTypes || [];
+      const columnTypesMap = new Map(columnTypesArray.map((ct: any) => [ct.name, ct.type]));
       const columns = headers.map((header) => ({
         name: header,
-        type: columnTypes[header] || 'text',
+        type: columnTypesMap.get(header) || 'text',
       }));
 
       res.json({

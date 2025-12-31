@@ -1954,7 +1954,7 @@ export type LibraryStorageStats = typeof libraryStorage.$inferSelect;
 export const spreadsheetUploadStatusEnum = ['pending', 'scanning', 'ready', 'error', 'expired'] as const;
 export type SpreadsheetUploadStatus = typeof spreadsheetUploadStatusEnum[number];
 
-export const spreadsheetFileTypeEnum = ['xlsx', 'xls', 'csv', 'tsv', 'pdf', 'docx'] as const;
+export const spreadsheetFileTypeEnum = ['xlsx', 'xls', 'csv', 'tsv', 'pdf', 'docx', 'pptx', 'ppt', 'rtf', 'png', 'jpeg', 'gif', 'bmp', 'tiff', 'webp'] as const;
 export type SpreadsheetFileType = typeof spreadsheetFileTypeEnum[number];
 
 export const spreadsheetUploads = pgTable('spreadsheet_uploads', {
