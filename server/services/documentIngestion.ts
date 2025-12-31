@@ -11,7 +11,7 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
 const PREVIEW_ROW_LIMIT = 100;
 
 export interface DocumentMetadata {
-  fileType: 'xlsx' | 'xls' | 'csv' | 'tsv' | 'pdf' | 'docx';
+  fileType: 'xlsx' | 'xls' | 'csv' | 'tsv' | 'pdf' | 'docx' | 'pptx' | 'ppt' | 'rtf' | 'png' | 'jpeg' | 'gif' | 'bmp' | 'tiff';
   fileName: string;
   fileSize: number;
   encoding?: string;
@@ -56,6 +56,16 @@ const MIME_TYPE_MAP: Record<string, DocumentMetadata['fileType']> = {
   'text/tab-separated-values': 'tsv',
   'application/pdf': 'pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/rtf': 'rtf',
+  'text/rtf': 'rtf',
+  'image/png': 'png',
+  'image/jpeg': 'jpeg',
+  'image/jpg': 'jpeg',
+  'image/gif': 'gif',
+  'image/bmp': 'bmp',
+  'image/tiff': 'tiff',
 };
 
 function checkMagicBytes(buffer: Buffer, expected: { bytes: number[]; offset?: number }[]): boolean {
@@ -406,12 +416,12 @@ async function parsePdf(buffer: Buffer): Promise<DocumentSheet[]> {
   const text = pdfData.text || "";
   const numPages = pdfData.numpages || 1;
 
-  const pages = text.split(/\f/).filter(page => page.trim().length > 0);
+  const pages = text.split(/\f/).filter((page: string) => page.trim().length > 0);
   
   const sheets: DocumentSheet[] = [];
 
   if (pages.length === 0 && text.trim()) {
-    const lines = text.split(/\r?\n/).filter(line => line.trim());
+    const lines = text.split(/\r?\n/).filter((line: string) => line.trim());
     const previewLines = lines.slice(0, PREVIEW_ROW_LIMIT);
     
     sheets.push({
@@ -420,13 +430,13 @@ async function parsePdf(buffer: Buffer): Promise<DocumentSheet[]> {
       rowCount: lines.length,
       columnCount: 1,
       headers: ["Content"],
-      previewData: previewLines.map(line => [line]),
+      previewData: previewLines.map((line: string) => [line]),
       isTabular: false,
     });
   } else {
     for (let i = 0; i < Math.max(pages.length, numPages); i++) {
       const pageText = pages[i] || "";
-      const lines = pageText.split(/\r?\n/).filter(line => line.trim());
+      const lines = pageText.split(/\r?\n/).filter((line: string) => line.trim());
       const previewLines = lines.slice(0, PREVIEW_ROW_LIMIT);
 
       sheets.push({
@@ -435,7 +445,7 @@ async function parsePdf(buffer: Buffer): Promise<DocumentSheet[]> {
         rowCount: lines.length,
         columnCount: 1,
         headers: ["Content"],
-        previewData: previewLines.map(line => [line]),
+        previewData: previewLines.map((line: string) => [line]),
         isTabular: false,
       });
     }

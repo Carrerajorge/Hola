@@ -2,6 +2,7 @@ import mammoth from "mammoth";
 import ExcelJS from "exceljs";
 import * as pdfParse from "pdf-parse";
 import officeParser from "officeparser";
+import { ocrService } from "./services/ocrService";
 
 const pdf = (pdfParse as any).default || pdfParse;
 
@@ -32,10 +33,49 @@ export async function extractText(content: Buffer, mimeType: string): Promise<st
     return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   }
 
+  if (mimeType === "application/rtf" || mimeType === "text/rtf") {
+    try {
+      const text = await officeParser.parseOfficeAsync(content);
+      if (text && text.trim().length > 0) {
+        return text;
+      }
+      return content.toString("utf-8").replace(/\\[a-z]+\d*\s?|[{}]/g, " ").replace(/\s+/g, " ").trim();
+    } catch (error) {
+      console.error("Error parsing RTF:", error);
+      return content.toString("utf-8").replace(/\\[a-z]+\d*\s?|[{}]/g, " ").replace(/\s+/g, " ").trim();
+    }
+  }
+
+  if (ocrService.isImageMimeType(mimeType)) {
+    try {
+      const ocrResult = await ocrService.extractTextFromImage(content, mimeType);
+      return ocrResult.text;
+    } catch (error) {
+      console.error("Error performing OCR on image:", error);
+      throw new Error("Failed to extract text from image");
+    }
+  }
+
   if (mimeType === "application/pdf") {
     try {
       const data = await pdf(content);
-      return data.text;
+      const extractedText = data.text || "";
+      
+      if (ocrService.isScannedDocument(content, mimeType, extractedText)) {
+        try {
+          const ocrResult = await ocrService.extractTextWithOCRFallback(
+            content,
+            mimeType,
+            extractedText
+          );
+          return ocrResult.text;
+        } catch (ocrError) {
+          console.error("OCR fallback failed for PDF:", ocrError);
+          return extractedText;
+        }
+      }
+      
+      return extractedText;
     } catch (error) {
       console.error("Error parsing PDF:", error);
       throw new Error("Failed to parse PDF");
