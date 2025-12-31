@@ -6,6 +6,81 @@ import { ocrService } from "./services/ocrService";
 
 const pdf = (pdfParse as any).default || pdfParse;
 
+export interface ExtractTextResult {
+  text: string;
+  success: boolean;
+  method: 'native' | 'ocr' | 'fallback';
+  error?: string;
+  confidence?: number;
+}
+
+const SUPPORTED_MIME_TYPES = new Set([
+  'text/plain', 'text/markdown', 'text/md', 'application/json', 'text/csv', 'text/html',
+  'application/rtf', 'text/rtf',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint',
+  'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp', 'image/tiff', 'image/webp'
+]);
+
+export function isSupportedMimeType(mimeType: string): boolean {
+  return SUPPORTED_MIME_TYPES.has(mimeType) || ocrService.isImageMimeType(mimeType);
+}
+
+export function getSupportedMimeTypes(): string[] {
+  return Array.from(SUPPORTED_MIME_TYPES);
+}
+
+export async function extractTextSafe(content: Buffer, mimeType: string): Promise<ExtractTextResult> {
+  try {
+    const text = await extractText(content, mimeType);
+    return {
+      text,
+      success: true,
+      method: 'native'
+    };
+  } catch (error) {
+    console.error(`[DocumentParser] Primary extraction failed for ${mimeType}:`, error);
+    
+    try {
+      if (ocrService.isImageMimeType(mimeType) || mimeType === 'application/pdf') {
+        const ocrResult = await ocrService.performOCR(content);
+        return {
+          text: ocrResult.text,
+          success: true,
+          method: 'ocr',
+          confidence: ocrResult.confidence
+        };
+      }
+    } catch (ocrError) {
+      console.error('[DocumentParser] OCR fallback also failed:', ocrError);
+    }
+    
+    try {
+      const rawText = content.toString('utf-8');
+      const cleanedText = rawText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+      if (cleanedText.length > 0) {
+        return {
+          text: cleanedText,
+          success: true,
+          method: 'fallback',
+          error: 'Used raw text fallback after primary extraction failed'
+        };
+      }
+    } catch {}
+    
+    return {
+      text: '',
+      success: false,
+      method: 'fallback',
+      error: error instanceof Error ? error.message : 'Unknown extraction error'
+    };
+  }
+}
+
 export async function extractText(content: Buffer, mimeType: string): Promise<string> {
   if (mimeType === "text/plain") {
     return content.toString("utf-8");
