@@ -2,6 +2,8 @@ import ExcelJS from "exceljs";
 import mammoth from "mammoth";
 import path from "path";
 import { createRequire } from "module";
+import officeParser from "officeparser";
+import { ocrService } from "./ocrService";
 
 // pdf-parse is CommonJS, use createRequire for ESM compatibility
 const require = createRequire(import.meta.url);
@@ -11,7 +13,7 @@ const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
 const PREVIEW_ROW_LIMIT = 100;
 
 export interface DocumentMetadata {
-  fileType: 'xlsx' | 'xls' | 'csv' | 'tsv' | 'pdf' | 'docx' | 'pptx' | 'ppt' | 'rtf' | 'png' | 'jpeg' | 'gif' | 'bmp' | 'tiff';
+  fileType: 'xlsx' | 'xls' | 'csv' | 'tsv' | 'pdf' | 'docx' | 'pptx' | 'ppt' | 'rtf' | 'png' | 'jpeg' | 'gif' | 'bmp' | 'tiff' | 'webp';
   fileName: string;
   fileSize: number;
   encoding?: string;
@@ -66,6 +68,7 @@ const MIME_TYPE_MAP: Record<string, DocumentMetadata['fileType']> = {
   'image/gif': 'gif',
   'image/bmp': 'bmp',
   'image/tiff': 'tiff',
+  'image/webp': 'webp',
 };
 
 function checkMagicBytes(buffer: Buffer, expected: { bytes: number[]; offset?: number }[]): boolean {
@@ -466,6 +469,87 @@ async function parsePdf(buffer: Buffer): Promise<DocumentSheet[]> {
   return sheets;
 }
 
+function parseGenericText(text: string, docName: string): DocumentSheet[] {
+  const lines = text.split(/\r?\n/).filter(line => line.trim());
+  const previewLines = lines.slice(0, PREVIEW_ROW_LIMIT);
+
+  return [{
+    name: docName,
+    index: 0,
+    rowCount: lines.length,
+    columnCount: 1,
+    headers: ["Content"],
+    previewData: previewLines.map(line => [line]),
+    isTabular: false,
+  }];
+}
+
+async function parsePptx(buffer: Buffer, fileName: string): Promise<DocumentSheet[]> {
+  try {
+    const text = await officeParser.parseOfficeAsync(buffer);
+    if (!text || text.trim().length === 0) {
+      return [{
+        name: "Presentation",
+        index: 0,
+        rowCount: 0,
+        columnCount: 1,
+        headers: ["Content"],
+        previewData: [],
+        isTabular: false,
+      }];
+    }
+    return parseGenericText(text, "Presentation");
+  } catch (error) {
+    console.error("Error parsing PowerPoint:", error);
+    throw new Error(`Failed to parse PowerPoint: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function parseRtf(buffer: Buffer): Promise<DocumentSheet[]> {
+  try {
+    const text = await officeParser.parseOfficeAsync(buffer);
+    if (!text || text.trim().length === 0) {
+      const rawText = buffer.toString("utf-8")
+        .replace(/\\[a-z]+\d*\s?|[{}]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return parseGenericText(rawText, "Document");
+    }
+    return parseGenericText(text, "Document");
+  } catch (error) {
+    console.error("Error parsing RTF:", error);
+    const rawText = buffer.toString("utf-8")
+      .replace(/\\[a-z]+\d*\s?|[{}]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return parseGenericText(rawText, "Document");
+  }
+}
+
+async function parseImage(buffer: Buffer, fileName: string): Promise<DocumentSheet[]> {
+  try {
+    const ocrResult = await ocrService.performOCR(buffer);
+    const text = ocrResult.text || "";
+    
+    if (!text.trim()) {
+      return [{
+        name: "Image",
+        index: 0,
+        rowCount: 0,
+        columnCount: 1,
+        headers: ["Content"],
+        previewData: [],
+        isTabular: false,
+      }];
+    }
+    
+    return parseGenericText(text, "Image");
+  } catch (error) {
+    console.error("Error performing OCR on image:", error);
+    throw new Error(`Failed to extract text from image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
 async function parseDocx(buffer: Buffer): Promise<DocumentSheet[]> {
   const result = await mammoth.extractRawText({ buffer });
   const text = result.value || "";
@@ -567,6 +651,21 @@ export async function parseDocument(
       break;
     case 'docx':
       sheets = await parseDocx(buffer);
+      break;
+    case 'pptx':
+    case 'ppt':
+      sheets = await parsePptx(buffer, fileName);
+      break;
+    case 'rtf':
+      sheets = await parseRtf(buffer);
+      break;
+    case 'png':
+    case 'jpeg':
+    case 'gif':
+    case 'bmp':
+    case 'tiff':
+    case 'webp':
+      sheets = await parseImage(buffer, fileName);
       break;
     default:
       throw new Error(`Unsupported file type: ${metadata.fileType}`);
