@@ -1,5 +1,6 @@
 import mammoth from "mammoth";
 import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import * as pdfParse from "pdf-parse";
 import officeParser from "officeparser";
 import { ocrService } from "./services/ocrService";
@@ -15,7 +16,7 @@ export interface ExtractTextResult {
 }
 
 const SUPPORTED_MIME_TYPES = new Set([
-  'text/plain', 'text/markdown', 'text/md', 'application/json', 'text/csv', 'text/html',
+  'text/plain', 'text/markdown', 'text/md', 'application/json', 'text/csv', 'text/tab-separated-values', 'text/html',
   'application/rtf', 'text/rtf',
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -99,7 +100,7 @@ export async function extractText(content: Buffer, mimeType: string): Promise<st
     }
   }
 
-  if (mimeType === "text/csv") {
+  if (mimeType === "text/csv" || mimeType === "text/tab-separated-values") {
     return content.toString("utf-8");
   }
 
@@ -167,8 +168,7 @@ export async function extractText(content: Buffer, mimeType: string): Promise<st
     }
   }
 
-  if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-      mimeType === "application/vnd.ms-excel") {
+  if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
     try {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(content);
@@ -211,8 +211,38 @@ export async function extractText(content: Buffer, mimeType: string): Promise<st
       
       return text.trim();
     } catch (error) {
-      console.error("Error parsing Excel:", error);
-      throw new Error("Failed to parse Excel");
+      console.error("Error parsing XLSX:", error);
+      throw new Error("Failed to parse XLSX");
+    }
+  }
+
+  if (mimeType === "application/vnd.ms-excel") {
+    try {
+      const workbook = XLSX.read(content, { type: 'buffer' });
+      let text = "";
+      
+      for (const sheetName of workbook.SheetNames) {
+        const worksheet = workbook.Sheets[sheetName];
+        text += `Sheet: ${sheetName}\n`;
+        
+        const data: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        for (const row of data) {
+          const values = row.map((cell: any) => {
+            let cellValue = cell === null || cell === undefined ? '' : String(cell);
+            if (cellValue.includes(',') || cellValue.includes('\n') || cellValue.includes('"')) {
+              cellValue = '"' + cellValue.replace(/"/g, '""') + '"';
+            }
+            return cellValue;
+          });
+          text += values.join(',') + "\n";
+        }
+        text += "\n";
+      }
+      
+      return text.trim();
+    } catch (error) {
+      console.error("Error parsing XLS:", error);
+      throw new Error("Failed to parse XLS");
     }
   }
 
