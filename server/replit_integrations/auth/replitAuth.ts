@@ -28,10 +28,37 @@ export function getAuthMetrics() {
 
 const getOidcConfig = memoize(
   async () => {
-    return await client.discovery(
-      new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
-      process.env.REPL_ID!
-    );
+    const maxRetries = 5;
+    const baseDelay = 2000;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[Auth] OIDC discovery attempt ${attempt}/${maxRetries}...`);
+        const config = await client.discovery(
+          new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
+          process.env.REPL_ID!
+        );
+        console.log(`[Auth] OIDC discovery successful on attempt ${attempt}`);
+        return config;
+      } catch (error: any) {
+        const isRetryable = 
+          error.code === 'OAUTH_TIMEOUT' || 
+          error.code === 'OAUTH_RESPONSE_IS_NOT_CONFORM' ||
+          error.message?.includes('503') ||
+          error.message?.includes('timeout');
+        
+        if (attempt === maxRetries || !isRetryable) {
+          console.error(`[Auth] OIDC discovery failed after ${attempt} attempts:`, error.message);
+          throw error;
+        }
+        
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        console.warn(`[Auth] OIDC discovery attempt ${attempt} failed (${error.code || error.message}), retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw new Error('OIDC discovery failed after all retries');
   },
   { maxAge: 3600 * 1000 }
 );

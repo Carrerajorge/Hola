@@ -10,11 +10,12 @@ import { cn } from "@/lib/utils";
 import "@/components/ui/glass-effects.css";
 
 interface AgentStep {
-  stepId: string;
-  stepType: string;
+  stepIndex: number;
+  toolName: string;
   status: "pending" | "running" | "succeeded" | "failed";
   description?: string;
-  duration?: number;
+  startedAt?: string;
+  completedAt?: string;
   error?: string;
   output?: any;
 }
@@ -85,9 +86,15 @@ function StepStatusIcon({ status }: { status: AgentStep["status"] }) {
   }
 }
 
+function calculateDuration(startedAt?: string, completedAt?: string): number | null {
+  if (!startedAt || !completedAt) return null;
+  return new Date(completedAt).getTime() - new Date(startedAt).getTime();
+}
+
 function StepItem({ step, index }: { step: AgentStep; index: number }) {
-  const IconComponent = getToolIcon(step.stepType);
+  const IconComponent = getToolIcon(step.toolName);
   const isRunning = step.status === "running";
+  const duration = calculateDuration(step.startedAt, step.completedAt);
   
   return (
     <div
@@ -98,7 +105,7 @@ function StepItem({ step, index }: { step: AgentStep; index: number }) {
         step.status === "failed" && "border-red-500/30 bg-red-500/5",
         step.status === "pending" && "border-border bg-muted/30"
       )}
-      data-testid={`step-item-${step.stepId}`}
+      data-testid={`step-item-${step.stepIndex}`}
     >
       <div className={cn(
         "flex items-center justify-center w-8 h-8 rounded-full shrink-0",
@@ -140,12 +147,12 @@ function StepItem({ step, index }: { step: AgentStep; index: number }) {
         </div>
         
         <p className="text-sm font-medium mt-1 truncate">
-          {step.description || step.stepType.replace(/_/g, " ")}
+          {step.description || step.toolName.replace(/_/g, " ")}
         </p>
         
-        {step.duration && step.status === "succeeded" && (
+        {duration && step.status === "succeeded" && (
           <p className="text-xs text-muted-foreground mt-0.5">
-            {formatDuration(step.duration)}
+            {formatDuration(duration)}
           </p>
         )}
         
@@ -312,7 +319,7 @@ export function AgentPanel({ runId, chatId, onClose, isOpen }: AgentPanelProps) 
             ) : steps.length > 0 ? (
               <div className="space-y-2">
                 {steps.map((step, index) => (
-                  <StepItem key={step.stepId} step={step} index={index} />
+                  <StepItem key={`plan-${step.stepIndex}`} step={step} index={index} />
                 ))}
               </div>
             ) : (
@@ -335,7 +342,7 @@ export function AgentPanel({ runId, chatId, onClose, isOpen }: AgentPanelProps) 
             ) : steps.length > 0 ? (
               <div className="space-y-2">
                 {steps.map((step, index) => (
-                  <StepItem key={step.stepId} step={step} index={index} />
+                  <StepItem key={`progress-${step.stepIndex}`} step={step} index={index} />
                 ))}
               </div>
             ) : (

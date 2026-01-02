@@ -192,16 +192,46 @@ export function createAgentModeRouter() {
         .where(eq(agentModeSteps.runId, id))
         .orderBy(agentModeSteps.stepIndex);
 
+      const planSteps = (run.plan as any)?.steps || [];
+      
+      const mergedSteps = planSteps.map((planStep: any, index: number) => {
+        const dbStep = steps.find(s => s.stepIndex === index);
+        if (dbStep) {
+          return {
+            stepIndex: dbStep.stepIndex,
+            toolName: dbStep.toolName,
+            description: planStep.description,
+            status: dbStep.status,
+            output: dbStep.toolOutput,
+            error: dbStep.error,
+            startedAt: dbStep.startedAt,
+            completedAt: dbStep.completedAt,
+          };
+        }
+        return {
+          stepIndex: index,
+          toolName: planStep.toolName,
+          description: planStep.description,
+          status: index < (run.currentStepIndex || 0) ? "pending" : 
+                  index === (run.currentStepIndex || 0) && run.status === "running" ? "running" : "pending",
+          output: null,
+          error: null,
+          startedAt: null,
+          completedAt: null,
+        };
+      });
+
       const response = {
         id: run.id,
         status: run.status,
         plan: run.plan,
         currentStepIndex: run.currentStepIndex,
-        totalSteps: run.totalSteps,
+        totalSteps: run.totalSteps || planSteps.length,
         completedSteps: run.completedSteps,
-        steps: steps.map(s => ({
+        steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
           stepIndex: s.stepIndex,
           toolName: s.toolName,
+          description: null,
           status: s.status,
           output: s.toolOutput,
           error: s.error,

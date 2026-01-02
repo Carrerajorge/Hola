@@ -4,10 +4,18 @@ import { apiRequest } from "@/lib/queryClient";
 
 export type AgentModeStatus = 'idle' | 'queued' | 'planning' | 'running' | 'completed' | 'failed' | 'cancelled';
 
+export interface AgentPlanStep {
+  index: number;
+  toolName: string;
+  description: string;
+  input: any;
+  expectedOutput: string;
+}
+
 export interface AgentPlan {
   objective: string;
-  steps: string[];
-  estimatedTime: number;
+  steps: AgentPlanStep[];
+  estimatedTime: string;
 }
 
 export interface AgentStep {
