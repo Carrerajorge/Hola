@@ -207,12 +207,16 @@ export class ToolRegistry {
         });
         
         return {
-          ...result,
+          success: result.success,
+          output: result.output,
+          artifacts: result.artifacts || [],
+          previews: result.previews || [],
           logs: [...(result.logs || []), ...logs],
           metrics: {
             durationMs: executionResult.metrics.totalDurationMs,
             ...result.metrics,
           },
+          error: result.error,
         };
       } else {
         addLog("error", `Tool failed: ${executionResult.error?.message}`, executionResult.error);
