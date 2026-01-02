@@ -10,30 +10,72 @@ import {
   parseExcelFromText,
   parseSlidesFromText,
 } from "../services/documentGeneration";
+import { executionEngine, type ExecutionOptions } from "./executionEngine";
+import { policyEngine, type PolicyContext } from "./policyEngine";
+import type { ToolCapability, ToolOutput } from "./contracts";
+import { randomUUID } from "crypto";
 
 export interface ToolContext {
   userId: string;
   chatId: string;
   runId: string;
+  correlationId?: string;
+  stepIndex?: number;
+  userPlan?: "free" | "pro" | "admin";
+  isConfirmed?: boolean;
 }
 
 export interface ToolArtifact {
+  id: string;
   type: string;
   name: string;
+  mimeType?: string;
+  url?: string;
   data: any;
+  size?: number;
+  createdAt: Date;
+}
+
+export interface ToolPreview {
+  type: "text" | "html" | "markdown" | "image" | "chart";
+  content: any;
+  title?: string;
+}
+
+export interface ToolLog {
+  level: "debug" | "info" | "warn" | "error";
+  message: string;
+  timestamp: Date;
+  data?: any;
+}
+
+export interface ToolMetrics {
+  durationMs: number;
+  tokensUsed?: number;
+  apiCalls?: number;
+  bytesProcessed?: number;
 }
 
 export interface ToolResult {
   success: boolean;
   output: any;
   artifacts?: ToolArtifact[];
-  error?: string;
+  previews?: ToolPreview[];
+  logs?: ToolLog[];
+  metrics?: ToolMetrics;
+  error?: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    details?: any;
+  };
 }
 
 export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: z.ZodSchema;
+  capabilities?: ToolCapability[];
   execute: (input: any, context: ToolContext) => Promise<ToolResult>;
 }
 
@@ -45,6 +87,7 @@ export class ToolRegistry {
       console.warn(`[ToolRegistry] Overwriting existing tool: ${tool.name}`);
     }
     this.tools.set(tool.name, tool);
+    console.log(`[ToolRegistry] Registered tool: ${tool.name}`);
   }
 
   get(name: string): ToolDefinition | undefined {
@@ -55,36 +98,145 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
+  listForPlan(plan: "free" | "pro" | "admin"): ToolDefinition[] {
+    const allowedTools = policyEngine.getToolsForPlan(plan);
+    return this.list().filter(t => allowedTools.includes(t.name));
+  }
+
   async execute(name: string, input: any, context: ToolContext): Promise<ToolResult> {
     const tool = this.tools.get(name);
+    const startTime = Date.now();
+    const logs: ToolLog[] = [];
+    
+    const addLog = (level: ToolLog["level"], message: string, data?: any) => {
+      logs.push({ level, message, timestamp: new Date(), data });
+    };
     
     if (!tool) {
       return {
         success: false,
         output: null,
-        error: `Tool "${name}" not found`,
+        error: {
+          code: "TOOL_NOT_FOUND",
+          message: `Tool "${name}" not found`,
+          retryable: false,
+        },
+        logs,
+      };
+    }
+
+    const policyContext: PolicyContext = {
+      userId: context.userId,
+      userPlan: context.userPlan || "free",
+      toolName: name,
+      isConfirmed: context.isConfirmed,
+    };
+
+    const policyCheck = policyEngine.checkAccess(policyContext);
+    
+    if (!policyCheck.allowed) {
+      addLog("warn", `Policy denied execution: ${policyCheck.reason}`);
+      return {
+        success: false,
+        output: null,
+        error: {
+          code: policyCheck.requiresConfirmation ? "REQUIRES_CONFIRMATION" : "ACCESS_DENIED",
+          message: policyCheck.reason || "Access denied",
+          retryable: false,
+        },
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
       };
     }
 
     try {
       const parseResult = tool.inputSchema.safeParse(input);
       if (!parseResult.success) {
+        addLog("error", "Input validation failed", parseResult.error.errors);
         return {
           success: false,
           output: null,
-          error: `Invalid input: ${parseResult.error.message}`,
+          error: {
+            code: "INVALID_INPUT",
+            message: `Invalid input: ${parseResult.error.message}`,
+            retryable: false,
+            details: parseResult.error.errors,
+          },
+          logs,
+          metrics: { durationMs: Date.now() - startTime },
         };
       }
 
-      return await tool.execute(parseResult.data, context);
+      addLog("info", `Executing tool: ${name}`);
+
+      const executionResult = await executionEngine.execute(
+        name,
+        () => tool.execute(parseResult.data, context),
+        {
+          maxRetries: policyCheck.policy.maxRetries,
+          timeoutMs: policyCheck.policy.maxExecutionTimeMs,
+        },
+        context.correlationId ? {
+          runId: context.runId,
+          correlationId: context.correlationId,
+          stepIndex: context.stepIndex || 0,
+        } : undefined
+      );
+
+      if (executionResult.success && executionResult.data) {
+        const result = executionResult.data;
+        addLog("info", `Tool completed successfully in ${executionResult.metrics.totalDurationMs}ms`);
+        
+        return {
+          ...result,
+          logs: [...(result.logs || []), ...logs],
+          metrics: {
+            durationMs: executionResult.metrics.totalDurationMs,
+            ...result.metrics,
+          },
+        };
+      } else {
+        addLog("error", `Tool failed: ${executionResult.error?.message}`, executionResult.error);
+        return {
+          success: false,
+          output: null,
+          error: {
+            code: executionResult.error?.code || "EXECUTION_ERROR",
+            message: executionResult.error?.message || "Unknown error",
+            retryable: executionResult.error?.retryable || false,
+          },
+          logs,
+          metrics: {
+            durationMs: executionResult.metrics.totalDurationMs,
+          },
+        };
+      }
     } catch (error: any) {
-      console.error(`[ToolRegistry] Error executing tool "${name}":`, error);
+      addLog("error", `Unexpected error: ${error.message}`, { stack: error.stack });
       return {
         success: false,
         output: null,
-        error: error.message || "Unknown error",
+        error: {
+          code: "UNEXPECTED_ERROR",
+          message: error.message || "Unknown error",
+          retryable: false,
+        },
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
       };
     }
+  }
+
+  createArtifact(type: string, name: string, data: any, mimeType?: string): ToolArtifact {
+    return {
+      id: randomUUID(),
+      type,
+      name,
+      mimeType,
+      data,
+      size: typeof data === "string" ? data.length : undefined,
+      createdAt: new Date(),
+    };
   }
 }
 
