@@ -1,0 +1,205 @@
+import { z } from "zod";
+
+export const RunStatusSchema = z.enum([
+  "queued",
+  "planning", 
+  "running",
+  "verifying",
+  "completed",
+  "failed",
+  "cancelled",
+  "paused"
+]);
+export type RunStatus = z.infer<typeof RunStatusSchema>;
+
+export const StepStatusSchema = z.enum([
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "skipped",
+  "cancelled"
+]);
+export type StepStatus = z.infer<typeof StepStatusSchema>;
+
+const RUN_TRANSITIONS: Record<RunStatus, RunStatus[]> = {
+  queued: ["planning", "cancelled", "failed"],
+  planning: ["running", "failed", "cancelled"],
+  running: ["verifying", "completed", "failed", "cancelled", "paused"],
+  verifying: ["completed", "failed", "cancelled"],
+  completed: [],
+  failed: ["queued"],
+  cancelled: ["queued"],
+  paused: ["running", "cancelled"],
+};
+
+const STEP_TRANSITIONS: Record<StepStatus, StepStatus[]> = {
+  pending: ["running", "skipped", "cancelled"],
+  running: ["succeeded", "failed", "cancelled"],
+  succeeded: [],
+  failed: ["running"],
+  skipped: [],
+  cancelled: [],
+};
+
+export class StateMachineError extends Error {
+  constructor(
+    public readonly entityType: "run" | "step",
+    public readonly entityId: string,
+    public readonly currentStatus: string,
+    public readonly targetStatus: string
+  ) {
+    super(`Invalid ${entityType} transition: ${currentStatus} -> ${targetStatus} for ${entityId}`);
+    this.name = "StateMachineError";
+  }
+}
+
+export class RunStateMachine {
+  private status: RunStatus;
+  private readonly runId: string;
+  private transitionHistory: Array<{
+    from: RunStatus;
+    to: RunStatus;
+    timestamp: number;
+    reason?: string;
+  }> = [];
+
+  constructor(runId: string, initialStatus: RunStatus = "queued") {
+    this.runId = runId;
+    this.status = initialStatus;
+    this.transitionHistory.push({
+      from: initialStatus,
+      to: initialStatus,
+      timestamp: Date.now(),
+      reason: "initialization"
+    });
+  }
+
+  getStatus(): RunStatus {
+    return this.status;
+  }
+
+  getHistory() {
+    return [...this.transitionHistory];
+  }
+
+  canTransitionTo(targetStatus: RunStatus): boolean {
+    return RUN_TRANSITIONS[this.status].includes(targetStatus);
+  }
+
+  getValidTransitions(): RunStatus[] {
+    return [...RUN_TRANSITIONS[this.status]];
+  }
+
+  transition(targetStatus: RunStatus, reason?: string): void {
+    if (!this.canTransitionTo(targetStatus)) {
+      throw new StateMachineError("run", this.runId, this.status, targetStatus);
+    }
+
+    const previousStatus = this.status;
+    this.status = targetStatus;
+    this.transitionHistory.push({
+      from: previousStatus,
+      to: targetStatus,
+      timestamp: Date.now(),
+      reason
+    });
+
+    console.log(`[StateMachine] Run ${this.runId}: ${previousStatus} -> ${targetStatus}${reason ? ` (${reason})` : ""}`);
+  }
+
+  isTerminal(): boolean {
+    return ["completed", "failed", "cancelled"].includes(this.status);
+  }
+
+  isActive(): boolean {
+    return ["queued", "planning", "running", "verifying", "paused"].includes(this.status);
+  }
+}
+
+export class StepStateMachine {
+  private status: StepStatus;
+  private readonly stepId: string;
+  private retryCount: number = 0;
+  private readonly maxRetries: number;
+  private transitionHistory: Array<{
+    from: StepStatus;
+    to: StepStatus;
+    timestamp: number;
+    reason?: string;
+  }> = [];
+
+  constructor(stepId: string, initialStatus: StepStatus = "pending", maxRetries: number = 3) {
+    this.stepId = stepId;
+    this.status = initialStatus;
+    this.maxRetries = maxRetries;
+    this.transitionHistory.push({
+      from: initialStatus,
+      to: initialStatus,
+      timestamp: Date.now(),
+      reason: "initialization"
+    });
+  }
+
+  getStatus(): StepStatus {
+    return this.status;
+  }
+
+  getRetryCount(): number {
+    return this.retryCount;
+  }
+
+  canRetry(): boolean {
+    return this.status === "failed" && this.retryCount < this.maxRetries;
+  }
+
+  getHistory() {
+    return [...this.transitionHistory];
+  }
+
+  canTransitionTo(targetStatus: StepStatus): boolean {
+    return STEP_TRANSITIONS[this.status].includes(targetStatus);
+  }
+
+  getValidTransitions(): StepStatus[] {
+    return [...STEP_TRANSITIONS[this.status]];
+  }
+
+  transition(targetStatus: StepStatus, reason?: string): void {
+    if (!this.canTransitionTo(targetStatus)) {
+      throw new StateMachineError("step", this.stepId, this.status, targetStatus);
+    }
+
+    const previousStatus = this.status;
+    this.status = targetStatus;
+    
+    if (previousStatus === "failed" && targetStatus === "running") {
+      this.retryCount++;
+    }
+
+    this.transitionHistory.push({
+      from: previousStatus,
+      to: targetStatus,
+      timestamp: Date.now(),
+      reason
+    });
+
+    console.log(`[StateMachine] Step ${this.stepId}: ${previousStatus} -> ${targetStatus}${reason ? ` (${reason})` : ""} (retries: ${this.retryCount})`);
+  }
+
+  isTerminal(): boolean {
+    return ["succeeded", "failed", "skipped", "cancelled"].includes(this.status);
+  }
+
+  isActive(): boolean {
+    return this.status === "running";
+  }
+}
+
+export function validateRunTransition(from: RunStatus, to: RunStatus): boolean {
+  return RUN_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+export function validateStepTransition(from: StepStatus, to: StepStatus): boolean {
+  return STEP_TRANSITIONS[from]?.includes(to) ?? false;
+}

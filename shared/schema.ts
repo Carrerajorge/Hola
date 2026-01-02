@@ -2196,3 +2196,26 @@ export const insertAgentModeStepSchema = createInsertSchema(agentModeSteps).omit
 
 export type InsertAgentModeStep = z.infer<typeof insertAgentModeStepSchema>;
 export type AgentModeStep = typeof agentModeSteps.$inferSelect;
+
+export const agentModeEvents = pgTable("agent_mode_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => agentModeRuns.id, { onDelete: "cascade" }),
+  stepIndex: integer("step_index"),
+  correlationId: varchar("correlation_id").notNull(),
+  eventType: text("event_type").notNull(),
+  payload: jsonb("payload").notNull(),
+  metadata: jsonb("metadata"),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+}, (table) => [
+  index("agent_mode_events_run_idx").on(table.runId),
+  index("agent_mode_events_correlation_idx").on(table.correlationId),
+  index("agent_mode_events_type_idx").on(table.eventType),
+  index("agent_mode_events_timestamp_idx").on(table.timestamp),
+]);
+
+export const insertAgentModeEventSchema = createInsertSchema(agentModeEvents).omit({
+  id: true,
+});
+
+export type InsertAgentModeEvent = z.infer<typeof insertAgentModeEventSchema>;
+export type AgentModeEvent = typeof agentModeEvents.$inferSelect;
