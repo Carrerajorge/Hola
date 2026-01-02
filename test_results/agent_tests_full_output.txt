@@ -4976,3 +4976,445 @@
 [2m   Start at [22m 18:50:19
 [2m   Duration [22m 9.62s[2m (transform 2.43s, setup 0ms, import 13.53s, tests 7.93s, environment 1ms)[22m
 
+
+[1m[46m RUN [49m[22m [36mv4.0.16 [39m[90m/home/runner/workspace[39m
+
+ [32m✓[39m server/agent/__tests__/webtool-cache-isolation.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 120[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m26 passed[39m[22m[90m (26)[39m
+[2m   Start at [22m 19:05:20
+[2m   Duration [22m 650ms[2m (transform 135ms, setup 0ms, import 183ms, tests 120ms, environment 0ms)[22m
+
+
+[1m[46m RUN [49m[22m [36mv4.0.16 [39m[90m/home/runner/workspace[39m
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mHTTP 429 Rate Limited Responses[2m > [22m[2mshould handle 429 responses from fetch adapter
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mHTTP 429 Rate Limited Responses[2m > [22m[2mshould fall back to browser on 429 from fetch
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mHTTP 429 Rate Limited Responses[2m > [22m[2mshould respect retry-after header on 429
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mHTTP 403 Forbidden Responses[2m > [22m[2mshould handle 403 responses gracefully
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mHTTP 403 Forbidden Responses[2m > [22m[2mshould try browser adapter on 403 from fetch
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mHTTP 403 Forbidden Responses[2m > [22m[2mshould report error when both fetch and browser return 403
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mTimeout and Slow Response Handling[2m > [22m[2mshould handle slow fetch responses with timeout
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mTimeout and Slow Response Handling[2m > [22m[2mshould fall back to browser on fetch timeout
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mTimeout and Slow Response Handling[2m > [22m[2mshould handle browser timeout gracefully
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mGiant HTML Response Handling (>5MB)[2m > [22m[2mshould handle giant HTML responses without crashing
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mGiant HTML Response Handling (>5MB)[2m > [22m[2mshould truncate or handle oversized content gracefully
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mMalformed HTML Handling[2m > [22m[2mshould handle completely malformed HTML
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mMalformed HTML Handling[2m > [22m[2mshould handle HTML with unclosed tags
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mMalformed HTML Handling[2m > [22m[2mshould handle binary content disguised as HTML
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mMalformed HTML Handling[2m > [22m[2mshould handle deeply nested HTML structures
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mCAPTCHA-like Response Handling[2m > [22m[2mshould detect CAPTCHA-like responses (short, no content)
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mCAPTCHA-like Response Handling[2m > [22m[2mshould try browser on suspected CAPTCHA from fetch
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mCAPTCHA-like Response Handling[2m > [22m[2mshould handle challenge pages
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstdout[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mCircuit Breaker Behavior[2m > [22m[2mshould trigger circuit breaker after repeated failures
+[22m[39m[CircuitBreaker:webtool-test] State transition: CLOSED -> OPEN
+
+[90mstdout[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mCircuit Breaker Behavior[2m > [22m[2mshould recover after circuit breaker reset timeout
+[22m[39m[CircuitBreaker:webtool-recovery-test] State transition: CLOSED -> OPEN
+
+[90mstdout[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mCircuit Breaker Behavior[2m > [22m[2mshould recover after circuit breaker reset timeout
+[22m[39m[CircuitBreaker:webtool-recovery-test] State transition: OPEN -> HALF_OPEN
+
+[90mstdout[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mCircuit Breaker Behavior[2m > [22m[2mshould recover after circuit breaker reset timeout
+[22m[39m[CircuitBreaker:webtool-recovery-test] State transition: HALF_OPEN -> CLOSED
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mFallback Ladder (fetch -> browser -> error)[2m > [22m[2mshould use fetch first, then fall back to browser
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mFallback Ladder (fetch -> browser -> error)[2m > [22m[2mshould return error when both fetch and browser fail
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mFallback Ladder (fetch -> browser -> error)[2m > [22m[2mshould skip browser for successful fetch
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mFallback Ladder (fetch -> browser -> error)[2m > [22m[2mshould handle partial failures in concurrent fetches
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould handle rapid consecutive retrievals
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould handle special characters in URLs
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould handle unicode content
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mEdge Cases and Stress Conditions[2m > [22m[2mshould not leak memory with many failed requests
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mContent Quality and Validation[2m > [22m[2mshould reject extremely short responses as low quality
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+[90mstderr[2m | server/agent/__tests__/webtool-chaos.test.ts[2m > [22m[2mWebtool Chaos Tests[2m > [22m[2mContent Quality and Validation[2m > [22m[2mshould handle responses with only scripts and no content
+[22m[39m[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+[SandboxSecurity] Network access denied (disabled)
+
+ [32m✓[39m server/agent/__tests__/webtool-chaos.test.ts [2m([22m[2m33 tests[22m[2m)[22m[32m 133[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m33 passed[39m[22m[90m (33)[39m
+[2m   Start at [22m 19:05:23
+[2m   Duration [22m 3.07s[2m (transform 624ms, setup 0ms, import 2.30s, tests 133ms, environment 0ms)[22m
+

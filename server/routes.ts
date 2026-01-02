@@ -15,6 +15,7 @@ import { createFilesRouter } from "./routes/filesRouter";
 import { createGptRouter } from "./routes/gptRouter";
 import { createDocumentsRouter } from "./routes/documentsRouter";
 import { createAdminRouter } from "./routes/adminRouter";
+import { createRetrievalAdminRouter } from "./routes/retrievalAdminRouter";
 import { createAgentRouter } from "./routes/agentRouter";
 import { createFigmaRouter } from "./routes/figmaRouter";
 import { createLibraryRouter } from "./routes/libraryRouter";
@@ -58,6 +59,7 @@ export async function registerRoutes(
   app.use("/api", createGptRouter());
   app.use("/api/documents", createDocumentsRouter());
   app.use("/api/admin", createAdminRouter());
+  app.use("/api/admin", createRetrievalAdminRouter());
   app.use("/api", createAgentRouter(broadcastBrowserEvent));
   app.use(createFigmaRouter());
   app.use(createLibraryRouter());

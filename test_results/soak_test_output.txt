@@ -1,0 +1,49 @@
+======================================================================
+SOAK TEST - Web Retrieval System
+======================================================================
+
+Configuration:
+  Concurrency: 50
+  Duration: 15 seconds
+  Success Rate Threshold: 95%
+
+[5.0s] Requests: 4095 | Success: 98.14% | Active: 50 | Heap: 25.8MB
+[10.0s] Requests: 8247 | Success: 97.88% | Active: 50 | Heap: 33.0MB
+[15.0s] Requests: 12439 | Success: 97.90% | Active: 49 | Heap: 40.7MB
+
+======================================================================
+SOAK TEST RESULTS
+======================================================================
+
+Request Statistics:
+  Total Requests:      12488
+  Successful:          12226
+  Failed:              262
+  Success Rate:        97.90%
+  Requests/Second:     827.79
+  Duration:            15.09s
+
+Latency Statistics:
+  Min:                 19.44ms
+  Max:                 105.28ms
+  Avg:                 60.13ms
+  P50:                 60.21ms
+  P95:                 95.98ms
+  P99:                 99.07ms
+
+Memory Statistics:
+  Peak Heap Used:      40.71MB
+  Memory Growth:       29.27MB
+  Final Heap Used:     40.71MB
+  Final RSS:           123.63MB
+
+Error Types:
+  timeout              82 (0.66%)
+  rate_limit           70 (0.56%)
+  memory               56 (0.45%)
+  network              54 (0.43%)
+
+======================================================================
+RESULT: ✓ PASS
+  Success Rate: 97.90% (threshold: 95%)
+======================================================================
