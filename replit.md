@@ -62,3 +62,79 @@ Preferred communication style: Simple, everyday language.
 - **Piston API**: Used for multi-language code execution.
 - **World Bank API V2**: Integrated for economic data retrieval by the ETL Agent.
 - **Gmail API**: Utilized for Gmail chat integration.
+
+## Web Retrieval Production Readiness
+
+### Pipeline Architecture
+```
+User Prompt → RetrievalPlanner → ConcurrencyPool → FastFirstPipeline
+                                                        ↓
+                                    ResponseCache ←→ FetchAdapter (3s)
+                                         ↓              ↓ (fallback)
+                                    RelevanceFilter ← BrowserAdapter (8s)
+                                         ↓
+                                    RetrievalMetrics → Admin Endpoint
+```
+
+### Tuning Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `fetchTimeoutMs` | 3000 | HTTP fetch timeout |
+| `browserTimeoutMs` | 8000 | Browser render timeout |
+| `maxConcurrency` | 6 | Parallel fetch limit |
+| `maxMemoryMb` | 50 | Cache memory cap |
+| `maxContentSizeBytes` | 1MB | Max cached entry |
+
+### SLO Compliance
+
+| Metric | Threshold | Fast Mode | Realistic Mode |
+|--------|-----------|-----------|----------------|
+| Fetch P95 | ≤3000ms | 48.9ms | 1876.9ms |
+| Browser P95 | ≤8000ms | N/A | 4969.9ms |
+| Total P95 | - | 64.7ms | 5648.3ms |
+| Success Rate | ≥95% | 97.94% | 97.36% |
+
+### Test Summary
+
+| Test | Count | Status |
+|------|-------|--------|
+| Agent Tests | 408 | ✅ |
+| Chaos Tests | 33 | ✅ |
+| Isolation Tests | 26 | ✅ |
+| Benchmarks | 13 | ✅ |
+
+### Multi-Instance Cache
+
+**Status**: In-memory per instance. Redis NOT required because:
+1. Stateless design - cache miss fetches fresh content
+2. Short TTLs (5-10 min) - stale data auto-evicts
+3. 50MB cap per instance within container limits
+
+### Tenant Isolation
+
+Cache keys prefixed with `t:{hashedTenantId}:`. Tenant IDs hashed (SHA-256, 12 chars) for PII protection.
+
+### Admin Endpoint Security
+
+`GET /api/admin/retrieval-status?window=<ms>`
+- **RBAC**: Admin-only via `isAuthenticated` + `requireAdmin` middleware
+- **Window Validation**: Clamped to 1 min - 24 hours (prevents DoS)
+- **PII Redaction**: Domains hashed in `topErrorDomains`
+- **Logs Sanitized**: No URLs/headers in error logs
+
+### Reproduction Commands
+
+```bash
+# All tests (408)
+npx vitest run server/agent/__tests__
+
+# Benchmarks
+npx tsx scripts/web-bench.ts
+
+# Soak test - fast mode (duration in SECONDS)
+npx tsx scripts/soak-test.ts --concurrency 100 --duration 60
+
+# Soak test - realistic latencies
+npx tsx scripts/soak-test.ts --concurrency 50 --duration 30 --realistic
+```

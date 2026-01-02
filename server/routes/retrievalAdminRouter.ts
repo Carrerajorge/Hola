@@ -1,9 +1,33 @@
 import { Router, Request, Response, NextFunction } from "express";
+import { createHash } from "crypto";
 import { responseCache } from "../agent/webtool/responseCache";
 import { retrievalMetrics } from "../agent/webtool/retrievalMetrics";
 import { isAuthenticated } from "../replit_integrations/auth/replitAuth";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
+
+const MIN_WINDOW_MS = 60000;
+const MAX_WINDOW_MS = 86400000;
+const DEFAULT_WINDOW_MS = 3600000;
+
+function redactDomain(domain: string): string {
+  if (!domain) return "";
+  const parts = domain.split(".");
+  if (parts.length <= 2) {
+    return createHash("sha256").update(domain).digest("hex").slice(0, 8);
+  }
+  const tld = parts.slice(-2).join(".");
+  const subdomain = parts.slice(0, -2).join(".");
+  const hashedSubdomain = createHash("sha256").update(subdomain).digest("hex").slice(0, 6);
+  return `${hashedSubdomain}...${tld}`;
+}
+
+function validateWindowMs(value: unknown): number {
+  if (value === undefined || value === null) return DEFAULT_WINDOW_MS;
+  const parsed = parseInt(String(value), 10);
+  if (isNaN(parsed) || parsed < 0) return DEFAULT_WINDOW_MS;
+  return Math.max(MIN_WINDOW_MS, Math.min(MAX_WINDOW_MS, parsed));
+}
 
 interface ErrorTrackingEntry {
   domain: string;
@@ -143,15 +167,22 @@ export function createRetrievalAdminRouter(): Router {
 
   router.get("/retrieval-status", isAuthenticated, requireAdmin, async (req: Request, res: Response) => {
     try {
-      const windowMs = req.query.window 
-        ? parseInt(req.query.window as string, 10) 
-        : 3600000;
+      const windowMs = validateWindowMs(req.query.window);
 
       const cacheStats = responseCache.getStats();
       const slaReport = retrievalMetrics.getSLAReport(windowMs);
       const methodBreakdown = retrievalMetrics.getMethodBreakdown();
-      const errorSummary = retrievalErrorTracker.getSummary(windowMs);
+      const rawErrorSummary = retrievalErrorTracker.getSummary(windowMs);
       const latencyHistogram = retrievalMetrics.getLatencyHistogram();
+      
+      const errorSummary = {
+        ...rawErrorSummary,
+        topErrorDomains: rawErrorSummary.topErrorDomains.map(e => ({
+          domain: redactDomain(e.domain),
+          errorType: e.errorType,
+          count: e.count,
+        })),
+      };
 
       const response = {
         timestamp: new Date().toISOString(),
@@ -186,10 +217,12 @@ export function createRetrievalAdminRouter(): Router {
 
       res.json(response);
     } catch (error) {
-      console.error("[RetrievalAdmin] Error fetching retrieval status:", error);
+      console.error("[RetrievalAdmin] Error fetching retrieval status:", {
+        errorType: error instanceof Error ? error.constructor.name : "Unknown",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
       res.status(500).json({ 
         error: "Failed to fetch retrieval status",
-        message: error instanceof Error ? error.message : "Unknown error"
       });
     }
   });
