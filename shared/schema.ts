@@ -2156,11 +2156,13 @@ export const agentModeRuns = pgTable("agent_mode_runs", {
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  idempotencyKey: varchar("idempotency_key"),
 }, (table) => [
   index("agent_mode_runs_chat_idx").on(table.chatId),
   index("agent_mode_runs_message_idx").on(table.messageId),
   index("agent_mode_runs_status_idx").on(table.status),
   index("agent_mode_runs_created_idx").on(table.createdAt),
+  index("agent_mode_runs_idempotency_idx").on(table.idempotencyKey),
 ]);
 
 export const insertAgentModeRunSchema = createInsertSchema(agentModeRuns).omit({
@@ -2206,6 +2208,11 @@ export const agentModeEvents = pgTable("agent_mode_events", {
   payload: jsonb("payload").notNull(),
   metadata: jsonb("metadata"),
   timestamp: timestamp("timestamp").defaultNow().notNull(),
+  inputHash: varchar("input_hash"),
+  outputRef: text("output_ref"),
+  durationMs: integer("duration_ms"),
+  errorCode: text("error_code"),
+  retryCount: integer("retry_count").default(0),
 }, (table) => [
   index("agent_mode_events_run_idx").on(table.runId),
   index("agent_mode_events_correlation_idx").on(table.correlationId),

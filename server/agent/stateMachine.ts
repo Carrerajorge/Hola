@@ -15,6 +15,7 @@ export type RunStatus = z.infer<typeof RunStatusSchema>;
 export const StepStatusSchema = z.enum([
   "pending",
   "running",
+  "verifying",
   "succeeded",
   "failed",
   "skipped",
@@ -35,7 +36,8 @@ const RUN_TRANSITIONS: Record<RunStatus, RunStatus[]> = {
 
 const STEP_TRANSITIONS: Record<StepStatus, StepStatus[]> = {
   pending: ["running", "skipped", "cancelled"],
-  running: ["succeeded", "failed", "cancelled"],
+  running: ["succeeded", "failed", "cancelled", "verifying"],
+  verifying: ["succeeded", "failed"],
   succeeded: [],
   failed: ["running"],
   skipped: [],
@@ -192,7 +194,7 @@ export class StepStateMachine {
   }
 
   isActive(): boolean {
-    return this.status === "running";
+    return this.status === "running" || this.status === "verifying";
   }
 }
 

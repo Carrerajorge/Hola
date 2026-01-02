@@ -1,9 +1,9 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { db } from "../db";
-import { agentModeRuns, agentModeSteps } from "@shared/schema";
+import { agentModeRuns, agentModeSteps, agentModeEvents } from "@shared/schema";
 import { agentManager } from "../agent/agentOrchestrator";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, asc } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 const createRunSchema = z.object({
@@ -284,6 +284,41 @@ export function createAgentModeRouter() {
     } catch (error: any) {
       console.error("[AgentRoutes] Error getting steps:", error);
       res.status(500).json({ error: "Failed to get agent run steps" });
+    }
+  });
+
+  router.get("/runs/:id/events", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, id));
+
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      const events = await db.select()
+        .from(agentModeEvents)
+        .where(eq(agentModeEvents.runId, id))
+        .orderBy(asc(agentModeEvents.timestamp));
+
+      const response = events.map(e => ({
+        id: e.id,
+        runId: e.runId,
+        stepIndex: e.stepIndex,
+        correlationId: e.correlationId,
+        eventType: e.eventType,
+        payload: e.payload,
+        metadata: e.metadata,
+        timestamp: e.timestamp,
+      }));
+
+      res.json(response);
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error getting events:", error);
+      res.status(500).json({ error: "Failed to get agent run events" });
     }
   });
 

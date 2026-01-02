@@ -265,6 +265,7 @@ const analyzeSpreadsheetTool: ToolDefinition = {
   inputSchema: analyzeSpreadsheetSchema,
   capabilities: ["reads_files", "produces_artifacts"],
   execute: async (input, context): Promise<ToolResult> => {
+    const startTime = Date.now();
     try {
       const params: StartAnalysisParams = {
         uploadId: input.uploadId,
@@ -283,12 +284,20 @@ const analyzeSpreadsheetTool: ToolDefinition = {
           sessionId: result.sessionId,
           message: "Analysis started successfully",
         },
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
       };
     } catch (error: any) {
       return {
         success: false,
         output: null,
         error: createError("ANALYSIS_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
       };
     }
   },
@@ -306,6 +315,7 @@ const webSearchTool: ToolDefinition = {
   inputSchema: webSearchSchema,
   capabilities: ["requires_network", "accesses_external_api"],
   execute: async (input, context): Promise<ToolResult> => {
+    const startTime = Date.now();
     try {
       if (input.academic) {
         const results = await searchScholar(input.query, input.maxResults);
@@ -316,6 +326,10 @@ const webSearchTool: ToolDefinition = {
             type: "academic",
             results,
           },
+          artifacts: [],
+          previews: [],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
         };
       }
 
@@ -328,12 +342,20 @@ const webSearchTool: ToolDefinition = {
           results: response.results,
           contents: response.contents,
         },
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
       };
     } catch (error: any) {
       return {
         success: false,
         output: null,
         error: createError("SEARCH_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
       };
     }
   },
@@ -349,6 +371,7 @@ const generateImageTool: ToolDefinition = {
   inputSchema: generateImageSchema,
   capabilities: ["requires_network", "accesses_external_api", "produces_artifacts"],
   execute: async (input, context): Promise<ToolResult> => {
+    const startTime = Date.now();
     try {
       const result = await generateImage(input.prompt);
       
@@ -366,12 +389,19 @@ const generateImageTool: ToolDefinition = {
             result.mimeType
           ),
         ],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
       };
     } catch (error: any) {
       return {
         success: false,
         output: null,
         error: createError("IMAGE_GENERATION_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
       };
     }
   },
@@ -389,6 +419,7 @@ const browseUrlTool: ToolDefinition = {
   inputSchema: browseUrlSchema,
   capabilities: ["requires_network", "accesses_external_api", "long_running"],
   execute: async (input, context): Promise<ToolResult> => {
+    const startTime = Date.now();
     let sessionId = input.sessionId;
     let createdSession = false;
 
@@ -425,7 +456,10 @@ const browseUrlTool: ToolDefinition = {
           timing: result.timing,
           sessionId: createdSession ? undefined : sessionId,
         },
-        artifacts: artifacts.length > 0 ? artifacts : undefined,
+        artifacts,
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
         error: result.error ? createError("BROWSE_ERROR", result.error, true) : undefined,
       };
     } catch (error: any) {
@@ -436,6 +470,10 @@ const browseUrlTool: ToolDefinition = {
         success: false,
         output: null,
         error: createError("BROWSE_ERROR", error.message, true),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
       };
     }
   },
@@ -453,6 +491,7 @@ const generateDocumentTool: ToolDefinition = {
   inputSchema: generateDocumentSchema,
   capabilities: ["produces_artifacts", "writes_files"],
   execute: async (input, context): Promise<ToolResult> => {
+    const startTime = Date.now();
     try {
       let buffer: Buffer;
       let mimeType: string;
@@ -501,12 +540,19 @@ const generateDocumentTool: ToolDefinition = {
             mimeType
           ),
         ],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
       };
     } catch (error: any) {
       return {
         success: false,
         output: null,
         error: createError("DOCUMENT_GENERATION_ERROR", error.message, false),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
       };
     }
   },
