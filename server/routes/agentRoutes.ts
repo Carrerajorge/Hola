@@ -160,8 +160,14 @@ export function createAgentModeRouter() {
       })();
 
       res.status(201).json({ 
+        id: newRun.id,
         runId: newRun.id, 
-        status: "queued" 
+        status: "queued",
+        steps: [],
+        artifacts: [],
+        plan: null,
+        summary: null,
+        error: null,
       });
     } catch (error: any) {
       console.error("[AgentRoutes] Error creating run:", error);
