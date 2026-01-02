@@ -3543,7 +3543,7 @@ IMPORTANTE:
                   className="flex items-center gap-1 sm:gap-2 bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-1 rounded-md cursor-not-allowed opacity-60"
                   data-testid="button-model-selector-disabled"
                 >
-                  <span className="font-semibold text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none text-gray-500 dark:text-gray-400">
+                  <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none text-gray-500 dark:text-gray-400">
                     Sin modelos activos
                   </span>
                   <ChevronDown className="h-3 w-3 text-gray-400 flex-shrink-0" />
@@ -3560,7 +3560,7 @@ IMPORTANTE:
                 onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
                 data-testid="button-model-selector"
               >
-                <span className="font-semibold text-xs sm:text-sm truncate max-w-[80px] sm:max-w-none">
+                <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
                   {selectedModelData?.name || "Seleccionar modelo"}
                 </span>
                 <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
@@ -3605,12 +3605,13 @@ IMPORTANTE:
           <Button
             variant="outline"
             size="sm"
-            className="rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
+            className="hidden sm:flex rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
             onClick={() => setIsUpgradeDialogOpen(true)}
             data-testid="button-upgrade-header"
           >
             <Sparkles className="h-3 w-3 text-primary" />
-            Mejorar el plan a Go
+            <span className="hidden md:inline">Mejorar el plan a Go</span>
+            <span className="md:hidden">Upgrade</span>
           </Button>
           {chatId && !chatId.startsWith("pending-") ? (
             <ShareChatDialog chatId={chatId} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
