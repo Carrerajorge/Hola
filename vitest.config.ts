@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['tests/**/*.test.ts', 'server/__tests__/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'server/__tests__/**/*.test.ts', 'server/**/__tests__/**/*.test.ts'],
     exclude: ['node_modules', 'dist'],
     testTimeout: 30000,
     hookTimeout: 30000,
@@ -17,7 +17,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './')
+      '@': path.resolve(__dirname, './'),
+      '@shared': path.resolve(__dirname, './shared')
     }
   }
 });

@@ -67,3 +67,65 @@ Preferred communication style: Simple, everyday language.
 - **Piston API**: Used for multi-language code execution.
 - **World Bank API V2**: Integrated for economic data retrieval by the ETL Agent.
 - **Gmail API**: Utilized for Gmail chat integration.
+
+## Agent Mode - Acceptance Checklist
+
+### Core Functionality
+- [x] Chat normal funciona sin cambios (Agent es plugin modular)
+- [x] Botón Agente activa mode='agent' en mensajes
+- [x] Panel Plan/Progreso/Artefactos visible en UI
+
+### State Machine & Contracts
+- [x] Máquina de estados estricta: queued→planning→running→verifying→completed/failed/cancelled/paused
+- [x] Contratos tipados con Zod: Run, Step, ToolCall, Artifact
+- [x] Validación runtime de transiciones de estado
+- [x] Idempotency keys en agent_runs
+
+### Persistence & Events
+- [x] Tablas PostgreSQL: agentModeRuns, agentModeSteps, agentModeEvents
+- [x] Índices por chatId, messageId, runId, status, createdAt
+- [x] Event sourcing append-only con correlationId
+- [x] Campos de auditoría: inputHash, outputRef, durationMs, errorCode, retryCount
+
+### Execution Engine
+- [x] Circuit breaker (5 failures→open, 60s reset)
+- [x] Backoff exponencial con jitter para reintentos
+- [x] Cancel tokens para abortar ejecución
+- [x] Timeouts configurables por herramienta
+
+### Tool Registry
+- [x] 5 herramientas registradas: analyze_spreadsheet, web_search, generate_image, browse_url, generate_document
+- [x] Outputs normalizados: {artifacts[], previews[], logs[], metrics[]}
+- [x] Métricas por ejecución: latencyMs, tokensUsed
+
+### Policy Engine
+- [x] RBAC por plan: free, pro, admin
+- [x] Deny-by-default para herramientas sensibles
+- [x] Rate limiting por usuario/herramienta
+- [x] Capacidades por herramienta (requiresConfirmation, isDestructive, etc.)
+
+### API Endpoints
+- [x] POST /api/agent/runs - Crear run
+- [x] GET /api/agent/runs/:id - Obtener run
+- [x] GET /api/agent/runs/:id/steps - Obtener steps
+- [x] GET /api/agent/runs/:id/events - Obtener eventos
+- [x] POST /api/agent/runs/:id/cancel - Cancelar run
+- [x] POST /api/agent/runs/:id/retry - Reintentar run fallido
+- [x] POST /api/agent/runs/:id/pause - Pausar run activo
+- [x] POST /api/agent/runs/:id/resume - Resumir run pausado
+
+### Observability
+- [x] Logs estructurados con correlationId
+- [x] Métricas por step: latency, success_rate, tool_error_rate
+- [x] MetricsCollector con getLatencyP95, getSuccessRate, getErrorRate
+
+### Tests
+- [x] Unit tests para StateMachine (18 tests)
+- [x] Unit tests para ToolRegistry (7 tests)
+- [x] Unit tests para PolicyEngine (16 tests)
+- [x] Unit tests para MetricsCollector (13 tests)
+- [x] Tests ubicados en server/agent/__tests__/agent.test.ts
+
+### Evidence
+- **Test command**: `npm test -- server/agent/__tests__/agent.test.ts`
+- **81 tests passing** verificando toda la infraestructura del Agent
