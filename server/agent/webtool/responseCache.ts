@@ -27,6 +27,7 @@ export interface CacheOptions {
   browserTtlMs: number;
   cleanupIntervalMs: number;
   maxMemoryMb: number;
+  maxContentSizeBytes: number;
 }
 
 export interface CacheStats {
@@ -45,6 +46,7 @@ const DEFAULT_CACHE_OPTIONS: CacheOptions = {
   browserTtlMs: 5 * 60 * 1000,
   cleanupIntervalMs: 60 * 1000,
   maxMemoryMb: 50,
+  maxContentSizeBytes: 1024 * 1024,
 };
 
 export class ResponseCache {
@@ -54,10 +56,15 @@ export class ResponseCache {
   private hits = 0;
   private misses = 0;
   private cleanupTimer: NodeJS.Timeout | null = null;
+  private currentMemoryBytes = 0;
 
   constructor(options: Partial<CacheOptions> = {}) {
     this.options = { ...DEFAULT_CACHE_OPTIONS, ...options };
     this.startCleanup();
+  }
+
+  private estimateEntrySize(entry: CacheEntry): number {
+    return entry.content.length + (entry.title?.length || 0) + entry.url.length + 200;
   }
 
   private startCleanup(): void {
@@ -111,7 +118,12 @@ export class ResponseCache {
       queryHash?: string;
       ttlMs?: number;
     }
-  ): void {
+  ): boolean {
+    if (content.length > this.options.maxContentSizeBytes) {
+      console.warn(`[ResponseCache] Content too large for caching: ${content.length} bytes (max: ${this.options.maxContentSizeBytes})`);
+      return false;
+    }
+    
     const urlHash = ResponseCache.hashUrl(url);
     const now = Date.now();
     
@@ -135,15 +147,30 @@ export class ResponseCache {
       ttlMs,
     };
     
+    const entrySize = this.estimateEntrySize(entry);
+    const maxBytes = this.options.maxMemoryMb * 1024 * 1024;
+    
+    const existingEntry = this.cache.get(urlHash);
+    if (existingEntry) {
+      this.currentMemoryBytes -= this.estimateEntrySize(existingEntry);
+    }
+    
+    while (this.currentMemoryBytes + entrySize > maxBytes && this.cache.size > 0) {
+      this.evictOldest();
+    }
+    
     if (this.cache.size >= this.options.maxEntries) {
       this.evictOldest();
     }
     
     this.cache.set(urlHash, entry);
+    this.currentMemoryBytes += entrySize;
     
     if (options.queryHash) {
       this.addToQueryIndex(urlHash, options.queryHash);
     }
+    
+    return true;
   }
 
   getConditionalHeaders(url: string): Record<string, string> | null {
@@ -205,6 +232,7 @@ export class ResponseCache {
     const entry = this.cache.get(urlHash);
     
     if (entry) {
+      this.currentMemoryBytes -= this.estimateEntrySize(entry);
       this.removeFromQueryIndex(urlHash, entry.queryHash);
       this.cache.delete(urlHash);
       return true;
@@ -221,6 +249,10 @@ export class ResponseCache {
     
     let count = 0;
     for (const urlHash of urlHashes) {
+      const entry = this.cache.get(urlHash);
+      if (entry) {
+        this.currentMemoryBytes -= this.estimateEntrySize(entry);
+      }
       if (this.cache.delete(urlHash)) {
         count++;
       }
@@ -235,6 +267,7 @@ export class ResponseCache {
     this.queryIndex.clear();
     this.hits = 0;
     this.misses = 0;
+    this.currentMemoryBytes = 0;
   }
 
   getStats(): CacheStats {
@@ -297,6 +330,7 @@ export class ResponseCache {
     if (oldestHash) {
       const entry = this.cache.get(oldestHash);
       if (entry) {
+        this.currentMemoryBytes -= this.estimateEntrySize(entry);
         this.removeFromQueryIndex(oldestHash, entry.queryHash);
       }
       this.cache.delete(oldestHash);
@@ -316,6 +350,7 @@ export class ResponseCache {
     for (const hash of expired) {
       const entry = this.cache.get(hash);
       if (entry) {
+        this.currentMemoryBytes -= this.estimateEntrySize(entry);
         this.removeFromQueryIndex(hash, entry.queryHash);
       }
       this.cache.delete(hash);

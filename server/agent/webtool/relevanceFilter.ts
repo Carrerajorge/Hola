@@ -118,7 +118,8 @@ export class RelevanceFilter {
     let currentIndex = 0;
     
     for (const sentence of sentences) {
-      if (currentChunk.length + sentence.length > this.options.chunkSize && currentChunk.length > 0) {
+      const separator = currentChunk.length > 0 ? " " : "";
+      if (currentChunk.length + separator.length + sentence.length > this.options.chunkSize && currentChunk.length > 0) {
         chunks.push({
           text: currentChunk.trim(),
           startIndex: chunkStart,
@@ -126,13 +127,13 @@ export class RelevanceFilter {
         });
         
         const overlapStart = Math.max(0, currentChunk.length - this.options.chunkOverlap);
-        currentChunk = currentChunk.slice(overlapStart) + sentence;
-        chunkStart = currentIndex - (currentChunk.length - sentence.length);
+        currentChunk = currentChunk.slice(overlapStart) + " " + sentence;
+        chunkStart = currentIndex - (currentChunk.length - sentence.length - 1);
       } else {
         if (currentChunk.length === 0) {
           chunkStart = currentIndex;
         }
-        currentChunk += sentence;
+        currentChunk += separator + sentence;
       }
       
       currentIndex += sentence.length;
@@ -150,8 +151,9 @@ export class RelevanceFilter {
   }
 
   private splitIntoSentences(text: string): string[] {
+    const normalized = text.replace(/\s+/g, " ").trim();
     const sentenceEnders = /(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚ])/g;
-    const sentences = text.split(sentenceEnders);
+    const sentences = normalized.split(sentenceEnders);
     return sentences.filter(s => s.trim().length > 0);
   }
 

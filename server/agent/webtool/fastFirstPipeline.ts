@@ -330,6 +330,13 @@ export class FastFirstPipeline extends EventEmitter {
     
     try {
       const canonicalUrl = canonicalizeUrl(url);
+      const domain = extractDomain(canonicalUrl);
+      
+      if (!sandboxSecurity.isHostAllowed(domain)) {
+        errors.push({ url, error: `Host ${domain} not in sandbox allowlist`, stage: "security" });
+        return null;
+      }
+      
       const urlHash = ResponseCache.hashUrl(canonicalUrl);
       
       if (this.options.enableCache) {

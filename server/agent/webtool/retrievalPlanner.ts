@@ -40,6 +40,7 @@ const STOP_WORDS = new Set([
   "estas", "eso", "esa", "ese", "esos", "esas", "aquel", "aquella",
   "aquellos", "aquellas", "uno", "una", "unos", "unas", "el", "la", "los",
   "las", "del", "al", "y", "o", "pero", "porque", "pues", "aunque", "si",
+  "son", "ser", "está", "están", "era", "eran", "fue", "fueron",
 ]);
 
 const RECENCY_PATTERNS = [
@@ -61,6 +62,7 @@ export class RetrievalPlanner {
   private entityPatterns: RegExp[] = [
     /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g,
     /\b(?:Dr\.|Mr\.|Mrs\.|Ms\.|Prof\.)\s+[A-Z][a-z]+\b/g,
+    /\b[A-Z][a-z]{2,}\b/g,
     /\b[A-Z]{2,}\b/g,
     /\b\d{4}\b/g,
     /"([^"]+)"/g,
