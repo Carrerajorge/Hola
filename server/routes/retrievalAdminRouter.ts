@@ -5,6 +5,14 @@ import { retrievalMetrics } from "../agent/webtool/retrievalMetrics";
 import { isAuthenticated } from "../replit_integrations/auth/replitAuth";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
+import { createRateLimiter } from "../middleware/rateLimiter";
+import {
+  v2MetricsCollector,
+  domainCircuitBreaker,
+  type Percentiles,
+  type ErrorTaxonomy,
+  type ResourceSample,
+} from "../agent/webtool/v2";
 
 const MIN_WINDOW_MS = 60000;
 const MAX_WINDOW_MS = 86400000;
@@ -164,6 +172,131 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction) {
 
 export function createRetrievalAdminRouter(): Router {
   const router = Router();
+
+  const v2StatusRateLimiter = createRateLimiter({
+    windowMs: 60000,
+    maxRequests: 10,
+    keyPrefix: "retrieval-v2-status",
+    message: "Rate limit exceeded for retrieval status endpoint. Max 10 requests/minute.",
+  });
+
+  function hashDomain(domain: string): string {
+    if (!domain) return "";
+    return createHash("sha256").update(domain.toLowerCase()).digest("hex").slice(0, 12);
+  }
+
+  router.get(
+    "/retrieval-v2-status",
+    isAuthenticated,
+    requireAdmin,
+    v2StatusRateLimiter,
+    async (req: Request, res: Response) => {
+      try {
+        const windowMs = validateWindowMs(req.query.window);
+
+        const phasePercentiles = v2MetricsCollector.getAllPhasePercentiles(windowMs);
+        const browserRatio = v2MetricsCollector.getBrowserRatio(windowMs);
+        const cacheHitRate = v2MetricsCollector.getCacheHitRate(windowMs);
+        const errorTaxonomy = v2MetricsCollector.getErrorTaxonomy();
+        const resourceReport = v2MetricsCollector.getResourceReport(windowMs);
+        const successRate = v2MetricsCollector.getSuccessRate(windowMs);
+        const totalSamples = v2MetricsCollector.getSampleCount();
+
+        const allPhasesCounts = Object.values(phasePercentiles).reduce(
+          (sum, p) => sum + p.count,
+          0
+        );
+        const avgLatencyMs =
+          allPhasesCounts > 0
+            ? Object.values(phasePercentiles).reduce(
+                (sum, p) => sum + p.avg * p.count,
+                0
+              ) / allPhasesCounts
+            : 0;
+
+        const openCircuits = domainCircuitBreaker.getAllOpenCircuits();
+        const circuitBreakerStatus = openCircuits.map((c) => ({
+          domainHash: hashDomain(c.domain),
+          state: c.status.state,
+          failures: c.status.failures,
+          lastErrorType: c.status.lastErrorType,
+          openedAt: c.status.openedAt,
+        }));
+
+        const slaReport = retrievalMetrics.getSLAReport(windowMs);
+
+        const resourceGauges: {
+          heapUsedMb: number;
+          heapTotalMb: number;
+          rssMb: number;
+          fdCount: number;
+          contextCount: number;
+        } = {
+          heapUsedMb: resourceReport.current.heapUsedMb,
+          heapTotalMb: resourceReport.current.heapTotalMb,
+          rssMb: resourceReport.current.rssMb,
+          fdCount: resourceReport.current.fdCount,
+          contextCount: openCircuits.length,
+        };
+
+        const response = {
+          timestamp: new Date().toISOString(),
+          windowMs,
+          overall: {
+            totalRequests: totalSamples,
+            successRate,
+            avgLatencyMs,
+          },
+          phasePercentiles: phasePercentiles as Record<
+            string,
+            {
+              p50: number;
+              p95: number;
+              p99: number;
+              avg: number;
+              count: number;
+            }
+          >,
+          browserRatio,
+          cacheHitRate,
+          errorTaxonomy: errorTaxonomy as Record<string, number>,
+          resourceGauges,
+          circuitBreaker: {
+            openCount: circuitBreakerStatus.filter((c) => c.state === "open").length,
+            halfOpenCount: circuitBreakerStatus.filter((c) => c.state === "half-open").length,
+            domains: circuitBreakerStatus,
+          },
+          slaCompliance: {
+            fetchP95Ms: slaReport.fetchP95Ms,
+            browserP95Ms: slaReport.browserP95Ms,
+            overallP95Ms: slaReport.overallP95Ms,
+            cacheHitRate: slaReport.cacheHitRate,
+            avgRelevanceScore: slaReport.avgRelevanceScore,
+            avgSourcesCount: slaReport.avgSourcesCount,
+            successRate: slaReport.successRate,
+            totalRequests: slaReport.totalRequests,
+            compliance: slaReport.slaCompliance,
+          },
+          resourceReport: {
+            growthRates: resourceReport.growthRates,
+            limits: resourceReport.limits,
+            warnings: resourceReport.warnings,
+            leakDetected: resourceReport.leakDetected,
+          },
+        };
+
+        res.json(response);
+      } catch (error) {
+        console.error("[RetrievalAdmin] Error fetching V2 retrieval status:", {
+          errorType: error instanceof Error ? error.constructor.name : "Unknown",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+        res.status(500).json({
+          error: "Failed to fetch V2 retrieval status",
+        });
+      }
+    }
+  );
 
   router.get("/retrieval-status", isAuthenticated, requireAdmin, async (req: Request, res: Response) => {
     try {

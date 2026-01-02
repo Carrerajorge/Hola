@@ -1,5 +1,6 @@
 import { z } from "zod";
 import * as fs from "fs";
+import * as v8 from "v8";
 import { EventEmitter } from "events";
 
 export const PhaseType = z.enum(["search", "fetch", "browser", "extract", "filter"]);
@@ -175,7 +176,6 @@ export class ResourceSampler extends EventEmitter {
 
   private checkWarnings(sample: ResourceSample): void {
     const warnings: string[] = [];
-    const v8 = require("v8");
     const heapStats = v8.getHeapStatistics();
     const heapLimitMb = heapStats.heap_size_limit / (1024 * 1024);
     const usagePercent = (sample.heapUsedMb / heapLimitMb) * 100;
@@ -224,7 +224,6 @@ export class ResourceSampler extends EventEmitter {
       ? this.samples[this.samples.length - 1]
       : this.sample();
     
-    const v8 = require("v8");
     const heapStats = v8.getHeapStatistics();
     const heapLimitMb = heapStats.heap_size_limit / (1024 * 1024);
     
