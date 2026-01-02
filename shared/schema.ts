@@ -2138,3 +2138,61 @@ export const insertChatMessageAnalysisSchema = createInsertSchema(chatMessageAna
 
 export type InsertChatMessageAnalysis = z.infer<typeof insertChatMessageAnalysisSchema>;
 export type ChatMessageAnalysis = typeof chatMessageAnalysis.$inferSelect;
+
+// Agent Mode Tables - For autonomous agent execution within chats
+export const agentModeRuns = pgTable("agent_mode_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  messageId: varchar("message_id").references(() => chatMessages.id, { onDelete: "set null" }),
+  userId: varchar("user_id").references(() => users.id),
+  status: text("status").notNull().default("queued"), // queued, planning, running, succeeded, failed, cancelled
+  plan: jsonb("plan"), // array of planned steps
+  artifacts: jsonb("artifacts"), // output artifacts
+  summary: text("summary"),
+  error: text("error"),
+  totalSteps: integer("total_steps").default(0),
+  completedSteps: integer("completed_steps").default(0),
+  currentStepIndex: integer("current_step_index").default(0),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("agent_mode_runs_chat_idx").on(table.chatId),
+  index("agent_mode_runs_message_idx").on(table.messageId),
+  index("agent_mode_runs_status_idx").on(table.status),
+  index("agent_mode_runs_created_idx").on(table.createdAt),
+]);
+
+export const insertAgentModeRunSchema = createInsertSchema(agentModeRuns).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAgentModeRun = z.infer<typeof insertAgentModeRunSchema>;
+export type AgentModeRun = typeof agentModeRuns.$inferSelect;
+
+export const agentModeSteps = pgTable("agent_mode_steps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => agentModeRuns.id, { onDelete: "cascade" }),
+  stepIndex: integer("step_index").notNull(),
+  toolName: text("tool_name").notNull(),
+  toolInput: jsonb("tool_input"),
+  toolOutput: jsonb("tool_output"),
+  status: text("status").notNull().default("pending"), // pending, running, succeeded, failed, skipped
+  error: text("error"),
+  retryCount: integer("retry_count").default(0),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("agent_mode_steps_run_idx").on(table.runId),
+  index("agent_mode_steps_status_idx").on(table.status),
+]);
+
+export const insertAgentModeStepSchema = createInsertSchema(agentModeSteps).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAgentModeStep = z.infer<typeof insertAgentModeStepSchema>;
+export type AgentModeStep = typeof agentModeSteps.$inferSelect;
