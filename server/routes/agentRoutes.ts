@@ -26,6 +26,7 @@ export function createAgentModeRouter() {
       const { chatId, messageId, message, attachments, idempotencyKey } = validatedBody;
       const user = (req as any).user;
       const userId = user?.claims?.sub || user?.id;
+      const userPlan = (user?.plan === "pro" || user?.plan === "admin") ? user.plan : "free" as "free" | "pro" | "admin";
 
       if (idempotencyKey) {
         const idempotencyResult = await checkIdempotency(idempotencyKey, chatId);
@@ -77,7 +78,8 @@ export function createAgentModeRouter() {
             chatId,
             userId || "anonymous",
             message,
-            attachments
+            attachments,
+            userPlan
           );
 
           orchestrator.on("progress", async (progress) => {
@@ -469,6 +471,7 @@ export function createAgentModeRouter() {
       const { id } = req.params;
       const user = (req as any).user;
       const userId = user?.claims?.sub || user?.id;
+      const userPlan = (user?.plan === "pro" || user?.plan === "admin") ? user.plan : "free" as "free" | "pro" | "admin";
 
       const [run] = await db.select()
         .from(agentModeRuns)
@@ -518,7 +521,8 @@ export function createAgentModeRouter() {
               run.chatId,
               userId || "anonymous",
               plan.objective,
-              []
+              [],
+              userPlan
             );
 
             orchestrator.on("progress", async (progress) => {

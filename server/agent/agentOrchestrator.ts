@@ -79,6 +79,7 @@ export class AgentOrchestrator extends EventEmitter {
   public runId: string;
   public chatId: string;
   public userId: string;
+  public userPlan: "free" | "pro" | "admin";
   public status: AgentStatus;
   public plan: AgentPlan | null;
   public currentStepIndex: number;
@@ -89,11 +90,12 @@ export class AgentOrchestrator extends EventEmitter {
   private userMessage: string;
   private attachments: any[];
 
-  constructor(runId: string, chatId: string, userId: string) {
+  constructor(runId: string, chatId: string, userId: string, userPlan: "free" | "pro" | "admin" = "free") {
     super();
     this.runId = runId;
     this.chatId = chatId;
     this.userId = userId;
+    this.userPlan = userPlan;
     this.status = "queued";
     this.plan = null;
     this.currentStepIndex = 0;
@@ -238,6 +240,7 @@ Respond with ONLY valid JSON in this exact format:
         userId: this.userId,
         chatId: this.chatId,
         runId: this.runId,
+        userPlan: this.userPlan,
       });
 
       const completedAt = Date.now();
@@ -425,13 +428,14 @@ export class AgentManager {
     chatId: string,
     userId: string,
     message: string,
-    attachments?: any[]
+    attachments?: any[],
+    userPlan: "free" | "pro" | "admin" = "free"
   ): Promise<AgentOrchestrator> {
     if (this.activeRuns.has(runId)) {
       throw new Error(`Run ${runId} already exists`);
     }
 
-    const orchestrator = new AgentOrchestrator(runId, chatId, userId);
+    const orchestrator = new AgentOrchestrator(runId, chatId, userId, userPlan);
     this.activeRuns.set(runId, orchestrator);
 
     await orchestrator.generatePlan(message, attachments);

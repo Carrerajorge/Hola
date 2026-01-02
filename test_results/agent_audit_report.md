@@ -175,7 +175,13 @@ if (callData) {
 
 **Fix Applied**: Separated check and increment operations. `checkAccess()` only verifies limit, `incrementRateLimit()` called after successful execution in `ExecutionEngine.execute()`. Context now accepts `userId` and `userPlan` parameters.
 
-**Integration Note**: Callers (AgentOrchestrator, toolRegistry) should pass `userPlan` in context to ensure plan-specific rate limits. Default falls back to "free" if not provided.
+**Integration Complete**: 
+- `AgentOrchestrator` constructor now accepts `userPlan` parameter
+- `AgentManager.startRun()` propagates `userPlan` to orchestrator
+- `toolRegistry.execute()` always passes `userId` and `userPlan` to `ExecutionEngine` (auto-generates correlationId if not provided)
+- `agentRoutes.ts` extracts user plan from authenticated user and passes to all startRun calls
+- Rate limits now correctly namespace by user's actual plan (free/pro/admin)
+- **Note**: All tool executions now increment rate limits correctly, regardless of whether correlationId was provided by caller
 
 ---
 

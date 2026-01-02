@@ -214,11 +214,13 @@ export class ToolRegistry {
           maxRetries: policyCheck.policy.maxRetries,
           timeoutMs: policyCheck.policy.maxExecutionTimeMs,
         },
-        context.correlationId ? {
+        {
           runId: context.runId,
-          correlationId: context.correlationId,
+          correlationId: context.correlationId || `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           stepIndex: context.stepIndex || 0,
-        } : undefined
+          userId: context.userId,
+          userPlan: context.userPlan || "free",
+        }
       );
 
       if (executionResult.success && executionResult.data) {
