@@ -26,7 +26,7 @@ export type StepStatus = z.infer<typeof StepStatusSchema>;
 const RUN_TRANSITIONS: Record<RunStatus, RunStatus[]> = {
   queued: ["planning", "cancelled", "failed"],
   planning: ["running", "failed", "cancelled"],
-  running: ["verifying", "completed", "failed", "cancelled", "paused"],
+  running: ["verifying", "failed", "cancelled", "paused"],
   verifying: ["completed", "failed", "cancelled"],
   completed: [],
   failed: ["queued"],

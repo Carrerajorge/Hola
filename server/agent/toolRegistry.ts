@@ -118,12 +118,15 @@ export class ToolRegistry {
       return {
         success: false,
         output: null,
+        artifacts: [],
+        previews: [],
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
         error: {
           code: "TOOL_NOT_FOUND",
           message: `Tool "${name}" not found`,
           retryable: false,
         },
-        logs,
       };
     }
 
@@ -141,13 +144,15 @@ export class ToolRegistry {
       return {
         success: false,
         output: null,
+        artifacts: [],
+        previews: [],
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
         error: {
           code: policyCheck.requiresConfirmation ? "REQUIRES_CONFIRMATION" : "ACCESS_DENIED",
           message: policyCheck.reason || "Access denied",
           retryable: false,
         },
-        logs,
-        metrics: { durationMs: Date.now() - startTime },
       };
     }
 
@@ -158,14 +163,16 @@ export class ToolRegistry {
         return {
           success: false,
           output: null,
+          artifacts: [],
+          previews: [],
+          logs,
+          metrics: { durationMs: Date.now() - startTime },
           error: {
             code: "INVALID_INPUT",
             message: `Invalid input: ${parseResult.error.message}`,
             retryable: false,
             details: parseResult.error.errors,
           },
-          logs,
-          metrics: { durationMs: Date.now() - startTime },
         };
       }
 
@@ -202,14 +209,16 @@ export class ToolRegistry {
         return {
           success: false,
           output: null,
+          artifacts: [],
+          previews: [],
+          logs,
+          metrics: {
+            durationMs: executionResult.metrics.totalDurationMs,
+          },
           error: {
             code: executionResult.error?.code || "EXECUTION_ERROR",
             message: executionResult.error?.message || "Unknown error",
             retryable: executionResult.error?.retryable || false,
-          },
-          logs,
-          metrics: {
-            durationMs: executionResult.metrics.totalDurationMs,
           },
         };
       }
@@ -218,13 +227,15 @@ export class ToolRegistry {
       return {
         success: false,
         output: null,
+        artifacts: [],
+        previews: [],
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
         error: {
           code: "UNEXPECTED_ERROR",
           message: error.message || "Unknown error",
           retryable: false,
         },
-        logs,
-        metrics: { durationMs: Date.now() - startTime },
       };
     }
   }

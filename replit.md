@@ -26,6 +26,13 @@ Preferred communication style: Simple, everyday language.
 - **Professional CV/Resume Generation**: A three-layer architecture for structured CV generation.
 - **Spreadsheet Analyzer Module**: Provides AI-powered analysis, LLM agent for Python code generation (with AST-based security validation), and a secure Python sandbox for execution.
 - **System Observability**: Features structured JSON logging with correlation IDs, health monitoring, and request tracing.
+- **Agent Infrastructure (Hardened)**: Modular plugin architecture with:
+  - **StateMachine**: Explicit state transitions for runs (queued→planning→running→verifying→completed/failed/cancelled/paused) and steps with transition validation
+  - **Typed Contracts**: Zod schemas for Run, Step, ToolCall, Artifact with runtime validation
+  - **Event Sourcing**: Append-only agent_events table with correlationId tracking, audit fields (input_hash, output_ref, duration_ms, error_code, retry_count)
+  - **PolicyEngine**: RBAC with plan-based permissions (free/pro/admin), deny-by-default for sensitive tools, rate limiting
+  - **ExecutionEngine**: Circuit breaker (5 failures→open, 60s reset), exponential backoff with jitter, cancellation tokens, configurable timeouts
+  - **ToolRegistry**: 5 registered tools (analyze_spreadsheet, web_search, generate_image, browse_url, generate_document) with capabilities and standardized outputs (artifacts[], previews[], logs[], metrics[])
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt and multi-tenant validation.
