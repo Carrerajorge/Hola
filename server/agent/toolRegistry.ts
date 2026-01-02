@@ -14,6 +14,7 @@ import { executionEngine, type ExecutionOptions } from "./executionEngine";
 import { policyEngine, type PolicyContext } from "./policyEngine";
 import type { ToolCapability } from "./contracts";
 import { randomUUID } from "crypto";
+import { metricsCollector } from "./metricsCollector";
 
 export type ArtifactType = "file" | "image" | "document" | "chart" | "data" | "preview" | "link";
 
@@ -56,6 +57,8 @@ export interface ToolMetrics {
   tokensUsed?: number;
   apiCalls?: number;
   bytesProcessed?: number;
+  successRate?: number;
+  errorRate?: number;
 }
 
 export interface ToolResult {
@@ -196,6 +199,13 @@ export class ToolRegistry {
         const result = executionResult.data;
         addLog("info", `Tool completed successfully in ${executionResult.metrics.totalDurationMs}ms`);
         
+        metricsCollector.record({
+          toolName: name,
+          latencyMs: executionResult.metrics.totalDurationMs,
+          success: true,
+          timestamp: new Date(),
+        });
+        
         return {
           ...result,
           logs: [...(result.logs || []), ...logs],
@@ -206,6 +216,15 @@ export class ToolRegistry {
         };
       } else {
         addLog("error", `Tool failed: ${executionResult.error?.message}`, executionResult.error);
+        
+        metricsCollector.record({
+          toolName: name,
+          latencyMs: executionResult.metrics.totalDurationMs,
+          success: false,
+          errorCode: executionResult.error?.code || "EXECUTION_ERROR",
+          timestamp: new Date(),
+        });
+        
         return {
           success: false,
           output: null,
@@ -224,6 +243,15 @@ export class ToolRegistry {
       }
     } catch (error: any) {
       addLog("error", `Unexpected error: ${error.message}`, { stack: error.stack });
+      
+      metricsCollector.record({
+        toolName: name,
+        latencyMs: Date.now() - startTime,
+        success: false,
+        errorCode: "UNEXPECTED_ERROR",
+        timestamp: new Date(),
+      });
+      
       return {
         success: false,
         output: null,

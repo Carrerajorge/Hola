@@ -357,6 +357,74 @@ export function createAgentModeRouter() {
     }
   });
 
+  router.post("/runs/:id/pause", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, id));
+
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      if (run.status !== "running") {
+        return res.status(400).json({ 
+          error: "Can only pause running runs",
+          currentStatus: run.status,
+        });
+      }
+
+      if (typeof (agentManager as any).pauseRun === 'function') {
+        await (agentManager as any).pauseRun(id);
+      }
+
+      await db.update(agentModeRuns)
+        .set({ status: "paused" })
+        .where(eq(agentModeRuns.id, id));
+
+      res.json({ success: true, status: "paused" });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error pausing run:", error);
+      res.status(500).json({ error: "Failed to pause agent run" });
+    }
+  });
+
+  router.post("/runs/:id/resume", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, id));
+
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      if (run.status !== "paused") {
+        return res.status(400).json({ 
+          error: "Can only resume paused runs",
+          currentStatus: run.status,
+        });
+      }
+
+      if (typeof (agentManager as any).resumeRun === 'function') {
+        await (agentManager as any).resumeRun(id);
+      }
+
+      await db.update(agentModeRuns)
+        .set({ status: "running" })
+        .where(eq(agentModeRuns.id, id));
+
+      res.json({ success: true, status: "running" });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error resuming run:", error);
+      res.status(500).json({ error: "Failed to resume agent run" });
+    }
+  });
+
   router.post("/runs/:id/retry", requireAuth, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
