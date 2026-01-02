@@ -57,10 +57,33 @@ export interface TransitionContext {
 }
 
 const RUN_TRANSITION_GUARDS: Partial<Record<RunStatus, Partial<Record<RunStatus, TransitionGuard[]>>>> = {
+  queued: {
+    planning: [{
+      condition: (ctx) => ctx.metadata?.userId !== undefined,
+      message: "userId required to start planning"
+    }],
+    cancelled: [{
+      condition: () => true,
+      message: "Cancellation always allowed from queued"
+    }],
+  },
+  planning: {
+    running: [{
+      condition: (ctx) => ctx.metadata?.planGenerated !== false,
+      message: "Plan must be generated before running"
+    }, {
+      condition: (ctx) => (ctx.metadata?.stepCount ?? 0) > 0,
+      message: "Plan must have at least one step"
+    }],
+  },
   running: {
     verifying: [{
       condition: (ctx) => ctx.metadata?.allStepsCompleted !== false,
       message: "Cannot verify until all steps are completed"
+    }],
+    paused: [{
+      condition: (ctx) => ctx.metadata?.canPause !== false,
+      message: "Run cannot be paused at this moment"
     }],
   },
   verifying: {
@@ -68,7 +91,22 @@ const RUN_TRANSITION_GUARDS: Partial<Record<RunStatus, Partial<Record<RunStatus,
       condition: (ctx) => ctx.metadata?.verificationPassed !== false,
       message: "Verification must pass before completing"
     }],
-  }
+  },
+  failed: {
+    queued: [{
+      condition: (ctx) => ctx.metadata?.retryable !== false,
+      message: "Run is not retryable"
+    }, {
+      condition: (ctx) => (ctx.metadata?.retryCount ?? 0) < (ctx.metadata?.maxRetries ?? 3),
+      message: "Maximum retry count exceeded"
+    }],
+  },
+  paused: {
+    running: [{
+      condition: (ctx) => ctx.metadata?.canResume !== false,
+      message: "Run cannot be resumed"
+    }],
+  },
 };
 
 export class StateMachineError extends Error {

@@ -169,12 +169,11 @@ export class PolicyEngine {
               policy,
             };
           }
-          callData.count++;
         } else {
-          this.callCounts.set(key, { count: 1, windowStart: now });
+          this.callCounts.set(key, { count: 0, windowStart: now });
         }
       } else {
-        this.callCounts.set(key, { count: 1, windowStart: now });
+        this.callCounts.set(key, { count: 0, windowStart: now });
       }
     }
 
@@ -192,6 +191,17 @@ export class PolicyEngine {
       requiresConfirmation: false,
       policy,
     };
+  }
+
+  incrementRateLimit(context: PolicyContext): void {
+    const policy = this.policies.get(context.toolName);
+    if (!policy?.rateLimit) return;
+    
+    const key = `${context.userId}:${context.toolName}`;
+    const callData = this.callCounts.get(key);
+    if (callData) {
+      callData.count++;
+    }
   }
 
   getCapabilities(toolName: string): ToolCapability[] {

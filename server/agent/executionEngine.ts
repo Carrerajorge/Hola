@@ -88,6 +88,29 @@ export class CancellationError extends Error {
   }
 }
 
+export class RetryableError extends Error {
+  public readonly isRetryable: boolean;
+  public readonly statusCode?: number;
+  public readonly originalError?: Error;
+
+  constructor(
+    message: string,
+    isRetryable: boolean = true,
+    statusCode?: number,
+    originalError?: Error
+  ) {
+    super(message);
+    this.name = "RetryableError";
+    this.isRetryable = isRetryable;
+    this.statusCode = statusCode;
+    this.originalError = originalError;
+  }
+
+  static fromError(error: Error, isRetryable: boolean): RetryableError {
+    return new RetryableError(error.message, isRetryable, undefined, error);
+  }
+}
+
 interface CircuitBreakerState {
   failures: number;
   lastFailure: number;
@@ -374,13 +397,22 @@ export class ExecutionEngine extends EventEmitter {
     cancellationToken?: CancellationToken
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      
+      const settle = (fn: () => void) => {
+        if (!settled) {
+          settled = true;
+          fn();
+        }
+      };
+
       const timeoutId = setTimeout(() => {
-        reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+        settle(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)));
       }, timeoutMs);
 
       const cancelHandler = () => {
         clearTimeout(timeoutId);
-        reject(new CancellationError(cancellationToken?.reason || "Cancelled"));
+        settle(() => reject(new CancellationError(cancellationToken?.reason || "Cancelled")));
       };
 
       if (cancellationToken) {
@@ -390,11 +422,11 @@ export class ExecutionEngine extends EventEmitter {
       fn()
         .then(result => {
           clearTimeout(timeoutId);
-          resolve(result);
+          settle(() => resolve(result));
         })
         .catch(error => {
           clearTimeout(timeoutId);
-          reject(error);
+          settle(() => reject(error));
         });
     });
   }
@@ -419,21 +451,32 @@ export class ExecutionEngine extends EventEmitter {
   }
 
   private isRetryableError(error: any): boolean {
-    const retryablePatterns = [
-      "ETIMEDOUT",
-      "ECONNRESET",
-      "ECONNREFUSED",
-      "ENOTFOUND",
-      "timeout",
-      "rate limit",
-      "503",
-      "502",
-      "429",
-      "temporarily unavailable",
-    ];
-
-    const errorString = (error.message || "").toLowerCase() + (error.code || "").toLowerCase();
-    return retryablePatterns.some(pattern => errorString.includes(pattern.toLowerCase()));
+    if (error instanceof RetryableError) {
+      return error.isRetryable;
+    }
+    
+    if (error.isRetryable !== undefined) {
+      return Boolean(error.isRetryable);
+    }
+    
+    const retryableErrorCodes = new Set([
+      "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "ENOTFOUND",
+      "TIMEOUT", "RATE_LIMITED", "SERVICE_UNAVAILABLE",
+      "ERR_NETWORK", "ECONNABORTED", "EAI_AGAIN"
+    ]);
+    
+    if (error.code && retryableErrorCodes.has(error.code.toUpperCase())) {
+      return true;
+    }
+    
+    const retryableHttpCodes = new Set([429, 502, 503, 504, 408]);
+    if (error.statusCode && retryableHttpCodes.has(error.statusCode)) {
+      return true;
+    }
+    
+    const message = (error.message || "").toLowerCase();
+    const retryablePatterns = ["timeout", "rate limit", "temporarily unavailable", "too many requests"];
+    return retryablePatterns.some(pattern => message.includes(pattern));
   }
 
   private getErrorCode(error: any): string {

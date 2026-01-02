@@ -54,20 +54,57 @@ export async function executeInTransaction<T>(
 }
 
 export async function acquireRunLock(runId: string, lockDurationMs: number = 30000): Promise<boolean> {
-  const lockKey = `run_lock:${runId}`;
-  const lockExpiry = new Date(Date.now() + lockDurationMs);
+  const lockTimeoutMs = Math.min(lockDurationMs, 5000);
   
   try {
-    const [run] = await db.select()
-      .from(agentModeRuns)
-      .where(eq(agentModeRuns.id, runId));
+    await db.execute(sql`SET LOCAL lock_timeout = ${lockTimeoutMs}`);
     
-    if (!run) return false;
+    const result = await db.execute(
+      sql`SELECT id FROM agent_mode_runs WHERE id = ${runId} FOR UPDATE NOWAIT`
+    );
     
-    console.log(`[DBTransaction] Acquired lock for run ${runId} until ${lockExpiry.toISOString()}`);
+    if (!result || (result as any).length === 0) {
+      console.warn(`[DBTransaction] Run ${runId} not found for lock`);
+      return false;
+    }
+    
+    console.log(`[DBTransaction] Acquired row lock for run ${runId}`);
     return true;
-  } catch (error) {
-    console.error(`[DBTransaction] Failed to acquire lock for run ${runId}:`, error);
+  } catch (error: any) {
+    if (error.code === '55P03') {
+      console.warn(`[DBTransaction] Lock contention for run ${runId}: already locked`);
+      return false;
+    }
+    console.error(`[DBTransaction] Failed to acquire lock for run ${runId}:`, error.message);
     return false;
   }
+}
+
+export async function tryAcquireAdvisoryLock(lockId: number): Promise<boolean> {
+  try {
+    const result = await db.execute(sql`SELECT pg_try_advisory_lock(${lockId}) as acquired`);
+    const acquired = (result as any)?.[0]?.acquired;
+    return acquired === true;
+  } catch (error) {
+    console.error(`[DBTransaction] Advisory lock error:`, error);
+    return false;
+  }
+}
+
+export async function releaseAdvisoryLock(lockId: number): Promise<void> {
+  try {
+    await db.execute(sql`SELECT pg_advisory_unlock(${lockId})`);
+  } catch (error) {
+    console.error(`[DBTransaction] Advisory unlock error:`, error);
+  }
+}
+
+export function runIdToLockId(runId: string): number {
+  let hash = 0;
+  for (let i = 0; i < runId.length; i++) {
+    const char = runId.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash);
 }

@@ -30,6 +30,37 @@ const DEFAULT_CONFIG: SandboxConfig = {
   allowedModules: [],
 };
 
+const WEBTOOL_CONFIG: SandboxConfig = {
+  allowNetwork: true,
+  allowedHosts: [
+    "*.google.com",
+    "*.bing.com", 
+    "*.duckduckgo.com",
+    "*.wikipedia.org",
+    "*.github.com",
+    "*.stackoverflow.com",
+    "*.worldbank.org",
+    "api.worldbank.org",
+  ],
+  maxMemoryMB: 1024,
+  maxCpuPercent: 75,
+  maxExecutionTimeMs: 60000,
+  blockedModules: ["child_process", "cluster", "worker_threads", "vm"],
+  allowedModules: ["http", "https", "url", "querystring"],
+};
+
+export type SecurityProfile = "default" | "webtool" | "code_execution";
+
+const SECURITY_PROFILES: Record<SecurityProfile, SandboxConfig> = {
+  default: DEFAULT_CONFIG,
+  webtool: WEBTOOL_CONFIG,
+  code_execution: {
+    ...DEFAULT_CONFIG,
+    maxExecutionTimeMs: 30000,
+    maxMemoryMB: 256,
+  },
+};
+
 export class SandboxSecurityManager {
   private config: SandboxConfig;
   
@@ -76,6 +107,32 @@ export class SandboxSecurityManager {
     }
     return { valid: true, errors: [] };
   }
+
+  static forProfile(profile: SecurityProfile): SandboxSecurityManager {
+    return new SandboxSecurityManager(SECURITY_PROFILES[profile]);
+  }
+
+  static getProfile(profile: SecurityProfile): SandboxConfig {
+    return { ...SECURITY_PROFILES[profile] };
+  }
+
+  isHostAllowedWithWildcard(host: string): boolean {
+    if (!this.config.allowNetwork) {
+      return false;
+    }
+    if (this.config.allowedHosts.length === 0) {
+      return true;
+    }
+    const normalizedHost = host.toLowerCase();
+    return this.config.allowedHosts.some(pattern => {
+      if (pattern.startsWith("*.")) {
+        const suffix = pattern.slice(1);
+        return normalizedHost.endsWith(suffix) || normalizedHost === pattern.slice(2);
+      }
+      return normalizedHost === pattern.toLowerCase();
+    });
+  }
 }
 
 export const sandboxSecurity = new SandboxSecurityManager();
+export const webtoolSecurity = SandboxSecurityManager.forProfile("webtool");

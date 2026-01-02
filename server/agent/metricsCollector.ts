@@ -41,11 +41,39 @@ export interface TracedEvent {
 
 export class MetricsCollector {
   private metrics: Map<string, StepMetrics[]> = new Map();
+  private readonly maxEntriesPerTool: number;
+  private readonly retentionMs: number;
+
+  constructor(maxEntriesPerTool: number = 1000, retentionMs: number = 3600000) {
+    this.maxEntriesPerTool = maxEntriesPerTool;
+    this.retentionMs = retentionMs;
+  }
 
   record(metrics: StepMetrics): void {
     const existing = this.metrics.get(metrics.toolName) || [];
     existing.push(metrics);
+    
+    if (existing.length > this.maxEntriesPerTool) {
+      existing.shift();
+    }
+    
     this.metrics.set(metrics.toolName, existing);
+  }
+
+  pruneOldEntries(): number {
+    const cutoff = new Date(Date.now() - this.retentionMs);
+    let pruned = 0;
+    
+    for (const [toolName, entries] of this.metrics.entries()) {
+      const originalLength = entries.length;
+      const filtered = entries.filter(m => m.timestamp >= cutoff);
+      if (filtered.length !== originalLength) {
+        pruned += originalLength - filtered.length;
+        this.metrics.set(toolName, filtered);
+      }
+    }
+    
+    return pruned;
   }
 
   private getAllMetrics(): StepMetrics[] {

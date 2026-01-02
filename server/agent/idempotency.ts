@@ -42,7 +42,8 @@ export async function checkIdempotency(
 }
 
 export function generateIdempotencyKey(chatId: string, message: string): string {
+  const normalizedMessage = message.trim().toLowerCase();
   const hash = createHash("sha256");
-  hash.update(`${chatId}:${message}:${Date.now()}`);
+  hash.update(`${chatId}:${normalizedMessage}`);
   return hash.digest("hex").substring(0, 32);
 }
