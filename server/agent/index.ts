@@ -7,3 +7,4 @@ export { guardrails, type PIIMatch, type AuditLogEntry, type DownloadPolicy, typ
 export { runPipeline, cancelPipeline, initializePipeline, getAvailableTools, multiIntentManager, multiIntentPipeline } from "./pipeline";
 export type { PipelineResult, PipelineRunOptions, ProgressUpdate, ExecutionPlan, PlanStep } from "./pipeline";
 export { sandboxSecurity, SandboxSecurityManager, SandboxConfigSchema, type SandboxConfig } from "./sandboxSecurity";
+export { metricsCollector, eventTracer, type StepMetrics, type ToolStats, type ExportedMetrics, type EventTrace, type TracedEvent } from "./metricsCollector";

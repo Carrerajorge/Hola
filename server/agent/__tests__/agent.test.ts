@@ -773,10 +773,10 @@ describe('MetricsCollector', () => {
         timestamp: new Date(),
       });
 
-      expect(metricsCollector.getSuccessRate('test_tool')).toBeCloseTo(0.6667, 2);
+      expect(metricsCollector.getSuccessRate('test_tool')).toBeCloseTo(66.67, 0);
     });
 
-    it('should return 1 when all successful', () => {
+    it('should return 100 when all successful', () => {
       metricsCollector.record({
         toolName: 'test_tool',
         latencyMs: 100,
@@ -784,7 +784,7 @@ describe('MetricsCollector', () => {
         timestamp: new Date(),
       });
 
-      expect(metricsCollector.getSuccessRate('test_tool')).toBe(1);
+      expect(metricsCollector.getSuccessRate('test_tool')).toBe(100);
     });
   });
 
@@ -808,7 +808,7 @@ describe('MetricsCollector', () => {
         timestamp: new Date(),
       });
 
-      expect(metricsCollector.getErrorRate('test_tool')).toBe(0.5);
+      expect(metricsCollector.getErrorRate('test_tool')).toBe(50);
     });
 
     it('should return 0 when no errors', () => {
@@ -822,7 +822,7 @@ describe('MetricsCollector', () => {
       expect(metricsCollector.getErrorRate('test_tool')).toBe(0);
     });
 
-    it('should return 1 when all failed', () => {
+    it('should return 100 when all failed', () => {
       metricsCollector.record({
         toolName: 'test_tool',
         latencyMs: 100,
@@ -830,7 +830,7 @@ describe('MetricsCollector', () => {
         timestamp: new Date(),
       });
 
-      expect(metricsCollector.getErrorRate('test_tool')).toBe(1);
+      expect(metricsCollector.getErrorRate('test_tool')).toBe(100);
     });
   });
 
@@ -857,8 +857,8 @@ describe('MetricsCollector', () => {
       const stats = metricsCollector.getToolStats();
       expect(stats['tool_a']).toBeDefined();
       expect(stats['tool_b']).toBeDefined();
-      expect(stats['tool_a'].successRate).toBe(1);
-      expect(stats['tool_b'].errorRate).toBe(1);
+      expect(stats['tool_a'].successRate).toBe(100);
+      expect(stats['tool_b'].errorRate).toBe(100);
     });
 
     it('should include all required fields in stats', () => {

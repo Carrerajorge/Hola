@@ -13,7 +13,33 @@ export interface ToolStats {
   totalCalls: number;
 }
 
-class MetricsCollector {
+export interface ExportedMetrics {
+  timestamp: string;
+  tools: Record<string, ToolStats>;
+  aggregate: {
+    totalCalls: number;
+    overallSuccessRate: number;
+    overallErrorRate: number;
+    overallLatencyP95: number;
+  };
+}
+
+export interface EventTrace {
+  correlationId: string;
+  runId: string;
+  events: TracedEvent[];
+}
+
+export interface TracedEvent {
+  timestamp: string;
+  type: "step_start" | "step_end" | "tool_call" | "tool_result" | "error" | "state_change";
+  stepId?: string;
+  toolName?: string;
+  durationMs?: number;
+  metadata?: Record<string, any>;
+}
+
+export class MetricsCollector {
   private metrics: Map<string, StepMetrics[]> = new Map();
 
   record(metrics: StepMetrics): void {
@@ -22,42 +48,59 @@ class MetricsCollector {
     this.metrics.set(metrics.toolName, existing);
   }
 
-  getLatencyP95(toolName: string): number {
-    const toolMetrics = this.metrics.get(toolName);
-    if (!toolMetrics || toolMetrics.length === 0) {
+  private getAllMetrics(): StepMetrics[] {
+    const allMetrics: StepMetrics[] = [];
+    Array.from(this.metrics.values()).forEach(toolMetrics => {
+      allMetrics.push(...toolMetrics);
+    });
+    return allMetrics;
+  }
+
+  getLatencyP95(toolName?: string): number {
+    const metricsToAnalyze = toolName 
+      ? this.metrics.get(toolName) || []
+      : this.getAllMetrics();
+    
+    if (metricsToAnalyze.length === 0) {
       return 0;
     }
 
-    const latencies = toolMetrics.map(m => m.latencyMs).sort((a, b) => a - b);
+    const latencies = metricsToAnalyze.map(m => m.latencyMs).sort((a, b) => a - b);
     const p95Index = Math.floor(latencies.length * 0.95);
     return latencies[Math.min(p95Index, latencies.length - 1)];
   }
 
-  getSuccessRate(toolName: string): number {
-    const toolMetrics = this.metrics.get(toolName);
-    if (!toolMetrics || toolMetrics.length === 0) {
+  getSuccessRate(toolName?: string): number {
+    const metricsToAnalyze = toolName 
+      ? this.metrics.get(toolName) || []
+      : this.getAllMetrics();
+    
+    if (metricsToAnalyze.length === 0) {
       return 0;
     }
 
-    const successCount = toolMetrics.filter(m => m.success).length;
-    return successCount / toolMetrics.length;
+    const successCount = metricsToAnalyze.filter(m => m.success).length;
+    return (successCount / metricsToAnalyze.length) * 100;
   }
 
-  getErrorRate(toolName: string): number {
-    const toolMetrics = this.metrics.get(toolName);
-    if (!toolMetrics || toolMetrics.length === 0) {
+  getErrorRate(toolName?: string): number {
+    const metricsToAnalyze = toolName 
+      ? this.metrics.get(toolName) || []
+      : this.getAllMetrics();
+    
+    if (metricsToAnalyze.length === 0) {
       return 0;
     }
 
-    const errorCount = toolMetrics.filter(m => !m.success).length;
-    return errorCount / toolMetrics.length;
+    const errorCount = metricsToAnalyze.filter(m => !m.success).length;
+    return (errorCount / metricsToAnalyze.length) * 100;
   }
 
   getToolStats(): Record<string, ToolStats> {
     const stats: Record<string, ToolStats> = {};
 
-    for (const [toolName, toolMetrics] of this.metrics.entries()) {
-      if (toolMetrics.length === 0) continue;
+    Array.from(this.metrics.entries()).forEach(([toolName, toolMetrics]) => {
+      if (toolMetrics.length === 0) return;
 
       const latencies = toolMetrics.map(m => m.latencyMs).sort((a, b) => a - b);
       const p95Index = Math.floor(latencies.length * 0.95);
@@ -66,13 +109,29 @@ class MetricsCollector {
 
       stats[toolName] = {
         latencyP95: latencies[Math.min(p95Index, latencies.length - 1)],
-        successRate: successCount / toolMetrics.length,
-        errorRate: errorCount / toolMetrics.length,
+        successRate: (successCount / toolMetrics.length) * 100,
+        errorRate: (errorCount / toolMetrics.length) * 100,
         totalCalls: toolMetrics.length,
       };
-    }
+    });
 
     return stats;
+  }
+
+  exportMetrics(): ExportedMetrics {
+    const allMetrics = this.getAllMetrics();
+    const toolStats = this.getToolStats();
+
+    return {
+      timestamp: new Date().toISOString(),
+      tools: toolStats,
+      aggregate: {
+        totalCalls: allMetrics.length,
+        overallSuccessRate: this.getSuccessRate(),
+        overallErrorRate: this.getErrorRate(),
+        overallLatencyP95: this.getLatencyP95(),
+      },
+    };
   }
 
   clear(): void {
@@ -81,3 +140,30 @@ class MetricsCollector {
 }
 
 export const metricsCollector = new MetricsCollector();
+
+class EventTracer {
+  private traces: Map<string, EventTrace> = new Map();
+
+  startTrace(correlationId: string, runId: string): void {
+    this.traces.set(correlationId, { correlationId, runId, events: [] });
+  }
+
+  addEvent(correlationId: string, event: Omit<TracedEvent, "timestamp">): void {
+    const trace = this.traces.get(correlationId);
+    if (trace) {
+      trace.events.push({ ...event, timestamp: new Date().toISOString() });
+    }
+  }
+
+  getTrace(correlationId: string): EventTrace | undefined {
+    return this.traces.get(correlationId);
+  }
+
+  endTrace(correlationId: string): EventTrace | undefined {
+    const trace = this.traces.get(correlationId);
+    this.traces.delete(correlationId);
+    return trace;
+  }
+}
+
+export const eventTracer = new EventTracer();
