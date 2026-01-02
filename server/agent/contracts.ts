@@ -259,6 +259,59 @@ export const RunResponseSchema = z.object({
 });
 export type RunResponse = z.infer<typeof RunResponseSchema>;
 
+export const CitationSchema = z.object({
+  id: z.string().uuid(),
+  sourceUrl: z.string().url(),
+  sourceTitle: z.string(),
+  quote: z.string().min(1).max(500),
+  locator: z.string(),
+  confidence: z.number().min(0).max(1),
+  retrievedAt: z.date(),
+  verifiedAt: z.date().optional(),
+});
+export type Citation = z.infer<typeof CitationSchema>;
+
+export const RunResultPackageSchema = z.object({
+  finalAnswer: z.string(),
+  artifacts: z.array(ArtifactSchema),
+  citations: z.array(CitationSchema),
+  runLog: z.array(AgentEventSchema),
+  metrics: z.object({
+    totalDurationMs: z.number(),
+    planningMs: z.number(),
+    executionMs: z.number(),
+    verificationMs: z.number(),
+    toolCalls: z.number(),
+    tokensUsed: z.number().optional(),
+    citationCoverage: z.number().min(0).max(1),
+  }),
+  status: RunStatusSchema,
+  error: z.string().optional(),
+});
+export type RunResultPackage = z.infer<typeof RunResultPackageSchema>;
+
+export const AgentRoleSchema = z.enum(["planner", "executor", "verifier"]);
+export type AgentRole = z.infer<typeof AgentRoleSchema>;
+
+export const RoleTransitionSchema = z.object({
+  fromRole: AgentRoleSchema,
+  toRole: AgentRoleSchema,
+  timestamp: z.date(),
+  reason: z.string(),
+  metadata: z.record(z.any()).optional(),
+});
+export type RoleTransition = z.infer<typeof RoleTransitionSchema>;
+
+export const CancellationTokenSchema = z.object({
+  id: z.string().uuid(),
+  runId: z.string().uuid(),
+  cancelled: z.boolean().default(false),
+  paused: z.boolean().default(false),
+  reason: z.string().optional(),
+  requestedAt: z.date().optional(),
+});
+export type CancellationToken = z.infer<typeof CancellationTokenSchema>;
+
 export function validateRun(data: unknown): Run {
   return RunSchema.parse(data);
 }
@@ -284,4 +337,24 @@ export function safeValidateRun(data: unknown): { success: true; data: Run } | {
   return result.success 
     ? { success: true, data: result.data }
     : { success: false, error: result.error };
+}
+
+export function validateCitation(data: unknown): Citation {
+  return CitationSchema.parse(data);
+}
+
+export function validateRunResultPackage(data: unknown): RunResultPackage {
+  return RunResultPackageSchema.parse(data);
+}
+
+export function validateAgentRole(data: unknown): AgentRole {
+  return AgentRoleSchema.parse(data);
+}
+
+export function validateRoleTransition(data: unknown): RoleTransition {
+  return RoleTransitionSchema.parse(data);
+}
+
+export function validateCancellationToken(data: unknown): CancellationToken {
+  return CancellationTokenSchema.parse(data);
 }
