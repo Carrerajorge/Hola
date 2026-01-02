@@ -12,8 +12,10 @@ import {
 } from "../services/documentGeneration";
 import { executionEngine, type ExecutionOptions } from "./executionEngine";
 import { policyEngine, type PolicyContext } from "./policyEngine";
-import type { ToolCapability, ToolOutput } from "./contracts";
+import type { ToolCapability } from "./contracts";
 import { randomUUID } from "crypto";
+
+export type ArtifactType = "file" | "image" | "document" | "chart" | "data" | "preview" | "link";
 
 export interface ToolContext {
   userId: string;
@@ -27,7 +29,7 @@ export interface ToolContext {
 
 export interface ToolArtifact {
   id: string;
-  type: string;
+  type: ArtifactType;
   name: string;
   mimeType?: string;
   url?: string;
@@ -227,17 +229,26 @@ export class ToolRegistry {
     }
   }
 
-  createArtifact(type: string, name: string, data: any, mimeType?: string): ToolArtifact {
-    return {
-      id: randomUUID(),
-      type,
-      name,
-      mimeType,
-      data,
-      size: typeof data === "string" ? data.length : undefined,
-      createdAt: new Date(),
-    };
+  createArtifact(type: ArtifactType, name: string, data: any, mimeType?: string): ToolArtifact {
+    return createArtifact(type, name, data, mimeType);
   }
+}
+
+export function createArtifact(type: ArtifactType, name: string, data: any, mimeType?: string, url?: string): ToolArtifact {
+  return {
+    id: randomUUID(),
+    type,
+    name,
+    mimeType,
+    url,
+    data,
+    size: (typeof data === "string" && data.length > 0) ? data.length : (Buffer.isBuffer(data) && data.length > 0) ? data.length : undefined,
+    createdAt: new Date(),
+  };
+}
+
+export function createError(code: string, message: string, retryable: boolean = false, details?: any): ToolResult["error"] {
+  return { code, message, retryable, details };
 }
 
 const analyzeSpreadsheetSchema = z.object({
@@ -252,6 +263,7 @@ const analyzeSpreadsheetTool: ToolDefinition = {
   name: "analyze_spreadsheet",
   description: "Analyze Excel or CSV spreadsheet files. Performs data analysis, generates insights, charts, and summaries from spreadsheet data.",
   inputSchema: analyzeSpreadsheetSchema,
+  capabilities: ["reads_files", "produces_artifacts"],
   execute: async (input, context): Promise<ToolResult> => {
     try {
       const params: StartAnalysisParams = {
@@ -276,7 +288,7 @@ const analyzeSpreadsheetTool: ToolDefinition = {
       return {
         success: false,
         output: null,
-        error: error.message,
+        error: createError("ANALYSIS_ERROR", error.message, true),
       };
     }
   },
@@ -292,6 +304,7 @@ const webSearchTool: ToolDefinition = {
   name: "web_search",
   description: "Search the web for information. Can search general web or academic/scholarly sources like Google Scholar.",
   inputSchema: webSearchSchema,
+  capabilities: ["requires_network", "accesses_external_api"],
   execute: async (input, context): Promise<ToolResult> => {
     try {
       if (input.academic) {
@@ -320,7 +333,7 @@ const webSearchTool: ToolDefinition = {
       return {
         success: false,
         output: null,
-        error: error.message,
+        error: createError("SEARCH_ERROR", error.message, true),
       };
     }
   },
@@ -334,6 +347,7 @@ const generateImageTool: ToolDefinition = {
   name: "generate_image",
   description: "Generate an image using Gemini AI based on a text description. Returns a base64-encoded image.",
   inputSchema: generateImageSchema,
+  capabilities: ["requires_network", "accesses_external_api", "produces_artifacts"],
   execute: async (input, context): Promise<ToolResult> => {
     try {
       const result = await generateImage(input.prompt);
@@ -345,21 +359,19 @@ const generateImageTool: ToolDefinition = {
           mimeType: result.mimeType,
         },
         artifacts: [
-          {
-            type: "image",
-            name: "generated_image",
-            data: {
-              base64: result.imageBase64,
-              mimeType: result.mimeType,
-            },
-          },
+          createArtifact(
+            "image",
+            "generated_image",
+            { base64: result.imageBase64, mimeType: result.mimeType },
+            result.mimeType
+          ),
         ],
       };
     } catch (error: any) {
       return {
         success: false,
         output: null,
-        error: error.message,
+        error: createError("IMAGE_GENERATION_ERROR", error.message, true),
       };
     }
   },
@@ -375,6 +387,7 @@ const browseUrlTool: ToolDefinition = {
   name: "browse_url",
   description: "Navigate to a URL using a headless browser. Returns page content, title, and optionally a screenshot.",
   inputSchema: browseUrlSchema,
+  capabilities: ["requires_network", "accesses_external_api", "long_running"],
   execute: async (input, context): Promise<ToolResult> => {
     let sessionId = input.sessionId;
     let createdSession = false;
@@ -389,14 +402,14 @@ const browseUrlTool: ToolDefinition = {
 
       const artifacts: ToolArtifact[] = [];
       if (result.screenshot) {
-        artifacts.push({
-          type: "screenshot",
-          name: "page_screenshot",
-          data: {
-            base64: result.screenshot.toString("base64"),
-            mimeType: "image/png",
-          },
-        });
+        artifacts.push(
+          createArtifact(
+            "image",
+            "page_screenshot",
+            { base64: result.screenshot.toString("base64"), mimeType: "image/png" },
+            "image/png"
+          )
+        );
       }
 
       if (createdSession) {
@@ -413,7 +426,7 @@ const browseUrlTool: ToolDefinition = {
           sessionId: createdSession ? undefined : sessionId,
         },
         artifacts: artifacts.length > 0 ? artifacts : undefined,
-        error: result.error,
+        error: result.error ? createError("BROWSE_ERROR", result.error, true) : undefined,
       };
     } catch (error: any) {
       if (createdSession && sessionId) {
@@ -422,7 +435,7 @@ const browseUrlTool: ToolDefinition = {
       return {
         success: false,
         output: null,
-        error: error.message,
+        error: createError("BROWSE_ERROR", error.message, true),
       };
     }
   },
@@ -438,6 +451,7 @@ const generateDocumentTool: ToolDefinition = {
   name: "generate_document",
   description: "Generate Office documents (Word, Excel, PowerPoint). For Word: provide markdown/text content. For Excel: provide tabular data. For PowerPoint: provide slide content.",
   inputSchema: generateDocumentSchema,
+  capabilities: ["produces_artifacts", "writes_files"],
   execute: async (input, context): Promise<ToolResult> => {
     try {
       let buffer: Buffer;
@@ -480,22 +494,19 @@ const generateDocumentTool: ToolDefinition = {
           size: buffer.length,
         },
         artifacts: [
-          {
-            type: "document",
-            name: filename,
-            data: {
-              base64: buffer.toString("base64"),
-              mimeType,
-              filename,
-            },
-          },
+          createArtifact(
+            "document",
+            filename,
+            { base64: buffer.toString("base64"), mimeType, filename },
+            mimeType
+          ),
         ],
       };
     } catch (error: any) {
       return {
         success: false,
         output: null,
-        error: error.message,
+        error: createError("DOCUMENT_GENERATION_ERROR", error.message, false),
       };
     }
   },
