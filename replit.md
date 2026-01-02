@@ -138,3 +138,82 @@ npx tsx scripts/soak-test.ts --concurrency 100 --duration 60
 # Soak test - realistic latencies
 npx tsx scripts/soak-test.ts --concurrency 50 --duration 30 --realistic
 ```
+
+## Agent Production Readiness
+
+### Multi-Role Orchestration
+
+The Agent module implements a Manus-like architecture with three specialized roles:
+
+```
+User Request → RunController → PlannerAgent → ExecutorAgent → VerifierAgent
+                    ↓              ↓              ↓              ↓
+               Async Queue    Create Plan    Execute Steps    Verify Output
+                    ↓              ↓              ↓              ↓
+               CancellationToken  AgentPlan    StepResults   VerificationResult
+                    ↓              ↓              ↓              ↓
+                DB Events      Citations     Artifacts     RunResultPackage
+```
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **RunController** | `server/agent/runController.ts` | Async run lifecycle, pause/resume/cancel |
+| **PlannerAgent** | `server/agent/roles/plannerAgent.ts` | Break objectives into tool-based steps |
+| **ExecutorAgent** | `server/agent/roles/executorAgent.ts` | Execute tools with retries and citations |
+| **VerifierAgent** | `server/agent/roles/verifierAgent.ts` | Verify citation coverage, identify gaps |
+| **MetricsCollector** | `server/agent/metricsCollector.ts` | P50/P95/P99 per tool and phase |
+
+### Output Package
+
+Every agent run produces a standardized `RunResultPackage`:
+
+```typescript
+{
+  finalAnswer: string,
+  artifacts: Artifact[],
+  citations: Citation[],        // quote + locator + sourceUrl
+  runLog: AgentEvent[],
+  metrics: {
+    totalDurationMs, planningMs, executionMs, verificationMs,
+    toolCalls, tokensUsed, citationCoverage
+  },
+  status: RunStatus,
+  error?: string
+}
+```
+
+### Citation Verification
+
+- **CitationSchema**: `{ sourceUrl, sourceTitle, quote, locator, confidence, retrievedAt }`
+- **Coverage Check**: VerifierAgent validates claims have supporting citations
+- **Gap Detection**: Uncited claims trigger re-search recommendations
+
+### Cancellation Tokens
+
+- Runs can be paused, resumed, or cancelled at any point
+- `CancellationToken` propagates through ExecutorAgent to tools
+- State transitions validated by `RunStateMachine`
+
+### Test Summary
+
+| Test Suite | Count | Status |
+|------------|-------|--------|
+| Agent Tests | 81 | ✅ |
+| Roles Tests | 42 | ✅ |
+| WebTool Tests | 408 | ✅ |
+| Benchmarks | 13 | ✅ |
+| Chaos Tests | 33 | ✅ |
+| Isolation Tests | 26 | ✅ |
+
+### Agent Certification Command
+
+```bash
+# Run full certification suite
+tsx scripts/agent-certify.ts
+
+# Individual test suites
+npx vitest run server/agent/__tests__/roles.test.ts
+npx vitest run server/agent/__tests__/agent.test.ts
+```
