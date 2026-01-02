@@ -248,7 +248,7 @@ export class ExecutionEngine extends EventEmitter {
     toolName: string,
     fn: () => Promise<T>,
     options: Partial<ExecutionOptions> = {},
-    context?: { runId: string; correlationId: string; stepIndex: number }
+    context?: { runId: string; correlationId: string; stepIndex: number; userId?: string; userPlan?: "free" | "pro" | "admin" }
   ): Promise<ExecutionResult<T>> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
     const startTime = Date.now();
@@ -296,6 +296,12 @@ export class ExecutionEngine extends EventEmitter {
         this.circuitBreaker.recordSuccess(toolName);
 
         if (context) {
+          policyEngine.incrementRateLimit({
+            userId: context.userId || context.runId,
+            userPlan: context.userPlan || "free",
+            toolName,
+          });
+
           await logToolEvent(
             context.runId,
             context.correlationId,

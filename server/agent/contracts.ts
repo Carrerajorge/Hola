@@ -16,13 +16,49 @@ export type ToolCapability = z.infer<typeof ToolCapabilitySchema>;
 export const UserPlanSchema = z.enum(["free", "pro", "admin"]);
 export type UserPlan = z.infer<typeof UserPlanSchema>;
 
+export const ImageArtifactDataSchema = z.object({
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  format: z.enum(["png", "jpeg", "gif", "webp", "svg"]),
+  base64: z.string().optional(),
+});
+
+export const DocumentArtifactDataSchema = z.object({
+  pageCount: z.number().int().nonnegative().optional(),
+  format: z.enum(["pdf", "docx", "xlsx", "pptx", "txt", "html", "md"]),
+  content: z.string().optional(),
+});
+
+export const ChartArtifactDataSchema = z.object({
+  chartType: z.enum(["bar", "line", "pie", "scatter", "area", "radar"]),
+  config: z.record(z.any()),
+  data: z.array(z.record(z.any())),
+});
+
+export const DataArtifactDataSchema = z.object({
+  format: z.enum(["json", "csv", "xml"]),
+  rows: z.number().int().nonnegative().optional(),
+  columns: z.array(z.string()).optional(),
+  sample: z.any().optional(),
+});
+
+export const ArtifactDataSchema = z.discriminatedUnion("artifactType", [
+  z.object({ artifactType: z.literal("image"), ...ImageArtifactDataSchema.shape }),
+  z.object({ artifactType: z.literal("document"), ...DocumentArtifactDataSchema.shape }),
+  z.object({ artifactType: z.literal("chart"), ...ChartArtifactDataSchema.shape }),
+  z.object({ artifactType: z.literal("data"), ...DataArtifactDataSchema.shape }),
+  z.object({ artifactType: z.literal("file"), path: z.string() }),
+  z.object({ artifactType: z.literal("preview"), content: z.string() }),
+  z.object({ artifactType: z.literal("link"), href: z.string().url() }),
+]);
+
 export const ArtifactSchema = z.object({
   id: z.string().uuid(),
   type: z.enum(["file", "image", "document", "chart", "data", "preview", "link"]),
   name: z.string().min(1),
   mimeType: z.string().optional(),
   url: z.string().url().optional(),
-  data: z.any().optional(),
+  data: ArtifactDataSchema.optional(),
   size: z.number().int().positive().optional(),
   metadata: z.record(z.any()).optional(),
   createdAt: z.date(),

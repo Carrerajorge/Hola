@@ -53,30 +53,44 @@ export async function executeInTransaction<T>(
   }
 }
 
-export async function acquireRunLock(runId: string, lockDurationMs: number = 30000): Promise<boolean> {
-  const lockTimeoutMs = Math.min(lockDurationMs, 5000);
+export async function acquireRunLock(runId: string, _lockDurationMs: number = 30000): Promise<boolean> {
+  const lockId = runIdToLockId(runId);
+  return tryAcquireAdvisoryLock(lockId);
+}
+
+export async function releaseRunLock(runId: string): Promise<void> {
+  const lockId = runIdToLockId(runId);
+  await releaseAdvisoryLock(lockId);
+}
+
+export async function withRunLock<T>(
+  runId: string,
+  operation: () => Promise<T>,
+  timeoutMs: number = 5000
+): Promise<{ success: boolean; data?: T; error?: string }> {
+  const lockId = runIdToLockId(runId);
+  const acquired = await tryAcquireAdvisoryLock(lockId);
+  
+  if (!acquired) {
+    return { success: false, error: `Could not acquire lock for run ${runId}` };
+  }
+  
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   
   try {
-    await db.execute(sql`SET LOCAL lock_timeout = ${lockTimeoutMs}`);
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error("Lock operation timeout")), timeoutMs);
+    });
     
-    const result = await db.execute(
-      sql`SELECT id FROM agent_mode_runs WHERE id = ${runId} FOR UPDATE NOWAIT`
-    );
-    
-    if (!result || (result as any).length === 0) {
-      console.warn(`[DBTransaction] Run ${runId} not found for lock`);
-      return false;
-    }
-    
-    console.log(`[DBTransaction] Acquired row lock for run ${runId}`);
-    return true;
+    const data = await Promise.race([operation(), timeoutPromise]);
+    return { success: true, data };
   } catch (error: any) {
-    if (error.code === '55P03') {
-      console.warn(`[DBTransaction] Lock contention for run ${runId}: already locked`);
-      return false;
+    return { success: false, error: error.message };
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
     }
-    console.error(`[DBTransaction] Failed to acquire lock for run ${runId}:`, error.message);
-    return false;
+    await releaseAdvisoryLock(lockId);
   }
 }
 

@@ -130,10 +130,12 @@ export class RunStateMachine {
     timestamp: number;
     reason?: string;
   }> = [];
+  private readonly maxHistorySize: number;
 
-  constructor(runId: string, initialStatus: RunStatus = "queued") {
+  constructor(runId: string, initialStatus: RunStatus = "queued", maxHistorySize: number = 100) {
     this.runId = runId;
     this.status = initialStatus;
+    this.maxHistorySize = maxHistorySize;
     this.transitionHistory.push({
       from: initialStatus,
       to: initialStatus,
@@ -171,6 +173,10 @@ export class RunStateMachine {
       timestamp: Date.now(),
       reason
     });
+
+    if (this.transitionHistory.length > this.maxHistorySize) {
+      this.transitionHistory.shift();
+    }
 
     console.log(`[StateMachine] Run ${this.runId}: ${previousStatus} -> ${targetStatus}${reason ? ` (${reason})` : ""}`);
   }

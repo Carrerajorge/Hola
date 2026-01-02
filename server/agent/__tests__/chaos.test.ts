@@ -371,7 +371,7 @@ describe("Chaos Tests - Agent Infrastructure", () => {
       }
     });
 
-    it("should enforce rate limits under load", () => {
+    it("should enforce rate limits under load with incrementRateLimit", () => {
       const policy = {
         toolName: "rate-limited-tool",
         capabilities: [] as any[],
@@ -388,20 +388,19 @@ describe("Chaos Tests - Agent Infrastructure", () => {
       
       policyEngine.registerPolicy(policy);
       
+      const context = {
+        userId: "rate-test-user",
+        userPlan: "free" as const,
+        toolName: "rate-limited-tool",
+      };
+      
       for (let i = 0; i < 5; i++) {
-        const result = policyEngine.checkAccess({
-          userId: "rate-test-user",
-          userPlan: "free",
-          toolName: "rate-limited-tool",
-        });
+        const result = policyEngine.checkAccess(context);
         expect(result.allowed).toBe(true);
+        policyEngine.incrementRateLimit(context);
       }
       
-      const result = policyEngine.checkAccess({
-        userId: "rate-test-user",
-        userPlan: "free",
-        toolName: "rate-limited-tool",
-      });
+      const result = policyEngine.checkAccess(context);
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain("Rate limit exceeded");
     });

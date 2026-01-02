@@ -85,11 +85,22 @@ export class SandboxSecurityManager {
       console.warn(`[SandboxSecurity] Network access denied (disabled)`);
       return false;
     }
-    if (this.config.allowedHosts.length > 0 && !this.config.allowedHosts.includes(host)) {
-      console.warn(`[SandboxSecurity] Host not in allowlist: ${host}`);
-      return false;
+    if (this.config.allowedHosts.length === 0) {
+      return true;
     }
-    return true;
+    const normalizedHost = host.toLowerCase();
+    const allowed = this.config.allowedHosts.some(pattern => {
+      const normalizedPattern = pattern.toLowerCase();
+      if (normalizedPattern.startsWith("*.")) {
+        const suffix = normalizedPattern.slice(1);
+        return normalizedHost.endsWith(suffix) || normalizedHost === normalizedPattern.slice(2);
+      }
+      return normalizedHost === normalizedPattern;
+    });
+    if (!allowed) {
+      console.warn(`[SandboxSecurity] Host not in allowlist: ${host}`);
+    }
+    return allowed;
   }
   
   getResourceLimits(): { memory: number; cpu: number; time: number } {

@@ -157,23 +157,23 @@ export class PolicyEngine {
     if (policy.rateLimit) {
       const key = `${context.userId}:${context.toolName}`;
       const now = Date.now();
-      const callData = this.callCounts.get(key);
+      let callData = this.callCounts.get(key);
 
-      if (callData) {
-        if (now - callData.windowStart < policy.rateLimit.windowMs) {
-          if (callData.count >= policy.rateLimit.maxCalls) {
-            return {
-              allowed: false,
-              requiresConfirmation: false,
-              reason: `Rate limit exceeded for ${context.toolName}: ${policy.rateLimit.maxCalls} calls per ${policy.rateLimit.windowMs}ms`,
-              policy,
-            };
-          }
-        } else {
-          this.callCounts.set(key, { count: 0, windowStart: now });
-        }
-      } else {
-        this.callCounts.set(key, { count: 0, windowStart: now });
+      if (callData && now - callData.windowStart >= policy.rateLimit.windowMs) {
+        callData = { count: 0, windowStart: now };
+        this.callCounts.set(key, callData);
+      } else if (!callData) {
+        callData = { count: 0, windowStart: now };
+        this.callCounts.set(key, callData);
+      }
+
+      if (callData.count >= policy.rateLimit.maxCalls) {
+        return {
+          allowed: false,
+          requiresConfirmation: false,
+          reason: `Rate limit exceeded for ${context.toolName}: ${policy.rateLimit.maxCalls} calls per ${policy.rateLimit.windowMs}ms`,
+          policy,
+        };
       }
     }
 

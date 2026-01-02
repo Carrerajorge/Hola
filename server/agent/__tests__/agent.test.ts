@@ -541,7 +541,7 @@ describe('PolicyEngine', () => {
   });
 
   describe('rate limiting', () => {
-    it('should track rate limit calls', () => {
+    it('should track rate limit calls with incrementRateLimit', () => {
       engine.registerPolicy({
         toolName: 'rate_limited_tool',
         capabilities: [],
@@ -563,8 +563,11 @@ describe('PolicyEngine', () => {
       };
 
       expect(engine.checkAccess(context).allowed).toBe(true);
+      engine.incrementRateLimit(context);
       expect(engine.checkAccess(context).allowed).toBe(true);
+      engine.incrementRateLimit(context);
       expect(engine.checkAccess(context).allowed).toBe(true);
+      engine.incrementRateLimit(context);
       
       const result = engine.checkAccess(context);
       expect(result.allowed).toBe(false);
@@ -593,6 +596,7 @@ describe('PolicyEngine', () => {
       };
 
       engine.checkAccess(context);
+      engine.incrementRateLimit(context);
       expect(engine.checkAccess(context).allowed).toBe(false);
       
       engine.clearRateLimits();
