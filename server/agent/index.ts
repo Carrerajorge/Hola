@@ -6,3 +6,4 @@ export { checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, type 
 export { guardrails, type PIIMatch, type AuditLogEntry, type DownloadPolicy, type GuardrailsConfig } from "./guardrails";
 export { runPipeline, cancelPipeline, initializePipeline, getAvailableTools, multiIntentManager, multiIntentPipeline } from "./pipeline";
 export type { PipelineResult, PipelineRunOptions, ProgressUpdate, ExecutionPlan, PlanStep } from "./pipeline";
+export { sandboxSecurity, SandboxSecurityManager, SandboxConfigSchema, type SandboxConfig } from "./sandboxSecurity";

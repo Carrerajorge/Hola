@@ -7,6 +7,7 @@ import { eq, desc, asc } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { RunResponseSchema } from "../agent/contracts";
 import { checkIdempotency } from "../agent/idempotency";
+import { updateRunWithLock } from "../agent/dbTransactions";
 
 const createRunSchema = z.object({
   chatId: z.string().min(1, "chatId is required"),
@@ -78,10 +79,17 @@ export function createAgentModeRouter() {
       }).returning();
 
       (async () => {
+        let currentStatus = "queued";
         try {
-          await db.update(agentModeRuns)
-            .set({ status: "planning", startedAt: new Date() })
-            .where(eq(agentModeRuns.id, runId));
+          const lockResult = await updateRunWithLock(runId, "queued", { 
+            status: "planning", 
+            startedAt: new Date() 
+          });
+          if (!lockResult.success) {
+            console.warn(`[AgentRoutes] Failed to transition run ${runId} to planning: ${lockResult.error}`);
+            return;
+          }
+          currentStatus = "planning";
 
           const orchestrator = await agentManager.startRun(
             runId,
@@ -93,8 +101,9 @@ export function createAgentModeRouter() {
 
           orchestrator.on("progress", async (progress) => {
             try {
+              const newStatus = progress.status === "executing" ? "running" : progress.status;
               const updateData: any = {
-                status: progress.status === "executing" ? "running" : progress.status,
+                status: newStatus,
                 currentStepIndex: progress.currentStepIndex,
                 totalSteps: progress.totalSteps,
                 completedSteps: progress.stepResults.filter((r: any) => r.success).length,
@@ -125,9 +134,12 @@ export function createAgentModeRouter() {
                 updateData.completedAt = new Date();
               }
 
-              await db.update(agentModeRuns)
-                .set(updateData)
-                .where(eq(agentModeRuns.id, runId));
+              const lockResult = await updateRunWithLock(runId, currentStatus, updateData);
+              if (lockResult.success) {
+                currentStatus = newStatus;
+              } else {
+                console.warn(`[AgentRoutes] Optimistic lock failed for run ${runId}: ${lockResult.error}`);
+              }
 
               for (const stepResult of progress.stepResults) {
                 const existingStep = await db.select()
@@ -165,13 +177,11 @@ export function createAgentModeRouter() {
 
         } catch (err: any) {
           console.error(`[AgentRoutes] Error starting run ${runId}:`, err);
-          await db.update(agentModeRuns)
-            .set({ 
-              status: "failed", 
-              error: err.message || "Failed to start agent run",
-              completedAt: new Date(),
-            })
-            .where(eq(agentModeRuns.id, runId));
+          await updateRunWithLock(runId, currentStatus, { 
+            status: "failed", 
+            error: err.message || "Failed to start agent run",
+            completedAt: new Date(),
+          });
         }
       })();
 
@@ -364,12 +374,17 @@ export function createAgentModeRouter() {
 
       const cancelled = await agentManager.cancelRun(id);
 
-      await db.update(agentModeRuns)
-        .set({ 
-          status: "cancelled", 
-          completedAt: new Date(),
-        })
-        .where(eq(agentModeRuns.id, id));
+      const lockResult = await updateRunWithLock(id, run.status, { 
+        status: "cancelled", 
+        completedAt: new Date(),
+      });
+
+      if (!lockResult.success) {
+        return res.status(409).json({
+          error: "Failed to cancel run due to concurrent modification",
+          details: lockResult.error,
+        });
+      }
 
       res.json({ success: true });
     } catch (error: any) {
@@ -401,9 +416,14 @@ export function createAgentModeRouter() {
         await (agentManager as any).pauseRun(id);
       }
 
-      await db.update(agentModeRuns)
-        .set({ status: "paused" })
-        .where(eq(agentModeRuns.id, id));
+      const lockResult = await updateRunWithLock(id, "running", { status: "paused" });
+
+      if (!lockResult.success) {
+        return res.status(409).json({
+          error: "Failed to pause run due to concurrent modification",
+          details: lockResult.error,
+        });
+      }
 
       res.json({ success: true, status: "paused" });
     } catch (error: any) {
@@ -435,9 +455,14 @@ export function createAgentModeRouter() {
         await (agentManager as any).resumeRun(id);
       }
 
-      await db.update(agentModeRuns)
-        .set({ status: "running" })
-        .where(eq(agentModeRuns.id, id));
+      const lockResult = await updateRunWithLock(id, "paused", { status: "running" });
+
+      if (!lockResult.success) {
+        return res.status(409).json({
+          error: "Failed to resume run due to concurrent modification",
+          details: lockResult.error,
+        });
+      }
 
       res.json({ success: true, status: "running" });
     } catch (error: any) {
@@ -476,18 +501,24 @@ export function createAgentModeRouter() {
 
       const retryFromStep = failedStep?.stepIndex || 0;
 
-      await db.update(agentModeRuns)
-        .set({ 
-          status: "running",
-          error: null,
-          completedAt: null,
-          currentStepIndex: retryFromStep,
-        })
-        .where(eq(agentModeRuns.id, id));
+      const retryLockResult = await updateRunWithLock(id, "failed", { 
+        status: "running",
+        error: null,
+        completedAt: null,
+        currentStepIndex: retryFromStep,
+      });
+
+      if (!retryLockResult.success) {
+        return res.status(409).json({
+          error: "Failed to acquire lock for retry",
+          details: retryLockResult.error,
+        });
+      }
 
       const plan = run.plan as any;
       if (plan && plan.objective) {
         (async () => {
+          let currentStatus = "running";
           try {
             const orchestrator = await agentManager.startRun(
               id,
@@ -499,8 +530,9 @@ export function createAgentModeRouter() {
 
             orchestrator.on("progress", async (progress) => {
               try {
+                const newStatus = progress.status === "executing" ? "running" : progress.status;
                 const updateData: any = {
-                  status: progress.status === "executing" ? "running" : progress.status,
+                  status: newStatus,
                   currentStepIndex: progress.currentStepIndex,
                   completedSteps: progress.stepResults.filter((r: any) => r.success).length,
                 };
@@ -521,22 +553,23 @@ export function createAgentModeRouter() {
                   updateData.error = progress.error || "Unknown error";
                 }
 
-                await db.update(agentModeRuns)
-                  .set(updateData)
-                  .where(eq(agentModeRuns.id, id));
+                const lockResult = await updateRunWithLock(id, currentStatus, updateData);
+                if (lockResult.success) {
+                  currentStatus = newStatus;
+                } else {
+                  console.warn(`[AgentRoutes] Optimistic lock failed for retry run ${id}: ${lockResult.error}`);
+                }
               } catch (err) {
                 console.error(`[AgentRoutes] Error updating retry run ${id}:`, err);
               }
             });
           } catch (err: any) {
             console.error(`[AgentRoutes] Error retrying run ${id}:`, err);
-            await db.update(agentModeRuns)
-              .set({ 
-                status: "failed", 
-                error: err.message || "Failed to retry agent run",
-                completedAt: new Date(),
-              })
-              .where(eq(agentModeRuns.id, id));
+            await updateRunWithLock(id, currentStatus, { 
+              status: "failed", 
+              error: err.message || "Failed to retry agent run",
+              completedAt: new Date(),
+            });
           }
         })();
       }

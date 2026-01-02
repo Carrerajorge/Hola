@@ -3,10 +3,44 @@ import { policyEngine } from "./policyEngine";
 import { eventLogger, logToolEvent } from "./eventLogger";
 import type { ToolOutput, ToolCapability } from "./contracts";
 
+export type CleanupHandler = () => Promise<void>;
+
+export class ResourceCleanupRegistry {
+  private handlers: Map<string, CleanupHandler[]> = new Map();
+
+  register(correlationId: string, handler: CleanupHandler): void {
+    const existing = this.handlers.get(correlationId) || [];
+    existing.push(handler);
+    this.handlers.set(correlationId, existing);
+  }
+
+  async cleanup(correlationId: string): Promise<void> {
+    const handlers = this.handlers.get(correlationId) || [];
+    console.log(`[ResourceCleanup] Cleaning up ${handlers.length} resources for ${correlationId}`);
+
+    for (const handler of handlers) {
+      try {
+        await handler();
+      } catch (error: any) {
+        console.error(`[ResourceCleanup] Cleanup failed:`, error.message);
+      }
+    }
+
+    this.handlers.delete(correlationId);
+  }
+
+  clear(): void {
+    this.handlers.clear();
+  }
+}
+
+export const resourceCleanup = new ResourceCleanupRegistry();
+
 export class CancellationToken {
   private _isCancelled: boolean = false;
   private _reason: string = "";
   private callbacks: (() => void)[] = [];
+  private correlationId?: string;
 
   get isCancelled(): boolean {
     return this._isCancelled;
@@ -16,10 +50,19 @@ export class CancellationToken {
     return this._reason;
   }
 
-  cancel(reason: string = "Cancelled by user"): void {
+  setCorrelationId(id: string): void {
+    this.correlationId = id;
+  }
+
+  async cancel(reason: string = "Cancelled by user"): Promise<void> {
     if (this._isCancelled) return;
     this._isCancelled = true;
     this._reason = reason;
+
+    if (this.correlationId) {
+      await resourceCleanup.cleanup(this.correlationId);
+    }
+
     this.callbacks.forEach(cb => cb());
   }
 
