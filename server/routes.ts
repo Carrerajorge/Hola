@@ -30,6 +30,7 @@ import aiExcelRouter from "./routes/aiExcelRouter";
 import errorRouter from "./routes/errorRouter";
 import { createSpreadsheetRouter } from "./routes/spreadsheetRoutes";
 import { createChatRoutes } from "./routes/chatRoutes";
+import { createAgentModeRouter } from "./routes/agentRoutes";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
@@ -72,6 +73,7 @@ export async function registerRoutes(
   app.use("/api/errors", errorRouter);
   app.use("/api/spreadsheet", createSpreadsheetRouter());
   app.use("/api/chat", createChatRoutes());
+  app.use("/api/agent", createAgentModeRouter());
 
   // ===== Public Models Endpoint (for user-facing selector) =====
   app.get("/api/models/available", async (req: Request, res: Response) => {
