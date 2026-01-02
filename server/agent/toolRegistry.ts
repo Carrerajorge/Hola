@@ -12,9 +12,23 @@ import {
 } from "../services/documentGeneration";
 import { executionEngine, type ExecutionOptions } from "./executionEngine";
 import { policyEngine, type PolicyContext } from "./policyEngine";
-import { ToolOutputSchema, type ToolCapability } from "./contracts";
+import { ToolOutputSchema, ToolCapabilitySchema, type ToolCapability } from "./contracts";
 import { randomUUID } from "crypto";
 import { metricsCollector } from "./metricsCollector";
+import { validateOrThrow } from "./validation";
+
+export const ToolDefinitionSchema = z.object({
+  name: z.string().min(1, "Tool name is required"),
+  description: z.string().min(1, "Tool description is required"),
+  inputSchema: z.custom<z.ZodSchema>((val) => val instanceof z.ZodType, {
+    message: "inputSchema must be a valid Zod schema",
+  }),
+  capabilities: z.array(ToolCapabilitySchema).optional(),
+  execute: z.custom<(input: any, context: ToolContext) => Promise<ToolResult>>(
+    (val) => typeof val === "function",
+    { message: "execute must be a function" }
+  ),
+});
 
 export type ArtifactType = "file" | "image" | "document" | "chart" | "data" | "preview" | "link";
 
@@ -88,11 +102,17 @@ export class ToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
 
   register(tool: ToolDefinition): void {
-    if (this.tools.has(tool.name)) {
-      console.warn(`[ToolRegistry] Overwriting existing tool: ${tool.name}`);
+    const validatedTool = validateOrThrow(
+      ToolDefinitionSchema,
+      tool,
+      `ToolRegistry.register(${tool?.name || "unknown"})`
+    );
+    
+    if (this.tools.has(validatedTool.name)) {
+      console.warn(`[ToolRegistry] Overwriting existing tool: ${validatedTool.name}`);
     }
-    this.tools.set(tool.name, tool);
-    console.log(`[ToolRegistry] Registered tool: ${tool.name}`);
+    this.tools.set(validatedTool.name, validatedTool as ToolDefinition);
+    console.log(`[ToolRegistry] Registered tool: ${validatedTool.name}`);
   }
 
   get(name: string): ToolDefinition | undefined {
@@ -160,9 +180,15 @@ export class ToolRegistry {
     }
 
     try {
-      const parseResult = tool.inputSchema.safeParse(input);
-      if (!parseResult.success) {
-        addLog("error", "Input validation failed", parseResult.error.errors);
+      let validatedInput: unknown;
+      try {
+        validatedInput = validateOrThrow(
+          tool.inputSchema,
+          input,
+          `ToolRegistry.execute(${name}).input`
+        );
+      } catch (validationError: any) {
+        addLog("error", "Input validation failed", validationError.zodError?.errors || validationError.message);
         return {
           success: false,
           output: null,
@@ -172,9 +198,9 @@ export class ToolRegistry {
           metrics: { durationMs: Date.now() - startTime },
           error: {
             code: "INVALID_INPUT",
-            message: `Invalid input: ${parseResult.error.message}`,
+            message: `Invalid input: ${validationError.message}`,
             retryable: false,
-            details: parseResult.error.errors,
+            details: validationError.zodError?.errors,
           },
         };
       }
@@ -183,7 +209,7 @@ export class ToolRegistry {
 
       const executionResult = await executionEngine.execute(
         name,
-        () => tool.execute(parseResult.data, context),
+        () => tool.execute(validatedInput, context),
         {
           maxRetries: policyCheck.policy.maxRetries,
           timeoutMs: policyCheck.policy.maxExecutionTimeMs,

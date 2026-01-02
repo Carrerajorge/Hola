@@ -185,21 +185,27 @@ export const CreateRunRequestSchema = z.object({
 });
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>;
 
+export const StepResponseSchema = z.object({
+  stepIndex: z.number(),
+  toolName: z.string(),
+  description: z.string().optional().nullable(),
+  status: StepStatusSchema,
+  output: z.any().optional().nullable(),
+  error: z.string().optional().nullable(),
+  startedAt: z.union([z.string().datetime(), z.date()]).optional().nullable(),
+  completedAt: z.union([z.string().datetime(), z.date()]).optional().nullable(),
+});
+export type StepResponse = z.infer<typeof StepResponseSchema>;
+
+export const StepsArrayResponseSchema = z.array(StepResponseSchema);
+export type StepsArrayResponse = z.infer<typeof StepsArrayResponseSchema>;
+
 export const RunResponseSchema = z.object({
   id: z.string().uuid(),
   chatId: z.string(),
   status: RunStatusSchema,
-  plan: AgentPlanSchema.optional(),
-  steps: z.array(z.object({
-    stepIndex: z.number(),
-    toolName: z.string(),
-    description: z.string().optional(),
-    status: StepStatusSchema,
-    output: z.any().optional(),
-    error: z.string().optional(),
-    startedAt: z.string().datetime().optional(),
-    completedAt: z.string().datetime().optional(),
-  })),
+  plan: AgentPlanSchema.optional().nullable(),
+  steps: z.array(StepResponseSchema),
   artifacts: z.array(z.object({
     id: z.string(),
     type: z.string(),

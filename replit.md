@@ -126,6 +126,24 @@ Preferred communication style: Simple, everyday language.
 - [x] Unit tests para MetricsCollector (13 tests)
 - [x] Tests ubicados en server/agent/__tests__/agent.test.ts
 
+### Hardening (Defensive Programming)
+- [x] Validación Zod estricta en todos los límites (server/agent/validation.ts)
+- [x] TransitionGuards para transiciones de estado bloqueadas (stateMachine.ts)
+- [x] Idempotency keys y deduplicación (server/agent/idempotency.ts)
+- [x] Transacciones DB + locks optimistas (server/agent/dbTransactions.ts)
+- [x] Cancel tokens con ResourceCleanupRegistry (executionEngine.ts)
+- [x] Sandbox Security deny-by-default (server/agent/sandboxSecurity.ts)
+- [x] EventTracer para observabilidad completa (metricsCollector.ts)
+
+### Chaos Tests & Benchmarks
+- [x] 39 chaos tests cubriendo resiliencia, circuit breaker, edge cases
+- [x] 5 benchmarks de rendimiento con umbrales
+- [x] State Machine: 1000 transiciones < 100ms
+- [x] Metrics: 10000 registros < 200ms
+- [x] Tool Registry: 100 calls concurrentes < 500ms
+- [x] Memory: < 50MB para 10000 eventos
+
 ### Evidence
-- **Test command**: `npm test -- server/agent/__tests__/agent.test.ts`
-- **81 tests passing** verificando toda la infraestructura del Agent
+- **Test command**: `npx vitest run server/agent/__tests__`
+- **125 tests passing** verificando toda la infraestructura del Agent
+- **Archivos creados**: validation.ts, idempotency.ts, dbTransactions.ts, sandboxSecurity.ts, chaos.test.ts, benchmarks.test.ts

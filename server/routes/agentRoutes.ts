@@ -1,25 +1,13 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { z } from "zod";
 import { db } from "../db";
 import { agentModeRuns, agentModeSteps, agentModeEvents } from "@shared/schema";
 import { agentManager } from "../agent/agentOrchestrator";
 import { eq, desc, asc } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { RunResponseSchema } from "../agent/contracts";
+import { CreateRunRequestSchema, RunResponseSchema, StepsArrayResponseSchema } from "../agent/contracts";
+import { validateOrThrow, ValidationError } from "../agent/validation";
 import { checkIdempotency } from "../agent/idempotency";
 import { updateRunWithLock } from "../agent/dbTransactions";
-
-const createRunSchema = z.object({
-  chatId: z.string().min(1, "chatId is required"),
-  messageId: z.string().optional(),
-  message: z.string().min(1, "message is required"),
-  attachments: z.array(z.any()).optional(),
-  idempotencyKey: z.string().optional(),
-});
-
-const cancelRunSchema = z.object({
-  reason: z.string().optional(),
-});
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   const user = (req as any).user;
@@ -34,15 +22,8 @@ export function createAgentModeRouter() {
 
   router.post("/runs", requireAuth, async (req: Request, res: Response) => {
     try {
-      const validation = createRunSchema.safeParse(req.body);
-      if (!validation.success) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
-          details: validation.error.errors 
-        });
-      }
-
-      const { chatId, messageId, message, attachments, idempotencyKey } = validation.data;
+      const validatedBody = validateOrThrow(CreateRunRequestSchema, req.body, "POST /runs request body");
+      const { chatId, messageId, message, attachments, idempotencyKey } = validatedBody;
       const user = (req as any).user;
       const userId = user?.claims?.sub || user?.id;
 
@@ -196,6 +177,12 @@ export function createAgentModeRouter() {
         error: null,
       });
     } catch (error: any) {
+      if (error instanceof ValidationError) {
+        return res.status(400).json({ 
+          error: "Validation failed", 
+          details: error.zodError.errors 
+        });
+      }
       console.error("[AgentRoutes] Error creating run:", error);
       res.status(500).json({ error: "Failed to create agent run" });
     }
@@ -249,11 +236,12 @@ export function createAgentModeRouter() {
 
       const response = {
         id: run.id,
+        chatId: run.chatId,
         status: run.status,
         plan: run.plan,
-        currentStepIndex: run.currentStepIndex,
-        totalSteps: run.totalSteps || planSteps.length,
-        completedSteps: run.completedSteps,
+        currentStepIndex: run.currentStepIndex ?? 0,
+        totalSteps: run.totalSteps ?? planSteps.length,
+        completedSteps: run.completedSteps ?? 0,
         steps: mergedSteps.length > 0 ? mergedSteps : steps.map(s => ({
           stepIndex: s.stepIndex,
           toolName: s.toolName,
@@ -264,21 +252,21 @@ export function createAgentModeRouter() {
           startedAt: s.startedAt,
           completedAt: s.completedAt,
         })),
-        artifacts: run.artifacts,
+        artifacts: (run.artifacts as any[]) || [],
         summary: run.summary,
         error: run.error,
-        startedAt: run.startedAt,
-        completedAt: run.completedAt,
-        createdAt: run.createdAt,
+        startedAt: run.startedAt?.toISOString(),
+        completedAt: run.completedAt?.toISOString(),
+        createdAt: run.createdAt.toISOString(),
       };
 
-      const validatedResponse = RunResponseSchema.safeParse(response);
-      if (!validatedResponse.success) {
-        console.warn(`[AgentRoutes] Response validation failed for run ${id}:`, validatedResponse.error.message);
-      }
-
-      res.json(response);
+      const validatedResponse = validateOrThrow(RunResponseSchema, response, `GET /runs/${id} response`);
+      res.json(validatedResponse);
     } catch (error: any) {
+      if (error instanceof ValidationError) {
+        console.error(`[AgentRoutes] Response validation failed:`, error.zodError.errors);
+        return res.status(500).json({ error: "Internal response validation failed" });
+      }
       console.error("[AgentRoutes] Error getting run:", error);
       res.status(500).json({ error: "Failed to get agent run" });
     }
@@ -311,8 +299,13 @@ export function createAgentModeRouter() {
         completedAt: s.completedAt,
       }));
 
-      res.json(response);
+      const validatedResponse = validateOrThrow(StepsArrayResponseSchema, response, `GET /runs/${id}/steps response`);
+      res.json(validatedResponse);
     } catch (error: any) {
+      if (error instanceof ValidationError) {
+        console.error(`[AgentRoutes] Response validation failed:`, error.zodError.errors);
+        return res.status(500).json({ error: "Internal response validation failed" });
+      }
       console.error("[AgentRoutes] Error getting steps:", error);
       res.status(500).json({ error: "Failed to get agent run steps" });
     }
