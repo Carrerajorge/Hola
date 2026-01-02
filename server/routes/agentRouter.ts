@@ -11,14 +11,31 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
 
   router.post("/agent/runs", async (req, res) => {
     try {
-      const { chatId, message, attachments } = req.body;
+      let { chatId, message, attachments } = req.body;
       
-      if (!chatId || !message) {
-        return res.status(400).json({ error: "chatId and message are required" });
+      if (!message) {
+        return res.status(400).json({ error: "message is required" });
       }
       
       const runId = randomUUID();
       const userId = "anonymous";
+      
+      if (!chatId || chatId.startsWith("pending-") || chatId === "") {
+        const newChatId = randomUUID();
+        console.log(`[AgentRouter] Creating new chat ${newChatId} for agent run`);
+        try {
+          await storage.createChat({
+            id: newChatId,
+            userId: userId,
+            title: message.slice(0, 50) + (message.length > 50 ? "..." : ""),
+            aiModelUsed: "gemini-2.5-flash"
+          });
+          chatId = newChatId;
+        } catch (chatError: any) {
+          console.error(`[AgentRouter] Failed to create chat:`, chatError);
+          chatId = newChatId;
+        }
+      }
       
       try {
         await db.insert(agentModeRuns).values({

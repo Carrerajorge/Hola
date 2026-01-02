@@ -56,6 +56,7 @@ interface AgentModeState {
   summary: string | null;
   error: string | null;
   progress: { current: number; total: number };
+  createdChatId: string | null;
 }
 
 const initialState: AgentModeState = {
@@ -66,7 +67,8 @@ const initialState: AgentModeState = {
   artifacts: [],
   summary: null,
   error: null,
-  progress: { current: 0, total: 0 }
+  progress: { current: 0, total: 0 },
+  createdChatId: null
 };
 
 export function useAgentMode(chatId: string) {
@@ -116,7 +118,7 @@ export function useAgentMode(chatId: string) {
   const startRunMutation = useMutation({
     mutationFn: async ({ message, attachments }: { message: string; attachments?: any[] }) => {
       const res = await apiRequest('POST', `/api/agent/runs`, {
-        chatId,
+        chatId: chatId || "",
         message,
         attachments
       });
@@ -131,7 +133,8 @@ export function useAgentMode(chatId: string) {
         artifacts: data.artifacts || [],
         summary: data.summary || null,
         error: data.error || null,
-        progress: { current: 0, total: data.plan?.steps.length || 0 }
+        progress: { current: 0, total: data.plan?.steps.length || 0 },
+        createdChatId: data.chatId || null
       });
       queryClient.invalidateQueries({ queryKey: ['/api/agent/runs', data.id] });
     },
@@ -167,7 +170,7 @@ export function useAgentMode(chatId: string) {
     mutationFn: async () => {
       if (!lastMessageRef.current) throw new Error('No previous message to retry');
       const res = await apiRequest('POST', `/api/agent/runs`, {
-        chatId,
+        chatId: chatId || "",
         message: lastMessageRef.current,
         attachments: lastAttachmentsRef.current
       });
@@ -182,7 +185,8 @@ export function useAgentMode(chatId: string) {
         artifacts: data.artifacts || [],
         summary: data.summary || null,
         error: data.error || null,
-        progress: { current: 0, total: data.plan?.steps.length || 0 }
+        progress: { current: 0, total: data.plan?.steps.length || 0 },
+        createdChatId: data.chatId || null
       });
       queryClient.invalidateQueries({ queryKey: ['/api/agent/runs', data.id] });
     },
@@ -195,12 +199,12 @@ export function useAgentMode(chatId: string) {
     }
   });
 
-  const startRun = useCallback(async (message: string, attachments?: any[]): Promise<string> => {
+  const startRun = useCallback(async (message: string, attachments?: any[]): Promise<{ runId: string; chatId: string }> => {
     lastMessageRef.current = message;
     lastAttachmentsRef.current = attachments;
     
     const result = await startRunMutation.mutateAsync({ message, attachments });
-    return result.id;
+    return { runId: result.id, chatId: result.chatId };
   }, [startRunMutation]);
 
   const cancelRun = useCallback(async (): Promise<void> => {
@@ -222,6 +226,7 @@ export function useAgentMode(chatId: string) {
     summary: state.summary,
     error: state.error,
     progress: state.progress,
+    createdChatId: state.createdChatId,
     startRun,
     cancelRun,
     retryRun,

@@ -2501,9 +2501,13 @@ export function ChatInterface({
           type: f.type,
           spreadsheetData: f.spreadsheetData
         }));
-        const runId = await agentMode.startRun(input, attachments);
-        if (runId) {
+        const result = await agentMode.startRun(input, attachments);
+        if (result.runId) {
           setIsAgentPanelOpen(true);
+          // Navigate to the newly created chat if agent mode created one
+          if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
+            window.location.href = `/chat/${result.chatId}`;
+          }
         }
         setInput("");
         setUploadedFiles([]);
