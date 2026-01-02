@@ -147,3 +147,37 @@ Preferred communication style: Simple, everyday language.
 - **Test command**: `npx vitest run server/agent/__tests__`
 - **125 tests passing** verificando toda la infraestructura del Agent
 - **Archivos creados**: validation.ts, idempotency.ts, dbTransactions.ts, sandboxSecurity.ts, chaos.test.ts, benchmarks.test.ts
+
+## Certification Pipeline
+
+### Scripts
+- `npm run agent:certify` - Ejecuta pipeline completo de certificación
+- `npm run agent:release-gate` - Verifica que certificación esté vigente antes de deploy
+
+### Pipeline Stages
+1. **Unit/Integration/Chaos/Benchmark Tests** - Ejecuta 125 tests en server/agent/__tests__
+2. **Static Validation (Agent)** - Verifica archivos del módulo Agent solamente
+3. **Soak Test** - 1min con 10 runs concurrentes, éxito >99.5%, P95 <200ms
+4. **Production Build** - npm run build sin errores
+
+### Auto-Fix System
+- Máximo 3 intentos por certificación
+- Diagnósticos automáticos para tests fallidos, errores de tipos, soak test
+- Reintentos con backoff entre intentos
+
+### Release Gates (scripts/release-gate.cjs)
+- Bloquea deploy si reporte no existe
+- Bloquea si reporte es más viejo que 24 horas
+- Bloquea si status no es PASSED
+
+### Report Output
+- Ubicación: `test_results/agent_certification_report.md`
+- Métricas: P95/P99 latency, throughput, memory peak, flakiness
+- Detalles por stage con duración y errores
+
+### Certification Status (Latest)
+- **Date**: 2026-01-02
+- **Status**: PASSED
+- **Duration**: ~121s total (8s tests, 8s validation, 60s soak, 45s build)
+- **Success Rate**: 100%
+- **P95 Latency**: 207ms
