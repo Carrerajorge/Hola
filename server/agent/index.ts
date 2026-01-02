@@ -8,3 +8,4 @@ export { runPipeline, cancelPipeline, initializePipeline, getAvailableTools, mul
 export type { PipelineResult, PipelineRunOptions, ProgressUpdate, ExecutionPlan, PlanStep } from "./pipeline";
 export { sandboxSecurity, SandboxSecurityManager, SandboxConfigSchema, type SandboxConfig } from "./sandboxSecurity";
 export { metricsCollector, eventTracer, type StepMetrics, type ToolStats, type ExportedMetrics, type EventTrace, type TracedEvent } from "./metricsCollector";
+export * from "./webtool";
