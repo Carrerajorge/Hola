@@ -424,6 +424,30 @@ describe("ResponseCache", () => {
     expect(stats.entries).toBe(0);
   });
 
+  it("should track memory correctly when entries expire on get()", async () => {
+    cache = new ResponseCache({
+      maxEntries: 100,
+      fetchTtlMs: 50,
+      browserTtlMs: 50,
+      cleanupIntervalMs: 1000000,
+      maxMemoryMb: 1,
+      maxContentSizeBytes: 10000,
+    });
+    
+    cache.set("https://example.com/1", "a".repeat(400), { fetchMethod: "fetch" });
+    
+    await new Promise(r => setTimeout(r, 100));
+    
+    const entry = cache.get("https://example.com/1");
+    expect(entry).toBeNull();
+    
+    cache.set("https://example.com/2", "b".repeat(400), { fetchMethod: "fetch" });
+    cache.set("https://example.com/3", "c".repeat(400), { fetchMethod: "fetch" });
+    
+    const stats = cache.getStats();
+    expect(stats.entries).toBe(2);
+  });
+
   it("should generate consistent URL hashes", () => {
     const hash1 = ResponseCache.hashUrl("https://example.com/page");
     const hash2 = ResponseCache.hashUrl("https://example.com/page");

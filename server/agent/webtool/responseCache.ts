@@ -93,6 +93,7 @@ export class ResponseCache {
     }
     
     if (Date.now() > entry.expiresAt) {
+      this.currentMemoryBytes -= this.estimateEntrySize(entry);
       this.cache.delete(urlHash);
       this.removeFromQueryIndex(urlHash, entry.queryHash);
       this.misses++;
