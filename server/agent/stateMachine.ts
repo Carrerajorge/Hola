@@ -44,6 +44,33 @@ const STEP_TRANSITIONS: Record<StepStatus, StepStatus[]> = {
   cancelled: [],
 };
 
+export interface TransitionGuard {
+  condition: (context: TransitionContext) => boolean;
+  message: string;
+}
+
+export interface TransitionContext {
+  runId: string;
+  fromStatus: RunStatus;
+  toStatus: RunStatus;
+  metadata?: Record<string, any>;
+}
+
+const RUN_TRANSITION_GUARDS: Partial<Record<RunStatus, Partial<Record<RunStatus, TransitionGuard[]>>>> = {
+  running: {
+    verifying: [{
+      condition: (ctx) => ctx.metadata?.allStepsCompleted !== false,
+      message: "Cannot verify until all steps are completed"
+    }],
+  },
+  verifying: {
+    completed: [{
+      condition: (ctx) => ctx.metadata?.verificationPassed !== false,
+      message: "Verification must pass before completing"
+    }],
+  }
+};
+
 export class StateMachineError extends Error {
   constructor(
     public readonly entityType: "run" | "step",
@@ -116,6 +143,52 @@ export class RunStateMachine {
 
   isActive(): boolean {
     return ["queued", "planning", "running", "verifying", "paused"].includes(this.status);
+  }
+
+  transitionWithGuards(targetStatus: RunStatus, metadata?: Record<string, any>): void {
+    if (!this.canTransitionTo(targetStatus)) {
+      throw new StateMachineError("run", this.runId, this.status, targetStatus);
+    }
+
+    const guards = RUN_TRANSITION_GUARDS[this.status]?.[targetStatus];
+    if (guards) {
+      const context: TransitionContext = {
+        runId: this.runId,
+        fromStatus: this.status,
+        toStatus: targetStatus,
+        metadata
+      };
+      for (const guard of guards) {
+        if (!guard.condition(context)) {
+          throw new StateMachineError("run", this.runId, this.status, targetStatus);
+        }
+      }
+    }
+
+    this.transition(targetStatus, metadata?.reason);
+  }
+
+  getBlockedReason(targetStatus: RunStatus, metadata?: Record<string, any>): string | null {
+    if (!this.canTransitionTo(targetStatus)) {
+      return `Transition from ${this.status} to ${targetStatus} is not allowed`;
+    }
+
+    const guards = RUN_TRANSITION_GUARDS[this.status]?.[targetStatus];
+    if (guards) {
+      const context: TransitionContext = {
+        runId: this.runId,
+        fromStatus: this.status,
+        toStatus: targetStatus,
+        metadata
+      };
+      for (const guard of guards) {
+        if (!guard.condition(context)) {
+          return guard.message;
+        }
+      }
+    }
+
+    return null;
   }
 }
 

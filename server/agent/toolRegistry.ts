@@ -12,7 +12,7 @@ import {
 } from "../services/documentGeneration";
 import { executionEngine, type ExecutionOptions } from "./executionEngine";
 import { policyEngine, type PolicyContext } from "./policyEngine";
-import type { ToolCapability } from "./contracts";
+import { ToolOutputSchema, type ToolCapability } from "./contracts";
 import { randomUUID } from "crypto";
 import { metricsCollector } from "./metricsCollector";
 
@@ -205,6 +205,11 @@ export class ToolRegistry {
           success: true,
           timestamp: new Date(),
         });
+        
+        const validatedOutput = ToolOutputSchema.safeParse(result);
+        if (!validatedOutput.success) {
+          addLog("warn", `Tool output validation failed: ${validatedOutput.error.message}`);
+        }
         
         return {
           success: result.success,

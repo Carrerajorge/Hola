@@ -5,12 +5,15 @@ import { agentModeRuns, agentModeSteps, agentModeEvents } from "@shared/schema";
 import { agentManager } from "../agent/agentOrchestrator";
 import { eq, desc, asc } from "drizzle-orm";
 import { randomUUID } from "crypto";
+import { RunResponseSchema } from "../agent/contracts";
+import { checkIdempotency } from "../agent/idempotency";
 
 const createRunSchema = z.object({
   chatId: z.string().min(1, "chatId is required"),
   messageId: z.string().optional(),
   message: z.string().min(1, "message is required"),
   attachments: z.array(z.any()).optional(),
+  idempotencyKey: z.string().optional(),
 });
 
 const cancelRunSchema = z.object({
@@ -38,9 +41,21 @@ export function createAgentModeRouter() {
         });
       }
 
-      const { chatId, messageId, message, attachments } = validation.data;
+      const { chatId, messageId, message, attachments, idempotencyKey } = validation.data;
       const user = (req as any).user;
       const userId = user?.claims?.sub || user?.id;
+
+      if (idempotencyKey) {
+        const idempotencyResult = await checkIdempotency(idempotencyKey, chatId);
+        if (idempotencyResult.isDuplicate) {
+          return res.status(200).json({
+            id: idempotencyResult.existingRunId,
+            runId: idempotencyResult.existingRunId,
+            status: idempotencyResult.existingStatus,
+            duplicate: true,
+          });
+        }
+      }
 
       const runId = randomUUID();
 
@@ -59,6 +74,7 @@ export function createAgentModeRouter() {
         currentStepIndex: 0,
         startedAt: null,
         completedAt: null,
+        idempotencyKey: idempotencyKey || null,
       }).returning();
 
       (async () => {
@@ -245,6 +261,11 @@ export function createAgentModeRouter() {
         completedAt: run.completedAt,
         createdAt: run.createdAt,
       };
+
+      const validatedResponse = RunResponseSchema.safeParse(response);
+      if (!validatedResponse.success) {
+        console.warn(`[AgentRoutes] Response validation failed for run ${id}:`, validatedResponse.error.message);
+      }
 
       res.json(response);
     } catch (error: any) {
