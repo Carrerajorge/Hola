@@ -24,7 +24,7 @@ import { executorAgent, ExecutionContext, StepResult, Citation } from "./roles/e
 import { verifierAgent, RunResultPackage as VerifierPackage } from "./roles/verifierAgent";
 import { storage } from "../storage";
 import { db } from "../db";
-import { agentRuns, agentSteps, agentAssets, agentModeEvents } from "@shared/schema";
+import { agentRuns, agentSteps, agentAssets, agentModeEvents, agentModeRuns, agentModeSteps } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 export const RunControllerConfigSchema = z.object({
@@ -96,10 +96,13 @@ export class RunController extends EventEmitter {
       },
     };
 
-    await storage.createAgentRun({
-      conversationId: validatedRequest.chatId,
-      status: "pending",
-      objective: validatedRequest.message,
+    await db.insert(agentModeRuns).values({
+      id: runId,
+      chatId: validatedRequest.chatId,
+      messageId: validatedRequest.messageId,
+      userId,
+      status: "queued",
+      idempotencyKey: validatedRequest.idempotencyKey,
     });
 
     await logRunEvent(runId, correlationId, "run_created", {
@@ -335,7 +338,25 @@ export class RunController extends EventEmitter {
     const events = await eventLogger.getEventsForRun(runId);
 
     const allArtifacts = context?.artifacts || run.artifacts || [];
-    const allCitations = context?.citations || [];
+
+    let allCitations = context?.citations || [];
+    if (allCitations.length === 0) {
+      const citationEvents = await db.select().from(agentModeEvents)
+        .where(eq(agentModeEvents.runId, runId));
+      const citationRows = citationEvents.filter((e) => e.eventType === "citation_extracted");
+      allCitations = citationRows.map((e) => {
+        const payload = e.payload as { sourceUrl?: string; sourceTitle?: string; excerpt?: string; confidence?: number };
+        return {
+          id: e.id,
+          stepIndex: e.stepIndex || 0,
+          sourceUrl: payload.sourceUrl || "",
+          sourceTitle: payload.sourceTitle || "",
+          excerpt: payload.excerpt || "",
+          confidence: payload.confidence || 0,
+          createdAt: e.timestamp,
+        };
+      });
+    }
 
     const now = Date.now();
     const planningMs = context?.planningDurationMs || 0;
@@ -354,7 +375,7 @@ export class RunController extends EventEmitter {
         id: c.id,
         sourceUrl: c.sourceUrl || "",
         sourceTitle: c.sourceTitle || "",
-        quote: c.excerpt.slice(0, 500),
+        quote: (c.excerpt || "").slice(0, 500),
         locator: `step:${c.stepIndex}`,
         confidence: c.confidence,
         retrievedAt: c.createdAt,
@@ -410,6 +431,10 @@ export class RunController extends EventEmitter {
       run.status = "planning";
       stateMachine.transition("planning", "Starting execution");
 
+      await db.update(agentModeRuns)
+        .set({ startedAt: run.startedAt, status: "planning" })
+        .where(eq(agentModeRuns.id, run.id));
+
       await logRunEvent(run.id, run.correlationId, "run_started", {
         startedAt: run.startedAt.toISOString(),
       });
@@ -424,6 +449,10 @@ export class RunController extends EventEmitter {
       stateMachine.transition("running", "Plan generated, executing steps");
       run.status = "running";
       run.updatedAt = new Date();
+
+      await db.update(agentModeRuns)
+        .set({ status: "running", plan: run.plan as any, totalSteps: run.totalSteps })
+        .where(eq(agentModeRuns.id, run.id));
 
       this.emitRoleTransition(context, "executor", "executor", "Starting execution phase");
       await this.executionPhase(context);
@@ -453,7 +482,10 @@ export class RunController extends EventEmitter {
         artifactCount: context.artifacts.length,
       });
 
-      this.emit("runCompleted", { runId: run.id, result: await this.getRunResult(run.id) });
+      const result = await this.getRunResult(run.id);
+      await this.persistRunResult(run.id, context, result);
+
+      this.emit("runCompleted", { runId: run.id, result });
     } catch (error: any) {
       await this.handleRunError(context, error);
     } finally {
@@ -497,6 +529,22 @@ export class RunController extends EventEmitter {
       run.updatedAt = new Date();
 
       context.planningDurationMs = Date.now() - planningStart;
+
+      await db.update(agentModeRuns)
+        .set({ plan: run.plan as any, totalSteps: run.totalSteps })
+        .where(eq(agentModeRuns.id, run.id));
+
+      for (const step of run.steps) {
+        await db.insert(agentModeSteps).values({
+          id: step.id,
+          runId: run.id,
+          stepIndex: step.stepIndex,
+          toolName: step.toolName,
+          toolInput: step.input || {},
+          status: step.status,
+          retryCount: 0,
+        }).onConflictDoNothing();
+      }
 
       console.log(`[RunController] Planning completed for run ${run.id}: ${plan.steps.length} steps`);
     } catch (error: any) {
@@ -575,9 +623,30 @@ export class RunController extends EventEmitter {
           if (result.success) {
             run.completedSteps++;
             context.artifacts.push(...result.artifacts);
-            context.citations.push(...result.citations);
+            const citationsWithIds = result.citations.map((c) => ({
+              ...c,
+              id: c.id || randomUUID(),
+            }));
+            context.citations.push(...citationsWithIds);
           } else if (!step.optional) {
             console.warn(`[RunController] Required step ${step.index} failed: ${result.error?.message}`);
+          }
+
+          await db.update(agentModeRuns)
+            .set({ completedSteps: run.completedSteps, currentStepIndex: run.currentStepIndex })
+            .where(eq(agentModeRuns.id, run.id));
+
+          if (runStep) {
+            await db.update(agentModeSteps)
+              .set({
+                toolOutput: runStep.output,
+                status: runStep.status,
+                error: runStep.error,
+                startedAt: runStep.startedAt,
+                completedAt: runStep.completedAt,
+                retryCount: runStep.retryCount,
+              })
+              .where(eq(agentModeSteps.id, runStep.id));
           }
         } catch (error: any) {
           if (error instanceof CancellationError) {
@@ -674,7 +743,10 @@ export class RunController extends EventEmitter {
           wasResumed: true,
         });
 
-        this.emit("runCompleted", { runId: run.id });
+        const result = await this.getRunResult(run.id);
+        await this.persistRunResult(run.id, context, result);
+
+        this.emit("runCompleted", { runId: run.id, result });
       }
     } catch (error: any) {
       await this.handleRunError(context, error);
@@ -708,6 +780,52 @@ export class RunController extends EventEmitter {
       completedSteps: run.completedSteps,
       totalSteps: run.totalSteps,
     });
+
+    try {
+      await db.update(agentModeRuns)
+        .set({
+          status: "failed",
+          completedAt: run.completedAt,
+          error: run.error,
+          plan: run.plan as any,
+          artifacts: context.artifacts as any,
+          totalSteps: run.totalSteps,
+          completedSteps: run.completedSteps,
+          currentStepIndex: run.currentStepIndex,
+        })
+        .where(eq(agentModeRuns.id, run.id));
+
+      for (const step of run.steps) {
+        await db.update(agentModeSteps)
+          .set({
+            toolOutput: step.output,
+            status: step.status,
+            error: step.error,
+            completedAt: step.completedAt,
+            retryCount: step.retryCount,
+          })
+          .where(eq(agentModeSteps.id, step.id));
+      }
+
+      for (const citation of context.citations) {
+        await db.insert(agentModeEvents).values({
+          id: citation.id || randomUUID(),
+          runId: run.id,
+          stepIndex: citation.stepIndex,
+          correlationId: run.correlationId,
+          eventType: "citation_extracted",
+          payload: {
+            sourceUrl: citation.sourceUrl,
+            sourceTitle: citation.sourceTitle,
+            excerpt: citation.excerpt,
+            confidence: citation.confidence,
+          },
+          timestamp: citation.createdAt,
+        }).onConflictDoNothing();
+      }
+    } catch (persistError) {
+      console.error(`[RunController] Failed to persist failed run ${run.id}:`, persistError);
+    }
 
     this.emit("runFailed", { runId: run.id, error: error.message });
   }
@@ -774,31 +892,76 @@ export class RunController extends EventEmitter {
     }
 
     try {
-      const dbRun = await storage.getAgentRun(runId);
+      const [dbRun] = await db.select().from(agentModeRuns).where(eq(agentModeRuns.id, runId));
       if (!dbRun) {
-        return null;
+        const legacyRun = await storage.getAgentRun(runId);
+        if (!legacyRun) return null;
+        return {
+          id: legacyRun.id,
+          chatId: legacyRun.conversationId || "",
+          userId: "",
+          status: this.mapDbStatus(legacyRun.status),
+          steps: [],
+          artifacts: [],
+          correlationId: randomUUID(),
+          currentStepIndex: 0,
+          totalSteps: 0,
+          completedSteps: 0,
+          startedAt: legacyRun.startedAt,
+          completedAt: legacyRun.completedAt || undefined,
+          createdAt: legacyRun.startedAt,
+          updatedAt: legacyRun.startedAt,
+          error: legacyRun.error || undefined,
+          metadata: { objective: legacyRun.objective },
+        };
       }
+
+      const dbSteps = await db.select().from(agentModeSteps).where(eq(agentModeSteps.runId, runId));
+
+      const plan = dbRun.plan as AgentPlan | null;
+      const planSteps = plan?.steps || [];
+
+      const steps = dbSteps.map((s) => {
+        const planStep = planSteps.find((ps) => ps.index === s.stepIndex);
+        return {
+          id: s.id,
+          runId: s.runId,
+          stepIndex: s.stepIndex,
+          toolName: s.toolName,
+          description: planStep?.description || "",
+          status: s.status as "pending" | "running" | "succeeded" | "failed" | "skipped",
+          input: s.toolInput,
+          output: s.toolOutput,
+          error: s.error || undefined,
+          startedAt: s.startedAt || undefined,
+          completedAt: s.completedAt || undefined,
+          retryCount: s.retryCount || 0,
+        };
+      });
+
+      const artifacts = (dbRun.artifacts as Artifact[]) || [];
 
       const run: Run = {
         id: dbRun.id,
-        chatId: dbRun.conversationId || "",
-        userId: "",
+        chatId: dbRun.chatId || "",
+        messageId: dbRun.messageId || undefined,
+        userId: dbRun.userId || "",
         status: this.mapDbStatus(dbRun.status),
-        steps: [],
-        artifacts: [],
+        plan: plan || undefined,
+        steps,
+        artifacts,
         correlationId: randomUUID(),
-        currentStepIndex: 0,
-        totalSteps: 0,
-        completedSteps: 0,
-        startedAt: dbRun.startedAt,
+        currentStepIndex: dbRun.currentStepIndex || 0,
+        totalSteps: dbRun.totalSteps || 0,
+        completedSteps: dbRun.completedSteps || 0,
+        summary: dbRun.summary || undefined,
+        startedAt: dbRun.startedAt || undefined,
         completedAt: dbRun.completedAt || undefined,
-        createdAt: dbRun.startedAt,
-        updatedAt: dbRun.startedAt,
+        createdAt: dbRun.createdAt,
+        updatedAt: dbRun.createdAt,
         error: dbRun.error || undefined,
-        metadata: {
-          objective: dbRun.objective,
-          routerDecision: dbRun.routerDecision,
-        },
+        idempotencyKey: dbRun.idempotencyKey || undefined,
+        metadata: plan ? { originalMessage: plan.objective } : {},
       };
 
       return run;
@@ -811,12 +974,85 @@ export class RunController extends EventEmitter {
   private mapDbStatus(status: string): RunStatus {
     const statusMap: Record<string, RunStatus> = {
       pending: "queued",
+      queued: "queued",
+      planning: "planning",
       running: "running",
+      verifying: "verifying",
       completed: "completed",
+      succeeded: "completed",
       failed: "failed",
       cancelled: "cancelled",
     };
     return statusMap[status] || "queued";
+  }
+
+  private async persistRunResult(
+    runId: string,
+    context: ActiveRunContext,
+    result: RunResultPackage
+  ): Promise<void> {
+    try {
+      await db.update(agentModeRuns)
+        .set({
+          status: context.run.status === "completed" ? "succeeded" : "failed",
+          startedAt: context.run.startedAt,
+          completedAt: context.run.completedAt,
+          error: context.run.error,
+          plan: context.run.plan as any,
+          artifacts: context.artifacts as any,
+          summary: context.run.summary,
+          totalSteps: context.run.totalSteps,
+          completedSteps: context.run.completedSteps,
+          currentStepIndex: context.run.currentStepIndex,
+        })
+        .where(eq(agentModeRuns.id, runId));
+
+      for (const step of context.run.steps) {
+        await db.insert(agentModeSteps).values({
+          id: step.id,
+          runId,
+          stepIndex: step.stepIndex,
+          toolName: step.toolName,
+          toolInput: step.input || {},
+          toolOutput: step.output,
+          status: step.status,
+          error: step.error,
+          startedAt: step.startedAt,
+          completedAt: step.completedAt,
+          retryCount: step.retryCount,
+        }).onConflictDoUpdate({
+          target: [agentModeSteps.id],
+          set: {
+            toolOutput: step.output,
+            status: step.status,
+            error: step.error,
+            completedAt: step.completedAt,
+            retryCount: step.retryCount,
+          },
+        });
+      }
+
+      for (const citation of context.citations) {
+        await db.insert(agentModeEvents).values({
+          id: citation.id,
+          runId,
+          stepIndex: citation.stepIndex,
+          correlationId: context.run.correlationId,
+          eventType: "citation_extracted",
+          payload: {
+            sourceUrl: citation.sourceUrl,
+            sourceTitle: citation.sourceTitle,
+            excerpt: citation.excerpt,
+            confidence: citation.confidence,
+          },
+          timestamp: citation.createdAt,
+        }).onConflictDoNothing();
+      }
+
+      console.log(`[RunController] Persisted run result for ${runId}: ${context.run.steps.length} steps, ${context.artifacts.length} artifacts, ${context.citations.length} citations`);
+    } catch (error) {
+      console.error(`[RunController] Failed to persist run result for ${runId}:`, error);
+    }
   }
 
   private buildRunResponse(run: Run): RunResponse {
