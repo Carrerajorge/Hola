@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
-export type AgentModeStatus = 'idle' | 'queued' | 'planning' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type AgentModeStatus = 'idle' | 'queued' | 'planning' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface AgentPlan {
   objective: string;
@@ -13,7 +13,7 @@ export interface AgentPlan {
 export interface AgentStep {
   stepIndex: number;
   toolName: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
   output?: any;
   error?: string;
   startedAt?: string;
@@ -89,7 +89,7 @@ export function useAgentMode(chatId: string) {
 
   useEffect(() => {
     if (runData) {
-      const completedSteps = runData.steps.filter(s => s.status === 'completed').length;
+      const completedSteps = runData.steps.filter(s => s.status === 'succeeded' || s.status === 'failed').length;
       const totalSteps = runData.plan?.steps.length || runData.steps.length || 0;
       
       setState(prev => ({
@@ -97,7 +97,7 @@ export function useAgentMode(chatId: string) {
         status: runData.status,
         plan: runData.plan || null,
         steps: runData.steps,
-        artifacts: runData.artifacts,
+        artifacts: runData.artifacts || [],
         summary: runData.summary || null,
         error: runData.error || null,
         progress: { current: completedSteps, total: totalSteps }

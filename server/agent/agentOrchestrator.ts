@@ -18,9 +18,9 @@ export interface AgentPlan {
 }
 
 export type AgentStatus = 
-  | "idle"
+  | "queued"
   | "planning"
-  | "executing"
+  | "running"
   | "completed"
   | "failed"
   | "cancelled";
@@ -94,7 +94,7 @@ export class AgentOrchestrator extends EventEmitter {
     this.runId = runId;
     this.chatId = chatId;
     this.userId = userId;
-    this.status = "idle";
+    this.status = "queued";
     this.plan = null;
     this.currentStepIndex = 0;
     this.artifacts = [];
@@ -288,7 +288,7 @@ Respond with ONLY valid JSON in this exact format:
   }
 
   async run(): Promise<void> {
-    if (this.status !== "idle" && this.status !== "planning") {
+    if (this.status !== "queued" && this.status !== "planning") {
       throw new Error(`Cannot start run in status: ${this.status}`);
     }
 
@@ -297,7 +297,7 @@ Respond with ONLY valid JSON in this exact format:
         throw new Error("No plan available. Call generatePlan first.");
       }
 
-      this.status = "executing";
+      this.status = "running";
       this.emitProgress();
 
       for (let i = 0; i < this.plan.steps.length; i++) {

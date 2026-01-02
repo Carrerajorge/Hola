@@ -93,7 +93,7 @@ export function createAgentModeRouter() {
               }
 
               if (progress.status === "completed") {
-                updateData.status = "succeeded";
+                updateData.status = "completed";
                 updateData.completedAt = new Date();
                 
                 const summary = await orchestrator.generateSummary();
@@ -263,7 +263,7 @@ export function createAgentModeRouter() {
         return res.status(404).json({ error: "Run not found" });
       }
 
-      if (["succeeded", "failed", "cancelled"].includes(run.status)) {
+      if (["completed", "failed", "cancelled"].includes(run.status)) {
         return res.status(400).json({ 
           error: "Cannot cancel a run that has already finished",
           currentStatus: run.status,
@@ -350,7 +350,7 @@ export function createAgentModeRouter() {
                 }
 
                 if (progress.status === "completed") {
-                  updateData.status = "succeeded";
+                  updateData.status = "completed";
                   updateData.completedAt = new Date();
                   const summary = await orchestrator.generateSummary();
                   updateData.summary = summary;

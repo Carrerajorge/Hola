@@ -90,7 +90,9 @@ import { RecordingPanel } from "@/components/recording-panel";
 import { Composer } from "@/components/composer";
 import { MessageList, parseDocumentBlocks, type DocumentBlock } from "@/components/message-list";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
+import { AgentPanel } from "@/components/agent-panel";
 import { useAuth } from "@/hooks/use-auth";
+import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
@@ -929,7 +931,10 @@ export function ChatInterface({
   const [showFigmaTokenInput, setShowFigmaTokenInput] = useState(false);
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
+  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
   const modelSelectorRef = useRef<HTMLDivElement>(null);
+  
+  const agentMode = useAgentMode(chatId || "");
   
   const { availableModels, isLoading: isModelsLoading, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
   
@@ -998,6 +1003,13 @@ export function ChatInterface({
   useEffect(() => {
     chatIdRef.current = chatId || null;
   }, [chatId]);
+  
+  // Open agent panel when selecting agent tool and there's an active run
+  useEffect(() => {
+    if (selectedTool === "agent" && agentMode.runId) {
+      setIsAgentPanelOpen(true);
+    }
+  }, [selectedTool, agentMode.runId]);
   
   // Update streaming store when aiState changes
   // This allows tracking of chats processing in background after component unmounts
@@ -2479,6 +2491,29 @@ export function ChatInterface({
     const hasSelectionWithInstruction = selectedDocText && input.trim();
     
     if (!hasInput && !hasFiles && !hasSelectionWithInstruction) return;
+
+    // Handle Agent mode
+    if (selectedTool === "agent") {
+      try {
+        const attachments = uploadedFiles.map(f => ({
+          id: f.id,
+          name: f.name,
+          type: f.type,
+          spreadsheetData: f.spreadsheetData
+        }));
+        const runId = await agentMode.startRun(input, attachments);
+        if (runId) {
+          setIsAgentPanelOpen(true);
+        }
+        setInput("");
+        setUploadedFiles([]);
+        setSelectedTool(null);
+      } catch (error) {
+        console.error("Failed to start agent run:", error);
+        toast({ title: "Error", description: "Failed to start agent", variant: "destructive" });
+      }
+      return;
+    }
 
     // If there's selected text from document, rewrite it
     if (selectedDocText && applyRewriteRef.current && input.trim()) {
@@ -4443,6 +4478,14 @@ IMPORTANTE:
       <UpgradePlanDialog 
         open={isUpgradeDialogOpen} 
         onOpenChange={setIsUpgradeDialogOpen} 
+      />
+
+      {/* Agent Panel */}
+      <AgentPanel
+        runId={agentMode.runId}
+        chatId={chatId || ""}
+        isOpen={isAgentPanelOpen}
+        onClose={() => setIsAgentPanelOpen(false)}
       />
     </div>
   );
