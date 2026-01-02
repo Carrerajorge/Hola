@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
 import { storage } from "../storage";
+import { db } from "../db";
+import { agentModeRuns } from "@shared/schema";
 import { agentOrchestrator, agentManager, guardrails } from "../agent";
 import { browserSessionManager, SessionEvent } from "../agent/browser";
 
@@ -17,6 +19,21 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       
       const runId = randomUUID();
       const userId = "anonymous";
+      
+      try {
+        await db.insert(agentModeRuns).values({
+          id: runId,
+          chatId: chatId,
+          userId: null,
+          status: "queued"
+        });
+      } catch (dbError: any) {
+        if (dbError.message?.includes("foreign key constraint")) {
+          console.log(`[AgentRouter] Chat ${chatId} not found in DB, creating run in-memory only`);
+        } else {
+          throw dbError;
+        }
+      }
       
       const orchestrator = await agentManager.startRun(
         runId,
