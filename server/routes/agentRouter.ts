@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
 import { storage } from "../storage";
-import { agentOrchestrator, guardrails } from "../agent";
+import { agentOrchestrator, agentManager, guardrails } from "../agent";
 import { browserSessionManager, SessionEvent } from "../agent/browser";
 
 export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, event: SessionEvent) => void) {
@@ -18,7 +18,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       const runId = randomUUID();
       const userId = "anonymous";
       
-      const run = await agentOrchestrator.startRun(
+      const orchestrator = await agentManager.startRun(
         runId,
         chatId,
         userId,
@@ -26,7 +26,28 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         attachments
       );
       
-      res.json(run);
+      const progress = orchestrator.getProgress();
+      
+      res.json({
+        id: progress.runId,
+        chatId: chatId,
+        status: progress.status,
+        plan: progress.plan,
+        steps: progress.stepResults.map(s => ({
+          stepIndex: s.stepIndex,
+          toolName: s.toolName,
+          status: s.success ? 'succeeded' : (s.error ? 'failed' : 'pending'),
+          output: s.output,
+          error: s.error,
+          startedAt: new Date(s.startedAt).toISOString(),
+          completedAt: new Date(s.completedAt).toISOString()
+        })),
+        artifacts: progress.artifacts,
+        summary: null,
+        error: progress.error || null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
     } catch (error: any) {
       console.error("Error starting agent run:", error);
       res.status(500).json({ error: error.message || "Failed to start agent run" });
@@ -35,13 +56,55 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
 
   router.get("/agent/runs/:id", async (req, res) => {
     try {
+      const progress = agentManager.getRunStatus(req.params.id);
+      
+      if (progress) {
+        return res.json({
+          id: progress.runId,
+          chatId: "",
+          status: progress.status,
+          plan: progress.plan,
+          steps: progress.stepResults.map(s => ({
+            stepIndex: s.stepIndex,
+            toolName: s.toolName,
+            status: s.success ? 'succeeded' : (s.error ? 'failed' : 'pending'),
+            output: s.output,
+            error: s.error,
+            startedAt: new Date(s.startedAt).toISOString(),
+            completedAt: new Date(s.completedAt).toISOString()
+          })),
+          artifacts: progress.artifacts,
+          summary: null,
+          error: progress.error || null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      
       const run = await storage.getAgentRun(req.params.id);
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
       }
       const steps = await storage.getAgentSteps(req.params.id);
       const assets = await storage.getAgentAssets(req.params.id);
-      res.json({ run, steps, assets });
+      res.json({ 
+        id: run.id,
+        chatId: run.chatId,
+        status: run.status,
+        plan: null,
+        steps: steps.map((s: any) => ({
+          stepIndex: s.stepIndex,
+          toolName: s.stepType,
+          status: s.success === 'true' ? 'succeeded' : (s.success === 'false' ? 'failed' : 'pending'),
+          output: s.result,
+          error: s.error
+        })),
+        artifacts: assets,
+        summary: run.summary,
+        error: run.error,
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt
+      });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to get agent run" });
     }
@@ -49,7 +112,10 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
 
   router.post("/agent/runs/:id/cancel", async (req, res) => {
     try {
-      const success = agentOrchestrator.cancelRun(req.params.id);
+      let success = await agentManager.cancelRun(req.params.id);
+      if (!success) {
+        success = agentOrchestrator.cancelRun(req.params.id);
+      }
       if (success) {
         res.json({ success: true });
       } else {

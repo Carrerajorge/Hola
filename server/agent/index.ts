@@ -2,6 +2,7 @@ export { routeMessage, extractUrls, type RouteResult, type RouteDecision } from 
 export { browserWorker, type BrowserSession, type NavigationResult } from "./browser-worker";
 export { extractWithReadability, summarizeForLLM, type ExtractedContent } from "./extractor";
 export { agentOrchestrator, type AgentTask, type StepUpdate, type StepCallback } from "./orchestrator";
+export { agentManager, type AgentPlan, type AgentStatus, type AgentProgress } from "./agentOrchestrator";
 export { checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, type SecurityCheck } from "./security";
 export { guardrails, type PIIMatch, type AuditLogEntry, type DownloadPolicy, type GuardrailsConfig } from "./guardrails";
 export { runPipeline, cancelPipeline, initializePipeline, getAvailableTools, multiIntentManager, multiIntentPipeline } from "./pipeline";
