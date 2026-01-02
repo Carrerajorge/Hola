@@ -181,3 +181,38 @@ Preferred communication style: Simple, everyday language.
 - **Duration**: ~121s total (8s tests, 8s validation, 60s soak, 45s build)
 - **Success Rate**: 100%
 - **P95 Latency**: 207ms
+
+## WebTool Module (Production-Grade)
+
+### Architecture
+Layered architecture for web navigation and information retrieval:
+- **SearchAdapter**: Wraps web search with normalized results
+- **FetchAdapter**: HTTP fetch with retries, timeouts, robots.txt respect, sandbox security
+- **BrowserAdapter**: Playwright-based for JavaScript-rendered pages with wait strategies
+- **RetrievalPipeline**: Orchestrates adapters with canonicalization, deduplication, scoring, extraction
+
+### Features
+- **URL Canonicalization**: Removes 50+ tracking params (utm_*, fbclid, gclid, etc.)
+- **Content Deduplication**: By canonical URL and SHA256 content hash
+- **Quality Scoring**: Domain allowlist, TLD scoring, HTTPS bonus, recency, authoritativeness
+- **Content Extraction**: Readability-based with ExtractedDocument structure (title, headings, links, wordCount, readTime, language)
+- **Sandbox Security**: All adapters check host allowlist before network access
+- **Cancellation Support**: CancellationToken integration for graceful abort
+
+### Files
+- `server/agent/webtool/types.ts` - Zod schemas and TypeScript types
+- `server/agent/webtool/canonicalizeUrl.ts` - URL normalization with validation
+- `server/agent/webtool/hashContent.ts` - SHA256 content hashing
+- `server/agent/webtool/qualityScorer.ts` - Configurable quality scoring
+- `server/agent/webtool/searchAdapter.ts` - ISearchAdapter + DuckDuckGoSearchAdapter
+- `server/agent/webtool/fetchAdapter.ts` - IFetchAdapter + HttpFetchAdapter
+- `server/agent/webtool/browserAdapter.ts` - IBrowserAdapter + PlaywrightBrowserAdapter
+- `server/agent/webtool/retrievalPipeline.ts` - RetrievalPipeline orchestrator
+
+### Tool Registration
+- **Tool**: `web_search_retrieve`
+- **Capabilities**: requires_network, accesses_external_api, long_running
+
+### Tests
+- **170 tests** covering all components
+- Test file: `server/agent/__tests__/webtool.test.ts`
