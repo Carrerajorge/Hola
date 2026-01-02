@@ -9,3 +9,4 @@ export type { PipelineResult, PipelineRunOptions, ProgressUpdate, ExecutionPlan,
 export { sandboxSecurity, SandboxSecurityManager, SandboxConfigSchema, type SandboxConfig } from "./sandboxSecurity";
 export { metricsCollector, eventTracer, type StepMetrics, type ToolStats, type ExportedMetrics, type EventTrace, type TracedEvent } from "./metricsCollector";
 export * from "./webtool";
+export { RunController, runController, RunControllerConfigSchema, type RunControllerConfig } from "./runController";

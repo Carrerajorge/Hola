@@ -7,7 +7,10 @@ export interface StepMetrics {
 }
 
 export interface ToolStats {
+  latencyP50: number;
   latencyP95: number;
+  latencyP99: number;
+  latencyAvg: number;
   successRate: number;
   errorRate: number;
   totalCalls: number;
@@ -20,8 +23,29 @@ export interface ExportedMetrics {
     totalCalls: number;
     overallSuccessRate: number;
     overallErrorRate: number;
+    overallLatencyP50: number;
     overallLatencyP95: number;
+    overallLatencyP99: number;
+    overallLatencyAvg: number;
   };
+}
+
+export interface PhaseMetrics {
+  phase: string;
+  durationMs: number;
+  toolCalls: number;
+  success: boolean;
+  timestamp: Date;
+}
+
+export interface PhaseStats {
+  phase: string;
+  latencyP50: number;
+  latencyP95: number;
+  latencyP99: number;
+  latencyAvg: number;
+  successRate: number;
+  totalRuns: number;
 }
 
 export interface EventTrace {
@@ -84,18 +108,41 @@ export class MetricsCollector {
     return allMetrics;
   }
 
+  private getPercentile(latencies: number[], percentile: number): number {
+    if (latencies.length === 0) return 0;
+    const sorted = [...latencies].sort((a, b) => a - b);
+    const index = Math.floor(sorted.length * percentile);
+    return sorted[Math.min(index, sorted.length - 1)];
+  }
+
+  getLatencyP50(toolName?: string): number {
+    const metricsToAnalyze = toolName 
+      ? this.metrics.get(toolName) || []
+      : this.getAllMetrics();
+    return this.getPercentile(metricsToAnalyze.map(m => m.latencyMs), 0.50);
+  }
+
   getLatencyP95(toolName?: string): number {
     const metricsToAnalyze = toolName 
       ? this.metrics.get(toolName) || []
       : this.getAllMetrics();
-    
-    if (metricsToAnalyze.length === 0) {
-      return 0;
-    }
+    return this.getPercentile(metricsToAnalyze.map(m => m.latencyMs), 0.95);
+  }
 
-    const latencies = metricsToAnalyze.map(m => m.latencyMs).sort((a, b) => a - b);
-    const p95Index = Math.floor(latencies.length * 0.95);
-    return latencies[Math.min(p95Index, latencies.length - 1)];
+  getLatencyP99(toolName?: string): number {
+    const metricsToAnalyze = toolName 
+      ? this.metrics.get(toolName) || []
+      : this.getAllMetrics();
+    return this.getPercentile(metricsToAnalyze.map(m => m.latencyMs), 0.99);
+  }
+
+  getLatencyAvg(toolName?: string): number {
+    const metricsToAnalyze = toolName 
+      ? this.metrics.get(toolName) || []
+      : this.getAllMetrics();
+    if (metricsToAnalyze.length === 0) return 0;
+    const sum = metricsToAnalyze.reduce((acc, m) => acc + m.latencyMs, 0);
+    return sum / metricsToAnalyze.length;
   }
 
   getSuccessRate(toolName?: string): number {
@@ -130,13 +177,16 @@ export class MetricsCollector {
     Array.from(this.metrics.entries()).forEach(([toolName, toolMetrics]) => {
       if (toolMetrics.length === 0) return;
 
-      const latencies = toolMetrics.map(m => m.latencyMs).sort((a, b) => a - b);
-      const p95Index = Math.floor(latencies.length * 0.95);
+      const latencies = toolMetrics.map(m => m.latencyMs);
       const successCount = toolMetrics.filter(m => m.success).length;
       const errorCount = toolMetrics.filter(m => !m.success).length;
+      const sum = latencies.reduce((acc, l) => acc + l, 0);
 
       stats[toolName] = {
-        latencyP95: latencies[Math.min(p95Index, latencies.length - 1)],
+        latencyP50: this.getPercentile(latencies, 0.50),
+        latencyP95: this.getPercentile(latencies, 0.95),
+        latencyP99: this.getPercentile(latencies, 0.99),
+        latencyAvg: sum / latencies.length,
         successRate: (successCount / toolMetrics.length) * 100,
         errorRate: (errorCount / toolMetrics.length) * 100,
         totalCalls: toolMetrics.length,
@@ -157,7 +207,10 @@ export class MetricsCollector {
         totalCalls: allMetrics.length,
         overallSuccessRate: this.getSuccessRate(),
         overallErrorRate: this.getErrorRate(),
+        overallLatencyP50: this.getLatencyP50(),
         overallLatencyP95: this.getLatencyP95(),
+        overallLatencyP99: this.getLatencyP99(),
+        overallLatencyAvg: this.getLatencyAvg(),
       },
     };
   }
@@ -168,6 +221,57 @@ export class MetricsCollector {
 }
 
 export const metricsCollector = new MetricsCollector();
+
+export class PhaseMetricsCollector {
+  private phaseMetrics: Map<string, PhaseMetrics[]> = new Map();
+  private readonly maxEntriesPerPhase: number = 500;
+
+  record(metrics: PhaseMetrics): void {
+    const existing = this.phaseMetrics.get(metrics.phase) || [];
+    existing.push(metrics);
+    if (existing.length > this.maxEntriesPerPhase) {
+      existing.shift();
+    }
+    this.phaseMetrics.set(metrics.phase, existing);
+  }
+
+  getPhaseStats(): Record<string, PhaseStats> {
+    const stats: Record<string, PhaseStats> = {};
+
+    Array.from(this.phaseMetrics.entries()).forEach(([phase, metrics]) => {
+      if (metrics.length === 0) return;
+
+      const latencies = metrics.map(m => m.durationMs);
+      const sorted = [...latencies].sort((a, b) => a - b);
+      const successCount = metrics.filter(m => m.success).length;
+      const sum = latencies.reduce((acc, l) => acc + l, 0);
+
+      const getPercentile = (arr: number[], p: number) => {
+        if (arr.length === 0) return 0;
+        const idx = Math.floor(arr.length * p);
+        return arr[Math.min(idx, arr.length - 1)];
+      };
+
+      stats[phase] = {
+        phase,
+        latencyP50: getPercentile(sorted, 0.50),
+        latencyP95: getPercentile(sorted, 0.95),
+        latencyP99: getPercentile(sorted, 0.99),
+        latencyAvg: sum / metrics.length,
+        successRate: (successCount / metrics.length) * 100,
+        totalRuns: metrics.length,
+      };
+    });
+
+    return stats;
+  }
+
+  clear(): void {
+    this.phaseMetrics.clear();
+  }
+}
+
+export const phaseMetricsCollector = new PhaseMetricsCollector();
 
 class EventTracer {
   private traces: Map<string, EventTrace> = new Map();
