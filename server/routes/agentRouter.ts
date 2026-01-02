@@ -1,10 +1,37 @@
 import { Router } from "express";
+import { randomUUID } from "crypto";
 import { storage } from "../storage";
 import { agentOrchestrator, guardrails } from "../agent";
 import { browserSessionManager, SessionEvent } from "../agent/browser";
 
 export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, event: SessionEvent) => void) {
   const router = Router();
+
+  router.post("/agent/runs", async (req, res) => {
+    try {
+      const { chatId, message, attachments } = req.body;
+      
+      if (!chatId || !message) {
+        return res.status(400).json({ error: "chatId and message are required" });
+      }
+      
+      const runId = randomUUID();
+      const userId = "anonymous";
+      
+      const run = await agentOrchestrator.startRun(
+        runId,
+        chatId,
+        userId,
+        message,
+        attachments
+      );
+      
+      res.json(run);
+    } catch (error: any) {
+      console.error("Error starting agent run:", error);
+      res.status(500).json({ error: error.message || "Failed to start agent run" });
+    }
+  });
 
   router.get("/agent/runs/:id", async (req, res) => {
     try {
