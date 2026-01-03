@@ -167,12 +167,12 @@ function inferStatusFromEvent(event: any, kind: AgentEventKind): AgentEventStatu
     return 'ok';
   }
   
-  if (content.success === false || content.status === 'failed' || content.error) {
-    return 'fail';
-  }
-  
   if (content.shouldRetry || content.shouldReplan) {
     return 'warn';
+  }
+  
+  if (content.success === false || content.status === 'failed' || content.error) {
+    return 'fail';
   }
   
   return 'ok';

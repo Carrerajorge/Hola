@@ -33,6 +33,7 @@ Preferred communication style: Simple, everyday language.
 - **Agent Mode Features**: Event stream tracking (actions/observations/errors), todo.md tracking system, virtual workspace files, step verification with LLM-based evaluation, dynamic replanning, and error retention in context for learning.
 - **Agent Mode UI**: "Computer" view in agent panel showing real-time events, todo list with status indicators, and workspace files browser.
 - **Agent Mode Limitations (MVP)**: Event stream, todo list, and workspace files are stored in-memory only during active runs. Data is not persisted to database after run completion (future enhancement planned).
+- **Agent Event Schema**: Standardized event schema with `kind` (action/observation/verification/error/plan/thinking/progress/result), `status` (ok/warn/fail), `title`, `summary`, `confidence`, and `payload` fields. Events are normalized by `normalizeAgentEvent()` mapper for human-readable UI rendering with collapsible JSON details.
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt and multi-tenant validation.
