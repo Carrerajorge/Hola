@@ -546,7 +546,7 @@ export class MemStorage implements IStorage {
   }
 
   async getAgentRunsByChatId(chatId: string): Promise<AgentRun[]> {
-    return db.select().from(agentRuns).where(eq(agentRuns.chatId, chatId)).orderBy(desc(agentRuns.createdAt));
+    return db.select().from(agentRuns).where(eq(agentRuns.conversationId, chatId)).orderBy(desc(agentRuns.startedAt));
   }
 
   async updateAgentRunStatus(id: string, status: string, error?: string): Promise<AgentRun | undefined> {
