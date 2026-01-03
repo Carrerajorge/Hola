@@ -48,6 +48,7 @@ export default function Home() {
   useEffect(() => {
     useMediaLibrary.getState().preload();
   }, []);
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isNewChatMode, setIsNewChatMode] = useState(false);
   const [newChatStableKey, setNewChatStableKey] = useState<string | null>(null);
@@ -133,6 +134,21 @@ export default function Home() {
     // Only reset the process steps for UI (not aiState - that's per-chat streaming)
     setAiProcessSteps([]);
   }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
+
+  // Listen for select-chat custom event (used by Agent Mode navigation)
+  useEffect(() => {
+    const handleSelectChatEvent = (event: CustomEvent<{ chatId: string }>) => {
+      const { chatId } = event.detail;
+      if (chatId) {
+        handleSelectChatWithClear(chatId);
+      }
+    };
+    
+    window.addEventListener("select-chat", handleSelectChatEvent as EventListener);
+    return () => {
+      window.removeEventListener("select-chat", handleSelectChatEvent as EventListener);
+    };
+  }, [handleSelectChatWithClear]);
 
   const handleNewChat = () => {
     // Keep processing state for background chats - don't clear processingChatIds

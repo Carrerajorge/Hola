@@ -1,4 +1,4 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route, useLocation, useParams } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -11,6 +11,20 @@ import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useChats } from "@/hooks/use-chats";
 import { SearchModal } from "@/components/search-modal";
 import Home from "@/pages/home";
+
+function ChatPageRedirect() {
+  const params = useParams<{ id: string }>();
+  const [, setLocation] = useLocation();
+  
+  useEffect(() => {
+    if (params.id) {
+      window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: params.id } }));
+      setLocation("/");
+    }
+  }, [params.id, setLocation]);
+  
+  return <Home />;
+}
 import ProfilePage from "@/pages/profile";
 import BillingPage from "@/pages/billing";
 import SettingsPage from "@/pages/settings";
@@ -97,6 +111,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      <Route path="/chat/:id" component={ChatPageRedirect} />
       <Route path="/welcome" component={LandingPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/signup" component={SignupPage} />

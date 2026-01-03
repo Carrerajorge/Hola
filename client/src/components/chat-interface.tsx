@@ -2509,12 +2509,15 @@ export function ChatInterface({
           type: f.type,
           spreadsheetData: f.spreadsheetData
         }));
+        console.log("[Agent Mode] Starting run with input:", input);
         const result = await agentMode.startRun(input, attachments);
+        console.log("[Agent Mode] Run result:", result);
         if (result.runId) {
           setIsAgentPanelOpen(true);
           // Navigate to the newly created chat if agent mode created one
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
-            window.location.href = `/chat/${result.chatId}`;
+            console.log("[Agent Mode] Navigating to chat:", result.chatId);
+            window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId } }));
           }
         }
         setInput("");
