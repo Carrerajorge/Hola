@@ -634,6 +634,192 @@ const generateDocumentTool: ToolDefinition = {
   },
 };
 
+const readFileSchema = z.object({
+  filepath: z.string().describe("Path to file in workspace"),
+});
+
+const readFileTool: ToolDefinition = {
+  name: "read_file",
+  description: "Read contents of a file from the agent's workspace.",
+  inputSchema: readFileSchema,
+  capabilities: ["reads_files"],
+  execute: async (input, context): Promise<ToolResult> => {
+    const startTime = Date.now();
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const safePath = path.resolve('/tmp/agent-workspace', context.runId, input.filepath);
+      if (!safePath.startsWith(path.resolve('/tmp/agent-workspace', context.runId))) {
+        throw new Error('Access denied: path outside workspace');
+      }
+      const content = await fs.readFile(safePath, 'utf-8');
+      return {
+        success: true,
+        output: { filepath: input.filepath, content, size: content.length },
+        artifacts: [],
+        previews: [{ type: "text", content: content.slice(0, 1000), title: input.filepath }],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: null,
+        error: createError("FILE_READ_ERROR", error.message, false),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
+const writeFileSchema = z.object({
+  filepath: z.string().describe("Path to file in workspace"),
+  content: z.string().describe("File content to write"),
+});
+
+const writeFileTool: ToolDefinition = {
+  name: "write_file",
+  description: "Write or create a file in the agent's workspace.",
+  inputSchema: writeFileSchema,
+  capabilities: ["writes_files"],
+  execute: async (input, context): Promise<ToolResult> => {
+    const startTime = Date.now();
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const workspaceDir = path.resolve('/tmp/agent-workspace', context.runId);
+      await fs.mkdir(workspaceDir, { recursive: true });
+      const safePath = path.resolve(workspaceDir, input.filepath);
+      if (!safePath.startsWith(workspaceDir)) {
+        throw new Error('Access denied: path outside workspace');
+      }
+      await fs.mkdir(path.dirname(safePath), { recursive: true });
+      await fs.writeFile(safePath, input.content, 'utf-8');
+      return {
+        success: true,
+        output: { filepath: input.filepath, size: input.content.length, created: true },
+        artifacts: [createArtifact("file", input.filepath, { path: safePath, size: input.content.length })],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: null,
+        error: createError("FILE_WRITE_ERROR", error.message, false),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
+const shellCommandSchema = z.object({
+  command: z.string().describe("Shell command to execute"),
+  timeout: z.number().min(1000).max(60000).default(30000).describe("Timeout in milliseconds"),
+});
+
+const shellCommandTool: ToolDefinition = {
+  name: "shell_command",
+  description: "Execute a shell command in the agent's sandbox. Limited to safe operations.",
+  inputSchema: shellCommandSchema,
+  capabilities: ["executes_code", "long_running"],
+  execute: async (input, context): Promise<ToolResult> => {
+    const startTime = Date.now();
+    const blockedCommands = ['rm -rf', 'sudo', 'chmod 777', 'mkfs', 'dd if=', '> /dev', 'curl | sh', 'wget | sh'];
+    const isBlocked = blockedCommands.some(bc => input.command.toLowerCase().includes(bc));
+    if (isBlocked) {
+      return {
+        success: false,
+        output: null,
+        error: createError("COMMAND_BLOCKED", "This command is not allowed for security reasons", false),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+    try {
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+      const { stdout, stderr } = await execAsync(input.command, {
+        timeout: input.timeout,
+        cwd: `/tmp/agent-workspace/${context.runId}`,
+        env: { ...process.env, HOME: `/tmp/agent-workspace/${context.runId}` },
+      });
+      return {
+        success: true,
+        output: { command: input.command, stdout, stderr, exitCode: 0 },
+        artifacts: [],
+        previews: [{ type: "text", content: stdout || stderr, title: "Command Output" }],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: { command: input.command, stdout: error.stdout || '', stderr: error.stderr || error.message, exitCode: error.code || 1 },
+        error: createError("COMMAND_ERROR", error.message, true),
+        artifacts: [],
+        previews: [{ type: "text", content: error.stderr || error.message, title: "Error Output" }],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
+const listFilesSchema = z.object({
+  directory: z.string().default(".").describe("Directory path in workspace"),
+});
+
+const listFilesTool: ToolDefinition = {
+  name: "list_files",
+  description: "List files and directories in the agent's workspace.",
+  inputSchema: listFilesSchema,
+  capabilities: ["reads_files"],
+  execute: async (input, context): Promise<ToolResult> => {
+    const startTime = Date.now();
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const workspaceDir = path.resolve('/tmp/agent-workspace', context.runId);
+      await fs.mkdir(workspaceDir, { recursive: true });
+      const targetDir = path.resolve(workspaceDir, input.directory);
+      if (!targetDir.startsWith(workspaceDir)) {
+        throw new Error('Access denied: path outside workspace');
+      }
+      const entries = await fs.readdir(targetDir, { withFileTypes: true });
+      const files = entries.map(e => ({ name: e.name, type: e.isDirectory() ? 'directory' : 'file' }));
+      return {
+        success: true,
+        output: { directory: input.directory, files, count: files.length },
+        artifacts: [],
+        previews: [{ type: "text", content: files.map(f => `${f.type === 'directory' ? '[D]' : '[F]'} ${f.name}`).join('\n'), title: "Files" }],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        output: null,
+        error: createError("LIST_FILES_ERROR", error.message, false),
+        artifacts: [],
+        previews: [],
+        logs: [],
+        metrics: { durationMs: Date.now() - startTime },
+      };
+    }
+  },
+};
+
 export const toolRegistry = new ToolRegistry();
 
 toolRegistry.register(analyzeSpreadsheetTool);
@@ -641,6 +827,10 @@ toolRegistry.register(webSearchTool);
 toolRegistry.register(generateImageTool);
 toolRegistry.register(browseUrlTool);
 toolRegistry.register(generateDocumentTool);
+toolRegistry.register(readFileTool);
+toolRegistry.register(writeFileTool);
+toolRegistry.register(shellCommandTool);
+toolRegistry.register(listFilesTool);
 
 export {
   analyzeSpreadsheetSchema,

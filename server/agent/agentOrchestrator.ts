@@ -107,6 +107,26 @@ const AVAILABLE_TOOLS = [
     description: "Generate Office documents (Word, Excel, PowerPoint).",
     inputSchema: "{ type: 'word'|'excel'|'ppt', title: string, content: string }",
   },
+  {
+    name: "read_file",
+    description: "Read contents of a file from the agent's workspace.",
+    inputSchema: "{ filepath: string }",
+  },
+  {
+    name: "write_file",
+    description: "Write or create a file in the agent's workspace.",
+    inputSchema: "{ filepath: string, content: string }",
+  },
+  {
+    name: "shell_command",
+    description: "Execute a shell command in the agent's sandbox. Limited to safe operations.",
+    inputSchema: "{ command: string, timeout?: number (1000-60000, default 30000) }",
+  },
+  {
+    name: "list_files",
+    description: "List files and directories in the agent's workspace.",
+    inputSchema: "{ directory?: string (default '.') }",
+  },
 ];
 
 const MAX_RETRY_ATTEMPTS = 2;
