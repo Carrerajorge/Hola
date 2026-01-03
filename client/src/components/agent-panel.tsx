@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { X, FileSpreadsheet, Globe, Image, FileText, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Square, Bot, Sparkles, FileIcon } from "lucide-react";
+import { X, FileSpreadsheet, Globe, Image, FileText, Loader2, CheckCircle2, XCircle, Clock, RefreshCw, Square, Bot, Sparkles, FileIcon, Terminal, FolderOpen, List, Monitor, Activity, Circle, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +28,28 @@ interface AgentArtifact {
   data?: any;
 }
 
+interface AgentEvent {
+  type: 'action' | 'observation' | 'plan' | 'verification' | 'error' | 'replan';
+  content: any;
+  timestamp: number;
+  stepIndex?: number;
+  metadata?: any;
+}
+
+interface TodoItem {
+  id: string;
+  task: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+  stepIndex?: number;
+  lastError?: string;
+}
+
+interface WorkspaceFile {
+  name: string;
+  type: 'file' | 'directory';
+  content?: string;
+}
+
 interface AgentRunData {
   id: string;
   chatId: string;
@@ -39,6 +61,9 @@ interface AgentRunData {
   completedAt?: string;
   error?: string;
   summary?: string;
+  eventStream?: AgentEvent[];
+  todoList?: TodoItem[];
+  workspaceFiles?: Record<string, string>;
 }
 
 interface AgentPanelProps {
@@ -57,6 +82,10 @@ const TOOL_ICONS: Record<string, React.ElementType> = {
   extract_content: FileText,
   transform_data: FileSpreadsheet,
   respond: Bot,
+  read_file: FileIcon,
+  write_file: FileText,
+  shell_command: Terminal,
+  list_files: FolderOpen,
 };
 
 function getToolIcon(stepType: string): React.ElementType {
@@ -195,6 +224,83 @@ function ArtifactItem({ artifact }: { artifact: AgentArtifact }) {
   );
 }
 
+function EventStreamItem({ event }: { event: AgentEvent }) {
+  const getEventIcon = () => {
+    switch (event.type) {
+      case 'action': return <Activity className="h-3 w-3 text-blue-500" />;
+      case 'observation': return <Monitor className="h-3 w-3 text-green-500" />;
+      case 'plan': return <List className="h-3 w-3 text-purple-500" />;
+      case 'verification': return <CheckCircle className="h-3 w-3 text-yellow-500" />;
+      case 'error': return <AlertCircle className="h-3 w-3 text-red-500" />;
+      case 'replan': return <RefreshCw className="h-3 w-3 text-orange-500" />;
+      default: return <Circle className="h-3 w-3" />;
+    }
+  };
+  
+  const formatTime = (ts: number) => {
+    const date = new Date(ts);
+    return date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+  
+  const getEventContent = () => {
+    if (typeof event.content === 'string') return event.content;
+    if (event.content?.message) return event.content.message;
+    if (event.content?.toolName) return `Tool: ${event.content.toolName}`;
+    return JSON.stringify(event.content).slice(0, 100);
+  };
+  
+  return (
+    <div className={cn(
+      "flex items-start gap-2 p-2 rounded text-xs border-l-2",
+      event.type === 'action' && "border-l-blue-500 bg-blue-500/5",
+      event.type === 'observation' && "border-l-green-500 bg-green-500/5",
+      event.type === 'error' && "border-l-red-500 bg-red-500/5",
+      event.type === 'plan' && "border-l-purple-500 bg-purple-500/5",
+      event.type === 'verification' && "border-l-yellow-500 bg-yellow-500/5",
+      event.type === 'replan' && "border-l-orange-500 bg-orange-500/5"
+    )}>
+      {getEventIcon()}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-medium capitalize">{event.type}</span>
+          <span className="text-muted-foreground">{formatTime(event.timestamp)}</span>
+        </div>
+        <p className="text-muted-foreground truncate">{getEventContent()}</p>
+      </div>
+    </div>
+  );
+}
+
+function TodoListItem({ item }: { item: TodoItem }) {
+  const getStatusIcon = () => {
+    switch (item.status) {
+      case 'completed': return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case 'in_progress': return <Loader2 className="h-4 w-4 text-purple-500 animate-spin" />;
+      case 'failed': return <XCircle className="h-4 w-4 text-red-500" />;
+      case 'skipped': return <Circle className="h-4 w-4 text-gray-400" />;
+      default: return <Circle className="h-4 w-4 text-muted-foreground" />;
+    }
+  };
+  
+  return (
+    <div className={cn(
+      "flex items-start gap-2 p-2 rounded-md border",
+      item.status === 'completed' && "border-green-500/30 bg-green-500/5",
+      item.status === 'in_progress' && "border-purple-500/30 bg-purple-500/5",
+      item.status === 'failed' && "border-red-500/30 bg-red-500/5",
+      item.status === 'pending' && "border-border"
+    )}>
+      {getStatusIcon()}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm">{item.task}</p>
+        {item.lastError && (
+          <p className="text-xs text-red-500 mt-1">{item.lastError}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function AgentPanel({ runId, chatId, onClose, isOpen }: AgentPanelProps) {
   const { data: runData, isLoading, refetch } = useQuery<AgentRunData>({
     queryKey: ["agent-run", runId],
@@ -309,6 +415,10 @@ export function AgentPanel({ runId, chatId, onClose, isOpen }: AgentPanelProps) 
           <TabsTrigger value="artifacts" className="flex-1 data-[state=active]:bg-purple-500/10 data-[state=active]:text-purple-600">
             Artefactos
           </TabsTrigger>
+          <TabsTrigger value="computer" className="flex-1 data-[state=active]:bg-purple-500/10 data-[state=active]:text-purple-600">
+            <Monitor className="h-3.5 w-3.5 mr-1" />
+            Computer
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="plan" className="flex-1 overflow-hidden m-0 mt-2">
@@ -390,6 +500,84 @@ export function AgentPanel({ runId, chatId, onClose, isOpen }: AgentPanelProps) 
               </div>
             )}
           </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="computer" className="flex-1 overflow-hidden m-0 mt-2">
+          <div className="flex flex-col h-full">
+            <Tabs defaultValue="events" className="flex-1 flex flex-col overflow-hidden">
+              <TabsList className="mx-4 h-8 bg-muted/30">
+                <TabsTrigger value="events" className="text-xs h-6">
+                  <Activity className="h-3 w-3 mr-1" />
+                  Events
+                </TabsTrigger>
+                <TabsTrigger value="todo" className="text-xs h-6">
+                  <List className="h-3 w-3 mr-1" />
+                  Todo
+                </TabsTrigger>
+                <TabsTrigger value="files" className="text-xs h-6">
+                  <FolderOpen className="h-3 w-3 mr-1" />
+                  Files
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="events" className="flex-1 overflow-hidden m-0 mt-2">
+                <ScrollArea className="h-full px-4 pb-4">
+                  {(runData?.eventStream || []).length > 0 ? (
+                    <div className="space-y-1">
+                      {(runData?.eventStream || []).map((event, index) => (
+                        <EventStreamItem key={`event-${index}`} event={event} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <Activity className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                      <p className="text-sm text-muted-foreground">No events yet</p>
+                    </div>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+              
+              <TabsContent value="todo" className="flex-1 overflow-hidden m-0 mt-2">
+                <ScrollArea className="h-full px-4 pb-4">
+                  {(runData?.todoList || []).length > 0 ? (
+                    <div className="space-y-2">
+                      {(runData?.todoList || []).map((item) => (
+                        <TodoListItem key={item.id} item={item} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <List className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                      <p className="text-sm text-muted-foreground">No todo items</p>
+                    </div>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+              
+              <TabsContent value="files" className="flex-1 overflow-hidden m-0 mt-2">
+                <ScrollArea className="h-full px-4 pb-4">
+                  {runData?.workspaceFiles && Object.keys(runData.workspaceFiles).length > 0 ? (
+                    <div className="space-y-1">
+                      {Object.entries(runData.workspaceFiles || {}).map(([filename, content]) => (
+                        <div key={filename} className="flex items-center gap-2 p-2 rounded border border-border hover:bg-accent/50 cursor-pointer">
+                          <FileIcon className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm flex-1 truncate">{filename}</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {typeof content === 'string' ? `${content.length} chars` : 'file'}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <FolderOpen className="h-8 w-8 text-muted-foreground/50 mb-2" />
+                      <p className="text-sm text-muted-foreground">No workspace files</p>
+                    </div>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
+          </div>
         </TabsContent>
       </Tabs>
 

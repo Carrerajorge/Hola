@@ -61,6 +61,9 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       );
       
       const progress = orchestrator.getProgress();
+      const eventStream = orchestrator.getEventStream ? orchestrator.getEventStream() : [];
+      const todoList = orchestrator.getTodoList ? orchestrator.getTodoList() : [];
+      const workspaceFiles = orchestrator.getWorkspaceFiles ? Object.fromEntries(orchestrator.getWorkspaceFiles()) : {};
       
       const planWithResponse = progress.plan as any;
       res.json({
@@ -78,6 +81,9 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
           completedAt: s.completedAt ? new Date(s.completedAt).toISOString() : null
         })),
         artifacts: progress.artifacts,
+        eventStream: eventStream,
+        todoList: todoList,
+        workspaceFiles: workspaceFiles,
         summary: planWithResponse?.conversationalResponse || null,
         error: progress.error || null,
         createdAt: new Date().toISOString(),
@@ -98,6 +104,12 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       const activeRuns = agentManager.getActiveRunsForChat(chatId);
       if (activeRuns.length > 0) {
         const latestRun = activeRuns[0];
+        const orchestrator = agentManager.getOrchestrator(latestRun.runId);
+        const eventStream = orchestrator?.getEventStream ? orchestrator.getEventStream() : [];
+        const todoList = orchestrator?.getTodoList ? orchestrator.getTodoList() : [];
+        const workspaceFiles = orchestrator?.getWorkspaceFiles ? 
+          Object.fromEntries(orchestrator.getWorkspaceFiles()) : {};
+
         return res.json({
           id: latestRun.runId,
           chatId: chatId,
@@ -113,6 +125,9 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
             completedAt: s.completedAt ? new Date(s.completedAt).toISOString() : null
           })),
           artifacts: latestRun.artifacts,
+          eventStream: eventStream,
+          todoList: todoList,
+          workspaceFiles: workspaceFiles,
           summary: null,
           error: latestRun.error || null,
           createdAt: new Date().toISOString(),
@@ -143,6 +158,9 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
           error: s.error
         })),
         artifacts: assets,
+        eventStream: [],
+        todoList: [],
+        workspaceFiles: {},
         summary: latestRun.summary,
         error: latestRun.error,
         createdAt: latestRun.createdAt,
@@ -159,6 +177,12 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       const progress = agentManager.getRunStatus(req.params.id);
       
       if (progress) {
+        const orchestrator = agentManager.getOrchestrator(req.params.id);
+        const eventStream = orchestrator?.getEventStream ? orchestrator.getEventStream() : [];
+        const todoList = orchestrator?.getTodoList ? orchestrator.getTodoList() : [];
+        const workspaceFiles = orchestrator?.getWorkspaceFiles ? 
+          Object.fromEntries(orchestrator.getWorkspaceFiles()) : {};
+
         return res.json({
           id: progress.runId,
           chatId: "",
@@ -174,6 +198,9 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
             completedAt: s.completedAt ? new Date(s.completedAt).toISOString() : null
           })),
           artifacts: progress.artifacts,
+          eventStream: eventStream,
+          todoList: todoList,
+          workspaceFiles: workspaceFiles,
           summary: null,
           error: progress.error || null,
           createdAt: new Date().toISOString(),
@@ -200,6 +227,9 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
           error: s.error
         })),
         artifacts: assets,
+        eventStream: [],
+        todoList: [],
+        workspaceFiles: {},
         summary: run.summary,
         error: run.error,
         createdAt: run.createdAt,

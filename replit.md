@@ -25,11 +25,14 @@ Preferred communication style: Simple, everyday language.
 - **Spreadsheet Analyzer Module**: AI-powered analysis, LLM agent for Python code generation (with AST-based security validation), and a secure Python sandbox for execution.
 - **System Observability**: Structured JSON logging with correlation IDs, health monitoring, and request tracing.
 - **Agent Infrastructure**: Modular plugin architecture with a StateMachine, Typed Contracts (Zod schemas), Event Sourcing, a PolicyEngine for RBAC, and an ExecutionEngine with circuit breakers and exponential backoff.
-- **Tool Registry**: Registers 5 core tools: `analyze_spreadsheet`, `web_search`, `generate_image`, `browse_url`, `generate_document`, with standardized outputs.
+- **Tool Registry**: Registers 9 core tools: `analyze_spreadsheet`, `web_search`, `generate_image`, `browse_url`, `generate_document`, `read_file`, `write_file`, `shell_command`, `list_files`, with standardized outputs and sandboxed execution.
 - **WebTool Module**: Layered architecture for web navigation and information retrieval (SearchAdapter, FetchAdapter, BrowserAdapter, RetrievalPipeline) with URL canonicalization, content deduplication, quality scoring, content extraction, and sandbox security.
 - **Ultra-Fast Web Retrieval System**: High-performance web retrieval with parallel execution, intelligent caching (in-memory, LRU), relevance filtering, and streaming results.
 - **Web Retrieval V2**: Enhancements for robustness and stability with BudgetEnforcer, DomainCircuitBreaker, NegativeCache, RequestDeduplicator, HedgedRequestManager, StaleWhileRevalidate, BrowserWatchdog, SourceQualityScorer, DomainDiversityChecker, CitationCoverageEnforcer, and LeakDetection with WorkerRecovery.
 - **Agent Orchestration**: Manus-like architecture with RunController, PlannerAgent, ExecutorAgent, and VerifierAgent roles.
+- **Agent Mode Features**: Event stream tracking (actions/observations/errors), todo.md tracking system, virtual workspace files, step verification with LLM-based evaluation, dynamic replanning, and error retention in context for learning.
+- **Agent Mode UI**: "Computer" view in agent panel showing real-time events, todo list with status indicators, and workspace files browser.
+- **Agent Mode Limitations (MVP)**: Event stream, todo list, and workspace files are stored in-memory only during active runs. Data is not persisted to database after run completion (future enhancement planned).
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt and multi-tenant validation.
