@@ -38,6 +38,7 @@ interface AgentRunData {
   startedAt?: string;
   completedAt?: string;
   error?: string;
+  summary?: string;
 }
 
 interface AgentPanelProps {
@@ -338,6 +339,18 @@ export function AgentPanel({ runId, chatId, onClose, isOpen }: AgentPanelProps) 
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-purple-500" />
+              </div>
+            ) : runData?.summary && steps.length === 0 ? (
+              <div className="p-4 rounded-lg border border-purple-500/30 bg-purple-500/5">
+                <div className="flex items-start gap-3">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-purple-700 flex-shrink-0">
+                    <Bot className="h-4 w-4 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-foreground mb-1">Respuesta</p>
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">{runData.summary}</p>
+                  </div>
+                </div>
               </div>
             ) : steps.length > 0 ? (
               <div className="space-y-2">

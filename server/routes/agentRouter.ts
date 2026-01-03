@@ -62,6 +62,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       
       const progress = orchestrator.getProgress();
       
+      const planWithResponse = progress.plan as any;
       res.json({
         id: progress.runId,
         chatId: chatId,
@@ -77,7 +78,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
           completedAt: s.completedAt ? new Date(s.completedAt).toISOString() : null
         })),
         artifacts: progress.artifacts,
-        summary: null,
+        summary: planWithResponse?.conversationalResponse || null,
         error: progress.error || null,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()

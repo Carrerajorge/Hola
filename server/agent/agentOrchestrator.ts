@@ -119,11 +119,68 @@ export class AgentOrchestrator extends EventEmitter {
     this.emit("progress", progress);
   }
 
+  private async checkIfConversational(message: string): Promise<boolean> {
+    const conversationalPatterns = [
+      /^(hola|hi|hey|hello|buenos?\s*(días?|tardes?|noches?)|saludos?|qué\s*tal|cómo\s*estás?|qué\s*onda)/i,
+      /^(gracias|thank|thanks|ok|okay|vale|entendido|perfecto|genial|excelente)/i,
+      /^(adiós|bye|chao|hasta\s*(luego|pronto|mañana)|nos\s*vemos)/i,
+      /^(quién\s*eres|qué\s*eres|cómo\s*te\s*llamas|cuál\s*es\s*tu\s*nombre)/i,
+      /^(ayuda|help|qué\s*puedes\s*hacer|para\s*qué\s*sirves)/i,
+    ];
+    
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length < 50) {
+      for (const pattern of conversationalPatterns) {
+        if (pattern.test(trimmedMessage)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private async generateConversationalResponse(message: string): Promise<string> {
+    const messages: GeminiChatMessage[] = [
+      {
+        role: "user",
+        parts: [{ text: message }],
+      },
+    ];
+
+    try {
+      const response = await geminiChat(messages, {
+        systemInstruction: `Eres Sira, un asistente de IA amigable y servicial. Responde de manera natural y conversacional en español. Si el usuario te saluda, salúdalo de vuelta. Si te pregunta quién eres, explica que eres un asistente de IA que puede ayudar con búsquedas web, análisis de documentos, generación de imágenes y más. Mantén tus respuestas concisas y amigables.`,
+        temperature: 0.7,
+        maxOutputTokens: 500,
+      });
+      return response.content;
+    } catch (error: any) {
+      console.error(`[AgentOrchestrator] Failed to generate conversational response:`, error.message);
+      return "¡Hola! Soy Sira, tu asistente de IA. ¿En qué puedo ayudarte hoy?";
+    }
+  }
+
   async generatePlan(userMessage: string, attachments?: any[]): Promise<AgentPlan> {
     this.userMessage = userMessage;
     this.attachments = attachments || [];
     this.status = "planning";
     this.emitProgress();
+
+    // Check if message is conversational (doesn't need tools)
+    const isConversational = await this.checkIfConversational(userMessage);
+    if (isConversational && (!attachments || attachments.length === 0)) {
+      // For conversational messages, respond directly without tools
+      const response = await this.generateConversationalResponse(userMessage);
+      this.plan = {
+        objective: "Respond to conversational message",
+        steps: [],
+        estimatedTime: "0 seconds",
+        conversationalResponse: response
+      } as AgentPlan & { conversationalResponse?: string };
+      this.status = "completed";
+      this.emitProgress();
+      return this.plan;
+    }
 
     const toolDescriptions = AVAILABLE_TOOLS.map(
       (t) => `- ${t.name}: ${t.description}\n  Input: ${t.inputSchema}`
