@@ -21,6 +21,8 @@ export type AgentStatus =
   | "queued"
   | "planning"
   | "running"
+  | "verifying"
+  | "replanning"
   | "completed"
   | "failed"
   | "cancelled";
@@ -36,6 +38,36 @@ export interface StepResult {
   completedAt: number;
 }
 
+export type EventType = 'action' | 'observation' | 'plan' | 'verification' | 'error' | 'replan';
+
+export interface AgentEvent {
+  type: EventType;
+  content: any;
+  timestamp: number;
+  stepIndex?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface TodoItem {
+  id: string;
+  task: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+  stepIndex?: number;
+  attempts: number;
+  lastError?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface VerificationResult {
+  success: boolean;
+  shouldRetry: boolean;
+  shouldReplan: boolean;
+  feedback: string;
+  suggestedAction?: string;
+  confidence: number;
+}
+
 export interface AgentProgress {
   runId: string;
   status: AgentStatus;
@@ -45,6 +77,8 @@ export interface AgentProgress {
   stepResults: StepResult[];
   artifacts: ToolArtifact[];
   error?: string;
+  todoList?: TodoItem[];
+  eventStream?: AgentEvent[];
 }
 
 const AVAILABLE_TOOLS = [
@@ -75,6 +109,9 @@ const AVAILABLE_TOOLS = [
   },
 ];
 
+const MAX_RETRY_ATTEMPTS = 2;
+const MAX_REPLAN_ATTEMPTS = 2;
+
 export class AgentOrchestrator extends EventEmitter {
   public runId: string;
   public chatId: string;
@@ -89,6 +126,12 @@ export class AgentOrchestrator extends EventEmitter {
   private isCancelled: boolean;
   private userMessage: string;
   private attachments: any[];
+  
+  private eventStream: AgentEvent[] = [];
+  private todoList: TodoItem[] = [];
+  private workspaceFiles: Map<string, string> = new Map();
+  private replanAttempts: number = 0;
+  private stepRetryCount: Map<number, number> = new Map();
 
   constructor(runId: string, chatId: string, userId: string, userPlan: "free" | "pro" | "admin" = "free") {
     super();
@@ -106,6 +149,20 @@ export class AgentOrchestrator extends EventEmitter {
     this.attachments = [];
   }
 
+  private logEvent(type: EventType, content: any, stepIndex?: number, metadata?: Record<string, any>): void {
+    const event: AgentEvent = {
+      type,
+      content,
+      timestamp: Date.now(),
+      stepIndex,
+      metadata,
+    };
+    this.eventStream.push(event);
+    this.emit("event", { runId: this.runId, event, eventStream: this.eventStream });
+    console.log(`[AgentOrchestrator][${this.runId}] Event: ${type}`, 
+      typeof content === 'string' ? content.substring(0, 100) : JSON.stringify(content).substring(0, 100));
+  }
+
   private emitProgress(): void {
     const progress: AgentProgress = {
       runId: this.runId,
@@ -115,8 +172,335 @@ export class AgentOrchestrator extends EventEmitter {
       plan: this.plan,
       stepResults: this.stepResults,
       artifacts: this.artifacts,
+      todoList: this.todoList,
+      eventStream: this.eventStream,
     };
     this.emit("progress", progress);
+  }
+
+  private initializeTodoList(): void {
+    if (!this.plan) return;
+
+    this.todoList = this.plan.steps.map((step, index) => ({
+      id: `step-${index}`,
+      task: step.description,
+      status: index === 0 ? 'in_progress' : 'pending',
+      stepIndex: index,
+      attempts: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }));
+
+    this.updateWorkspaceFile('todo.md', this.generateTodoMarkdown());
+    this.logEvent('plan', { 
+      objective: this.plan.objective, 
+      totalSteps: this.plan.steps.length,
+      todoList: this.todoList 
+    });
+    this.emitProgress();
+  }
+
+  private generateTodoMarkdown(): string {
+    const statusEmoji: Record<TodoItem['status'], string> = {
+      'pending': '⏳',
+      'in_progress': '🔄',
+      'completed': '✅',
+      'failed': '❌',
+      'skipped': '⏭️',
+    };
+
+    let md = `# Agent Task Progress\n\n`;
+    md += `**Objective:** ${this.plan?.objective || 'N/A'}\n`;
+    md += `**Status:** ${this.status}\n`;
+    md += `**Run ID:** ${this.runId}\n\n`;
+    md += `## Tasks\n\n`;
+
+    for (const item of this.todoList) {
+      const emoji = statusEmoji[item.status];
+      md += `- ${emoji} ${item.task}`;
+      if (item.attempts > 1) {
+        md += ` (attempts: ${item.attempts})`;
+      }
+      if (item.lastError) {
+        md += `\n  - ⚠️ Error: ${item.lastError}`;
+      }
+      md += '\n';
+    }
+
+    const completed = this.todoList.filter(t => t.status === 'completed').length;
+    const failed = this.todoList.filter(t => t.status === 'failed').length;
+    md += `\n## Summary\n`;
+    md += `- Completed: ${completed}/${this.todoList.length}\n`;
+    md += `- Failed: ${failed}\n`;
+    md += `- Last updated: ${new Date().toISOString()}\n`;
+
+    return md;
+  }
+
+  private updateWorkspaceFile(filename: string, content: string): void {
+    this.workspaceFiles.set(filename, content);
+  }
+
+  updateTodoList(stepIndex: number, status: TodoItem['status'], error?: string): void {
+    const todoItem = this.todoList.find(t => t.stepIndex === stepIndex);
+    if (!todoItem) return;
+
+    todoItem.status = status;
+    todoItem.updatedAt = Date.now();
+    todoItem.attempts++;
+    
+    if (error) {
+      todoItem.lastError = error;
+    }
+
+    if (status === 'completed' || status === 'failed' || status === 'skipped') {
+      const nextItem = this.todoList.find(t => t.stepIndex === stepIndex + 1);
+      if (nextItem && nextItem.status === 'pending') {
+        nextItem.status = 'in_progress';
+        nextItem.updatedAt = Date.now();
+      }
+    }
+
+    this.updateWorkspaceFile('todo.md', this.generateTodoMarkdown());
+    this.logEvent('observation', {
+      type: 'todo_update',
+      stepIndex,
+      status,
+      error,
+      todoList: this.todoList,
+    }, stepIndex);
+    this.emitProgress();
+  }
+
+  async verifyStepResult(stepIndex: number, result: ToolResult): Promise<VerificationResult> {
+    if (!this.plan) {
+      return { 
+        success: false, 
+        shouldRetry: false, 
+        shouldReplan: false,
+        feedback: "No plan available", 
+        confidence: 0 
+      };
+    }
+
+    const step = this.plan.steps[stepIndex];
+    const retryCount = this.stepRetryCount.get(stepIndex) || 0;
+
+    this.status = "verifying";
+    this.emitProgress();
+
+    if (!result.success) {
+      const shouldRetry = retryCount < MAX_RETRY_ATTEMPTS;
+      const shouldReplan = !shouldRetry && this.replanAttempts < MAX_REPLAN_ATTEMPTS;
+
+      const verification: VerificationResult = {
+        success: false,
+        shouldRetry,
+        shouldReplan,
+        feedback: `Step failed: ${result.error || 'Unknown error'}`,
+        suggestedAction: shouldRetry ? 'Retry with modified parameters' : 
+                         shouldReplan ? 'Replan remaining steps' : 'Mark as failed and continue',
+        confidence: 0.9,
+      };
+
+      this.logEvent('verification', verification, stepIndex);
+      return verification;
+    }
+
+    try {
+      const verificationPrompt = `You are a verification agent. Analyze if the following step achieved its goal.
+
+Step: ${step.description}
+Tool: ${step.toolName}
+Expected Output: ${step.expectedOutput}
+
+Actual Result:
+${JSON.stringify(result.output, null, 2).substring(0, 2000)}
+
+Artifacts Generated: ${result.artifacts?.length || 0}
+
+Respond with ONLY valid JSON:
+{
+  "success": true/false,
+  "shouldRetry": true/false,
+  "shouldReplan": true/false,
+  "feedback": "Brief explanation of the result",
+  "confidence": 0.0-1.0
+}`;
+
+      const messages: GeminiChatMessage[] = [
+        { role: "user", parts: [{ text: verificationPrompt }] },
+      ];
+
+      const response = await geminiChat(messages, {
+        systemInstruction: "You are a verification agent that evaluates task completion. Be objective and thorough.",
+        temperature: 0.2,
+        maxOutputTokens: 500,
+      });
+
+      const jsonMatch = response.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        const verification: VerificationResult = {
+          success: parsed.success ?? true,
+          shouldRetry: parsed.shouldRetry ?? false,
+          shouldReplan: parsed.shouldReplan ?? false,
+          feedback: parsed.feedback ?? "Step completed",
+          confidence: parsed.confidence ?? 0.8,
+        };
+
+        this.logEvent('verification', verification, stepIndex);
+        return verification;
+      }
+    } catch (error: any) {
+      console.warn(`[AgentOrchestrator] Verification LLM call failed, using basic verification:`, error.message);
+    }
+
+    const hasOutput = result.output !== null && result.output !== undefined;
+    const hasArtifacts = (result.artifacts?.length || 0) > 0;
+
+    const verification: VerificationResult = {
+      success: hasOutput || hasArtifacts,
+      shouldRetry: false,
+      shouldReplan: false,
+      feedback: hasOutput || hasArtifacts 
+        ? "Step produced output/artifacts" 
+        : "Step completed but produced no visible output",
+      confidence: 0.7,
+    };
+
+    this.logEvent('verification', verification, stepIndex);
+    return verification;
+  }
+
+  async replanRemainingSteps(fromStepIndex: number, failureContext: string): Promise<boolean> {
+    if (this.replanAttempts >= MAX_REPLAN_ATTEMPTS) {
+      console.warn(`[AgentOrchestrator] Max replan attempts (${MAX_REPLAN_ATTEMPTS}) reached`);
+      return false;
+    }
+
+    this.replanAttempts++;
+    this.status = "replanning";
+    this.emitProgress();
+
+    this.logEvent('replan', {
+      fromStepIndex,
+      failureContext,
+      attempt: this.replanAttempts,
+    }, fromStepIndex);
+
+    const completedSteps = this.stepResults
+      .filter(r => r.success)
+      .map(r => {
+        const step = this.plan!.steps[r.stepIndex];
+        return `✓ Step ${r.stepIndex + 1}: ${step.description}`;
+      }).join('\n');
+
+    const failedSteps = this.stepResults
+      .filter(r => !r.success)
+      .map(r => {
+        const step = this.plan!.steps[r.stepIndex];
+        return `✗ Step ${r.stepIndex + 1}: ${step.description} - Error: ${r.error}`;
+      }).join('\n');
+
+    const toolDescriptions = AVAILABLE_TOOLS.map(
+      (t) => `- ${t.name}: ${t.description}\n  Input: ${t.inputSchema}`
+    ).join("\n");
+
+    const replanPrompt = `You are an AI agent planner. A previous plan partially failed and needs replanning.
+
+Original Objective: ${this.plan?.objective}
+Original User Request: ${this.userMessage}
+
+Progress so far:
+${completedSteps || 'No steps completed'}
+
+Failed steps:
+${failedSteps || 'None'}
+
+Failure context: ${failureContext}
+
+Available tools:
+${toolDescriptions}
+
+Create a NEW plan to complete the remaining objective, considering what has already been accomplished and what failed.
+Focus on alternative approaches that might succeed.
+
+Respond with ONLY valid JSON:
+{
+  "objective": "Updated objective based on progress",
+  "steps": [
+    {
+      "index": 0,
+      "toolName": "tool_name",
+      "description": "What this step accomplishes",
+      "input": { ... },
+      "expectedOutput": "Expected result"
+    }
+  ],
+  "estimatedTime": "X minutes"
+}`;
+
+    try {
+      const messages: GeminiChatMessage[] = [
+        { role: "user", parts: [{ text: replanPrompt }] },
+      ];
+
+      const response = await geminiChat(messages, {
+        systemInstruction: "You are an adaptive AI planner that creates recovery plans when initial plans fail.",
+        temperature: 0.4,
+        maxOutputTokens: 2000,
+      });
+
+      const jsonMatch = response.content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error("Failed to parse replan JSON");
+      }
+
+      const newPlan: AgentPlan = JSON.parse(jsonMatch[0]);
+
+      if (!newPlan.objective || !Array.isArray(newPlan.steps) || newPlan.steps.length === 0) {
+        throw new Error("Invalid replan structure");
+      }
+
+      newPlan.steps = newPlan.steps.slice(0, 6);
+      for (let i = 0; i < newPlan.steps.length; i++) {
+        newPlan.steps[i].index = i;
+      }
+
+      this.plan = newPlan;
+      this.currentStepIndex = 0;
+      this.stepRetryCount.clear();
+
+      this.todoList = newPlan.steps.map((step, index) => ({
+        id: `replan-step-${index}`,
+        task: step.description,
+        status: index === 0 ? 'in_progress' : 'pending',
+        stepIndex: index,
+        attempts: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }));
+
+      this.updateWorkspaceFile('todo.md', this.generateTodoMarkdown());
+      this.logEvent('plan', { 
+        type: 'replan',
+        objective: newPlan.objective, 
+        totalSteps: newPlan.steps.length,
+        todoList: this.todoList,
+        previousAttempts: this.replanAttempts,
+      });
+
+      console.log(`[AgentOrchestrator] Replanned with ${newPlan.steps.length} new steps (attempt ${this.replanAttempts})`);
+      return true;
+    } catch (error: any) {
+      console.error(`[AgentOrchestrator] Replanning failed:`, error.message);
+      this.logEvent('error', {
+        type: 'replan_failed',
+        error: error.message,
+      });
+      return false;
+    }
   }
 
   private async checkIfConversational(message: string): Promise<boolean> {
@@ -166,10 +550,14 @@ export class AgentOrchestrator extends EventEmitter {
     this.status = "planning";
     this.emitProgress();
 
-    // Check if message is conversational (doesn't need tools)
+    this.logEvent('action', {
+      type: 'start_planning',
+      userMessage: userMessage.substring(0, 500),
+      attachmentCount: this.attachments.length,
+    });
+
     const isConversational = await this.checkIfConversational(userMessage);
     if (isConversational && (!attachments || attachments.length === 0)) {
-      // For conversational messages, respond directly without tools
       const response = await this.generateConversationalResponse(userMessage);
       this.plan = {
         objective: "Respond to conversational message",
@@ -178,6 +566,7 @@ export class AgentOrchestrator extends EventEmitter {
         conversationalResponse: response
       } as AgentPlan & { conversationalResponse?: string };
       this.status = "completed";
+      this.logEvent('observation', { type: 'conversational_response', response: response.substring(0, 200) });
       this.emitProgress();
       return this.plan;
     }
@@ -249,6 +638,7 @@ Respond with ONLY valid JSON in this exact format:
       }
 
       this.plan = plan;
+      this.logEvent('plan', { objective: plan.objective, steps: plan.steps.length, estimatedTime: plan.estimatedTime });
       this.emitProgress();
 
       console.log(`[AgentOrchestrator] Generated plan with ${plan.steps.length} steps for run ${this.runId}`);
@@ -256,6 +646,8 @@ Respond with ONLY valid JSON in this exact format:
     } catch (error: any) {
       console.error(`[AgentOrchestrator] Failed to generate plan:`, error.message);
       
+      this.logEvent('error', { type: 'plan_generation_failed', error: error.message });
+
       this.plan = {
         objective: userMessage,
         steps: [
@@ -290,6 +682,14 @@ Respond with ONLY valid JSON in this exact format:
 
     const startedAt = Date.now();
 
+    this.logEvent('action', {
+      type: 'execute_step',
+      stepIndex,
+      toolName: step.toolName,
+      description: step.description,
+      input: step.input,
+    }, stepIndex);
+
     console.log(`[AgentOrchestrator] Executing step ${stepIndex}: ${step.toolName}`);
 
     try {
@@ -319,6 +719,16 @@ Respond with ONLY valid JSON in this exact format:
         this.artifacts.push(...result.artifacts);
       }
 
+      this.logEvent('observation', {
+        type: 'step_result',
+        stepIndex,
+        success: result.success,
+        hasOutput: result.output !== null,
+        artifactCount: result.artifacts?.length || 0,
+        duration: completedAt - startedAt,
+        error: result.error,
+      }, stepIndex);
+
       this.emitProgress();
 
       return result;
@@ -337,6 +747,16 @@ Respond with ONLY valid JSON in this exact format:
       };
 
       this.stepResults.push(stepResult);
+
+      this.logEvent('error', {
+        type: 'step_execution_error',
+        stepIndex,
+        toolName: step.toolName,
+        error: error.message,
+        stack: error.stack?.substring(0, 500),
+        duration: completedAt - startedAt,
+      }, stepIndex);
+
       this.emitProgress();
 
       return {
@@ -358,29 +778,86 @@ Respond with ONLY valid JSON in this exact format:
       }
 
       this.status = "running";
+      this.initializeTodoList();
       this.emitProgress();
 
-      for (let i = 0; i < this.plan.steps.length; i++) {
+      this.logEvent('action', {
+        type: 'run_started',
+        totalSteps: this.plan.steps.length,
+        objective: this.plan.objective,
+      });
+
+      let i = 0;
+      while (i < this.plan.steps.length) {
         if (this.isCancelled) {
           this.status = "cancelled";
+          this.updateTodoList(i, 'skipped');
+          this.logEvent('observation', { type: 'run_cancelled', atStep: i });
           this.emitProgress();
           console.log(`[AgentOrchestrator] Run ${this.runId} cancelled at step ${i}`);
           return;
         }
 
+        this.updateTodoList(i, 'in_progress');
         const result = await this.executeStep(i);
 
-        if (!result.success) {
-          console.warn(`[AgentOrchestrator] Step ${i} failed: ${result.error}`);
+        const verification = await this.verifyStepResult(i, result);
+
+        if (!verification.success) {
+          const retryCount = this.stepRetryCount.get(i) || 0;
+
+          if (verification.shouldRetry && retryCount < MAX_RETRY_ATTEMPTS) {
+            this.stepRetryCount.set(i, retryCount + 1);
+            console.log(`[AgentOrchestrator] Retrying step ${i} (attempt ${retryCount + 2})`);
+            this.logEvent('action', {
+              type: 'retry_step',
+              stepIndex: i,
+              attempt: retryCount + 2,
+              reason: verification.feedback,
+            }, i);
+            continue;
+          }
+
+          this.updateTodoList(i, 'failed', result.error || verification.feedback);
+
+          if (verification.shouldReplan) {
+            console.log(`[AgentOrchestrator] Attempting replan after step ${i} failure`);
+            const replanSuccess = await this.replanRemainingSteps(i, verification.feedback);
+            
+            if (replanSuccess) {
+              this.status = "running";
+              i = 0;
+              continue;
+            }
+          }
+
+          console.warn(`[AgentOrchestrator] Step ${i} failed (non-recoverable): ${result.error}`);
+        } else {
+          this.updateTodoList(i, 'completed');
         }
+
+        this.status = "running";
+        i++;
       }
 
       this.status = "completed";
+      this.logEvent('observation', {
+        type: 'run_completed',
+        totalSteps: this.plan.steps.length,
+        successfulSteps: this.stepResults.filter(r => r.success).length,
+        failedSteps: this.stepResults.filter(r => !r.success).length,
+        artifactCount: this.artifacts.length,
+      });
       this.emitProgress();
 
       console.log(`[AgentOrchestrator] Run ${this.runId} completed successfully`);
     } catch (error: any) {
       this.status = "failed";
+      this.logEvent('error', {
+        type: 'run_failed',
+        error: error.message,
+        stack: error.stack?.substring(0, 1000),
+      });
       this.emit("error", error);
       this.emitProgress();
       console.error(`[AgentOrchestrator] Run ${this.runId} failed:`, error.message);
@@ -391,6 +868,7 @@ Respond with ONLY valid JSON in this exact format:
   async cancel(): Promise<void> {
     this.isCancelled = true;
     this.status = "cancelled";
+    this.logEvent('action', { type: 'cancel_requested' });
     this.emitProgress();
     console.log(`[AgentOrchestrator] Run ${this.runId} cancellation requested`);
   }
@@ -416,6 +894,9 @@ Respond with ONLY valid JSON in this exact format:
       ? `\n\nArtifacts generated:\n${this.artifacts.map((a) => `- ${a.name} (${a.type})`).join("\n")}`
       : "";
 
+    const eventSummary = `\nTotal events logged: ${this.eventStream.length}`;
+    const replanInfo = this.replanAttempts > 0 ? `\nReplan attempts: ${this.replanAttempts}` : "";
+
     const systemPrompt = `You are summarizing the results of an AI agent execution. Be concise and focus on what was accomplished.`;
 
     const messages: GeminiChatMessage[] = [
@@ -431,6 +912,8 @@ Original user request: ${this.userMessage}
 Step Results:
 ${stepSummaries}
 ${artifactSummary}
+${eventSummary}
+${replanInfo}
 
 Status: ${this.status}
 Completed: ${completedSteps.length}/${this.plan.steps.length} steps
@@ -454,7 +937,7 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       
       return `Completed ${completedSteps.length} of ${this.plan.steps.length} steps for: ${this.plan.objective}. ${
         this.artifacts.length > 0 ? `Generated ${this.artifacts.length} artifact(s).` : ""
-      }`;
+      }${failedSteps.length > 0 ? ` ${failedSteps.length} step(s) failed.` : ""}`;
     }
   }
 
@@ -467,7 +950,25 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       plan: this.plan,
       stepResults: this.stepResults,
       artifacts: this.artifacts,
+      todoList: this.todoList,
+      eventStream: this.eventStream,
     };
+  }
+
+  getEventStream(): AgentEvent[] {
+    return [...this.eventStream];
+  }
+
+  getTodoList(): TodoItem[] {
+    return [...this.todoList];
+  }
+
+  getWorkspaceFile(filename: string): string | undefined {
+    return this.workspaceFiles.get(filename);
+  }
+
+  getWorkspaceFiles(): Map<string, string> {
+    return new Map(this.workspaceFiles);
   }
 }
 
@@ -561,13 +1062,28 @@ export class AgentManager {
         runs.push(orchestrator.getProgress());
       }
     }
-    // Sort by most recent first (based on step results)
     runs.sort((a, b) => {
       const aTime = a.stepResults.length > 0 ? a.stepResults[a.stepResults.length - 1].startedAt : 0;
       const bTime = b.stepResults.length > 0 ? b.stepResults[b.stepResults.length - 1].startedAt : 0;
       return bTime - aTime;
     });
     return runs;
+  }
+
+  getEventStream(runId: string): AgentEvent[] | null {
+    const orchestrator = this.activeRuns.get(runId);
+    if (!orchestrator) {
+      return null;
+    }
+    return orchestrator.getEventStream();
+  }
+
+  getTodoList(runId: string): TodoItem[] | null {
+    const orchestrator = this.activeRuns.get(runId);
+    if (!orchestrator) {
+      return null;
+    }
+    return orchestrator.getTodoList();
   }
 }
 
