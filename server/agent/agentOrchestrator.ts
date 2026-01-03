@@ -38,13 +38,21 @@ export interface StepResult {
   completedAt: number;
 }
 
-export type EventType = 'action' | 'observation' | 'plan' | 'verification' | 'error' | 'replan';
+export type EventType = 'action' | 'observation' | 'plan' | 'verification' | 'error' | 'replan' | 'thinking' | 'progress' | 'result';
+export type EventStatus = 'ok' | 'warn' | 'fail';
 
 export interface AgentEvent {
   type: EventType;
+  kind: EventType;
+  status: EventStatus;
   content: any;
   timestamp: number;
   stepIndex?: number;
+  title?: string;
+  summary?: string;
+  confidence?: number;
+  shouldRetry?: boolean;
+  shouldReplan?: boolean;
   metadata?: Record<string, any>;
 }
 
@@ -169,18 +177,82 @@ export class AgentOrchestrator extends EventEmitter {
     this.attachments = [];
   }
 
-  private logEvent(type: EventType, content: any, stepIndex?: number, metadata?: Record<string, any>): void {
+  private logEvent(
+    type: EventType, 
+    content: any, 
+    stepIndex?: number, 
+    options?: {
+      title?: string;
+      summary?: string;
+      status?: EventStatus;
+      confidence?: number;
+      shouldRetry?: boolean;
+      shouldReplan?: boolean;
+      metadata?: Record<string, any>;
+    }
+  ): void {
+    const inferredStatus = this.inferEventStatus(type, content, options?.status);
+    const inferredTitle = options?.title || this.inferEventTitle(type, content);
+    
     const event: AgentEvent = {
       type,
+      kind: type,
+      status: inferredStatus,
       content,
       timestamp: Date.now(),
       stepIndex,
-      metadata,
+      title: inferredTitle,
+      summary: options?.summary,
+      confidence: options?.confidence,
+      shouldRetry: options?.shouldRetry,
+      shouldReplan: options?.shouldReplan,
+      metadata: options?.metadata,
     };
     this.eventStream.push(event);
     this.emit("event", { runId: this.runId, event, eventStream: this.eventStream });
-    console.log(`[AgentOrchestrator][${this.runId}] Event: ${type}`, 
-      typeof content === 'string' ? content.substring(0, 100) : JSON.stringify(content).substring(0, 100));
+    console.log(`[AgentOrchestrator][${this.runId}] Event: ${type} [${inferredStatus}]`, 
+      inferredTitle || (typeof content === 'string' ? content.substring(0, 100) : JSON.stringify(content).substring(0, 100)));
+  }
+
+  private inferEventStatus(type: EventType, content: any, explicitStatus?: EventStatus): EventStatus {
+    if (explicitStatus) return explicitStatus;
+    
+    if (type === 'error') return 'fail';
+    
+    if (content?.success === true || content?.passed === true) return 'ok';
+    if (content?.success === false || content?.passed === false) return 'fail';
+    if (content?.shouldRetry || content?.shouldReplan) return 'warn';
+    
+    return 'ok';
+  }
+
+  private inferEventTitle(type: EventType, content: any): string {
+    const toolNames: Record<string, string> = {
+      web_search: 'Búsqueda web',
+      browse_url: 'Navegación web',
+      generate_document: 'Generando documento',
+      analyze_spreadsheet: 'Analizando hoja de cálculo',
+      generate_image: 'Generando imagen',
+      read_file: 'Leyendo archivo',
+      write_file: 'Escribiendo archivo',
+      shell_command: 'Ejecutando comando',
+      list_files: 'Listando archivos',
+      respond: 'Respuesta',
+    };
+
+    if (content?.toolName) {
+      return toolNames[content.toolName] || content.toolName;
+    }
+    if (content?.type) {
+      return toolNames[content.type] || content.type;
+    }
+    if (type === 'plan') return 'Plan creado';
+    if (type === 'verification') return 'Verificación';
+    if (type === 'replan') return 'Replanificación';
+    if (type === 'thinking') return 'Analizando';
+    if (type === 'progress') return 'Progreso';
+    
+    return type.charAt(0).toUpperCase() + type.slice(1);
   }
 
   private emitProgress(): void {
@@ -323,7 +395,14 @@ export class AgentOrchestrator extends EventEmitter {
         confidence: 0.9,
       };
 
-      this.logEvent('verification', verification, stepIndex);
+      this.logEvent('verification', verification, stepIndex, {
+        title: 'Verificación fallida',
+        summary: verification.feedback,
+        status: 'fail',
+        confidence: verification.confidence,
+        shouldRetry: verification.shouldRetry,
+        shouldReplan: verification.shouldReplan,
+      });
       return verification;
     }
 
@@ -369,7 +448,14 @@ Respond with ONLY valid JSON:
           confidence: parsed.confidence ?? 0.8,
         };
 
-        this.logEvent('verification', verification, stepIndex);
+        this.logEvent('verification', verification, stepIndex, {
+          title: verification.success ? 'Verificación exitosa' : 'Verificación fallida',
+          summary: verification.feedback,
+          status: verification.success ? 'ok' : (verification.shouldRetry || verification.shouldReplan ? 'warn' : 'fail'),
+          confidence: verification.confidence,
+          shouldRetry: verification.shouldRetry,
+          shouldReplan: verification.shouldReplan,
+        });
         return verification;
       }
     } catch (error: any) {
@@ -389,7 +475,12 @@ Respond with ONLY valid JSON:
       confidence: 0.7,
     };
 
-    this.logEvent('verification', verification, stepIndex);
+    this.logEvent('verification', verification, stepIndex, {
+      title: verification.success ? 'Verificación exitosa' : 'Verificación completada',
+      summary: verification.feedback,
+      status: verification.success ? 'ok' : 'warn',
+      confidence: verification.confidence,
+    });
     return verification;
   }
 
