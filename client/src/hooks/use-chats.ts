@@ -33,6 +33,7 @@ export interface GmailPreview {
 export interface AgentRunData {
   runId: string | null;
   status: "starting" | "running" | "completed" | "failed" | "cancelled";
+  userMessage?: string;
   steps: Array<{
     stepIndex: number;
     toolName: string;

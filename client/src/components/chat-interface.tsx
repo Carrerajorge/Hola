@@ -83,6 +83,8 @@ import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview
 import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDetector";
 import { markdownToTipTap } from "@/lib/markdownToHtml";
 import { detectGmailIntent } from "@/lib/gmailIntentDetector";
+import { useAgentStore, useAgentRun, type AgentRunState } from "@/stores/agent-store";
+import { useStartAgentRun, useCancelAgentRun, useAgentPolling } from "@/hooks/use-agent-polling";
 import { useStreamingStore } from "@/stores/streamingStore";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
@@ -938,31 +940,138 @@ export function ChatInterface({
   
   const agentMode = useAgentMode(chatId || "");
   
-  // Local state for Agent Mode messages to avoid infinite loops with parent state
-  const [localAgentMessages, setLocalAgentMessages] = useState<Message[]>([]);
-  const localAgentMessagesRef = useRef<Message[]>([]);
+  // Agent store for persisting agent runs across remounts
+  const agentStore = useAgentStore();
+  const { startRun: startAgentRun } = useStartAgentRun();
+  const { cancel: cancelAgentRun } = useCancelAgentRun();
   
-  // Combined messages: prop messages + local agent messages
+  // Track the current agent message ID for this chat session
+  const [currentAgentMessageId, setCurrentAgentMessageId] = useState<string | null>(null);
+  
+  // Use the store-based polling hook for the active agent run (only when valid messageId exists)
+  useAgentPolling(currentAgentMessageId);
+  
+  // Get the active run from the store for the current chat
+  const activeAgentRun = useMemo(() => {
+    if (currentAgentMessageId) {
+      return agentStore.runs[currentAgentMessageId] || null;
+    }
+    // Also check if there's an active run for this chatId from the store
+    return agentStore.getRunByChatId(chatId || "");
+  }, [currentAgentMessageId, agentStore.runs, chatId, agentStore]);
+  
+  // Combined messages: prop messages + agent runs from store
   const displayMessages = useMemo(() => {
-    if (localAgentMessages.length === 0) return messages;
-    // Merge: take prop messages and add/update local agent messages
     const msgMap = new Map(messages.map(m => [m.id, m]));
-    localAgentMessages.forEach(m => msgMap.set(m.id, m));
+    
+    // Merge agent runs from the store into messages
+    Object.entries(agentStore.runs).forEach(([messageId, runState]) => {
+      // Only include runs for the current chat
+      if (runState.chatId === chatId || (!chatId && runState.chatId)) {
+        const existingMsg = msgMap.get(messageId);
+        if (existingMsg) {
+          // Update existing message with agent run data
+          msgMap.set(messageId, {
+            ...existingMsg,
+            agentRun: {
+              runId: runState.runId,
+              status: runState.status,
+              userMessage: runState.userMessage,
+              steps: runState.steps,
+              eventStream: runState.eventStream,
+              summary: runState.summary,
+              error: runState.error,
+            }
+          });
+        } else {
+          // Create new message for agent run
+          msgMap.set(messageId, {
+            id: messageId,
+            role: "assistant" as const,
+            content: "",
+            timestamp: new Date(runState.createdAt),
+            agentRun: {
+              runId: runState.runId,
+              status: runState.status,
+              userMessage: runState.userMessage,
+              steps: runState.steps,
+              eventStream: runState.eventStream,
+              summary: runState.summary,
+              error: runState.error,
+            }
+          });
+        }
+      }
+    });
+    
     return Array.from(msgMap.values()).sort((a, b) => 
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
-  }, [messages, localAgentMessages]);
+  }, [messages, agentStore.runs, chatId]);
   
-  // Reset local agent messages when messages prop changes significantly (new chat)
-  const lastMsgCountRef = useRef(messages.length);
+  // Get store runs to trigger re-render when store rehydrates
+  const allAgentRuns = useAgentStore(state => state.runs);
+  
+  // Reset current agent message ID when chatId changes - polling auto-starts via useAgentPolling
   useEffect(() => {
-    // If messages from prop decreased (new chat or clear), reset local state
-    if (messages.length < lastMsgCountRef.current) {
-      setLocalAgentMessages([]);
-      localAgentMessagesRef.current = [];
+    // Find if there's an active run for this chat
+    const matchingRun = Object.entries(allAgentRuns).find(
+      ([_, run]) => run.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(run.status)
+    );
+    
+    if (matchingRun) {
+      const [msgId] = matchingRun;
+      setCurrentAgentMessageId(msgId);
+      // Polling auto-starts in useAgentPolling when runId and active status are present
+    } else {
+      setCurrentAgentMessageId(null);
     }
-    lastMsgCountRef.current = messages.length;
-  }, [messages.length]);
+  }, [chatId, allAgentRuns]);
+  
+  // Toast notifications for agent mode
+  const prevAgentStatusRef = useRef<string | null>(null);
+  
+  // Watch for agent run status changes and trigger appropriate toasts
+  useEffect(() => {
+    const currentStatus = activeAgentRun?.status || null;
+    const prevStatus = prevAgentStatusRef.current;
+    
+    // Only trigger toasts on status changes
+    if (currentStatus && currentStatus !== prevStatus) {
+      switch (currentStatus) {
+        case 'running':
+        case 'planning':
+          if (prevStatus === 'starting' || prevStatus === 'queued' || prevStatus === null) {
+            toast({
+              description: "Agente iniciado",
+              duration: 3000,
+            });
+          }
+          break;
+        case 'completed':
+          toast({
+            description: "Agente completó la tarea",
+            duration: 3000,
+          });
+          break;
+        case 'failed':
+          toast({
+            variant: "destructive",
+            description: `Error: ${activeAgentRun?.error || 'Error desconocido'}`,
+            duration: 5000,
+          });
+          break;
+        case 'cancelled':
+          toast({
+            description: "Ejecución cancelada",
+            duration: 3000,
+          });
+          break;
+      }
+    }
+    
+    prevAgentStatusRef.current = currentStatus;
+  }, [activeAgentRun?.status, activeAgentRun?.error, toast]);
   
   const { availableModels, isLoading: isModelsLoading, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
   
@@ -2051,6 +2160,58 @@ export function ChatInterface({
     }
   };
 
+  const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
+    try {
+      await cancelAgentRun(messageId, runId);
+      toast({ title: "Cancelado", description: "La ejecución del agente ha sido cancelada" });
+    } catch (error) {
+      console.error("Failed to cancel agent run:", error);
+      toast({ title: "Error", description: "No se pudo cancelar la ejecución", variant: "destructive" });
+    }
+  }, [cancelAgentRun, toast]);
+
+  const handleAgentRetry = useCallback((messageId: string, userMessage: string) => {
+    window.dispatchEvent(new CustomEvent("retry-agent-run", { 
+      detail: { messageId, userMessage } 
+    }));
+  }, []);
+
+  useEffect(() => {
+    const handleRetryAgentRun = async (event: CustomEvent<{ messageId: string; userMessage: string }>) => {
+      const { messageId, userMessage } = event.detail;
+      if (!userMessage) {
+        toast({ title: "Error", description: "No se puede reintentar sin el mensaje original", variant: "destructive" });
+        return;
+      }
+
+      agentStore.clearRun(messageId);
+
+      const newMessageId = `agent-${Date.now()}`;
+      setCurrentAgentMessageId(newMessageId);
+
+      try {
+        const result = await startAgentRun(
+          chatId || "",
+          userMessage,
+          newMessageId,
+          []
+        );
+
+        if (result?.chatId && (!chatId || chatId.startsWith("pending-"))) {
+          window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+        }
+      } catch (error) {
+        console.error("Failed to retry agent run:", error);
+        toast({ title: "Error", description: "No se pudo reiniciar el agente", variant: "destructive" });
+      }
+    };
+
+    window.addEventListener("retry-agent-run", handleRetryAgentRun as EventListener);
+    return () => {
+      window.removeEventListener("retry-agent-run", handleRetryAgentRun as EventListener);
+    };
+  }, [chatId, agentStore, startAgentRun, toast]);
+
   const handleStartEdit = (msg: Message) => {
     setEditingMessageId(msg.id);
     setEditContent(msg.content);
@@ -2551,111 +2712,39 @@ export function ChatInterface({
         setUploadedFiles([]);
         setSelectedTool(null);
         
-        // Add user message to chat - use local state to avoid infinite loops
+        // Generate a unique message ID for tracking in the store
+        const agentMessageId = `agent-${Date.now()}`;
+        setCurrentAgentMessageId(agentMessageId);
+        
+        // Add user message to chat via the callback
         const userMessage: Message = {
           id: `user-${Date.now()}`,
           role: "user",
           content: userMessageContent,
           timestamp: new Date(),
         };
-        setLocalAgentMessages(prev => {
-          const updated = [...prev, userMessage];
-          localAgentMessagesRef.current = updated;
-          return updated;
-        });
-        
-        // Create placeholder agent message
-        const agentMessageId = `agent-${Date.now()}`;
-        const agentMessage: Message = {
-          id: agentMessageId,
-          role: "assistant",
-          content: "",
-          timestamp: new Date(),
-          agentRun: {
-            runId: null,
-            status: "starting",
-            steps: [],
-            eventStream: [],
-            summary: null,
-            error: null,
-          }
-        };
-        setLocalAgentMessages(prev => {
-          const updated = [...prev, agentMessage];
-          localAgentMessagesRef.current = updated;
-          return updated;
-        });
+        onSendMessage(userMessage);
         
         console.log("[Agent Mode] Starting run with input:", userMessageContent);
-        const result = await agentMode.startRun(userMessageContent, attachments);
+        
+        // Use the store-based approach for starting the run
+        // This will create the run in the store and start polling automatically
+        const result = await startAgentRun(
+          chatId || "",
+          userMessageContent,
+          agentMessageId,
+          attachments
+        );
+        
         console.log("[Agent Mode] Run result:", result);
         
-        if (result.runId) {
-          // Update agent message with runId
-          setLocalAgentMessages(prev => {
-            const updated = prev.map(msg => 
-              msg.id === agentMessageId 
-                ? { ...msg, agentRun: { ...msg.agentRun!, runId: result.runId, status: "running" } }
-                : msg
-            );
-            localAgentMessagesRef.current = updated;
-            return updated;
-          });
-          
+        if (result) {
           // Navigate to new chat if created
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
             console.log("[Agent Mode] Navigating to chat:", result.chatId);
             window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
           }
-          
-          // Start polling for updates - track last data to avoid unnecessary re-renders
-          let lastRunDataJSON = "";
-          const pollInterval = setInterval(async () => {
-            try {
-              const response = await fetch(`/api/agent/runs/${result.runId}`);
-              const runData = await response.json();
-              
-              // Compare with last data to avoid unnecessary state updates
-              const runDataJSON = JSON.stringify({
-                status: runData.status,
-                summary: runData.summary,
-                error: runData.error,
-                stepsLength: runData.steps?.length || 0,
-                eventStreamLength: runData.eventStream?.length || 0,
-              });
-              
-              if (runDataJSON !== lastRunDataJSON) {
-                lastRunDataJSON = runDataJSON;
-                setLocalAgentMessages(prev => {
-                  const updated = prev.map(msg => 
-                    msg.id === agentMessageId 
-                      ? { 
-                          ...msg, 
-                          // Don't set content - AgentRunContent will render summary from agentRun
-                          agentRun: {
-                            runId: result.runId,
-                            status: runData.status,
-                            steps: runData.steps || [],
-                            eventStream: runData.eventStream || [],
-                            summary: runData.summary,
-                            error: runData.error,
-                          }
-                        }
-                      : msg
-                  );
-                  localAgentMessagesRef.current = updated;
-                  return updated;
-                });
-              }
-              
-              // Stop polling when complete
-              if (["completed", "failed", "cancelled"].includes(runData.status)) {
-                clearInterval(pollInterval);
-              }
-            } catch (error) {
-              console.error("Error polling agent run:", error);
-            }
-          }, 1000);
+          // Polling is handled automatically by useAgentPolling hook
         }
       } catch (error) {
         console.error("Failed to start agent run:", error);
@@ -3889,6 +3978,8 @@ IMPORTANTE:
                 minimizedDocument={minimizedDocument}
                 onRestoreDocument={restoreDocEditor}
                 onSelectSuggestedReply={(text) => setInput(text)}
+                onAgentCancel={handleAgentCancel}
+                onAgentRetry={handleAgentRetry}
               />
 
               {/* Agent Observer - Show when agent is running */}
@@ -4138,6 +4229,8 @@ IMPORTANTE:
                   minimizedDocument={minimizedDocument}
                   onRestoreDocument={restoreDocEditor}
                   onSelectSuggestedReply={(text) => setInput(text)}
+                  onAgentCancel={handleAgentCancel}
+                  onAgentRetry={handleAgentRetry}
                 />
                 <div ref={messagesEndRef} />
               </div>

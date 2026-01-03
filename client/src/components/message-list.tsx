@@ -1,4 +1,4 @@
-import React, { memo, useState, useCallback, useRef, useMemo } from "react";
+import React, { memo, useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   CheckCircle2,
@@ -31,7 +31,8 @@ import {
   Sparkles,
   Clock,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  ChevronDown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -977,7 +978,8 @@ const UserMessage = memo(function UserMessage({
 interface AgentRunContentProps {
   agentRun: {
     runId: string | null;
-    status: "starting" | "running" | "completed" | "failed" | "cancelled";
+    status: "starting" | "running" | "completed" | "failed" | "cancelled" | "queued" | "planning";
+    userMessage?: string;
     steps: Array<{
       stepIndex: number;
       toolName: string;
@@ -993,14 +995,32 @@ interface AgentRunContentProps {
     summary: string | null;
     error: string | null;
   };
+  onCancel?: () => void;
+  onRetry?: () => void;
 }
 
-const AgentRunContent = memo(function AgentRunContent({ agentRun }: AgentRunContentProps) {
+const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRetry }: AgentRunContentProps) {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const [showAllEvents, setShowAllEvents] = useState(false);
+  const eventsEndRef = useRef<HTMLDivElement>(null);
+  
+  const isActive = ["starting", "running", "queued", "planning"].includes(agentRun.status);
+  
+  useEffect(() => {
+    if (isActive && eventsEndRef.current) {
+      eventsEndRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [agentRun.eventStream?.length, isActive]);
+
   const getStatusIcon = () => {
     switch (agentRun.status) {
       case "starting":
-      case "running":
+      case "queued":
         return <Loader2 className="h-4 w-4 animate-spin text-purple-500" />;
+      case "planning":
+        return <Sparkles className="h-4 w-4 animate-pulse text-purple-500" />;
+      case "running":
+        return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
       case "completed":
         return <CheckCircle2 className="h-4 w-4 text-green-500" />;
       case "failed":
@@ -1014,8 +1034,10 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun }: AgentRunCont
 
   const getStatusText = () => {
     switch (agentRun.status) {
-      case "starting": return "Iniciando agente...";
-      case "running": return "Agente trabajando...";
+      case "starting": return "Iniciando...";
+      case "queued": return "En cola...";
+      case "planning": return "Planificando...";
+      case "running": return "Ejecutando...";
       case "completed": return "Completado";
       case "failed": return "Error";
       case "cancelled": return "Cancelado";
@@ -1025,8 +1047,9 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun }: AgentRunCont
 
   const getToolDisplayName = (toolName: string) => {
     const toolNames: Record<string, string> = {
-      analyze_spreadsheet: "Analizando hoja de cálculo",
-      web_search: "Buscando en la web",
+      analyze_spreadsheet: "Analizando datos",
+      web_search: "Buscando en web",
+      web_search_retrieve: "Recuperando información",
       generate_image: "Generando imagen",
       browse_url: "Navegando URL",
       generate_document: "Generando documento",
@@ -1035,109 +1058,246 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun }: AgentRunCont
       shell_command: "Ejecutando comando",
       list_files: "Listando archivos",
       respond: "Respondiendo",
+      start_planning: "Analizando solicitud",
+      conversational_response: "Respuesta",
     };
     return toolNames[toolName] || toolName;
   };
 
+  const formatEventContent = (event: { type: string; content: any }) => {
+    if (typeof event.content === "string") {
+      return event.content.length > 300 ? event.content.substring(0, 300) + "..." : event.content;
+    }
+    if (event.content?.type === "conversational_response") {
+      return event.content.response || "Respuesta generada";
+    }
+    if (event.content?.type === "start_planning") {
+      return `Analizando: "${event.content.userMessage?.substring(0, 100) || "..."}"`;
+    }
+    if (event.content?.type) {
+      return getToolDisplayName(event.content.type);
+    }
+    const jsonStr = JSON.stringify(event.content);
+    return jsonStr.length > 200 ? jsonStr.substring(0, 200) + "..." : jsonStr;
+  };
+
+  const visibleEvents = showAllEvents 
+    ? agentRun.eventStream 
+    : agentRun.eventStream?.slice(-5) || [];
+  const hiddenEventsCount = (agentRun.eventStream?.length || 0) - visibleEvents.length;
+
   return (
-    <div className="flex flex-col gap-3 w-full" data-testid="agent-run-content">
-      {/* Status header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-purple-500/10 rounded-lg border border-purple-500/20">
+    <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-bottom-2 duration-300" data-testid="agent-run-content">
+      {/* Collapsible header */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 rounded-lg border border-purple-500/20 hover:border-purple-500/40 transition-all w-full text-left"
+      >
         <Bot className="h-5 w-5 text-purple-500" />
         <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Modo Agente</span>
         <div className="flex-1" />
         {getStatusIcon()}
         <span className="text-xs text-muted-foreground">{getStatusText()}</span>
-      </div>
+        <ChevronDown className={cn(
+          "h-4 w-4 text-muted-foreground transition-transform",
+          isExpanded && "rotate-180"
+        )} />
+      </button>
 
-      {/* Event stream - show actions and observations */}
-      {agentRun.eventStream && agentRun.eventStream.length > 0 && (
-        <div className="space-y-2 pl-2 border-l-2 border-purple-500/30">
-          {agentRun.eventStream.slice(-10).map((event, idx) => (
-            <div key={idx} className="flex items-start gap-2 text-sm">
-              {event.type === "action" ? (
-                <Sparkles className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
-              ) : event.type === "observation" ? (
-                <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-              ) : event.type === "error" ? (
-                <XCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
-              ) : (
-                <Clock className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+      {isExpanded && (
+        <div className="space-y-3">
+          {/* Cancel button for active runs */}
+          {isActive && onCancel && (
+            <div className="flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onCancel}
+                className="text-xs text-muted-foreground hover:text-red-500"
+                data-testid="button-cancel-agent"
+              >
+                <XCircle className="h-3 w-3 mr-1" />
+                Cancelar
+              </Button>
+            </div>
+          )}
+
+          {/* Event timeline - Manus style */}
+          {agentRun.eventStream && agentRun.eventStream.length > 0 && (
+            <div className="relative">
+              {hiddenEventsCount > 0 && !showAllEvents && (
+                <button
+                  onClick={() => setShowAllEvents(true)}
+                  className="text-xs text-purple-500 hover:text-purple-600 mb-2 flex items-center gap-1"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                  Ver {hiddenEventsCount} eventos anteriores
+                </button>
               )}
-              <div className="flex-1 min-w-0">
-                <span className={cn(
-                  "text-xs font-medium uppercase tracking-wide",
-                  event.type === "action" && "text-blue-600 dark:text-blue-400",
-                  event.type === "observation" && "text-green-600 dark:text-green-400",
-                  event.type === "error" && "text-red-600 dark:text-red-400"
-                )}>
-                  {event.type === "action" ? "Acción" : event.type === "observation" ? "Resultado" : event.type}
-                </span>
-                <p className="text-muted-foreground text-xs mt-0.5 break-words">
-                  {typeof event.content === "string" 
-                    ? event.content.substring(0, 200) + (event.content.length > 200 ? "..." : "")
-                    : JSON.stringify(event.content).substring(0, 200)}
-                </p>
+              <div className="space-y-1.5 pl-3 border-l-2 border-purple-500/30">
+                {visibleEvents.map((event, idx) => {
+                  const isLast = idx === visibleEvents.length - 1;
+                  return (
+                    <div 
+                      key={`${event.timestamp}-${idx}`} 
+                      className={cn(
+                        "flex items-start gap-2 text-sm py-1.5 px-2 rounded-md transition-all",
+                        isLast && isActive && "bg-purple-500/5 border-l-2 border-purple-500 -ml-[11px] pl-[9px]"
+                      )}
+                    >
+                      <div className={cn(
+                        "w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0",
+                        event.type === "action" && "bg-blue-500/20",
+                        event.type === "observation" && "bg-green-500/20",
+                        event.type === "error" && "bg-red-500/20"
+                      )}>
+                        {event.type === "action" ? (
+                          <Sparkles className="h-3 w-3 text-blue-500" />
+                        ) : event.type === "observation" ? (
+                          <CheckCircle2 className="h-3 w-3 text-green-500" />
+                        ) : event.type === "error" ? (
+                          <XCircle className="h-3 w-3 text-red-500" />
+                        ) : (
+                          <Clock className="h-3 w-3 text-muted-foreground" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            "text-xs font-semibold uppercase tracking-wide",
+                            event.type === "action" && "text-blue-600 dark:text-blue-400",
+                            event.type === "observation" && "text-green-600 dark:text-green-400",
+                            event.type === "error" && "text-red-600 dark:text-red-400"
+                          )}>
+                            {event.type === "action" ? "Acción" : event.type === "observation" ? "Resultado" : "Error"}
+                          </span>
+                          {isLast && isActive && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[10px] font-medium">
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                              En proceso
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-muted-foreground text-xs mt-0.5 break-words leading-relaxed">
+                          {formatEventContent(event)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={eventsEndRef} />
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {/* Steps progress - if no event stream, show steps */}
-      {(!agentRun.eventStream || agentRun.eventStream.length === 0) && agentRun.steps && agentRun.steps.length > 0 && (
-        <div className="space-y-2">
-          {agentRun.steps.map((step, idx) => (
-            <div key={idx} className="flex items-center gap-2 text-sm">
-              {step.status === "succeeded" ? (
-                <CheckCircle2 className="h-4 w-4 text-green-500" />
-              ) : step.status === "running" ? (
-                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-              ) : step.status === "failed" ? (
-                <XCircle className="h-4 w-4 text-red-500" />
-              ) : (
-                <Clock className="h-4 w-4 text-muted-foreground" />
-              )}
-              <span className={cn(
-                step.status === "pending" && "text-muted-foreground",
-                step.status === "running" && "text-foreground font-medium",
-                step.status === "succeeded" && "text-green-600 dark:text-green-400",
-                step.status === "failed" && "text-red-600 dark:text-red-400"
-              )}>
-                {getToolDisplayName(step.toolName)}
-              </span>
+          {/* Steps progress - fallback if no event stream */}
+          {(!agentRun.eventStream || agentRun.eventStream.length === 0) && agentRun.steps && agentRun.steps.length > 0 && (
+            <div className="space-y-2 pl-3 border-l-2 border-blue-500/30">
+              {agentRun.steps.map((step, idx) => (
+                <div key={idx} className="flex items-center gap-2 text-sm py-1">
+                  {step.status === "succeeded" ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  ) : step.status === "running" ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                  ) : step.status === "failed" ? (
+                    <XCircle className="h-4 w-4 text-red-500" />
+                  ) : (
+                    <div className="w-4 h-4 rounded-full border-2 border-muted-foreground/30" />
+                  )}
+                  <span className={cn(
+                    "transition-colors",
+                    step.status === "pending" && "text-muted-foreground",
+                    step.status === "running" && "text-foreground font-medium",
+                    step.status === "succeeded" && "text-green-600 dark:text-green-400",
+                    step.status === "failed" && "text-red-600 dark:text-red-400"
+                  )}>
+                    {getToolDisplayName(step.toolName)}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          )}
 
-      {/* Summary/Response - show final response when completed */}
-      {agentRun.summary && agentRun.status === "completed" && (
-        <div className="text-sm leading-relaxed">
-          <MarkdownErrorBoundary>
-            <MarkdownRenderer content={agentRun.summary} />
-          </MarkdownErrorBoundary>
-        </div>
-      )}
+          {/* Loading skeleton for starting state */}
+          {isActive && (!agentRun.eventStream || agentRun.eventStream.length === 0) && (!agentRun.steps || agentRun.steps.length === 0) && (
+            <div className="space-y-2 animate-pulse">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-purple-500/20" />
+                <div className="h-4 w-32 bg-muted rounded" />
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-blue-500/20" />
+                <div className="h-4 w-48 bg-muted rounded" />
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Procesando tu solicitud...</span>
+              </div>
+            </div>
+          )}
 
-      {/* Error message */}
-      {agentRun.error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-          <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-            <XCircle className="h-4 w-4" />
-            <span className="text-sm font-medium">Error</span>
-          </div>
-          <p className="text-sm text-red-600/80 dark:text-red-400/80 mt-1">{agentRun.error}</p>
-        </div>
-      )}
+          {/* Summary/Response - show when completed */}
+          {agentRun.summary && agentRun.status === "completed" && (
+            <div className="mt-2 pt-2 border-t border-border/50">
+              <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+                <MarkdownErrorBoundary>
+                  <MarkdownRenderer content={agentRun.summary} />
+                </MarkdownErrorBoundary>
+              </div>
+            </div>
+          )}
 
-      {/* Loading indicator for starting/running without steps */}
-      {(agentRun.status === "starting" || agentRun.status === "running") && 
-       (!agentRun.steps || agentRun.steps.length === 0) && 
-       (!agentRun.eventStream || agentRun.eventStream.length === 0) && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span>Procesando tu mensaje...</span>
+          {/* Error message with retry */}
+          {agentRun.error && agentRun.status === "failed" && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                  <XCircle className="h-4 w-4" />
+                  <span className="text-sm font-medium">Error</span>
+                </div>
+                {onRetry && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onRetry}
+                    className="text-xs text-red-600 hover:text-red-700 hover:bg-red-500/10"
+                    data-testid="button-retry-agent"
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Reintentar
+                  </Button>
+                )}
+              </div>
+              <p className="text-sm text-red-600/80 dark:text-red-400/80 mt-1">{agentRun.error}</p>
+            </div>
+          )}
+
+          {/* Cancelled state */}
+          {agentRun.status === "cancelled" && (
+            <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-400">
+                  <AlertCircle className="h-4 w-4" />
+                  <span className="text-sm font-medium">Cancelado</span>
+                </div>
+                {onRetry && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onRetry}
+                    className="text-xs text-yellow-600 hover:text-yellow-700 hover:bg-yellow-500/10"
+                    data-testid="button-retry-cancelled-agent"
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Reintentar
+                  </Button>
+                )}
+              </div>
+              <p className="text-sm text-yellow-600/80 dark:text-yellow-400/80 mt-1">
+                La ejecución fue cancelada por el usuario.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1168,6 +1328,8 @@ interface AssistantMessageProps {
   onReopenDocument?: (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => void;
   minimizedDocument?: { type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null;
   onRestoreDocument?: () => void;
+  onAgentCancel?: (messageId: string, runId: string) => void;
+  onAgentRetry?: (messageId: string, userMessage: string) => void;
 }
 
 const AssistantMessage = memo(function AssistantMessage({
@@ -1193,7 +1355,9 @@ const AssistantMessage = memo(function AssistantMessage({
   onOpenLightbox,
   onReopenDocument,
   minimizedDocument,
-  onRestoreDocument
+  onRestoreDocument,
+  onAgentCancel,
+  onAgentRetry
 }: AssistantMessageProps) {
   const parsedContent = useMemo(() => {
     if (!message.content || message.isThinking) {
@@ -1248,7 +1412,11 @@ const AssistantMessage = memo(function AssistantMessage({
     <div className="flex flex-col gap-2 w-full min-w-0">
       {/* Agent run content - show progress and events */}
       {message.agentRun && (
-        <AgentRunContent agentRun={message.agentRun} />
+        <AgentRunContent 
+          agentRun={message.agentRun}
+          onCancel={message.agentRun.runId && onAgentCancel ? () => onAgentCancel(message.id, message.agentRun!.runId!) : undefined}
+          onRetry={onAgentRetry ? () => onAgentRetry(message.id, message.agentRun?.userMessage || "") : undefined}
+        />
       )}
 
       {message.isThinking && message.steps && (
@@ -1508,6 +1676,8 @@ interface MessageItemProps {
   minimizedDocument?: { type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null;
   onRestoreDocument?: () => void;
   setEditContent: (value: string) => void;
+  onAgentCancel?: (messageId: string, runId: string) => void;
+  onAgentRetry?: (messageId: string, userMessage: string) => void;
 }
 
 const MessageItem = memo(function MessageItem({
@@ -1540,7 +1710,9 @@ const MessageItem = memo(function MessageItem({
   handleReopenDocument,
   minimizedDocument,
   onRestoreDocument,
-  setEditContent
+  setEditContent,
+  onAgentCancel,
+  onAgentRetry
 }: MessageItemProps) {
   return (
     <div
@@ -1612,6 +1784,8 @@ const MessageItem = memo(function MessageItem({
             onReopenDocument={handleReopenDocument}
             minimizedDocument={minimizedDocument}
             onRestoreDocument={onRestoreDocument}
+            onAgentCancel={onAgentCancel}
+            onAgentRetry={onAgentRetry}
           />
         )}
       </div>
@@ -1622,6 +1796,8 @@ const MessageItem = memo(function MessageItem({
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
     prevProps.message.role === nextProps.message.role &&
+    prevProps.message.agentRun?.status === nextProps.message.agentRun?.status &&
+    prevProps.message.agentRun?.eventStream?.length === nextProps.message.agentRun?.eventStream?.length &&
     prevProps.msgIndex === nextProps.msgIndex &&
     prevProps.totalMessages === nextProps.totalMessages &&
     prevProps.variant === nextProps.variant &&
@@ -1671,6 +1847,8 @@ export interface MessageListProps {
   onSelectSuggestedReply?: (text: string) => void;
   parentRef?: React.RefObject<HTMLDivElement>;
   enableVirtualization?: boolean;
+  onAgentCancel?: (messageId: string, runId: string) => void;
+  onAgentRetry?: (messageId: string, userMessage: string) => void;
 }
 
 const VIRTUALIZATION_THRESHOLD = 50;
@@ -1708,7 +1886,9 @@ export function MessageList({
   onRestoreDocument,
   onSelectSuggestedReply,
   parentRef,
-  enableVirtualization = true
+  enableVirtualization = true,
+  onAgentCancel,
+  onAgentRetry
 }: MessageListProps) {
   const internalParentRef = useRef<HTMLDivElement>(null);
   const scrollRef = parentRef || internalParentRef;
@@ -1791,6 +1971,8 @@ export function MessageList({
                 minimizedDocument={minimizedDocument}
                 onRestoreDocument={onRestoreDocument}
                 setEditContent={setEditContent}
+                onAgentCancel={onAgentCancel}
+                onAgentRetry={onAgentRetry}
               />
             </div>
           );
@@ -1939,6 +2121,8 @@ export function MessageList({
           minimizedDocument={minimizedDocument}
           onRestoreDocument={onRestoreDocument}
           setEditContent={setEditContent}
+          onAgentCancel={onAgentCancel}
+          onAgentRetry={onAgentRetry}
         />
       ))}
 
