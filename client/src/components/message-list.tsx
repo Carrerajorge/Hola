@@ -26,7 +26,12 @@ import {
   Minimize2,
   ListPlus,
   Minus,
-  ArrowUp
+  ArrowUp,
+  Bot,
+  Sparkles,
+  Clock,
+  XCircle,
+  AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -969,6 +974,157 @@ const UserMessage = memo(function UserMessage({
   );
 });
 
+interface AgentRunContentProps {
+  agentRun: {
+    runId: string | null;
+    status: "starting" | "running" | "completed" | "failed" | "cancelled";
+    steps: Array<{
+      stepIndex: number;
+      toolName: string;
+      status: string;
+      output?: any;
+      error?: string;
+    }>;
+    eventStream: Array<{
+      type: string;
+      content: any;
+      timestamp: number;
+    }>;
+    summary: string | null;
+    error: string | null;
+  };
+}
+
+const AgentRunContent = memo(function AgentRunContent({ agentRun }: AgentRunContentProps) {
+  const getStatusIcon = () => {
+    switch (agentRun.status) {
+      case "starting":
+      case "running":
+        return <Loader2 className="h-4 w-4 animate-spin text-purple-500" />;
+      case "completed":
+        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+      case "failed":
+        return <XCircle className="h-4 w-4 text-red-500" />;
+      case "cancelled":
+        return <AlertCircle className="h-4 w-4 text-yellow-500" />;
+      default:
+        return <Clock className="h-4 w-4 text-muted-foreground" />;
+    }
+  };
+
+  const getStatusText = () => {
+    switch (agentRun.status) {
+      case "starting": return "Iniciando agente...";
+      case "running": return "Agente trabajando...";
+      case "completed": return "Completado";
+      case "failed": return "Error";
+      case "cancelled": return "Cancelado";
+      default: return agentRun.status;
+    }
+  };
+
+  const getToolDisplayName = (toolName: string) => {
+    const toolNames: Record<string, string> = {
+      analyze_spreadsheet: "Analizando hoja de cálculo",
+      web_search: "Buscando en la web",
+      generate_image: "Generando imagen",
+      browse_url: "Navegando URL",
+      generate_document: "Generando documento",
+      read_file: "Leyendo archivo",
+      write_file: "Escribiendo archivo",
+      shell_command: "Ejecutando comando",
+      list_files: "Listando archivos",
+      respond: "Respondiendo",
+    };
+    return toolNames[toolName] || toolName;
+  };
+
+  return (
+    <div className="flex flex-col gap-3 w-full" data-testid="agent-run-content">
+      {/* Status header */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-purple-500/10 rounded-lg border border-purple-500/20">
+        <Bot className="h-5 w-5 text-purple-500" />
+        <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Modo Agente</span>
+        <div className="flex-1" />
+        {getStatusIcon()}
+        <span className="text-xs text-muted-foreground">{getStatusText()}</span>
+      </div>
+
+      {/* Event stream - show actions and observations */}
+      {agentRun.eventStream && agentRun.eventStream.length > 0 && (
+        <div className="space-y-2 pl-2 border-l-2 border-purple-500/30">
+          {agentRun.eventStream.slice(-10).map((event, idx) => (
+            <div key={idx} className="flex items-start gap-2 text-sm">
+              {event.type === "action" ? (
+                <Sparkles className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              ) : event.type === "observation" ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+              ) : event.type === "error" ? (
+                <XCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+              ) : (
+                <Clock className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <span className={cn(
+                  "text-xs font-medium uppercase tracking-wide",
+                  event.type === "action" && "text-blue-600 dark:text-blue-400",
+                  event.type === "observation" && "text-green-600 dark:text-green-400",
+                  event.type === "error" && "text-red-600 dark:text-red-400"
+                )}>
+                  {event.type === "action" ? "Acción" : event.type === "observation" ? "Resultado" : event.type}
+                </span>
+                <p className="text-muted-foreground text-xs mt-0.5 break-words">
+                  {typeof event.content === "string" 
+                    ? event.content.substring(0, 200) + (event.content.length > 200 ? "..." : "")
+                    : JSON.stringify(event.content).substring(0, 200)}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Steps progress - if no event stream, show steps */}
+      {(!agentRun.eventStream || agentRun.eventStream.length === 0) && agentRun.steps && agentRun.steps.length > 0 && (
+        <div className="space-y-2">
+          {agentRun.steps.map((step, idx) => (
+            <div key={idx} className="flex items-center gap-2 text-sm">
+              {step.status === "succeeded" ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              ) : step.status === "running" ? (
+                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+              ) : step.status === "failed" ? (
+                <XCircle className="h-4 w-4 text-red-500" />
+              ) : (
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              )}
+              <span className={cn(
+                step.status === "pending" && "text-muted-foreground",
+                step.status === "running" && "text-foreground font-medium",
+                step.status === "succeeded" && "text-green-600 dark:text-green-400",
+                step.status === "failed" && "text-red-600 dark:text-red-400"
+              )}>
+                {getToolDisplayName(step.toolName)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error message */}
+      {agentRun.error && (
+        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+          <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+            <XCircle className="h-4 w-4" />
+            <span className="text-sm font-medium">Error</span>
+          </div>
+          <p className="text-sm text-red-600/80 dark:text-red-400/80 mt-1">{agentRun.error}</p>
+        </div>
+      )}
+    </div>
+  );
+});
+
 interface AssistantMessageProps {
   message: Message;
   msgIndex: number;
@@ -1071,6 +1227,11 @@ const AssistantMessage = memo(function AssistantMessage({
 
   return (
     <div className="flex flex-col gap-2 w-full min-w-0">
+      {/* Agent run content - show progress and events */}
+      {message.agentRun && (
+        <AgentRunContent agentRun={message.agentRun} />
+      )}
+
       {message.isThinking && message.steps && (
         <div className="rounded-lg border bg-card p-4 space-y-3 w-full animate-in fade-in slide-in-from-bottom-2">
           <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
