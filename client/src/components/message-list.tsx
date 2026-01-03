@@ -1113,8 +1113,10 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun }: AgentRunCont
 
       {/* Summary/Response - show final response when completed */}
       {agentRun.summary && agentRun.status === "completed" && (
-        <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed">
-          {agentRun.summary}
+        <div className="text-sm leading-relaxed">
+          <MarkdownErrorBoundary>
+            <MarkdownRenderer content={agentRun.summary} />
+          </MarkdownErrorBoundary>
         </div>
       )}
 
