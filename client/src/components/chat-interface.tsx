@@ -2481,16 +2481,24 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
+    console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
     // Don't submit if files are still uploading/processing
     const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
-    if (filesStillLoading) return;
+    if (filesStillLoading) {
+      console.log("[handleSubmit] files still loading, returning");
+      return;
+    }
     
     // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
     const hasInput = input.trim().length > 0;
     const hasFiles = uploadedFiles.length > 0;
     const hasSelectionWithInstruction = selectedDocText && input.trim();
     
-    if (!hasInput && !hasFiles && !hasSelectionWithInstruction) return;
+    console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
+    if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
+      console.log("[handleSubmit] no content to submit, returning");
+      return;
+    }
 
     // Handle Agent mode
     if (selectedTool === "agent") {
@@ -2622,8 +2630,10 @@ export function ChatInterface({
       attachments: attachments.length > 0 ? attachments : undefined,
     };
 
+    console.log("[handleSubmit] sending user message:", userMsg, "chatId:", chatId);
     // Send user message and get run info for SSE streaming
     const messageResult = await onSendMessage(userMsg);
+    console.log("[handleSubmit] messageResult:", messageResult);
     const runInfo = messageResult?.run;
 
     // Check for Google Forms intent
