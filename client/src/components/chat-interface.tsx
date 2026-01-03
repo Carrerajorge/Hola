@@ -2605,7 +2605,7 @@ export function ChatInterface({
           // Navigate to new chat if created
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
             console.log("[Agent Mode] Navigating to chat:", result.chatId);
-            window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId } }));
+            window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
           }
           
           // Start polling for updates - track last data to avoid unnecessary re-renders

@@ -136,11 +136,22 @@ export default function Home() {
   }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
 
   // Listen for select-chat custom event (used by Agent Mode navigation)
+  // This event is used when agent creates a new chat - we need to preserve the stable key
+  // to prevent component remount which would lose the agent run state
   useEffect(() => {
-    const handleSelectChatEvent = (event: CustomEvent<{ chatId: string }>) => {
-      const { chatId } = event.detail;
+    const handleSelectChatEvent = (event: CustomEvent<{ chatId: string; preserveKey?: boolean }>) => {
+      const { chatId, preserveKey } = event.detail;
       if (chatId) {
-        handleSelectChatWithClear(chatId);
+        // For agent mode navigation, don't reset the stable key - just update the active chat ID
+        // This prevents component remount and preserves agent run state
+        handleClearPendingCount(chatId);
+        setIsNewChatMode(false);
+        // Only reset stableKey if not preserving (for regular navigation)
+        if (!preserveKey) {
+          setNewChatStableKey(null);
+        }
+        setActiveChatId(chatId);
+        setAiProcessSteps([]);
       }
     };
     
@@ -148,7 +159,7 @@ export default function Home() {
     return () => {
       window.removeEventListener("select-chat", handleSelectChatEvent as EventListener);
     };
-  }, [handleSelectChatWithClear]);
+  }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
 
   const handleNewChat = () => {
     // Keep processing state for background chats - don't clear processingChatIds
