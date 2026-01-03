@@ -183,6 +183,10 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         const workspaceFiles = orchestrator?.getWorkspaceFiles ? 
           Object.fromEntries(orchestrator.getWorkspaceFiles()) : {};
 
+        // Get conversational response from plan if available
+        const conversationalResponse = (progress.plan as any)?.conversationalResponse;
+        const summary = conversationalResponse || null;
+
         return res.json({
           id: progress.runId,
           chatId: "",
@@ -201,7 +205,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
           eventStream: eventStream,
           todoList: todoList,
           workspaceFiles: workspaceFiles,
-          summary: null,
+          summary: summary,
           error: progress.error || null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()

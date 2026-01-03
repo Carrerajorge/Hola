@@ -1111,6 +1111,13 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun }: AgentRunCont
         </div>
       )}
 
+      {/* Summary/Response - show final response when completed */}
+      {agentRun.summary && agentRun.status === "completed" && (
+        <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed">
+          {agentRun.summary}
+        </div>
+      )}
+
       {/* Error message */}
       {agentRun.error && (
         <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
@@ -1119,6 +1126,16 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun }: AgentRunCont
             <span className="text-sm font-medium">Error</span>
           </div>
           <p className="text-sm text-red-600/80 dark:text-red-400/80 mt-1">{agentRun.error}</p>
+        </div>
+      )}
+
+      {/* Loading indicator for starting/running without steps */}
+      {(agentRun.status === "starting" || agentRun.status === "running") && 
+       (!agentRun.steps || agentRun.steps.length === 0) && 
+       (!agentRun.eventStream || agentRun.eventStream.length === 0) && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>Procesando tu mensaje...</span>
         </div>
       )}
     </div>
