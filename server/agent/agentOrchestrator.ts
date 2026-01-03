@@ -23,6 +23,8 @@ export type AgentStatus =
   | "running"
   | "verifying"
   | "replanning"
+  | "paused"
+  | "cancelling"
   | "completed"
   | "failed"
   | "cancelled";

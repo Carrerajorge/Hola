@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
-export type AgentModeStatus = 'idle' | 'queued' | 'planning' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AgentModeStatus = 'idle' | 'queued' | 'planning' | 'running' | 'verifying' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
 
 export interface AgentPlanStep {
   index: number;
@@ -208,9 +208,13 @@ export function useAgentMode(chatId: string) {
     }
   });
 
+  const preCancelStatusRef = useRef<AgentModeStatus>('idle');
+
   const cancelRunMutation = useMutation({
     mutationFn: async () => {
       if (!state.runId) throw new Error('No active run to cancel');
+      preCancelStatusRef.current = state.status;
+      setState(prev => ({ ...prev, status: 'cancelling' }));
       await apiRequest('POST', `/api/agent/runs/${state.runId}/cancel`);
     },
     onSuccess: () => {
@@ -224,6 +228,48 @@ export function useAgentMode(chatId: string) {
     },
     onError: (error: Error) => {
       console.error('Failed to cancel run:', error);
+      setState(prev => ({ 
+        ...prev, 
+        status: prev.status === 'cancelling' ? preCancelStatusRef.current : prev.status 
+      }));
+    }
+  });
+
+  const pauseRunMutation = useMutation({
+    mutationFn: async () => {
+      if (!state.runId) throw new Error('No active run to pause');
+      await apiRequest('POST', `/api/agent/runs/${state.runId}/pause`);
+    },
+    onSuccess: () => {
+      setState(prev => ({
+        ...prev,
+        status: 'paused'
+      }));
+      if (state.runId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/agent/runs', state.runId] });
+      }
+    },
+    onError: (error: Error) => {
+      console.error('Failed to pause run:', error);
+    }
+  });
+
+  const resumeRunMutation = useMutation({
+    mutationFn: async () => {
+      if (!state.runId) throw new Error('No paused run to resume');
+      await apiRequest('POST', `/api/agent/runs/${state.runId}/resume`);
+    },
+    onSuccess: () => {
+      setState(prev => ({
+        ...prev,
+        status: 'running'
+      }));
+      if (state.runId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/agent/runs', state.runId] });
+      }
+    },
+    onError: (error: Error) => {
+      console.error('Failed to resume run:', error);
     }
   });
 
@@ -284,11 +330,20 @@ export function useAgentMode(chatId: string) {
     await cancelRunMutation.mutateAsync();
   }, [cancelRunMutation]);
 
+  const pauseRun = useCallback(async (): Promise<void> => {
+    await pauseRunMutation.mutateAsync();
+  }, [pauseRunMutation]);
+
+  const resumeRun = useCallback(async (): Promise<void> => {
+    await resumeRunMutation.mutateAsync();
+  }, [resumeRunMutation]);
+
   const retryRun = useCallback(async (): Promise<void> => {
     await retryRunMutation.mutateAsync();
   }, [retryRunMutation]);
 
-  const isRunning = ['queued', 'planning', 'running'].includes(state.status);
+  const isRunning = ['queued', 'planning', 'running', 'verifying'].includes(state.status);
+  const isCancellable = ['queued', 'planning', 'running', 'verifying', 'paused'].includes(state.status);
 
   return {
     runId: state.runId,
@@ -302,7 +357,10 @@ export function useAgentMode(chatId: string) {
     createdChatId: state.createdChatId,
     startRun,
     cancelRun,
+    pauseRun,
+    resumeRun,
     retryRun,
-    isRunning
+    isRunning,
+    isCancellable
   };
 }

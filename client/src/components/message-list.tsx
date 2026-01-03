@@ -981,7 +981,7 @@ const UserMessage = memo(function UserMessage({
 interface AgentRunContentProps {
   agentRun: {
     runId: string | null;
-    status: "starting" | "running" | "completed" | "failed" | "cancelled" | "queued" | "planning";
+    status: "starting" | "running" | "completed" | "failed" | "cancelled" | "queued" | "planning" | "verifying" | "paused" | "cancelling";
     userMessage?: string;
     steps: Array<{
       stepIndex: number;
@@ -1000,14 +1000,19 @@ interface AgentRunContentProps {
   };
   onCancel?: () => void;
   onRetry?: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
 }
 
-const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRetry }: AgentRunContentProps) {
+const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRetry, onPause, onResume }: AgentRunContentProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [showAllEvents, setShowAllEvents] = useState(false);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   
-  const isActive = ["starting", "running", "queued", "planning"].includes(agentRun.status);
+  const isCancellable = ["starting", "running", "queued", "planning", "verifying", "paused"].includes(agentRun.status);
+  const isActive = ["starting", "running", "queued", "planning", "verifying", "cancelling"].includes(agentRun.status);
+  const isPaused = agentRun.status === "paused";
+  const isCancelling = agentRun.status === "cancelling";
   
   useEffect(() => {
     if (isActive && eventsEndRef.current) {
@@ -1024,6 +1029,12 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
         return <Sparkles className="h-4 w-4 animate-pulse text-purple-500" />;
       case "running":
         return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
+      case "verifying":
+        return <Eye className="h-4 w-4 animate-pulse text-purple-500" />;
+      case "paused":
+        return <Clock className="h-4 w-4 text-yellow-500" />;
+      case "cancelling":
+        return <Loader2 className="h-4 w-4 animate-spin text-red-500" />;
       case "completed":
         return <CheckCircle2 className="h-4 w-4 text-green-500" />;
       case "failed":
@@ -1041,6 +1052,9 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
       case "queued": return "En cola...";
       case "planning": return "Planificando...";
       case "running": return "Ejecutando...";
+      case "verifying": return "Verificando...";
+      case "paused": return "Pausado";
+      case "cancelling": return "Cancelando...";
       case "completed": return "Completado";
       case "failed": return "Error";
       case "cancelled": return "Cancelado";
@@ -1110,19 +1124,60 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
 
       {isExpanded && (
         <div className="space-y-3">
-          {/* Cancel button for active runs */}
-          {isActive && onCancel && (
-            <div className="flex justify-end">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onCancel}
-                className="text-xs text-muted-foreground hover:text-red-500"
-                data-testid="button-cancel-agent"
-              >
-                <XCircle className="h-3 w-3 mr-1" />
-                Cancelar
-              </Button>
+          {/* Action buttons for runs */}
+          {(isCancellable || isPaused) && (
+            <div className="flex justify-end gap-2">
+              {isPaused && onResume && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onResume}
+                  className="text-xs text-muted-foreground hover:text-green-500"
+                  data-testid="button-resume-agent"
+                >
+                  <RefreshCw className="h-3 w-3 mr-1" />
+                  Reanudar
+                </Button>
+              )}
+              {!isPaused && !isCancelling && isActive && onPause && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onPause}
+                  className="text-xs text-muted-foreground hover:text-yellow-500"
+                  data-testid="button-pause-agent"
+                >
+                  <Clock className="h-3 w-3 mr-1" />
+                  Pausar
+                </Button>
+              )}
+              {isCancellable && onCancel && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onCancel}
+                  disabled={isCancelling}
+                  className={cn(
+                    "text-xs",
+                    isCancelling 
+                      ? "text-red-400 cursor-not-allowed" 
+                      : "text-muted-foreground hover:text-red-500"
+                  )}
+                  data-testid="button-cancel-agent"
+                >
+                  {isCancelling ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      Cancelando...
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="h-3 w-3 mr-1" />
+                      Cancelar
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           )}
 

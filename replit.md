@@ -34,6 +34,7 @@ Preferred communication style: Simple, everyday language.
 - **Agent Mode UI**: "Computer" view in agent panel showing real-time events, todo list with status indicators, and workspace files browser.
 - **Agent Mode Limitations (MVP)**: Event stream, todo list, and workspace files are stored in-memory only during active runs. Data is not persisted to database after run completion (future enhancement planned).
 - **Agent Event Schema**: Standardized event schema with `kind` (action/observation/verification/error/plan/thinking/progress/result), `status` (ok/warn/fail), `title`, `summary`, `confidence`, and `payload` fields. Events are normalized by `normalizeAgentEvent()` mapper for human-readable UI rendering with collapsible JSON details.
+- **Agent Cancellation System**: Robust cancellation with AbortController/CancellationToken propagated end-to-end. States: queued → planning → running → verifying → completed|failed|cancelled, with intermediate states `paused` and `cancelling`. Cancel button always active during active states (queued, planning, running, verifying, paused). Guarantees: (1) No tool calls after cancel request, (2) Cleanup handlers invoked for Playwright contexts/fetch/sandbox, (3) Events `run_cancel_requested` and `run_cancelled` emitted, (4) Status persisted with `cancel_requested_at` and `ended_at` timestamps. Pause/Resume supported via POST /api/agent/runs/:id/pause and /resume endpoints.
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt and multi-tenant validation.

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export type AgentRunStatus = 'idle' | 'starting' | 'queued' | 'planning' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AgentRunStatus = 'idle' | 'starting' | 'queued' | 'planning' | 'running' | 'verifying' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
 
 export interface AgentEvent {
   type: 'action' | 'observation' | 'error' | 'thinking';
