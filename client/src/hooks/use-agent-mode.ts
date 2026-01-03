@@ -165,8 +165,21 @@ export function useAgentMode(chatId: string) {
 
   const startRunMutation = useMutation({
     mutationFn: async ({ message, attachments }: { message: string; attachments?: any[] }) => {
+      let resolvedChatId = chatId;
+      
+      // If chatId is pending or empty, create a new chat first
+      if (!chatId || chatId.startsWith("pending-") || chatId === "") {
+        const chatRes = await apiRequest('POST', `/api/chats`, {
+          title: message.substring(0, 50) + (message.length > 50 ? "..." : ""),
+          model: "gemini-3-flash-preview",
+          provider: "google"
+        });
+        const newChat = await chatRes.json();
+        resolvedChatId = newChat.id;
+      }
+      
       const res = await apiRequest('POST', `/api/agent/runs`, {
-        chatId: chatId || "",
+        chatId: resolvedChatId,
         message,
         attachments
       });
@@ -217,8 +230,20 @@ export function useAgentMode(chatId: string) {
   const retryRunMutation = useMutation({
     mutationFn: async () => {
       if (!lastMessageRef.current) throw new Error('No previous message to retry');
+      
+      let resolvedChatId = chatId;
+      if (!chatId || chatId.startsWith("pending-") || chatId === "") {
+        const chatRes = await apiRequest('POST', `/api/chats`, {
+          title: lastMessageRef.current.substring(0, 50) + (lastMessageRef.current.length > 50 ? "..." : ""),
+          model: "gemini-3-flash-preview",
+          provider: "google"
+        });
+        const newChat = await chatRes.json();
+        resolvedChatId = newChat.id;
+      }
+      
       const res = await apiRequest('POST', `/api/agent/runs`, {
-        chatId: chatId || "",
+        chatId: resolvedChatId,
         message: lastMessageRef.current,
         attachments: lastAttachmentsRef.current
       });
