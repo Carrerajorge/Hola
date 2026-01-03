@@ -2631,7 +2631,7 @@ export function ChatInterface({
                     msg.id === agentMessageId 
                       ? { 
                           ...msg, 
-                          content: runData.summary || "",
+                          // Don't set content - AgentRunContent will render summary from agentRun
                           agentRun: {
                             runId: result.runId,
                             status: runData.status,

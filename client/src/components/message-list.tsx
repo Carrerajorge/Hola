@@ -1281,7 +1281,7 @@ const AssistantMessage = memo(function AssistantMessage({
         </div>
       )}
 
-      {message.content && !message.isThinking && (
+      {message.content && !message.isThinking && !message.agentRun && (
         <>
           {contentBlocks.map((block, blockIdx) =>
             block.type === "python" ? (
