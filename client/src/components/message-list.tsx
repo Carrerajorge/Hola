@@ -68,6 +68,9 @@ import { SuggestedReplies, generateSuggestions } from "@/components/suggested-re
 import { getFileTheme, getFileCategory } from "@/lib/fileTypeTheme";
 import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResults";
+import { normalizeAgentEvent, hasPayloadDetails, type MappedAgentEvent } from "@/lib/agent-event-mapper";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Eye, Brain, List } from "lucide-react";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -1064,27 +1067,28 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
     return toolNames[toolName] || toolName;
   };
 
-  const formatEventContent = (event: { type: string; content: any }) => {
-    if (typeof event.content === "string") {
-      return event.content.length > 300 ? event.content.substring(0, 300) + "..." : event.content;
-    }
-    if (event.content?.type === "conversational_response") {
-      return event.content.response || "Respuesta generada";
-    }
-    if (event.content?.type === "start_planning") {
-      return `Analizando: "${event.content.userMessage?.substring(0, 100) || "..."}"`;
-    }
-    if (event.content?.type) {
-      return getToolDisplayName(event.content.type);
-    }
-    const jsonStr = JSON.stringify(event.content);
-    return jsonStr.length > 200 ? jsonStr.substring(0, 200) + "..." : jsonStr;
-  };
+  const mappedEvents = useMemo(() => {
+    return (agentRun.eventStream || []).map(event => normalizeAgentEvent(event));
+  }, [agentRun.eventStream]);
 
   const visibleEvents = showAllEvents 
-    ? agentRun.eventStream 
-    : agentRun.eventStream?.slice(-5) || [];
-  const hiddenEventsCount = (agentRun.eventStream?.length || 0) - visibleEvents.length;
+    ? mappedEvents 
+    : mappedEvents.slice(-5);
+  const hiddenEventsCount = mappedEvents.length - visibleEvents.length;
+
+  const getEventIcon = (event: MappedAgentEvent) => {
+    const iconClass = cn("h-3 w-3", event.ui.iconColor);
+    switch (event.ui.icon) {
+      case 'sparkles': return <Sparkles className={iconClass} />;
+      case 'check': return <CheckCircle2 className={iconClass} />;
+      case 'alert': return <XCircle className={iconClass} />;
+      case 'list': return <List className={iconClass} />;
+      case 'eye': return <Eye className={iconClass} />;
+      case 'brain': return <Brain className={iconClass} />;
+      case 'loader': return <Loader2 className={cn(iconClass, "animate-spin")} />;
+      default: return <Clock className={iconClass} />;
+    }
+  };
 
   return (
     <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-bottom-2 duration-300" data-testid="agent-run-content">
@@ -1122,13 +1126,14 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
             </div>
           )}
 
-          {/* Event timeline - Manus style */}
-          {agentRun.eventStream && agentRun.eventStream.length > 0 && (
-            <div className="relative">
+          {/* Event timeline - Manus style with human-readable cards */}
+          {mappedEvents.length > 0 && (
+            <div className="relative" data-testid="agent-event-timeline">
               {hiddenEventsCount > 0 && !showAllEvents && (
                 <button
                   onClick={() => setShowAllEvents(true)}
                   className="text-xs text-purple-500 hover:text-purple-600 mb-2 flex items-center gap-1"
+                  data-testid="button-show-all-events"
                 >
                   <ChevronDown className="h-3 w-3" />
                   Ver {hiddenEventsCount} eventos anteriores
@@ -1137,40 +1142,42 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
               <div className="space-y-1.5 pl-3 border-l-2 border-purple-500/30">
                 {visibleEvents.map((event, idx) => {
                   const isLast = idx === visibleEvents.length - 1;
+                  const showDetails = hasPayloadDetails(event);
                   return (
                     <div 
-                      key={`${event.timestamp}-${idx}`} 
+                      key={event.id} 
                       className={cn(
                         "flex items-start gap-2 text-sm py-1.5 px-2 rounded-md transition-all",
                         isLast && isActive && "bg-purple-500/5 border-l-2 border-purple-500 -ml-[11px] pl-[9px]"
                       )}
+                      data-testid={`agent-event-${event.kind}-${event.status}`}
                     >
                       <div className={cn(
                         "w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0",
-                        event.type === "action" && "bg-blue-500/20",
-                        event.type === "observation" && "bg-green-500/20",
-                        event.type === "error" && "bg-red-500/20"
+                        event.ui.bgColor
                       )}>
-                        {event.type === "action" ? (
-                          <Sparkles className="h-3 w-3 text-blue-500" />
-                        ) : event.type === "observation" ? (
-                          <CheckCircle2 className="h-3 w-3 text-green-500" />
-                        ) : event.type === "error" ? (
-                          <XCircle className="h-3 w-3 text-red-500" />
-                        ) : (
-                          <Clock className="h-3 w-3 text-muted-foreground" />
-                        )}
+                        {getEventIcon(event)}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={cn(
-                            "text-xs font-semibold uppercase tracking-wide",
-                            event.type === "action" && "text-blue-600 dark:text-blue-400",
-                            event.type === "observation" && "text-green-600 dark:text-green-400",
-                            event.type === "error" && "text-red-600 dark:text-red-400"
-                          )}>
-                            {event.type === "action" ? "Acción" : event.type === "observation" ? "Resultado" : "Error"}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={cn("text-xs font-semibold uppercase tracking-wide", event.ui.labelColor)}>
+                            {event.ui.label}
                           </span>
+                          {event.status === 'ok' && event.kind !== 'action' && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-600 dark:text-green-400 text-[10px] font-medium">
+                              ✓
+                            </span>
+                          )}
+                          {event.status === 'warn' && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-[10px] font-medium">
+                              ⚠
+                            </span>
+                          )}
+                          {event.confidence !== undefined && (
+                            <span className="text-[10px] text-muted-foreground">
+                              {Math.round(event.confidence * 100)}%
+                            </span>
+                          )}
                           {isLast && isActive && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[10px] font-medium">
                               <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
@@ -1178,9 +1185,27 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
                             </span>
                           )}
                         </div>
-                        <p className="text-muted-foreground text-xs mt-0.5 break-words leading-relaxed">
-                          {formatEventContent(event)}
+                        <p className="text-foreground text-xs mt-0.5 break-words leading-relaxed font-medium">
+                          {event.title}
                         </p>
+                        {event.summary && (
+                          <p className="text-muted-foreground text-xs mt-0.5 break-words leading-relaxed">
+                            {event.summary}
+                          </p>
+                        )}
+                        {showDetails && (
+                          <Collapsible className="mt-1">
+                            <CollapsibleTrigger className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1">
+                              <ChevronDown className="h-2.5 w-2.5" />
+                              Ver detalles
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
+                              <pre className="mt-1 p-2 bg-muted/50 rounded text-[10px] overflow-x-auto max-h-32 overflow-y-auto">
+                                {JSON.stringify(event.payload, null, 2)}
+                              </pre>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        )}
                       </div>
                     </div>
                   );

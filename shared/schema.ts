@@ -2250,3 +2250,69 @@ export const insertAgentWorkspaceSchema = createInsertSchema(agentWorkspaces).om
 
 export type InsertAgentWorkspace = z.infer<typeof insertAgentWorkspaceSchema>;
 export type AgentWorkspace = typeof agentWorkspaces.$inferSelect;
+
+// ==========================================
+// Agent Event Schema - Standardized Contract
+// ==========================================
+
+export const AgentEventKindSchema = z.enum([
+  'action',
+  'observation', 
+  'result',
+  'verification',
+  'error',
+  'plan',
+  'thinking',
+  'progress'
+]);
+
+export const AgentEventStatusSchema = z.enum(['ok', 'warn', 'fail']);
+
+export const AgentEventPhaseSchema = z.enum([
+  'planning',
+  'executing', 
+  'verifying',
+  'completed',
+  'failed',
+  'cancelled'
+]);
+
+export const AgentEventSchema = z.object({
+  id: z.string().uuid().optional(),
+  kind: AgentEventKindSchema,
+  status: AgentEventStatusSchema,
+  runId: z.string(),
+  stepId: z.string().optional(),
+  stepIndex: z.number().optional(),
+  phase: AgentEventPhaseSchema.optional(),
+  title: z.string(),
+  summary: z.string().optional(),
+  payload: z.any().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  shouldRetry: z.boolean().optional(),
+  shouldReplan: z.boolean().optional(),
+  timestamp: z.number(),
+  metadata: z.record(z.any()).optional(),
+});
+
+export type AgentEventKind = z.infer<typeof AgentEventKindSchema>;
+export type AgentEventStatus = z.infer<typeof AgentEventStatusSchema>;
+export type AgentEventPhase = z.infer<typeof AgentEventPhaseSchema>;
+export type AgentEvent = z.infer<typeof AgentEventSchema>;
+
+export function createAgentEvent(
+  kind: AgentEventKind,
+  status: AgentEventStatus,
+  runId: string,
+  title: string,
+  options?: Partial<Omit<AgentEvent, 'kind' | 'status' | 'runId' | 'title' | 'timestamp'>>
+): AgentEvent {
+  return AgentEventSchema.parse({
+    kind,
+    status,
+    runId,
+    title,
+    timestamp: Date.now(),
+    ...options,
+  });
+}
