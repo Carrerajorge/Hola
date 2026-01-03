@@ -2226,3 +2226,27 @@ export const insertAgentModeEventSchema = createInsertSchema(agentModeEvents).om
 
 export type InsertAgentModeEvent = z.infer<typeof insertAgentModeEventSchema>;
 export type AgentModeEvent = typeof agentModeEvents.$inferSelect;
+
+export const agentWorkspaces = pgTable("agent_workspaces", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => agentModeRuns.id, { onDelete: "cascade" }),
+  filePath: text("file_path").notNull(), // e.g., "todo.md", "output/report.xlsx"
+  fileType: text("file_type").notNull(), // "todo", "artifact", "temp", "memory"
+  content: text("content"), // text content for small files
+  storagePath: text("storage_path"), // object storage path for large files
+  metadata: jsonb("metadata"), // additional metadata
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("agent_workspaces_run_idx").on(table.runId),
+  index("agent_workspaces_path_idx").on(table.runId, table.filePath),
+]);
+
+export const insertAgentWorkspaceSchema = createInsertSchema(agentWorkspaces).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAgentWorkspace = z.infer<typeof insertAgentWorkspaceSchema>;
+export type AgentWorkspace = typeof agentWorkspaces.$inferSelect;
