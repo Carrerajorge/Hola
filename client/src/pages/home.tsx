@@ -207,13 +207,11 @@ export default function Home() {
     return [];
   }, [activeChat?.messages, chats]);
 
-  // Local messages state for agent mode updates (syncs with currentMessages)
-  const [displayMessages, setDisplayMessages] = useState<Message[]>([]);
-  
-  // Sync displayMessages with currentMessages when it changes
-  useEffect(() => {
-    setDisplayMessages(currentMessages);
-  }, [currentMessages]);
+  // Dummy setMessages for ChatInterface - Agent Mode uses its own internal state
+  // We pass messages as read-only from currentMessages
+  const noopSetMessages = useCallback(() => {
+    // No-op - Agent Mode will manage its own local state for real-time updates
+  }, []);
 
   const handleOpenGpts = () => {
     setIsGptExplorerOpen(true);
@@ -435,8 +433,8 @@ export default function Home() {
         ) : (activeChat || isNewChatMode || chats.length === 0) && (
           <ChatInterface 
             key={chatInterfaceKey} 
-            messages={displayMessages}
-            setMessages={setDisplayMessages}
+            messages={currentMessages}
+            setMessages={noopSetMessages}
             onSendMessage={handleSendMessage}
             isSidebarOpen={isSidebarOpen} 
             onToggleSidebar={() => setIsSidebarOpen(true)}

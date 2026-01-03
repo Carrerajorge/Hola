@@ -938,6 +938,32 @@ export function ChatInterface({
   
   const agentMode = useAgentMode(chatId || "");
   
+  // Local state for Agent Mode messages to avoid infinite loops with parent state
+  const [localAgentMessages, setLocalAgentMessages] = useState<Message[]>([]);
+  const localAgentMessagesRef = useRef<Message[]>([]);
+  
+  // Combined messages: prop messages + local agent messages
+  const displayMessages = useMemo(() => {
+    if (localAgentMessages.length === 0) return messages;
+    // Merge: take prop messages and add/update local agent messages
+    const msgMap = new Map(messages.map(m => [m.id, m]));
+    localAgentMessages.forEach(m => msgMap.set(m.id, m));
+    return Array.from(msgMap.values()).sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  }, [messages, localAgentMessages]);
+  
+  // Reset local agent messages when messages prop changes significantly (new chat)
+  const lastMsgCountRef = useRef(messages.length);
+  useEffect(() => {
+    // If messages from prop decreased (new chat or clear), reset local state
+    if (messages.length < lastMsgCountRef.current) {
+      setLocalAgentMessages([]);
+      localAgentMessagesRef.current = [];
+    }
+    lastMsgCountRef.current = messages.length;
+  }, [messages.length]);
+  
   const { availableModels, isLoading: isModelsLoading, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
   
   const selectedModelData = useMemo(() => {
@@ -1158,14 +1184,14 @@ export function ChatInterface({
 
   // Always scroll to bottom when new messages arrive
   useEffect(() => {
-    if (messages.length > 0) {
+    if (displayMessages.length > 0) {
       // Reset user scroll state when AI finishes responding
       if (aiState === "idle" && !streamingContent) {
         setUserHasScrolledUp(false);
       }
       scrollToBottom();
     }
-  }, [messages.length]);
+  }, [displayMessages.length]);
 
   useEffect(() => {
     return () => {
@@ -2525,14 +2551,18 @@ export function ChatInterface({
         setUploadedFiles([]);
         setSelectedTool(null);
         
-        // Add user message to chat
+        // Add user message to chat - use local state to avoid infinite loops
         const userMessage: Message = {
           id: `user-${Date.now()}`,
           role: "user",
           content: userMessageContent,
           timestamp: new Date(),
         };
-        setMessages(prev => [...prev, userMessage]);
+        setLocalAgentMessages(prev => {
+          const updated = [...prev, userMessage];
+          localAgentMessagesRef.current = updated;
+          return updated;
+        });
         
         // Create placeholder agent message
         const agentMessageId = `agent-${Date.now()}`;
@@ -2550,7 +2580,11 @@ export function ChatInterface({
             error: null,
           }
         };
-        setMessages(prev => [...prev, agentMessage]);
+        setLocalAgentMessages(prev => {
+          const updated = [...prev, agentMessage];
+          localAgentMessagesRef.current = updated;
+          return updated;
+        });
         
         console.log("[Agent Mode] Starting run with input:", userMessageContent);
         const result = await agentMode.startRun(userMessageContent, attachments);
@@ -2558,11 +2592,15 @@ export function ChatInterface({
         
         if (result.runId) {
           // Update agent message with runId
-          setMessages(prev => prev.map(msg => 
-            msg.id === agentMessageId 
-              ? { ...msg, agentRun: { ...msg.agentRun!, runId: result.runId, status: "running" } }
-              : msg
-          ));
+          setLocalAgentMessages(prev => {
+            const updated = prev.map(msg => 
+              msg.id === agentMessageId 
+                ? { ...msg, agentRun: { ...msg.agentRun!, runId: result.runId, status: "running" } }
+                : msg
+            );
+            localAgentMessagesRef.current = updated;
+            return updated;
+          });
           
           // Navigate to new chat if created
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
@@ -2570,28 +2608,45 @@ export function ChatInterface({
             window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId } }));
           }
           
-          // Start polling for updates
+          // Start polling for updates - track last data to avoid unnecessary re-renders
+          let lastRunDataJSON = "";
           const pollInterval = setInterval(async () => {
             try {
               const response = await fetch(`/api/agent/runs/${result.runId}`);
               const runData = await response.json();
               
-              setMessages(prev => prev.map(msg => 
-                msg.id === agentMessageId 
-                  ? { 
-                      ...msg, 
-                      content: runData.summary || "",
-                      agentRun: {
-                        runId: result.runId,
-                        status: runData.status,
-                        steps: runData.steps || [],
-                        eventStream: runData.eventStream || [],
-                        summary: runData.summary,
-                        error: runData.error,
-                      }
-                    }
-                  : msg
-              ));
+              // Compare with last data to avoid unnecessary state updates
+              const runDataJSON = JSON.stringify({
+                status: runData.status,
+                summary: runData.summary,
+                error: runData.error,
+                stepsLength: runData.steps?.length || 0,
+                eventStreamLength: runData.eventStream?.length || 0,
+              });
+              
+              if (runDataJSON !== lastRunDataJSON) {
+                lastRunDataJSON = runDataJSON;
+                setLocalAgentMessages(prev => {
+                  const updated = prev.map(msg => 
+                    msg.id === agentMessageId 
+                      ? { 
+                          ...msg, 
+                          content: runData.summary || "",
+                          agentRun: {
+                            runId: result.runId,
+                            status: runData.status,
+                            steps: runData.steps || [],
+                            eventStream: runData.eventStream || [],
+                            summary: runData.summary,
+                            error: runData.error,
+                          }
+                        }
+                      : msg
+                  );
+                  localAgentMessagesRef.current = updated;
+                  return updated;
+                });
+              }
               
               // Stop polling when complete
               if (["completed", "failed", "cancelled"].includes(runData.status)) {
@@ -3567,7 +3622,7 @@ IMPORTANTE:
     }
   };
 
-  const hasMessages = messages.length > 0;
+  const hasMessages = displayMessages.length > 0;
 
   return (
     <div className="flex h-full flex-col bg-transparent relative">
@@ -3804,7 +3859,7 @@ IMPORTANTE:
               style={{ paddingBottom: 'var(--composer-height, 120px)' }}
             >
               <MessageList
-                messages={messages}
+                messages={displayMessages}
                 variant={activeDocEditor ? "compact" : "default"}
                 editingMessageId={editingMessageId}
                 editContent={editContent}
@@ -4053,7 +4108,7 @@ IMPORTANTE:
                 className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
               >
                 <MessageList
-                  messages={messages}
+                  messages={displayMessages}
                   variant="default"
                   editingMessageId={editingMessageId}
                   editContent={editContent}
