@@ -196,6 +196,14 @@ function WorkspaceContent() {
     return [];
   }, [activeChat?.messages, chats]);
 
+  // Local messages state for agent mode updates (syncs with currentMessages)
+  const [displayMessages, setDisplayMessages] = useState<Message[]>([]);
+  
+  // Sync displayMessages with currentMessages when it changes
+  useEffect(() => {
+    setDisplayMessages(currentMessages);
+  }, [currentMessages]);
+
   useKeyboardShortcuts([
     {
       key: "n",
@@ -276,7 +284,8 @@ function WorkspaceContent() {
           <div className="flex-1 flex flex-col">
             <ChatInterface
               key={chatInterfaceKey}
-              messages={currentMessages}
+              messages={displayMessages}
+              setMessages={setDisplayMessages}
               onSendMessage={handleSendMessage}
               chatId={activeChat?.id || pendingChatIdRef.current}
               aiState={aiState}
@@ -347,7 +356,8 @@ function WorkspaceContent() {
               >
                 <ChatInterface
                   key={chatInterfaceKey}
-                  messages={currentMessages}
+                  messages={displayMessages}
+                  setMessages={setDisplayMessages}
                   onSendMessage={handleSendMessage}
                   chatId={activeChat?.id || pendingChatIdRef.current}
                   aiState={aiState}

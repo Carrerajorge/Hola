@@ -789,6 +789,7 @@ type AiProcessStep = { step: string; status: "pending" | "active" | "done" };
 
 interface ChatInterfaceProps {
   messages: Message[];
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onSendMessage: (message: Message) => Promise<{ run?: { id: string; chatId: string; userMessageId: string; status: string }; deduplicated?: boolean } | undefined>;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
@@ -862,6 +863,7 @@ async function triggerDocumentAnalysis(
 
 export function ChatInterface({ 
   messages, 
+  setMessages,
   onSendMessage, 
   isSidebarOpen = true, 
   onToggleSidebar,
@@ -2507,29 +2509,99 @@ export function ChatInterface({
       return;
     }
 
-    // Handle Agent mode
+    // Handle Agent mode - show in chat, not side panel
     if (selectedTool === "agent") {
       try {
+        const userMessageContent = input;
         const attachments = uploadedFiles.map(f => ({
           id: f.id,
           name: f.name,
           type: f.type,
           spreadsheetData: f.spreadsheetData
         }));
-        console.log("[Agent Mode] Starting run with input:", input);
-        const result = await agentMode.startRun(input, attachments);
+        
+        // Clear input immediately
+        setInput("");
+        setUploadedFiles([]);
+        setSelectedTool(null);
+        
+        // Add user message to chat
+        const userMessage: Message = {
+          id: `user-${Date.now()}`,
+          role: "user",
+          content: userMessageContent,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, userMessage]);
+        
+        // Create placeholder agent message
+        const agentMessageId = `agent-${Date.now()}`;
+        const agentMessage: Message = {
+          id: agentMessageId,
+          role: "assistant",
+          content: "",
+          timestamp: new Date(),
+          agentRun: {
+            runId: null,
+            status: "starting",
+            steps: [],
+            eventStream: [],
+            summary: null,
+            error: null,
+          }
+        };
+        setMessages(prev => [...prev, agentMessage]);
+        
+        console.log("[Agent Mode] Starting run with input:", userMessageContent);
+        const result = await agentMode.startRun(userMessageContent, attachments);
         console.log("[Agent Mode] Run result:", result);
+        
         if (result.runId) {
-          setIsAgentPanelOpen(true);
-          // Navigate to the newly created chat if agent mode created one
+          // Update agent message with runId
+          setMessages(prev => prev.map(msg => 
+            msg.id === agentMessageId 
+              ? { ...msg, agentRun: { ...msg.agentRun!, runId: result.runId, status: "running" } }
+              : msg
+          ));
+          
+          // Navigate to new chat if created
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
             console.log("[Agent Mode] Navigating to chat:", result.chatId);
             window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId } }));
           }
+          
+          // Start polling for updates
+          const pollInterval = setInterval(async () => {
+            try {
+              const response = await fetch(`/api/agent/runs/${result.runId}`);
+              const runData = await response.json();
+              
+              setMessages(prev => prev.map(msg => 
+                msg.id === agentMessageId 
+                  ? { 
+                      ...msg, 
+                      content: runData.summary || "",
+                      agentRun: {
+                        runId: result.runId,
+                        status: runData.status,
+                        steps: runData.steps || [],
+                        eventStream: runData.eventStream || [],
+                        summary: runData.summary,
+                        error: runData.error,
+                      }
+                    }
+                  : msg
+              ));
+              
+              // Stop polling when complete
+              if (["completed", "failed", "cancelled"].includes(runData.status)) {
+                clearInterval(pollInterval);
+              }
+            } catch (error) {
+              console.error("Error polling agent run:", error);
+            }
+          }, 1000);
         }
-        setInput("");
-        setUploadedFiles([]);
-        setSelectedTool(null);
       } catch (error) {
         console.error("Failed to start agent run:", error);
         toast({ title: "Error", description: "Failed to start agent", variant: "destructive" });

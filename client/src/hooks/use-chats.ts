@@ -30,6 +30,25 @@ export interface GmailPreview {
   filters?: string[];
 }
 
+export interface AgentRunData {
+  runId: string | null;
+  status: "starting" | "running" | "completed" | "failed" | "cancelled";
+  steps: Array<{
+    stepIndex: number;
+    toolName: string;
+    status: string;
+    output?: any;
+    error?: string;
+  }>;
+  eventStream: Array<{
+    type: string;
+    content: any;
+    timestamp: number;
+  }>;
+  summary: string | null;
+  error: string | null;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -48,6 +67,7 @@ export interface Message {
   generatedImage?: string;
   googleFormPreview?: GoogleFormPreview;
   gmailPreview?: GmailPreview;
+  agentRun?: AgentRunData;
 }
 
 export interface Chat {
