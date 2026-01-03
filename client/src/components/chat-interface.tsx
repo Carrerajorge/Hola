@@ -1004,7 +1004,14 @@ export function ChatInterface({
     chatIdRef.current = chatId || null;
   }, [chatId]);
   
-  // Open agent panel when selecting agent tool and there's an active run
+  // Open agent panel when there's an active run (regardless of selected tool)
+  useEffect(() => {
+    if (agentMode.runId && agentMode.isRunning) {
+      setIsAgentPanelOpen(true);
+    }
+  }, [agentMode.runId, agentMode.isRunning]);
+  
+  // Also open panel when selecting agent tool and there's any run
   useEffect(() => {
     if (selectedTool === "agent" && agentMode.runId) {
       setIsAgentPanelOpen(true);

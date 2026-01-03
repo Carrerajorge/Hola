@@ -73,8 +73,8 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
           status: s.success ? 'succeeded' : (s.error ? 'failed' : 'pending'),
           output: s.output,
           error: s.error,
-          startedAt: new Date(s.startedAt).toISOString(),
-          completedAt: new Date(s.completedAt).toISOString()
+          startedAt: s.startedAt ? new Date(s.startedAt).toISOString() : null,
+          completedAt: s.completedAt ? new Date(s.completedAt).toISOString() : null
         })),
         artifacts: progress.artifacts,
         summary: null,
@@ -85,6 +85,71 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
     } catch (error: any) {
       console.error("Error starting agent run:", error);
       res.status(500).json({ error: error.message || "Failed to start agent run" });
+    }
+  });
+
+  // Get active runs for a specific chat
+  router.get("/agent/runs/chat/:chatId", async (req, res) => {
+    try {
+      const { chatId } = req.params;
+      
+      // First check in-memory runs
+      const activeRuns = agentManager.getActiveRunsForChat(chatId);
+      if (activeRuns.length > 0) {
+        const latestRun = activeRuns[0];
+        return res.json({
+          id: latestRun.runId,
+          chatId: chatId,
+          status: latestRun.status,
+          plan: latestRun.plan,
+          steps: latestRun.stepResults.map(s => ({
+            stepIndex: s.stepIndex,
+            toolName: s.toolName,
+            status: s.success ? 'succeeded' : (s.error ? 'failed' : 'pending'),
+            output: s.output,
+            error: s.error,
+            startedAt: s.startedAt ? new Date(s.startedAt).toISOString() : null,
+            completedAt: s.completedAt ? new Date(s.completedAt).toISOString() : null
+          })),
+          artifacts: latestRun.artifacts,
+          summary: null,
+          error: latestRun.error || null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      
+      // Fall back to database
+      const runs = await storage.getAgentRunsByChatId(chatId);
+      if (runs.length === 0) {
+        return res.json(null);
+      }
+      
+      const latestRun = runs[0];
+      const steps = await storage.getAgentSteps(latestRun.id);
+      const assets = await storage.getAgentAssets(latestRun.id);
+      
+      res.json({
+        id: latestRun.id,
+        chatId: latestRun.chatId,
+        status: latestRun.status,
+        plan: null,
+        steps: steps.map((s: any) => ({
+          stepIndex: s.stepIndex,
+          toolName: s.stepType,
+          status: s.success === 'true' ? 'succeeded' : (s.success === 'false' ? 'failed' : 'pending'),
+          output: s.result,
+          error: s.error
+        })),
+        artifacts: assets,
+        summary: latestRun.summary,
+        error: latestRun.error,
+        createdAt: latestRun.createdAt,
+        updatedAt: latestRun.updatedAt
+      });
+    } catch (error: any) {
+      console.error("Error fetching runs for chat:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch runs" });
     }
   });
 
@@ -104,8 +169,8 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
             status: s.success ? 'succeeded' : (s.error ? 'failed' : 'pending'),
             output: s.output,
             error: s.error,
-            startedAt: new Date(s.startedAt).toISOString(),
-            completedAt: new Date(s.completedAt).toISOString()
+            startedAt: s.startedAt ? new Date(s.startedAt).toISOString() : null,
+            completedAt: s.completedAt ? new Date(s.completedAt).toISOString() : null
           })),
           artifacts: progress.artifacts,
           summary: null,

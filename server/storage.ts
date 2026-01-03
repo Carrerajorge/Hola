@@ -112,6 +112,7 @@ export interface IStorage {
   // Agent CRUD operations
   createAgentRun(run: InsertAgentRun): Promise<AgentRun>;
   getAgentRun(id: string): Promise<AgentRun | undefined>;
+  getAgentRunsByChatId(chatId: string): Promise<AgentRun[]>;
   updateAgentRunStatus(id: string, status: string, error?: string): Promise<AgentRun | undefined>;
   createAgentStep(step: InsertAgentStep): Promise<AgentStep>;
   getAgentSteps(runId: string): Promise<AgentStep[]>;
@@ -542,6 +543,10 @@ export class MemStorage implements IStorage {
   async getAgentRun(id: string): Promise<AgentRun | undefined> {
     const [result] = await db.select().from(agentRuns).where(eq(agentRuns.id, id));
     return result;
+  }
+
+  async getAgentRunsByChatId(chatId: string): Promise<AgentRun[]> {
+    return db.select().from(agentRuns).where(eq(agentRuns.chatId, chatId)).orderBy(desc(agentRuns.createdAt));
   }
 
   async updateAgentRunStatus(id: string, status: string, error?: string): Promise<AgentRun | undefined> {

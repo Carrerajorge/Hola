@@ -496,6 +496,22 @@ export class AgentManager {
   listActiveRuns(): string[] {
     return Array.from(this.activeRuns.keys());
   }
+
+  getActiveRunsForChat(chatId: string): AgentProgress[] {
+    const runs: AgentProgress[] = [];
+    for (const orchestrator of this.activeRuns.values()) {
+      if (orchestrator.chatId === chatId) {
+        runs.push(orchestrator.getProgress());
+      }
+    }
+    // Sort by most recent first (based on step results)
+    runs.sort((a, b) => {
+      const aTime = a.stepResults.length > 0 ? a.stepResults[a.stepResults.length - 1].startedAt : 0;
+      const bTime = b.stepResults.length > 0 ? b.stepResults[b.stepResults.length - 1].startedAt : 0;
+      return bTime - aTime;
+    });
+    return runs;
+  }
 }
 
 export const agentManager = new AgentManager();

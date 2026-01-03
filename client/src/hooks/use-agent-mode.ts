@@ -76,8 +76,56 @@ export function useAgentMode(chatId: string) {
   const [state, setState] = useState<AgentModeState>(initialState);
   const lastMessageRef = useRef<string | null>(null);
   const lastAttachmentsRef = useRef<any[] | undefined>(undefined);
+  const initializedForChatRef = useRef<string | null>(null);
 
   const isPollingActive = ['queued', 'planning', 'running'].includes(state.status);
+
+  // Fetch active run for the current chat when chatId changes
+  const { data: chatRunData } = useQuery<AgentRunResponse | null>({
+    queryKey: ['/api/agent/runs/chat', chatId],
+    queryFn: async () => {
+      if (!chatId || chatId.startsWith("pending-")) return null;
+      const res = await fetch(`/api/agent/runs/chat/${chatId}`, {
+        credentials: 'include'
+      });
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new Error(`Failed to fetch chat runs: ${res.status}`);
+      }
+      return res.json();
+    },
+    enabled: !!chatId && !chatId.startsWith("pending-") && !state.runId,
+    staleTime: 5000
+  });
+
+  // Initialize state from chat run data if we don't have a runId yet
+  useEffect(() => {
+    if (chatRunData && !state.runId && initializedForChatRef.current !== chatId) {
+      initializedForChatRef.current = chatId;
+      const completedSteps = chatRunData.steps.filter(s => s.status === 'succeeded' || s.status === 'failed').length;
+      const totalSteps = chatRunData.plan?.steps.length || chatRunData.steps.length || 0;
+      
+      setState({
+        runId: chatRunData.id,
+        status: chatRunData.status,
+        plan: chatRunData.plan || null,
+        steps: chatRunData.steps,
+        artifacts: chatRunData.artifacts || [],
+        summary: chatRunData.summary || null,
+        error: chatRunData.error || null,
+        progress: { current: completedSteps, total: totalSteps },
+        createdChatId: chatRunData.chatId
+      });
+    }
+  }, [chatRunData, state.runId, chatId]);
+
+  // Reset state when chatId changes
+  useEffect(() => {
+    if (chatId !== initializedForChatRef.current && state.runId) {
+      setState(initialState);
+      initializedForChatRef.current = null;
+    }
+  }, [chatId, state.runId]);
 
   const { data: runData } = useQuery<AgentRunResponse | null>({
     queryKey: ['/api/agent/runs', state.runId],
