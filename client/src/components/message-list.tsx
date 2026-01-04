@@ -1009,9 +1009,10 @@ interface AgentRunContentProps {
   onRetry?: () => void;
   onPause?: () => void;
   onResume?: () => void;
+  onArtifactPreview?: (artifact: AgentArtifact) => void;
 }
 
-const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRetry, onPause, onResume }: AgentRunContentProps) {
+const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRetry, onPause, onResume, onArtifactPreview }: AgentRunContentProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [showAllEvents, setShowAllEvents] = useState(false);
   const [isSlowConnection, setIsSlowConnection] = useState(false);
@@ -1442,7 +1443,9 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
                 artifacts={(agentRun as any).artifacts}
                 isRunning={false}
                 onDocumentClick={(artifact) => {
-                  console.log("Document clicked:", artifact);
+                  if (onArtifactPreview) {
+                    onArtifactPreview(artifact);
+                  }
                 }}
                 onDownload={(artifact) => {
                   if (artifact.data?.base64) {
@@ -1561,6 +1564,7 @@ interface AssistantMessageProps {
   onRestoreDocument?: () => void;
   onAgentCancel?: (messageId: string, runId: string) => void;
   onAgentRetry?: (messageId: string, userMessage: string) => void;
+  onAgentArtifactPreview?: (artifact: AgentArtifact) => void;
 }
 
 const AssistantMessage = memo(function AssistantMessage({
@@ -1588,7 +1592,8 @@ const AssistantMessage = memo(function AssistantMessage({
   minimizedDocument,
   onRestoreDocument,
   onAgentCancel,
-  onAgentRetry
+  onAgentRetry,
+  onAgentArtifactPreview
 }: AssistantMessageProps) {
   const parsedContent = useMemo(() => {
     if (!message.content || message.isThinking) {
@@ -1647,6 +1652,7 @@ const AssistantMessage = memo(function AssistantMessage({
           agentRun={message.agentRun}
           onCancel={onAgentCancel ? () => onAgentCancel(message.id, message.agentRun!.runId || "") : undefined}
           onRetry={onAgentRetry ? () => onAgentRetry(message.id, message.agentRun?.userMessage || "") : undefined}
+          onArtifactPreview={onAgentArtifactPreview}
         />
       )}
 
@@ -2017,6 +2023,7 @@ const MessageItem = memo(function MessageItem({
             onRestoreDocument={onRestoreDocument}
             onAgentCancel={onAgentCancel}
             onAgentRetry={onAgentRetry}
+            onAgentArtifactPreview={onAgentArtifactPreview}
           />
         )}
       </div>
@@ -2080,6 +2087,7 @@ export interface MessageListProps {
   enableVirtualization?: boolean;
   onAgentCancel?: (messageId: string, runId: string) => void;
   onAgentRetry?: (messageId: string, userMessage: string) => void;
+  onAgentArtifactPreview?: (artifact: AgentArtifact) => void;
 }
 
 const VIRTUALIZATION_THRESHOLD = 50;
@@ -2119,7 +2127,8 @@ export function MessageList({
   parentRef,
   enableVirtualization = true,
   onAgentCancel,
-  onAgentRetry
+  onAgentRetry,
+  onAgentArtifactPreview
 }: MessageListProps) {
   const internalParentRef = useRef<HTMLDivElement>(null);
   const scrollRef = parentRef || internalParentRef;

@@ -86,6 +86,7 @@ import { detectGmailIntent } from "@/lib/gmailIntentDetector";
 import { useAgentStore, useAgentRun, type AgentRunState } from "@/stores/agent-store";
 import { useStartAgentRun, useCancelAgentRun, useAgentPolling, abortPendingAgentStart } from "@/hooks/use-agent-polling";
 import { useStreamingStore } from "@/stores/streamingStore";
+import { DocumentPreviewPanel, type DocumentPreviewArtifact } from "@/components/document-preview-panel";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { RecordingPanel } from "@/components/recording-panel";
@@ -916,6 +917,7 @@ export function ChatInterface({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [previewDocument, setPreviewDocument] = useState<DocumentBlock | null>(null);
   const [editedDocumentContent, setEditedDocumentContent] = useState<string>("");
+  const [documentPreviewArtifact, setDocumentPreviewArtifact] = useState<DocumentPreviewArtifact | null>(null);
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
   const [editingSelectionText, setEditingSelectionText] = useState<string>("");
   const [originalSelectionText, setOriginalSelectionText] = useState<string>("");
@@ -4032,6 +4034,7 @@ IMPORTANTE:
                 onSelectSuggestedReply={(text) => setInput(text)}
                 onAgentCancel={handleAgentCancel}
                 onAgentRetry={handleAgentRetry}
+                onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
               />
 
               {/* Agent Observer - Show when agent is running */}
@@ -4285,6 +4288,7 @@ IMPORTANTE:
                   onSelectSuggestedReply={(text) => setInput(text)}
                   onAgentCancel={handleAgentCancel}
                   onAgentRetry={handleAgentRetry}
+                  onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
                 />
                 <div ref={messagesEndRef} />
               </div>
@@ -4778,6 +4782,32 @@ IMPORTANTE:
       <UpgradePlanDialog 
         open={isUpgradeDialogOpen} 
         onOpenChange={setIsUpgradeDialogOpen} 
+      />
+
+      {/* Document Preview Panel for agent-generated documents */}
+      <DocumentPreviewPanel
+        isOpen={!!documentPreviewArtifact}
+        onClose={() => setDocumentPreviewArtifact(null)}
+        artifact={documentPreviewArtifact}
+        onDownload={(artifact) => {
+          if (artifact.data?.base64) {
+            const byteCharacters = atob(artifact.data.base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: artifact.mimeType || 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = artifact.name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }
+        }}
       />
 
       {/* Agent Panel removed - progress is shown inline in chat messages */}
