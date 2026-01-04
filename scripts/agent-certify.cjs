@@ -45,12 +45,21 @@ const COMMAND_REGISTRY = {
   },
 };
 
+// Security: Explicit allowlist of valid command keys to prevent injection
+const VALID_COMMAND_KEYS = Object.freeze([
+  "vitest:tests",
+  "vitest:typecheck", 
+  "npm:build",
+  "node:count-agent-files",
+  "node:soak-stress",
+]);
+
 function runRegisteredCommand(commandKey, timeout = 300000) {
-  // Security: Only allow predefined command keys - lookup happens inline to avoid parameter injection
-  const commandConfig = COMMAND_REGISTRY[commandKey];
-  if (commandConfig === undefined) {
+  // Security: Validate against explicit allowlist before any lookup
+  if (!VALID_COMMAND_KEYS.includes(commandKey)) {
     throw new Error(`Unknown command key: ${commandKey}`);
   }
+  const commandConfig = COMMAND_REGISTRY[commandKey];
   
   const start = Date.now();
   try {
