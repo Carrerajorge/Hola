@@ -92,7 +92,7 @@ import { RecordingPanel } from "@/components/recording-panel";
 import { Composer } from "@/components/composer";
 import { MessageList, parseDocumentBlocks, type DocumentBlock } from "@/components/message-list";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
-import { AgentPanel } from "@/components/agent-panel";
+// AgentPanel removed - progress is shown inline in chat messages
 import { useAuth } from "@/hooks/use-auth";
 import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
@@ -935,7 +935,7 @@ export function ChatInterface({
   const [showFigmaTokenInput, setShowFigmaTokenInput] = useState(false);
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
-  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false);
+  // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
   
   const agentMode = useAgentMode(chatId || "");
@@ -1169,19 +1169,7 @@ export function ChatInterface({
     chatIdRef.current = chatId || null;
   }, [chatId]);
   
-  // Open agent panel when there's an active run (regardless of selected tool)
-  useEffect(() => {
-    if (agentMode.runId && agentMode.isRunning) {
-      setIsAgentPanelOpen(true);
-    }
-  }, [agentMode.runId, agentMode.isRunning]);
-  
-  // Also open panel when selecting agent tool and there's any run
-  useEffect(() => {
-    if (selectedTool === "agent" && agentMode.runId) {
-      setIsAgentPanelOpen(true);
-    }
-  }, [selectedTool, agentMode.runId]);
+  // Agent progress is now shown inline in chat messages, no panel needed
   
   // Update streaming store when aiState changes
   // This allows tracking of chats processing in background after component unmounts
@@ -4773,13 +4761,7 @@ IMPORTANTE:
         onOpenChange={setIsUpgradeDialogOpen} 
       />
 
-      {/* Agent Panel */}
-      <AgentPanel
-        runId={agentMode.runId}
-        chatId={chatId || ""}
-        isOpen={isAgentPanelOpen}
-        onClose={() => setIsAgentPanelOpen(false)}
-      />
+      {/* Agent Panel removed - progress is shown inline in chat messages */}
     </div>
   );
 }
