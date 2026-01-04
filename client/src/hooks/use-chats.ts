@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 
 export interface FigmaDiagram {
+  diagramType: "flowchart" | "orgchart" | "sequence" | "mindmap" | "network";
   nodes: Array<{
     id: string;
     type: "start" | "end" | "process" | "decision";
@@ -62,7 +63,7 @@ export interface Message {
   status?: 'pending' | 'processing' | 'done' | 'failed'; // Processing status for idempotency
   isThinking?: boolean;
   steps?: { title: string; status: "pending" | "loading" | "complete" }[];
-  attachments?: { type: "word" | "excel" | "ppt" | "image" | "pdf" | "text" | "code" | "archive" | "document" | "unknown"; name: string; mimeType?: string; imageUrl?: string; storagePath?: string; fileId?: string; documentType?: "word" | "excel" | "ppt"; content?: string; title?: string; savedAt?: string; spreadsheetData?: { uploadId: string; sheets: Array<{ name: string; rowCount: number; columnCount: number }>; previewData?: { headers: string[]; data: any[][] } } }[];
+  attachments?: { type: "word" | "excel" | "ppt" | "image" | "pdf" | "text" | "code" | "archive" | "document" | "unknown"; name: string; mimeType?: string; imageUrl?: string; storagePath?: string; fileId?: string; documentType?: "word" | "excel" | "ppt"; content?: string; title?: string; savedAt?: string; spreadsheetData?: { uploadId: string; sheets: Array<{ name: string; rowCount: number; columnCount: number }>; previewData?: { headers: string[]; data: any[][] }; analysisId?: string; sessionId?: string } }[];
   sources?: { fileName: string; content: string }[];
   figmaDiagram?: FigmaDiagram;
   generatedImage?: string;

@@ -1438,7 +1438,16 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
           {agentRun.status === "completed" && agentRun.steps && agentRun.steps.length > 0 && (
             <div className="mt-3">
               <AgentStepsDisplay
-                steps={agentRun.steps}
+                steps={agentRun.steps.map(step => ({
+                  ...step,
+                  status: (step.status === 'completed' || step.status === 'succeeded' || step.status === 'success') 
+                    ? 'succeeded' as const
+                    : (step.status === 'failed' || step.status === 'error') 
+                      ? 'failed' as const
+                      : (step.status === 'running' || step.status === 'in_progress') 
+                        ? 'running' as const
+                        : 'pending' as const
+                }))}
                 summary={agentRun.summary}
                 artifacts={(agentRun as any).artifacts}
                 isRunning={false}
@@ -1915,6 +1924,7 @@ interface MessageItemProps {
   setEditContent: (value: string) => void;
   onAgentCancel?: (messageId: string, runId: string) => void;
   onAgentRetry?: (messageId: string, userMessage: string) => void;
+  onAgentArtifactPreview?: (artifact: AgentArtifact) => void;
 }
 
 const MessageItem = memo(function MessageItem({
@@ -1949,7 +1959,8 @@ const MessageItem = memo(function MessageItem({
   onRestoreDocument,
   setEditContent,
   onAgentCancel,
-  onAgentRetry
+  onAgentRetry,
+  onAgentArtifactPreview
 }: MessageItemProps) {
   return (
     <div
