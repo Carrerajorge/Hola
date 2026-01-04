@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { execSync, spawn } = require("child_process");
+const { execSync, spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -57,7 +57,7 @@ function runRegisteredCommand(commandKey, timeout = 300000) {
   }
 }
 
-// Security: Safe npm install using spawn with shell:false to prevent injection
+// Security: Safe npm install using spawnSync with argument array to prevent injection
 function runNpmInstall(moduleName, timeout = 60000) {
   // Strict validation of module name
   const isValidModuleName = /^[@a-zA-Z0-9_\-\/\.]+$/.test(moduleName);
@@ -67,12 +67,25 @@ function runNpmInstall(moduleName, timeout = 60000) {
   
   const start = Date.now();
   try {
-    const output = execSync(`npm install ${moduleName}`, {
+    const result = spawnSync('npm', ['install', moduleName], {
       encoding: "utf-8",
       timeout,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
     });
+    
+    if (result.error) {
+      throw result.error;
+    }
+    
+    const output = result.stdout?.toString() || result.stderr?.toString() || '';
+    
+    if (result.status !== 0) {
+      const error = new Error(`npm install failed with status ${result.status}`);
+      error.stdout = result.stdout;
+      error.stderr = result.stderr;
+      throw error;
+    }
+    
     return { success: true, output, duration: Date.now() - start };
   } catch (error) {
     return {
