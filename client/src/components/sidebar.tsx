@@ -34,7 +34,7 @@ import {
   SquarePen,
   Pin
 } from "lucide-react";
-import { IliaGPTLogo } from "@/components/sira-logo";
+import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";

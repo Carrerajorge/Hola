@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
-import { IliaGPTLogo } from "@/components/sira-logo";
+import { IliaGPTLogo } from "@/components/iliagpt-logo";
 
 interface MiniSidebarProps {
   className?: string;

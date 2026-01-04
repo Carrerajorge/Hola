@@ -74,7 +74,7 @@ import { PPT_STREAMING_SYSTEM_PROMPT } from "@/lib/pptPrompts";
 import { ETLDialog } from "@/components/etl-dialog";
 import { FigmaBlock } from "@/components/figma-block";
 import { CodeExecutionBlock } from "@/components/code-execution-block";
-import { IliaGPTLogo } from "@/components/sira-logo";
+import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { ShareChatDialog, ShareIcon } from "@/components/share-chat-dialog";
 import { UpgradePlanDialog } from "@/components/upgrade-plan-dialog";
 import { DocumentGeneratorDialog } from "@/components/document-generator-dialog";

@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Paperclip, Search, BookOpen, Image, Mic, X, ChevronDown, HelpCircle } from "lucide-react";
-import { IliaGPTLogo } from "@/components/sira-logo";
+import { IliaGPTLogo } from "@/components/iliagpt-logo";
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
