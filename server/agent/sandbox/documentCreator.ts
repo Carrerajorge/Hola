@@ -20,7 +20,9 @@ import {
   DocumentSection,
   ExcelSheet,
   ToolResult,
+  SlideChart,
 } from "./agentTypes";
+import { generateImage } from "../../services/imageGeneration";
 
 export interface DocumentTheme {
   primaryColor: string;
@@ -94,6 +96,31 @@ export class DocumentCreator {
       return PROFESSIONAL_THEMES[themeName.toLowerCase()];
     }
     return DEFAULT_THEME;
+  }
+
+  async generateAndSaveImage(prompt: string): Promise<string> {
+    const imagesDir = path.join(this.outputDir, "images");
+    if (!fs.existsSync(imagesDir)) {
+      fs.mkdirSync(imagesDir, { recursive: true });
+    }
+
+    const result = await generateImage(prompt);
+    const filename = `generated_${Date.now()}.png`;
+    const filePath = path.join(imagesDir, filename);
+    
+    const imageBuffer = Buffer.from(result.imageBase64, "base64");
+    fs.writeFileSync(filePath, imageBuffer);
+    
+    return filePath;
+  }
+
+  private getChartType(type: "bar" | "line" | "pie"): PptxGenJS.CHART_NAME {
+    const chartTypes: Record<string, PptxGenJS.CHART_NAME> = {
+      bar: "bar",
+      line: "line",
+      pie: "pie",
+    };
+    return chartTypes[type] || "bar";
   }
 
   async createPptx(
@@ -261,6 +288,60 @@ export class DocumentCreator {
               });
             }
           } catch {
+          }
+        }
+
+        if (slideData.imageBase64) {
+          try {
+            slide.addImage({
+              data: `image/png;base64,${slideData.imageBase64}`,
+              x: 7,
+              y: 1.5,
+              w: 2.5,
+              h: 2,
+            });
+          } catch {
+          }
+        }
+
+        if (slideData.generateImage) {
+          try {
+            const generatedImagePath = await this.generateAndSaveImage(slideData.generateImage);
+            slide.addImage({
+              path: generatedImagePath,
+              x: 7,
+              y: 1.5,
+              w: 2.5,
+              h: 2,
+            });
+          } catch (imgError) {
+            console.error("[DocumentCreator] Failed to generate image:", imgError);
+          }
+        }
+
+        if (slideData.chart) {
+          try {
+            const chartData: PptxGenJS.OptsChartData[] = [{
+              name: slideData.chart.title || "Data",
+              labels: slideData.chart.data.labels,
+              values: slideData.chart.data.values,
+            }];
+
+            const chartType = this.getChartType(slideData.chart.type);
+            
+            slide.addChart(chartType, chartData, {
+              x: 0.5,
+              y: yPosition,
+              w: 6,
+              h: 3,
+              showTitle: !!slideData.chart.title,
+              title: slideData.chart.title,
+              showLegend: slideData.chart.type !== "pie",
+              legendPos: "b",
+              chartColors: [theme.primaryColor, theme.secondaryColor, theme.accentColor, "4A5568", "718096"],
+            });
+          } catch (chartError) {
+            console.error("[DocumentCreator] Failed to add chart:", chartError);
           }
         }
 

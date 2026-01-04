@@ -75,11 +75,24 @@ export const AgentStatusSchema = z.object({
 });
 export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 
+export const SlideChartSchema = z.object({
+  type: z.enum(["bar", "line", "pie"]),
+  data: z.object({
+    labels: z.array(z.string()),
+    values: z.array(z.number()),
+  }),
+  title: z.string().optional(),
+});
+export type SlideChart = z.infer<typeof SlideChartSchema>;
+
 export const DocumentSlideSchema = z.object({
   title: z.string().optional(),
   content: z.string().optional(),
   bullets: z.array(z.string()).optional(),
   imageUrl: z.string().optional(),
+  imageBase64: z.string().optional(),
+  generateImage: z.string().optional(),
+  chart: SlideChartSchema.optional(),
 });
 export type DocumentSlide = z.infer<typeof DocumentSlideSchema>;
 
