@@ -1,11 +1,8 @@
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 import { createRequire } from "node:module";
 
-// Use createRequire to properly load CommonJS module pdf-parse
 const require = createRequire(import.meta.url);
-const pdfParseModule = require("pdf-parse");
-// Handle both default export and direct export patterns
-const pdfParse = pdfParseModule.default || pdfParseModule;
+const { PDFParse } = require("pdf-parse");
 
 export class PdfParser implements FileParser {
   name = "pdf";
@@ -19,8 +16,7 @@ export class PdfParser implements FileParser {
     let timeoutId: NodeJS.Timeout | null = null;
     
     try {
-      
-      const parsePromise = this.parseWithPageStructure(content);
+      const parsePromise = this.parsePdf(content);
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error(`PDF parsing timed out after ${this.TIMEOUT_MS}ms`)), this.TIMEOUT_MS);
       });
@@ -48,48 +44,23 @@ export class PdfParser implements FileParser {
     }
   }
 
-  private async parseWithPageStructure(content: Buffer): Promise<ParsedResult> {
-    const pageTexts: string[] = [];
-    let currentPage = 0;
-
-    const options = {
-      pagerender: (pageData: any) => {
-        return pageData.getTextContent().then((textContent: any) => {
-          currentPage++;
-          let pageText = '';
-          let lastY: number | null = null;
-          
-          for (const item of textContent.items) {
-            if (item.str) {
-              const text = this.normalizeText(item.str);
-              if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
-                pageText += '\n';
-              }
-              pageText += text;
-              lastY = item.transform[5];
-            }
-          }
-          
-          pageTexts.push(pageText.trim());
-          return pageText;
-        });
-      }
-    };
-
-    const data = await pdfParse(content, options);
+  private async parsePdf(content: Buffer): Promise<ParsedResult> {
+    const parser = new PDFParse({ data: content });
+    const data = await parser.getText();
     
+    const text = this.normalizeText(data.text || '');
     const metadata = this.extractMetadata(data);
-    const formattedText = this.formatOutput(metadata, pageTexts, data.numpages);
+    const formattedText = this.formatOutput(metadata, text, data.numpages || 0);
 
     return {
       text: formattedText,
       metadata: {
-        pages: data.numpages,
+        pages: data.numpages || 0,
         title: metadata.title,
         author: metadata.author,
         creationDate: metadata.creationDate,
         producer: metadata.producer,
-        info: data.info,
+        info: data.info || {},
       },
     };
   }
@@ -132,7 +103,7 @@ export class PdfParser implements FileParser {
     return dateStr;
   }
 
-  private formatOutput(metadata: Record<string, string | undefined>, pageTexts: string[], totalPages: number): string {
+  private formatOutput(metadata: Record<string, string | undefined>, text: string, totalPages: number): string {
     const parts: string[] = [];
     
     parts.push('=== Document Info ===');
@@ -142,17 +113,8 @@ export class PdfParser implements FileParser {
     if (metadata.subject) parts.push(`Subject: ${metadata.subject}`);
     parts.push(`Pages: ${totalPages}`);
     parts.push('');
-
-    for (let i = 0; i < pageTexts.length; i++) {
-      const pageNum = i + 1;
-      const pageContent = pageTexts[i];
-      
-      if (pageContent && pageContent.trim()) {
-        parts.push(`=== Page ${pageNum} ===`);
-        parts.push(pageContent);
-        parts.push('');
-      }
-    }
+    parts.push('=== Content ===');
+    parts.push(text);
 
     return parts.join('\n').trim();
   }
