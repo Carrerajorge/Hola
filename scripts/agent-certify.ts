@@ -1,7 +1,33 @@
 #!/usr/bin/env npx tsx
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+
+type TestSuiteId = 'all_agent' | 'benchmarks' | 'chaos' | 'cache_isolation';
+
+interface TestSuiteConfig {
+  name: string;
+  args: readonly string[];
+}
+
+const TEST_SUITES: Readonly<Record<TestSuiteId, TestSuiteConfig>> = {
+  all_agent: {
+    name: 'All Agent Tests',
+    args: ['vitest', 'run', 'server/agent/__tests__'] as const,
+  },
+  benchmarks: {
+    name: 'Benchmark Tests',
+    args: ['vitest', 'run', 'server/agent/__tests__/benchmarks.test.ts'] as const,
+  },
+  chaos: {
+    name: 'Chaos Tests',
+    args: ['vitest', 'run', 'server/agent/__tests__/chaos.test.ts'] as const,
+  },
+  cache_isolation: {
+    name: 'Cache Isolation Tests',
+    args: ['vitest', 'run', 'server/agent/__tests__/webtool-cache-isolation.test.ts'] as const,
+  },
+} as const;
 
 interface CertificationResult {
   name: string;
@@ -26,38 +52,29 @@ function log(message: string, color: keyof typeof COLORS = 'reset') {
   console.log(`${COLORS[color]}${message}${COLORS.reset}`);
 }
 
-const ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
-  'npx vitest run server/agent/__tests__ 2>&1',
-  'npx vitest run server/agent/__tests__/benchmarks.test.ts 2>&1',
-  'npx vitest run server/agent/__tests__/chaos.test.ts 2>&1',
-  'npx vitest run server/agent/__tests__/webtool-cache-isolation.test.ts 2>&1',
-]);
-
-function runTest(name: string, command: string): CertificationResult {
-  if (!ALLOWED_COMMANDS.has(command)) {
-    throw new Error(`Command not in allowlist: ${command}`);
-  }
+function runTest(suiteId: TestSuiteId): CertificationResult {
+  const suite = TEST_SUITES[suiteId];
+  const commandDisplay = `npx ${suite.args.join(' ')}`;
+  
   const startTime = Date.now();
   let output = '';
   let passed = false;
   let testsPassed = 0;
   let testsFailed = 0;
 
-  log(`\nRunning: ${name}`, 'cyan');
-  log(`Command: ${command}`, 'blue');
+  log(`\nRunning: ${suite.name}`, 'cyan');
+  log(`Command: ${commandDisplay}`, 'blue');
 
-  try {
-    output = execSync(command, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      maxBuffer: 50 * 1024 * 1024,
-      timeout: 300000,
-    });
-    passed = true;
-  } catch (error: any) {
-    output = (error.stdout?.toString() || '') + (error.stderr?.toString() || '') + (error.message || '');
-    passed = false;
-  }
+  const result = spawnSync('npx', [...suite.args], {
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    maxBuffer: 50 * 1024 * 1024,
+    timeout: 300000,
+    shell: false,
+  });
+
+  output = (result.stdout || '') + (result.stderr || '');
+  passed = result.status === 0;
 
   const passMatch = output.match(/(\d+)\s+passed/);
   const failMatch = output.match(/(\d+)\s+failed/);
@@ -67,15 +84,15 @@ function runTest(name: string, command: string): CertificationResult {
 
   const duration = Date.now() - startTime;
   const statusIcon = passed ? '✅' : '❌';
-  log(`${statusIcon} ${name}: ${passed ? 'PASSED' : 'FAILED'} (${(duration / 1000).toFixed(2)}s)`, passed ? 'green' : 'red');
+  log(`${statusIcon} ${suite.name}: ${passed ? 'PASSED' : 'FAILED'} (${(duration / 1000).toFixed(2)}s)`, passed ? 'green' : 'red');
   
   if (testsPassed > 0 || testsFailed > 0) {
     log(`   Tests: ${testsPassed} passed, ${testsFailed} failed`, testsFailed > 0 ? 'yellow' : 'green');
   }
 
   return {
-    name,
-    command,
+    name: suite.name,
+    command: commandDisplay,
     passed,
     duration,
     output,
@@ -92,27 +109,10 @@ async function runCertification() {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const results: CertificationResult[] = [];
 
-  const testSuites = [
-    {
-      name: 'All Agent Tests',
-      command: 'npx vitest run server/agent/__tests__ 2>&1',
-    },
-    {
-      name: 'Benchmark Tests',
-      command: 'npx vitest run server/agent/__tests__/benchmarks.test.ts 2>&1',
-    },
-    {
-      name: 'Chaos Tests',
-      command: 'npx vitest run server/agent/__tests__/chaos.test.ts 2>&1',
-    },
-    {
-      name: 'Cache Isolation Tests',
-      command: 'npx vitest run server/agent/__tests__/webtool-cache-isolation.test.ts 2>&1',
-    },
-  ];
+  const suiteIds: TestSuiteId[] = ['all_agent', 'benchmarks', 'chaos', 'cache_isolation'];
 
-  for (const suite of testSuites) {
-    const result = runTest(suite.name, suite.command);
+  for (const suiteId of suiteIds) {
+    const result = runTest(suiteId);
     results.push(result);
   }
 
