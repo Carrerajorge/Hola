@@ -1,4 +1,9 @@
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
+import { createRequire } from "node:module";
+
+// Use createRequire to properly load CommonJS module pdf-parse
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 
 export class PdfParser implements FileParser {
   name = "pdf";
@@ -12,8 +17,6 @@ export class PdfParser implements FileParser {
     let timeoutId: NodeJS.Timeout | null = null;
     
     try {
-      const pdfParseModule = await import("pdf-parse");
-      const pdfParse = pdfParseModule.default;
       
       const parsePromise = this.parseWithPageStructure(pdfParse, content);
       const timeoutPromise = new Promise<never>((_, reject) => {
