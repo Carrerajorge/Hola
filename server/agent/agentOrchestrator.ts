@@ -488,6 +488,16 @@ Respond with ONLY valid JSON:
           shouldRetry: verification.shouldRetry,
           shouldReplan: verification.shouldReplan,
         });
+
+        await this.emitTraceEvent('verification', {
+          stepIndex,
+          stepId: `step-${stepIndex}`,
+          phase: 'verifying',
+          status: verification.success ? 'completed' : (verification.shouldRetry ? 'retrying' : 'failed'),
+          summary: verification.feedback,
+          confidence: verification.confidence,
+        });
+
         return verification;
       }
     } catch (error: any) {
@@ -513,6 +523,16 @@ Respond with ONLY valid JSON:
       status: verification.success ? 'ok' : 'warn',
       confidence: verification.confidence,
     });
+
+    await this.emitTraceEvent('verification', {
+      stepIndex,
+      stepId: `step-${stepIndex}`,
+      phase: 'verifying',
+      status: verification.success ? 'completed' : 'failed',
+      summary: verification.feedback,
+      confidence: verification.confidence,
+    });
+
     return verification;
   }
 
@@ -531,6 +551,14 @@ Respond with ONLY valid JSON:
       failureContext,
       attempt: this.replanAttempts,
     }, fromStepIndex);
+
+    await this.emitTraceEvent('replan', {
+      stepIndex: fromStepIndex,
+      phase: 'planning',
+      status: 'running',
+      summary: `Replanning from step ${fromStepIndex + 1}: ${failureContext.substring(0, 100)}`,
+      metadata: { attempt: this.replanAttempts, failureContext },
+    });
 
     const completedSteps = this.stepResults
       .filter(r => r.success)
@@ -842,6 +870,14 @@ Respond with ONLY valid JSON in this exact format:
       summary: step.description,
     });
 
+    await this.emitTraceEvent('tool_call', {
+      stepIndex,
+      stepId: `step-${stepIndex}`,
+      tool_name: step.toolName,
+      command: JSON.stringify(step.input).substring(0, 200),
+      summary: `Calling ${step.toolName}`,
+    });
+
     console.log(`[AgentOrchestrator] Executing step ${stepIndex}: ${step.toolName}`);
 
     try {
@@ -881,15 +917,27 @@ Respond with ONLY valid JSON in this exact format:
         error: result.error,
       }, stepIndex);
 
+      const outputSnippet = typeof result.output === 'string' 
+        ? result.output.substring(0, 500) 
+        : JSON.stringify(result.output).substring(0, 500);
+
       await this.emitTraceEvent('tool_output', {
         stepIndex,
         stepId: `step-${stepIndex}`,
         tool_name: step.toolName,
-        output_snippet: typeof result.output === 'string' 
-          ? result.output.substring(0, 500) 
-          : JSON.stringify(result.output).substring(0, 500),
+        output_snippet: outputSnippet,
         is_final_chunk: true,
       });
+
+      if (step.toolName === 'shell_command') {
+        await this.emitTraceEvent('shell_output', {
+          stepIndex,
+          stepId: `step-${stepIndex}`,
+          tool_name: 'shell_command',
+          command: typeof step.input?.command === 'string' ? step.input.command : '',
+          output_snippet: outputSnippet,
+        });
+      }
 
       if (result.success) {
         await this.emitTraceEvent('step_completed', {
@@ -972,7 +1020,7 @@ Respond with ONLY valid JSON in this exact format:
       }
 
       await this.emitTraceEvent('task_start', {
-        phase: 'executing',
+        phase: 'planning',
         status: 'running',
         summary: this.plan.objective,
       });
@@ -1032,6 +1080,15 @@ Respond with ONLY valid JSON in this exact format:
               attempt: retryCount + 2,
               reason: verification.feedback,
             }, i);
+
+            await this.emitTraceEvent('step_retried', {
+              stepIndex: i,
+              stepId: `step-${i}`,
+              status: 'retrying',
+              summary: `Retry attempt ${retryCount + 2}: ${verification.feedback}`,
+              metadata: { attempt: retryCount + 2 },
+            });
+
             continue;
           }
 
