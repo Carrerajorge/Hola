@@ -4,6 +4,7 @@ import { FileManager } from "./fileManager";
 import { DocumentCreator, documentCreator } from "./documentCreator";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
+import { searchOrchestrator, EnhancedSearchResult, DeepSearchResult } from "../../services/enhancedWebSearch";
 
 export abstract class BaseTool implements IAgentTool {
   abstract name: string;
@@ -249,72 +250,39 @@ export class PythonTool extends BaseTool {
 
 export class SearchTool extends BaseTool {
   name = "search";
-  description = "Performs web search using DuckDuckGo API";
+  description = "Performs web search using multiple sources with intelligent fallback (SearXNG, Brave, DuckDuckGo)";
   category: ToolCategory = "search";
-
-  private baseUrl = "https://api.duckduckgo.com/";
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { query, maxResults = 10 } = params;
+    const { query, maxResults = 10, timeout, sources } = params;
 
     if (!query || typeof query !== "string") {
       return this.createResult(false, null, "", "Search query is required", startTime);
     }
 
     try {
-      const url = new URL(this.baseUrl);
-      url.searchParams.set("q", query);
-      url.searchParams.set("format", "json");
-      url.searchParams.set("no_html", "1");
-      url.searchParams.set("skip_disambig", "1");
-
-      const response = await fetch(url.toString(), {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; AgentV2/1.0)",
-        },
+      const results = await searchOrchestrator.search(query, {
+        maxResults,
+        timeout,
+        sources
       });
 
-      if (!response.ok) {
-        throw new Error(`Search request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
-      const results: SearchResult[] = [];
-
-      if (data.Abstract) {
-        results.push({
-          title: data.Heading || "Abstract",
-          snippet: data.Abstract,
-          url: data.AbstractURL || "",
-        });
-      }
-
-      if (data.RelatedTopics && Array.isArray(data.RelatedTopics)) {
-        for (const topic of data.RelatedTopics.slice(0, maxResults - results.length)) {
-          if (topic.Text && topic.FirstURL) {
-            results.push({
-              title: topic.Text.split(" - ")[0] || topic.Text.substring(0, 50),
-              snippet: topic.Text,
-              url: topic.FirstURL,
-            });
-          } else if (topic.Topics) {
-            for (const subTopic of topic.Topics.slice(0, 3)) {
-              if (subTopic.Text && subTopic.FirstURL) {
-                results.push({
-                  title: subTopic.Text.split(" - ")[0] || subTopic.Text.substring(0, 50),
-                  snippet: subTopic.Text,
-                  url: subTopic.FirstURL,
-                });
-              }
-            }
-          }
-        }
-      }
+      const searchResults: SearchResult[] = results.map((r: EnhancedSearchResult) => ({
+        title: r.title,
+        snippet: r.snippet,
+        url: r.url,
+      }));
 
       return this.createResult(
         true,
-        { results: results.slice(0, maxResults), query, totalResults: results.length },
+        {
+          results: searchResults,
+          query,
+          totalResults: results.length,
+          sources: results.map(r => r.source),
+          scores: results.map(r => r.score)
+        },
         `Found ${results.length} results for "${query}"`,
         undefined,
         startTime
@@ -544,90 +512,49 @@ export class MessageTool extends BaseTool {
 
 export class ResearchTool extends BaseTool {
   name = "research";
-  description = "Performs deep research by combining search and browser tools";
+  description = "Performs deep research with multi-source search and parallel content extraction";
   category: ToolCategory = "search";
 
-  private searchTool: SearchTool;
-  private browserTool: BrowserTool;
   private maxPages = 5;
-
-  constructor(searchTool?: SearchTool, browserTool?: BrowserTool) {
-    super();
-    this.searchTool = searchTool || new SearchTool();
-    this.browserTool = browserTool || new BrowserTool();
-  }
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { query, maxPages = this.maxPages, extractContent = true } = params;
+    const { query, maxPages = this.maxPages, extractContent = true, concurrencyLimit = 3 } = params;
 
     if (!query || typeof query !== "string") {
       return this.createResult(false, null, "", "Research query is required", startTime);
     }
 
     try {
-      const searchResult = await this.searchTool.execute({ query, maxResults: maxPages + 5 });
+      const deepResults = await searchOrchestrator.deepSearch(query, {
+        maxResults: maxPages,
+        extractContent,
+        concurrencyLimit,
+        maxContentLength: 10000
+      });
 
-      if (!searchResult.success || !searchResult.data?.results) {
-        return this.createResult(
-          false,
-          null,
-          "",
-          searchResult.error || "Search failed",
-          startTime
-        );
-      }
-
-      const searchResults: SearchResult[] = searchResult.data.results;
-      const researchData: Array<{
-        source: SearchResult;
-        content?: WebPageContent;
-        fetchError?: string;
-      }> = [];
-
-      const urlsToFetch = searchResults
-        .filter((r) => r.url && r.url.startsWith("http"))
-        .slice(0, maxPages);
-
-      if (extractContent && urlsToFetch.length > 0) {
-        const fetchPromises = urlsToFetch.map(async (source) => {
-          try {
-            const browserResult = await this.browserTool.execute({
-              url: source.url,
-              extractText: true,
-              maxLength: 10000,
-            });
-
-            return {
-              source,
-              content: browserResult.success ? browserResult.data : undefined,
-              fetchError: browserResult.success ? undefined : browserResult.error,
-            };
-          } catch (error) {
-            return {
-              source,
-              fetchError: error instanceof Error ? error.message : String(error),
-            };
-          }
-        });
-
-        const results = await Promise.allSettled(fetchPromises);
-        for (const result of results) {
-          if (result.status === "fulfilled") {
-            researchData.push(result.value);
-          }
-        }
-      } else {
-        for (const source of searchResults) {
-          researchData.push({ source });
-        }
-      }
+      const researchData = deepResults.map((r: DeepSearchResult) => ({
+        source: {
+          title: r.title,
+          snippet: r.snippet,
+          url: r.url,
+        },
+        content: r.content ? {
+          url: r.url,
+          title: r.title,
+          content: r.content,
+          status: 200
+        } : undefined,
+        score: r.score,
+        extractedAt: r.extractedAt
+      }));
 
       const summary = {
         query,
         totalSources: researchData.length,
         successfulFetches: researchData.filter((r) => r.content).length,
         sources: researchData,
+        availableSearchSources: searchOrchestrator.getAvailableSources()
       };
 
       return this.createResult(
