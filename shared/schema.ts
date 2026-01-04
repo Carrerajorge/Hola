@@ -595,6 +595,32 @@ export const insertChatRunSchema = createInsertSchema(chatRuns).omit({
 export type InsertChatRun = z.infer<typeof insertChatRunSchema>;
 export type ChatRun = typeof chatRuns.$inferSelect;
 
+// Conversation Documents - Persistent document context for chat conversations
+// Stores extracted content from uploaded documents to maintain context across messages
+export const conversationDocuments = pgTable("conversation_documents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  messageId: varchar("message_id").references(() => chatMessages.id, { onDelete: "set null" }),
+  fileName: text("file_name").notNull(),
+  storagePath: text("storage_path"),
+  mimeType: text("mime_type").notNull(),
+  fileSize: integer("file_size"),
+  extractedText: text("extracted_text"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("conversation_documents_chat_idx").on(table.chatId),
+  index("conversation_documents_created_idx").on(table.chatId, table.createdAt),
+]);
+
+export const insertConversationDocumentSchema = createInsertSchema(conversationDocuments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertConversationDocument = z.infer<typeof insertConversationDocumentSchema>;
+export type ConversationDocument = typeof conversationDocuments.$inferSelect;
+
 // Tool Invocations - Track tool calls within a run for idempotency
 export const toolInvocations = pgTable("tool_invocations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

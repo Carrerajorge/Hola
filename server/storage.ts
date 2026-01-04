@@ -74,7 +74,8 @@ import {
   type ChatMessageAnalysis, type InsertChatMessageAnalysis,
   chatMessageAnalysis,
   files, fileChunks, fileJobs, agentRuns, agentSteps, agentAssets, domainPolicies, chats, chatMessages, chatShares,
-  chatRuns, toolInvocations,
+  chatRuns, toolInvocations, conversationDocuments,
+  type ConversationDocument, type InsertConversationDocument,
   gpts, gptCategories, gptVersions, gptKnowledge, gptActions, sidebarPinnedGpts, users,
   aiModels, payments, invoices, platformSettings, auditLogs, analyticsSnapshots, reports, libraryItems,
   notificationEventTypes, notificationPreferences, userSettings,
@@ -387,6 +388,10 @@ export interface IStorage {
   createChatMessageAnalysis(data: InsertChatMessageAnalysis): Promise<ChatMessageAnalysis>;
   getChatMessageAnalysisByUploadId(uploadId: string): Promise<ChatMessageAnalysis | undefined>;
   updateChatMessageAnalysis(id: string, updates: Partial<InsertChatMessageAnalysis>): Promise<ChatMessageAnalysis | undefined>;
+  // Conversation Documents - Persistent document context
+  createConversationDocument(doc: InsertConversationDocument): Promise<ConversationDocument>;
+  getConversationDocuments(chatId: string): Promise<ConversationDocument[]>;
+  deleteConversationDocument(id: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -2520,6 +2525,23 @@ export class MemStorage implements IStorage {
       .where(eq(chatMessageAnalysis.id, id))
       .returning();
     return result;
+  }
+
+  // Conversation Documents - Persistent document context
+  async createConversationDocument(doc: InsertConversationDocument): Promise<ConversationDocument> {
+    const [result] = await db.insert(conversationDocuments).values(doc).returning();
+    return result;
+  }
+
+  async getConversationDocuments(chatId: string): Promise<ConversationDocument[]> {
+    return db.select()
+      .from(conversationDocuments)
+      .where(eq(conversationDocuments.chatId, chatId))
+      .orderBy(conversationDocuments.createdAt);
+  }
+
+  async deleteConversationDocument(id: string): Promise<void> {
+    await db.delete(conversationDocuments).where(eq(conversationDocuments.id, id));
   }
 }
 
