@@ -90,116 +90,94 @@
 }
 
 /* ========================================
-   LIQUID PLUS BUTTON - TECH STYLE
+   PROFESSIONAL PLUS BUTTON - ENTERPRISE STYLE
 ======================================== */
 
-@keyframes liquid-morph {
+@keyframes pro-border-rotate {
+  0% { --gradient-angle: 0deg; }
+  100% { --gradient-angle: 360deg; }
+}
+
+@keyframes pro-pulse-ring {
   0%, 100% {
-    border-radius: 50%;
-    transform: scale(1) rotate(0deg);
-  }
-  25% {
-    border-radius: 45% 55% 55% 45% / 55% 45% 55% 45%;
-    transform: scale(1.02) rotate(2deg);
+    opacity: 0;
+    transform: scale(0.8);
   }
   50% {
-    border-radius: 55% 45% 45% 55% / 45% 55% 45% 55%;
-    transform: scale(1) rotate(0deg);
-  }
-  75% {
-    border-radius: 45% 55% 55% 45% / 45% 55% 55% 45%;
-    transform: scale(1.02) rotate(-2deg);
+    opacity: 0.6;
+    transform: scale(1.2);
   }
 }
 
-@keyframes liquid-glow-pulse {
-  0%, 100% {
-    box-shadow: 
-      0 0 0 0 rgba(99, 102, 241, 0),
-      inset 0 0 10px rgba(99, 102, 241, 0.1);
-  }
-  50% {
-    box-shadow: 
-      0 0 20px 4px rgba(99, 102, 241, 0.3),
-      inset 0 0 15px rgba(99, 102, 241, 0.2);
-  }
-}
-
-@keyframes liquid-shimmer {
-  0% {
-    background-position: -200% center;
-  }
-  100% {
-    background-position: 200% center;
-  }
-}
-
-@keyframes plus-rotate-hover {
-  0% { transform: rotate(0deg) scale(1); }
-  50% { transform: rotate(90deg) scale(1.1); }
-  100% { transform: rotate(180deg) scale(1); }
+@keyframes pro-icon-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
 }
 
 .liquid-plus-button {
+  --gradient-angle: 0deg;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(
-    135deg,
-    hsl(var(--primary) / 0.1) 0%,
-    hsl(var(--primary) / 0.05) 50%,
-    hsl(var(--primary) / 0.15) 100%
+  background: linear-gradient(145deg, 
+    hsl(var(--background)) 0%, 
+    hsl(var(--muted) / 0.5) 100%
   );
-  border: 1px solid hsl(var(--primary) / 0.2);
-  animation: liquid-morph 4s ease-in-out infinite;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
+  border: none;
+  border-radius: 12px;
+  transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+  overflow: visible;
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 4px 12px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .liquid-plus-button::before {
   content: '';
   position: absolute;
-  inset: -2px;
+  inset: -1.5px;
+  border-radius: 13px;
   background: linear-gradient(
-    90deg,
-    transparent 0%,
-    hsl(var(--primary) / 0.4) 50%,
-    transparent 100%
+    var(--gradient-angle),
+    hsl(var(--primary) / 0.4) 0%,
+    hsl(var(--primary) / 0.1) 25%,
+    transparent 50%,
+    hsl(var(--primary) / 0.1) 75%,
+    hsl(var(--primary) / 0.4) 100%
   );
-  background-size: 200% 100%;
-  animation: liquid-shimmer 3s ease-in-out infinite;
-  border-radius: inherit;
+  z-index: -1;
   opacity: 0;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
+  transition: opacity 0.4s ease;
+  animation: pro-border-rotate 3s linear infinite;
 }
 
 .liquid-plus-button::after {
   content: '';
   position: absolute;
   inset: 0;
+  border-radius: 12px;
   background: radial-gradient(
     circle at center,
-    hsl(var(--primary) / 0.2) 0%,
-    transparent 70%
+    hsl(var(--primary) / 0.08) 0%,
+    transparent 60%
   );
   opacity: 0;
   transition: opacity 0.3s ease;
   pointer-events: none;
-  border-radius: inherit;
 }
 
 .liquid-plus-button:hover {
-  background: linear-gradient(
-    135deg,
-    hsl(var(--primary) / 0.2) 0%,
-    hsl(var(--primary) / 0.1) 50%,
-    hsl(var(--primary) / 0.25) 100%
+  background: linear-gradient(145deg, 
+    hsl(var(--background)) 0%, 
+    hsl(var(--primary) / 0.08) 100%
   );
-  border-color: hsl(var(--primary) / 0.4);
-  animation: liquid-morph 2s ease-in-out infinite, liquid-glow-pulse 2s ease-in-out infinite;
-  transform: scale(1.05);
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 
+    0 4px 16px rgba(0, 0, 0, 0.1),
+    0 8px 24px hsl(var(--primary) / 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .liquid-plus-button:hover::before {
@@ -211,47 +189,75 @@
 }
 
 .liquid-plus-button:hover svg {
-  animation: plus-rotate-hover 0.5s ease-out forwards;
   color: hsl(var(--primary));
+  animation: pro-icon-float 1.5s ease-in-out infinite;
+  filter: drop-shadow(0 0 4px hsl(var(--primary) / 0.4));
 }
 
 .liquid-plus-button:active {
-  transform: scale(0.95);
-  animation: none;
+  transform: translateY(0) scale(0.98);
+  box-shadow: 
+    0 1px 4px rgba(0, 0, 0, 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .liquid-plus-button svg {
   position: relative;
   z-index: 10;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+  color: hsl(var(--muted-foreground));
 }
 
-/* Dark mode enhancements */
+/* Dark mode - Premium glass effect */
 .dark .liquid-plus-button {
-  background: linear-gradient(
-    135deg,
-    rgba(139, 92, 246, 0.15) 0%,
-    rgba(99, 102, 241, 0.08) 50%,
-    rgba(139, 92, 246, 0.2) 100%
+  background: linear-gradient(145deg, 
+    rgba(30, 30, 35, 0.9) 0%, 
+    rgba(40, 40, 50, 0.7) 100%
   );
-  border-color: rgba(139, 92, 246, 0.3);
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.3),
+    0 4px 12px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+}
+
+.dark .liquid-plus-button::before {
+  background: linear-gradient(
+    var(--gradient-angle),
+    rgba(139, 92, 246, 0.6) 0%,
+    rgba(99, 102, 241, 0.2) 25%,
+    transparent 50%,
+    rgba(99, 102, 241, 0.2) 75%,
+    rgba(139, 92, 246, 0.6) 100%
+  );
 }
 
 .dark .liquid-plus-button:hover {
-  background: linear-gradient(
-    135deg,
-    rgba(139, 92, 246, 0.25) 0%,
-    rgba(99, 102, 241, 0.15) 50%,
-    rgba(139, 92, 246, 0.3) 100%
+  background: linear-gradient(145deg, 
+    rgba(35, 35, 45, 0.95) 0%, 
+    rgba(60, 50, 80, 0.6) 100%
   );
-  border-color: rgba(139, 92, 246, 0.5);
   box-shadow: 
-    0 0 25px 5px rgba(139, 92, 246, 0.35),
-    inset 0 0 20px rgba(139, 92, 246, 0.25);
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 8px 32px rgba(139, 92, 246, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .dark .liquid-plus-button:hover svg {
   color: rgb(167, 139, 250);
+  filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.5));
+}
+
+.dark .liquid-plus-button svg {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Focus state for accessibility */
+.liquid-plus-button:focus-visible {
+  outline: none;
+  box-shadow: 
+    0 0 0 3px hsl(var(--background)),
+    0 0 0 5px hsl(var(--primary) / 0.5);
 }
 
 /* ========================================
