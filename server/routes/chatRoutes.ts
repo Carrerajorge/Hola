@@ -34,7 +34,7 @@ const complexityRequestSchema = z.object({
 });
 
 const routerRequestSchema = z.object({
-  message: z.string(),
+  message: z.string().min(1, "Message cannot be empty"),
   hasAttachments: z.boolean().optional().default(false),
 });
 

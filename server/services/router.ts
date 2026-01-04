@@ -19,29 +19,32 @@ const DEFAULT_CONFIG: RouterConfig = {
 };
 
 const HEURISTIC_PATTERNS: Array<{ pattern: RegExp; toolNeed: string; confidence: number }> = [
-  { pattern: /\b(busca|buscar|search|find|investigar|investigate|research)\b.*\b(web|internet|online)\b/i, toolNeed: "web_search", confidence: 0.9 },
+  { pattern: /\b(busca|buscar|search|find|investigar|investigate|research)\b.*\b(web|internet|online)\b/iu, toolNeed: "web_search", confidence: 0.9 },
   { pattern: /https?:\/\/[^\s]+/i, toolNeed: "open_url", confidence: 0.85 },
-  { pattern: /\b(navega|navigate|browse|visita|visit|abre|open)\b.*\b(página|page|sitio|site|url|web)\b/i, toolNeed: "open_url", confidence: 0.85 },
-  { pattern: /\b(descarga|download|extrae|extract|obtén|get)\b.*\b(archivo|file|documento|document|datos|data)\b/i, toolNeed: "extract_text", confidence: 0.8 },
-  { pattern: /\b(verifica|verify|comprueba|check|confirma|confirm)\b.*\b(hechos|facts|fuentes|sources)\b/i, toolNeed: "web_search", confidence: 0.85 },
-  { pattern: /\b(precio|price|cotización|quote|costo|cost)\b.*\b(actual|current|hoy|today|ahora|now)\b/i, toolNeed: "web_search", confidence: 0.9 },
-  { pattern: /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|excel|pdf|csv|archivo|file|presentación|presentation|ppt)\b/i, toolNeed: "generate_file", confidence: 0.85 },
-  { pattern: /\b(ejecuta|execute|run|corre)\b.*\b(código|code|script|programa|program|python|javascript|shell)\b/i, toolNeed: "execute_code", confidence: 0.8 },
-  { pattern: /\b(analiza|analyze|procesa|process)\b.*\b(archivo|file|documento|document|excel|spreadsheet)\b/i, toolNeed: "analyze_file", confidence: 0.8 },
-  { pattern: /\b(automatiza|automate|automatizar|automation)\b/i, toolNeed: "automation", confidence: 0.85 },
-  { pattern: /\b(paso\s+\d+|step\s+\d+|\d+\.\s+\w+)\b/i, toolNeed: "multi_step", confidence: 0.75 },
-  { pattern: /\b(primero|first)\b.*\b(luego|then|después|after)\b/i, toolNeed: "multi_step", confidence: 0.7 },
-  { pattern: /\b(cv|curriculum|resume|currículum)\b/i, toolNeed: "generate_file", confidence: 0.9 },
-  { pattern: /\b(landing page|página de aterrizaje)\b/i, toolNeed: "webdev", confidence: 0.85 },
-  { pattern: /\b(scrape|scrapear|extraer datos|extract data)\b/i, toolNeed: "web_scrape", confidence: 0.9 },
-  { pattern: /\b(usa el agente|use agent|modo agente|agent mode)\b/i, toolNeed: "explicit_agent", confidence: 1.0 },
+  { pattern: /\b(navega|navigate|browse|visita|visit|abre|open)\b.*\b(p[aá]gina|page|sitio|site|url|web)\b/iu, toolNeed: "open_url", confidence: 0.85 },
+  { pattern: /\b(descarga|download|extrae|extract|obt[eé]n|get)\b.*\b(archivo|file|documento|document|datos|data)\b/iu, toolNeed: "extract_text", confidence: 0.8 },
+  { pattern: /\b(verifica|verify|comprueba|check|confirma|confirm)\b.*\b(hechos|facts|fuentes|sources)\b/iu, toolNeed: "web_search", confidence: 0.85 },
+  { pattern: /\b(precio|price|cotizaci[oó]n|quote|costo|cost)\b.*\b(actual|current|hoy|today|ahora|now)\b/iu, toolNeed: "web_search", confidence: 0.9 },
+  { pattern: /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|excel|pdf|csv|archivo|file|presentaci[oó]n|presentation|ppt)\b/iu, toolNeed: "generate_file", confidence: 0.85 },
+  { pattern: /\b(ejecuta|execute|run|corre)\b.*\b(c[oó]digo|code|script|programa|program|python|javascript|shell)\b/iu, toolNeed: "execute_code", confidence: 0.8 },
+  { pattern: /\b(analiza|analyze|procesa|process)\b.*\b(archivo|file|documento|document|excel|spreadsheet)\b/iu, toolNeed: "analyze_file", confidence: 0.8 },
+  { pattern: /\b(automatiza|automate|automatizar|automation)\b/iu, toolNeed: "automation", confidence: 0.85 },
+  { pattern: /\b(paso\s+\d+|step\s+\d+|\d+\.\s+\w+)\b/iu, toolNeed: "multi_step", confidence: 0.75 },
+  { pattern: /\b(primero|first)\b.*\b(luego|then|despu[eé]s|after)\b/iu, toolNeed: "multi_step", confidence: 0.7 },
+  { pattern: /\b(cv|curriculum|resume|curr[ií]culum)\b/iu, toolNeed: "generate_file", confidence: 0.9 },
+  { pattern: /\b(landing page|p[aá]gina de aterrizaje)\b/iu, toolNeed: "webdev", confidence: 0.85 },
+  { pattern: /\b(scrape|scrapear|extraer datos|extract data)\b/iu, toolNeed: "web_scrape", confidence: 0.9 },
+  { pattern: /\b(usa el agente|use agent|modo agente|agent mode)\b/iu, toolNeed: "explicit_agent", confidence: 1.0 },
+  { pattern: /\b(from|de|en)\s+(wikipedia|the web|la web|internet)\b/iu, toolNeed: "web_search", confidence: 0.85 },
+  { pattern: /\b(get|obtener|find|buscar)\s+information\s+from\b/iu, toolNeed: "web_search", confidence: 0.8 },
+  { pattern: /\binformaci[oó]n\s+sobre\b.*\b(web|internet)\b/iu, toolNeed: "web_search", confidence: 0.85 },
 ];
 
 const TRIVIAL_PATTERNS = [
-  /^(hola|hi|hello|hey|buenos días|buenas tardes|buenas noches)[\s!?.,]*$/i,
-  /^(gracias|thanks|thank you|thx|ty|muchas gracias)[\s!?.,]*$/i,
-  /^(ok|okay|sí|si|yes|no|nope|vale|bien|bueno|sure|got it)[\s!?.,]*$/i,
-  /^(adiós|bye|goodbye|chao|hasta luego|see you)[\s!?.,]*$/i,
+  /^(hola|hi|hello|hey|buenos d[ií]as?|buenas tardes|buenas noches)[\s!?.,]*$/iu,
+  /^(gracias|thanks|thank you|thx|ty|muchas gracias)[\s!?.,]*$/iu,
+  /^(ok|okay|s[ií]|si|yes|no|nope|vale|bien|bueno|sure|got it)[\s!?.,]*$/iu,
+  /^(adi[oó]s|bye|goodbye|chao|hasta luego|see you)[\s!?.,]*$/iu,
 ];
 
 const SIMPLE_CHAT_PATTERNS = [
