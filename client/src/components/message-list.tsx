@@ -981,7 +981,7 @@ const UserMessage = memo(function UserMessage({
 interface AgentRunContentProps {
   agentRun: {
     runId: string | null;
-    status: "starting" | "running" | "completed" | "failed" | "cancelled" | "queued" | "planning" | "verifying" | "paused" | "cancelling";
+    status: "starting" | "running" | "completed" | "failed" | "cancelled" | "queued" | "planning" | "verifying" | "paused" | "cancelling" | "replanning";
     userMessage?: string;
     steps: Array<{
       stepIndex: number;
@@ -1009,8 +1009,8 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
   const [showAllEvents, setShowAllEvents] = useState(false);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   
-  const isCancellable = ["starting", "running", "queued", "planning", "verifying", "paused"].includes(agentRun.status);
-  const isActive = ["starting", "running", "queued", "planning", "verifying", "cancelling"].includes(agentRun.status);
+  const isCancellable = ["starting", "running", "queued", "planning", "verifying", "paused", "replanning"].includes(agentRun.status);
+  const isActive = ["starting", "running", "queued", "planning", "verifying", "cancelling", "replanning"].includes(agentRun.status);
   const isPaused = agentRun.status === "paused";
   const isCancelling = agentRun.status === "cancelling";
   
@@ -1031,6 +1031,8 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
         return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />;
       case "verifying":
         return <Eye className="h-4 w-4 animate-pulse text-purple-500" />;
+      case "replanning":
+        return <RefreshCw className="h-4 w-4 animate-spin text-orange-500" />;
       case "paused":
         return <Clock className="h-4 w-4 text-yellow-500" />;
       case "cancelling":
@@ -1053,6 +1055,7 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
       case "planning": return "Planificando...";
       case "running": return "Ejecutando...";
       case "verifying": return "Verificando...";
+      case "replanning": return "Replanificando...";
       case "paused": return "Pausado";
       case "cancelling": return "Cancelando...";
       case "completed": return "Completado";

@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 
-export type AgentModeStatus = 'idle' | 'queued' | 'planning' | 'running' | 'verifying' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
+export type AgentModeStatus = 'idle' | 'queued' | 'planning' | 'running' | 'verifying' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'replanning';
 
 export interface AgentPlanStep {
   index: number;
@@ -78,7 +78,7 @@ export function useAgentMode(chatId: string) {
   const lastAttachmentsRef = useRef<any[] | undefined>(undefined);
   const initializedForChatRef = useRef<string | null>(null);
 
-  const isPollingActive = ['queued', 'planning', 'running'].includes(state.status);
+  const isPollingActive = ['queued', 'planning', 'running', 'verifying', 'replanning', 'cancelling'].includes(state.status);
 
   // Fetch active run for the current chat when chatId changes
   const { data: chatRunData } = useQuery<AgentRunResponse | null>({
@@ -342,8 +342,13 @@ export function useAgentMode(chatId: string) {
     await retryRunMutation.mutateAsync();
   }, [retryRunMutation]);
 
-  const isRunning = ['queued', 'planning', 'running', 'verifying'].includes(state.status);
-  const isCancellable = ['queued', 'planning', 'running', 'verifying', 'paused'].includes(state.status);
+  const isRunning = ['queued', 'planning', 'running', 'verifying', 'replanning'].includes(state.status);
+  const isCancellable = ['queued', 'planning', 'running', 'verifying', 'paused', 'replanning'].includes(state.status);
+
+  const reset = useCallback(() => {
+    setState(initialState);
+    initializedForChatRef.current = null;
+  }, []);
 
   return {
     runId: state.runId,
@@ -360,6 +365,7 @@ export function useAgentMode(chatId: string) {
     pauseRun,
     resumeRun,
     retryRun,
+    reset,
     isRunning,
     isCancellable
   };
