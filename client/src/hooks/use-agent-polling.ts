@@ -63,7 +63,7 @@ export function useStartAgentRun() {
             provider: "google"
           })
         });
-        if (!chatRes.ok) throw new Error('Failed to create chat');
+        if (!chatRes.ok) throw new Error('Inicia sesión para usar el modo agente');
         const newChat = await chatRes.json();
         resolvedChatId = newChat.id;
       }
@@ -79,7 +79,7 @@ export function useStartAgentRun() {
         })
       });
       
-      if (!runRes.ok) throw new Error('Failed to start agent run');
+      if (!runRes.ok) throw new Error('Error al iniciar el agente');
       const runData = await runRes.json();
       
       setRunId(messageId, runData.id, runData.chatId);
