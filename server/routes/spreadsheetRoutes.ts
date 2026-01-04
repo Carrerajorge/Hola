@@ -23,10 +23,11 @@ import { generateAnalysisCode, validatePythonCode } from "../services/spreadshee
 import { executePythonCode, initializeSandbox } from "../services/pythonSandbox";
 import { parseDocument, extractMetadata, detectFileType } from "../services/documentIngestion";
 import { startAnalysis, getAnalysisProgress, getAnalysisResults } from "../services/analysisOrchestrator";
+import { LIMITS } from "../lib/constants";
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: LIMITS.MAX_FILE_SIZE_BYTES },
 });
 
 const TEMP_DIR = "/tmp/spreadsheets";
