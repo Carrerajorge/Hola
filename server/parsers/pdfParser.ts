@@ -12,7 +12,8 @@ export class PdfParser implements FileParser {
     let timeoutId: NodeJS.Timeout | null = null;
     
     try {
-      const pdfParse = require("pdf-parse");
+      const pdfParseModule = await import("pdf-parse");
+      const pdfParse = pdfParseModule.default;
       
       const parsePromise = this.parseWithPageStructure(pdfParse, content);
       const timeoutPromise = new Promise<never>((_, reject) => {
