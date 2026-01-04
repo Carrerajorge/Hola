@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { db } from "../db";
 import { agentModeRuns, agentModeSteps, agentModeEvents } from "@shared/schema";
 import { agentManager } from "../agent/agentOrchestrator";
+import { agentEventBus } from "../agent/eventBus";
 import { eq, desc, asc } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { CreateRunRequestSchema, RunResponseSchema, StepsArrayResponseSchema } from "../agent/contracts";
@@ -345,6 +346,33 @@ export function createAgentModeRouter() {
     } catch (error: any) {
       console.error("[AgentRoutes] Error getting events:", error);
       res.status(500).json({ error: "Failed to get agent run events" });
+    }
+  });
+
+  router.get("/runs/:id/events/stream", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, id));
+
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      const clientId = agentEventBus.subscribe(id, res);
+      console.log(`[AgentRoutes] SSE client ${clientId} connected to run ${id}`);
+
+      req.on("close", () => {
+        agentEventBus.removeClient(clientId);
+        console.log(`[AgentRoutes] SSE client ${clientId} disconnected from run ${id}`);
+      });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error setting up event stream:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to setup event stream" });
+      }
     }
   });
 

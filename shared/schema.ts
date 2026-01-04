@@ -2316,3 +2316,84 @@ export function createAgentEvent(
     ...options,
   });
 }
+
+// ==========================================
+// Trace Event Schema - SSE Streaming Contract
+// ==========================================
+
+export const TraceEventTypeSchema = z.enum([
+  'task_start',
+  'plan_created',
+  'plan_step',
+  'step_started',
+  'tool_call',
+  'tool_output',
+  'tool_chunk',
+  'observation',
+  'verification',
+  'step_completed',
+  'step_failed',
+  'step_retried',
+  'replan',
+  'thinking',
+  'shell_output',
+  'artifact_created',
+  'error',
+  'done',
+  'cancelled',
+  'heartbeat'
+]);
+
+export const TraceEventSchema = z.object({
+  event_type: TraceEventTypeSchema,
+  runId: z.string(),
+  stepId: z.string().optional(),
+  stepIndex: z.number().optional(),
+  phase: z.enum(['planning', 'executing', 'verifying', 'completed', 'failed', 'cancelled']).optional(),
+  status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'retrying']).optional(),
+  tool_name: z.string().optional(),
+  command: z.string().optional(),
+  output_snippet: z.string().optional(),
+  chunk_sequence: z.number().optional(),
+  is_final_chunk: z.boolean().optional(),
+  artifact: z.object({
+    type: z.string(),
+    name: z.string(),
+    url: z.string().optional(),
+    data: z.any().optional(),
+  }).optional(),
+  plan: z.object({
+    objective: z.string(),
+    steps: z.array(z.object({
+      index: z.number(),
+      toolName: z.string(),
+      description: z.string(),
+    })),
+    estimatedTime: z.string().optional(),
+  }).optional(),
+  error: z.object({
+    code: z.string().optional(),
+    message: z.string(),
+    retryable: z.boolean().optional(),
+  }).optional(),
+  summary: z.string().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  timestamp: z.number(),
+  metadata: z.record(z.any()).optional(),
+});
+
+export type TraceEventType = z.infer<typeof TraceEventTypeSchema>;
+export type TraceEvent = z.infer<typeof TraceEventSchema>;
+
+export function createTraceEvent(
+  event_type: TraceEventType,
+  runId: string,
+  options?: Partial<Omit<TraceEvent, 'event_type' | 'runId' | 'timestamp'>>
+): TraceEvent {
+  return TraceEventSchema.parse({
+    event_type,
+    runId,
+    timestamp: Date.now(),
+    ...options,
+  });
+}
