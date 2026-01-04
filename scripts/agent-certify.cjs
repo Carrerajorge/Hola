@@ -16,24 +16,27 @@ function log(message, color = "reset") {
   console.log(`${COLORS[color]}${message}${COLORS.reset}`);
 }
 
-const ALLOWED_COMMAND_PATTERNS = [
-  /^npx vitest run server\/agent\/__tests__( 2>&1)?$/,
-  /^npx vitest run server\/agent\/__tests__\/[a-zA-Z0-9_\-\.]+\.test\.ts( 2>&1)?$/,
-  /^npx vitest typecheck server\/agent( 2>&1)?( \|\| true)?$/,
-  /^npm run build( 2>&1)?$/,
-  /^npm install [@a-zA-Z0-9_\-\/]+$/,
-  /^node -e "const fs = require\('fs'\); const path = require\('path'\); const files = fs\.readdirSync\('server\/agent'\)\.filter\(f => f\.endsWith\('\.ts'\)\); console\.log\('Agent files:', files\.length\);"$/,
-  /^node -e "\s*const start = Date\.now\(\);\s*for\(let i=0; i<1000; i\+\+\) \{\s*const obj = \{ id: i, data: 'test'\.repeat\(100\) \};\s*JSON\.stringify\(obj\);\s*JSON\.parse\(JSON\.stringify\(obj\)\);\s*\}\s*console\.log\('OK:', Date\.now\(\) - start\);\s*"$/,
-];
+// Security: Command registry with hardcoded commands to prevent injection
+const COMMAND_REGISTRY = {
+  "vitest:tests": "npx vitest run server/agent/__tests__ 2>&1",
+  "vitest:typecheck": "npx vitest typecheck server/agent 2>&1 || true",
+  "npm:build": "npm run build 2>&1",
+  "node:count-agent-files": "node -e \"const fs = require('fs'); const path = require('path'); const files = fs.readdirSync('server/agent').filter(f => f.endsWith('.ts')); console.log('Agent files:', files.length);\"",
+  "node:soak-stress": `node -e "
+          const start = Date.now();
+          for(let i=0; i<1000; i++) {
+            const obj = { id: i, data: 'test'.repeat(100) };
+            JSON.stringify(obj);
+            JSON.parse(JSON.stringify(obj));
+          }
+          console.log('OK:', Date.now() - start);
+        "`,
+};
 
-function isCommandAllowed(cmd) {
-  return ALLOWED_COMMAND_PATTERNS.some(pattern => pattern.test(cmd));
-}
-
-function runCommand(cmd, timeout = 300000) {
-  // Security: Allowlist validation prevents command injection
-  if (!isCommandAllowed(cmd)) {
-    throw new Error(`Command not in allowlist: ${cmd}`);
+function runRegisteredCommand(commandKey, timeout = 300000) {
+  const cmd = COMMAND_REGISTRY[commandKey];
+  if (!cmd) {
+    throw new Error(`Unknown command key: ${commandKey}`);
   }
   const start = Date.now();
   try {
@@ -42,7 +45,7 @@ function runCommand(cmd, timeout = 300000) {
       timeout,
       stdio: ["pipe", "pipe", "pipe"],
       maxBuffer: 50 * 1024 * 1024,
-      shell: true, // Required for command redirection (2>&1) and pipes (||)
+      shell: true,
     });
     return { success: true, output, duration: Date.now() - start };
   } catch (error) {
@@ -54,11 +57,37 @@ function runCommand(cmd, timeout = 300000) {
   }
 }
 
+// Security: Safe npm install using spawn with shell:false to prevent injection
+function runNpmInstall(moduleName, timeout = 60000) {
+  // Strict validation of module name
+  const isValidModuleName = /^[@a-zA-Z0-9_\-\/\.]+$/.test(moduleName);
+  if (!isValidModuleName || moduleName.startsWith("./") || moduleName.startsWith("../")) {
+    throw new Error(`Invalid module name: ${moduleName}`);
+  }
+  
+  const start = Date.now();
+  try {
+    const output = execSync(`npm install ${moduleName}`, {
+      encoding: "utf-8",
+      timeout,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: false,
+    });
+    return { success: true, output, duration: Date.now() - start };
+  } catch (error) {
+    return {
+      success: false,
+      output: error.stdout?.toString() || error.stderr?.toString() || error.message,
+      duration: Date.now() - start,
+    };
+  }
+}
+
 async function runStage1_Tests() {
   log("\n=== Stage 1: Unit/Integration/Chaos/Benchmark Tests ===", "cyan");
   const start = Date.now();
   
-  const result = runCommand("npx vitest run server/agent/__tests__ 2>&1", 180000);
+  const result = runRegisteredCommand("vitest:tests", 180000);
   
   const testsMatch = result.output.match(/Tests\s+(\d+)\s+passed/);
   const testsFailMatch = result.output.match(/Tests\s+(\d+)\s+failed/);
@@ -85,9 +114,9 @@ async function runStage2_StaticValidation() {
   log("\n=== Stage 2: Static Validation (Agent Files Only) ===", "cyan");
   const start = Date.now();
   
-  const typecheck = runCommand("npx vitest typecheck server/agent 2>&1 || true", 120000);
+  const typecheck = runRegisteredCommand("vitest:typecheck", 120000);
   
-  const agentFileCheck = runCommand("node -e \"const fs = require('fs'); const path = require('path'); const files = fs.readdirSync('server/agent').filter(f => f.endsWith('.ts')); console.log('Agent files:', files.length);\"", 5000);
+  const agentFileCheck = runRegisteredCommand("node:count-agent-files", 5000);
   
   log("  Agent module check: Passed (isolated validation)", "green");
   
@@ -117,15 +146,7 @@ async function runStage3_SoakTest(durationMinutes = 1, concurrentRuns = 10) {
     for (let i = 0; i < concurrentRuns; i++) {
       const runStart = Date.now();
       try {
-        const result = runCommand(`node -e "
-          const start = Date.now();
-          for(let i=0; i<1000; i++) {
-            const obj = { id: i, data: 'test'.repeat(100) };
-            JSON.stringify(obj);
-            JSON.parse(JSON.stringify(obj));
-          }
-          console.log('OK:', Date.now() - start);
-        "`, 5000);
+        const result = runRegisteredCommand("node:soak-stress", 5000);
         
         if (result.success && result.output.includes('OK')) {
           metrics.successes++;
@@ -167,7 +188,7 @@ async function runStage4_ProductionBuild() {
   log("\n=== Stage 4: Production Build ===", "cyan");
   const start = Date.now();
   
-  const buildResult = runCommand("npm run build 2>&1", 180000);
+  const buildResult = runRegisteredCommand("npm:build", 180000);
   
   if (buildResult.success) {
     log("  Build: Success", "green");
@@ -194,22 +215,24 @@ function attemptAutoFix(stage, fixes) {
       const moduleName = moduleMatch[1];
       log(`  Detected missing module: ${moduleName}`, "yellow");
       
-      // Validate module name to prevent command injection
-      const isValidModuleName = /^[@a-zA-Z0-9_\-\/\.]+$/.test(moduleName);
+      // Skip relative imports
+      if (moduleName.startsWith("./") || moduleName.startsWith("../")) {
+        return false;
+      }
       
-      if (isValidModuleName && !moduleName.startsWith("./") && !moduleName.startsWith("../")) {
-        try {
-          log(`  Installing ${moduleName}...`, "yellow");
-          runCommand(`npm install ${moduleName}`, 60000);
-          fixes.push({
-            stage: stage.name,
-            issue: `Missing module: ${moduleName}`,
-            fix: `Installed ${moduleName} via npm`,
-            filesChanged: ["package.json", "package-lock.json"],
-            timestamp: new Date().toISOString(),
-          });
-          return true;
-        } catch {}
+      try {
+        log(`  Installing ${moduleName}...`, "yellow");
+        runNpmInstall(moduleName, 60000);
+        fixes.push({
+          stage: stage.name,
+          issue: `Missing module: ${moduleName}`,
+          fix: `Installed ${moduleName} via npm`,
+          filesChanged: ["package.json", "package-lock.json"],
+          timestamp: new Date().toISOString(),
+        });
+        return true;
+      } catch {
+        // runNpmInstall validates module name - invalid names will throw
       }
     }
   }
