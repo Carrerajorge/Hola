@@ -16,7 +16,23 @@ function log(message, color = "reset") {
   console.log(`${COLORS[color]}${message}${COLORS.reset}`);
 }
 
+const ALLOWED_COMMAND_PATTERNS = [
+  /^npx vitest run server\/agent\/__tests__( 2>&1)?$/,
+  /^npx vitest run server\/agent\/__tests__\/[a-zA-Z0-9_\-\.]+\.test\.ts( 2>&1)?$/,
+  /^npx vitest typecheck server\/agent( 2>&1)?( \|\| true)?$/,
+  /^npm run build( 2>&1)?$/,
+  /^npm install [@a-zA-Z0-9_\-\/]+$/,
+  /^node -e "/,
+];
+
+function isCommandAllowed(cmd) {
+  return ALLOWED_COMMAND_PATTERNS.some(pattern => pattern.test(cmd));
+}
+
 function runCommand(cmd, timeout = 300000) {
+  if (!isCommandAllowed(cmd)) {
+    throw new Error(`Command not in allowlist: ${cmd}`);
+  }
   const start = Date.now();
   try {
     const output = execSync(cmd, { 
