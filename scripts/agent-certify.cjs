@@ -30,6 +30,7 @@ function isCommandAllowed(cmd) {
 }
 
 function runCommand(cmd, timeout = 300000) {
+  // Security: Allowlist validation prevents command injection
   if (!isCommandAllowed(cmd)) {
     throw new Error(`Command not in allowlist: ${cmd}`);
   }
@@ -40,6 +41,7 @@ function runCommand(cmd, timeout = 300000) {
       timeout,
       stdio: ["pipe", "pipe", "pipe"],
       maxBuffer: 50 * 1024 * 1024,
+      shell: true, // Required for command redirection (2>&1) and pipes (||)
     });
     return { success: true, output, duration: Date.now() - start };
   } catch (error) {
