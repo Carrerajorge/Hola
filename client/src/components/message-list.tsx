@@ -32,7 +32,14 @@ import {
   Clock,
   XCircle,
   AlertCircle,
-  ChevronDown
+  ChevronDown,
+  Target,
+  Eye,
+  Brain,
+  List,
+  Globe,
+  Wrench,
+  Zap
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -70,7 +77,6 @@ import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResults";
 import { normalizeAgentEvent, hasPayloadDetails, type MappedAgentEvent } from "@/lib/agent-event-mapper";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Eye, Brain, List } from "lucide-react";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -1130,23 +1136,93 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
     }
   };
 
+  // Extract objective from event stream
+  const objective = useMemo(() => {
+    const planEvent = (agentRun.eventStream || []).find(
+      (e: any) => e.content?.plan?.objective || e.content?.objective
+    );
+    return planEvent?.content?.plan?.objective || planEvent?.content?.objective || agentRun.userMessage || null;
+  }, [agentRun.eventStream, agentRun.userMessage]);
+
+  // Count completed vs total steps
+  const stepProgress = useMemo(() => {
+    const completedEvents = mappedEvents.filter(e => e.status === 'ok' && (e.kind === 'observation' || e.kind === 'result')).length;
+    const totalSteps = agentRun.steps?.length || mappedEvents.filter(e => e.kind === 'action').length || 0;
+    return { completed: completedEvents, total: Math.max(totalSteps, completedEvents) };
+  }, [mappedEvents, agentRun.steps]);
+
   return (
     <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-bottom-2 duration-300" data-testid="agent-run-content">
-      {/* Collapsible header */}
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 rounded-lg border border-purple-500/20 hover:border-purple-500/40 transition-all w-full text-left"
-      >
-        <Bot className="h-5 w-5 text-purple-500" />
-        <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Modo Agente</span>
-        <div className="flex-1" />
-        {getStatusIcon()}
-        <span className="text-xs text-muted-foreground">{getStatusText()}</span>
-        <ChevronDown className={cn(
-          "h-4 w-4 text-muted-foreground transition-transform",
-          isExpanded && "rotate-180"
-        )} />
-      </button>
+      {/* Header with cancel button prominently displayed */}
+      <div className="flex items-start gap-2">
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex-1 flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 rounded-lg border border-purple-500/20 hover:border-purple-500/40 transition-all text-left"
+        >
+          <Bot className="h-5 w-5 text-purple-500" />
+          <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Modo Agente</span>
+          <div className="flex-1" />
+          {getStatusIcon()}
+          <span className="text-xs text-muted-foreground">{getStatusText()}</span>
+          <ChevronDown className={cn(
+            "h-4 w-4 text-muted-foreground transition-transform",
+            isExpanded && "rotate-180"
+          )} />
+        </button>
+        
+        {/* Prominent Cancel Button - always visible when active */}
+        {isCancellable && onCancel && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+            disabled={isCancelling}
+            className={cn(
+              "shrink-0 h-10 px-3 border",
+              isCancelling 
+                ? "text-red-400 border-red-300/50 bg-red-50/50 dark:bg-red-900/20 cursor-not-allowed" 
+                : "text-muted-foreground border-border hover:text-red-500 hover:border-red-300 hover:bg-red-50/50 dark:hover:bg-red-900/20"
+            )}
+            data-testid="button-cancel-agent-header"
+          >
+            {isCancelling ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                Cancelando
+              </>
+            ) : (
+              <>
+                <XCircle className="h-4 w-4 mr-1.5" />
+                Cancelar
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+
+      {/* Objective display - show what the agent is working on */}
+      {objective && isActive && (
+        <div className="px-3 py-2 bg-purple-500/5 rounded-lg border border-purple-500/10">
+          <div className="flex items-center gap-2 text-xs text-purple-600 dark:text-purple-400 font-medium uppercase tracking-wide mb-1">
+            <Target className="h-3 w-3" />
+            Objetivo
+          </div>
+          <p className="text-sm text-foreground line-clamp-2">{objective}</p>
+          {stepProgress.total > 0 && (
+            <div className="mt-2 flex items-center gap-2">
+              <div className="flex-1 h-1.5 bg-purple-500/20 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500"
+                  style={{ width: `${Math.min(100, (stepProgress.completed / stepProgress.total) * 100)}%` }}
+                />
+              </div>
+              <span className="text-xs text-muted-foreground shrink-0">
+                {stepProgress.completed}/{stepProgress.total}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {isExpanded && (
         <div className="space-y-3">

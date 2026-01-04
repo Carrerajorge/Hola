@@ -40,6 +40,7 @@ export interface ToolContext {
   stepIndex?: number;
   userPlan?: "free" | "pro" | "admin";
   isConfirmed?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface ToolArtifact {
@@ -136,6 +137,23 @@ export class ToolRegistry {
     const addLog = (level: ToolLog["level"], message: string, data?: any) => {
       logs.push({ level, message, timestamp: new Date(), data });
     };
+
+    if (context.signal?.aborted) {
+      addLog("info", "Tool execution aborted before start");
+      return {
+        success: false,
+        output: null,
+        artifacts: [],
+        previews: [],
+        logs,
+        metrics: { durationMs: Date.now() - startTime },
+        error: {
+          code: "ABORTED",
+          message: "Tool execution was cancelled",
+          retryable: false,
+        },
+      };
+    }
     
     if (!tool) {
       return {
@@ -393,8 +411,31 @@ const webSearchTool: ToolDefinition = {
   execute: async (input, context): Promise<ToolResult> => {
     const startTime = Date.now();
     try {
+      if (context.signal?.aborted) {
+        return {
+          success: false,
+          output: null,
+          error: createError("ABORTED", "Web search was cancelled", false),
+          artifacts: [],
+          previews: [],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
+
       if (input.academic) {
         const results = await searchScholar(input.query, input.maxResults);
+        if (context.signal?.aborted) {
+          return {
+            success: false,
+            output: null,
+            error: createError("ABORTED", "Web search was cancelled", false),
+            artifacts: [],
+            previews: [],
+            logs: [],
+            metrics: { durationMs: Date.now() - startTime },
+          };
+        }
         return {
           success: true,
           output: {
@@ -410,6 +451,17 @@ const webSearchTool: ToolDefinition = {
       }
 
       const response = await searchWeb(input.query, input.maxResults);
+      if (context.signal?.aborted) {
+        return {
+          success: false,
+          output: null,
+          error: createError("ABORTED", "Web search was cancelled", false),
+          artifacts: [],
+          previews: [],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
       return {
         success: true,
         output: {
@@ -424,6 +476,17 @@ const webSearchTool: ToolDefinition = {
         metrics: { durationMs: Date.now() - startTime },
       };
     } catch (error: any) {
+      if (context.signal?.aborted) {
+        return {
+          success: false,
+          output: null,
+          error: createError("ABORTED", "Web search was cancelled", false),
+          artifacts: [],
+          previews: [],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
       return {
         success: false,
         output: null,
@@ -500,12 +563,54 @@ const browseUrlTool: ToolDefinition = {
     let createdSession = false;
 
     try {
+      if (context.signal?.aborted) {
+        return {
+          success: false,
+          output: null,
+          error: createError("ABORTED", "URL browsing was cancelled", false),
+          artifacts: [],
+          previews: [],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
+
       if (!sessionId) {
         sessionId = await browserWorker.createSession();
         createdSession = true;
       }
 
+      if (context.signal?.aborted) {
+        if (createdSession && sessionId) {
+          await browserWorker.destroySession(sessionId).catch(() => {});
+        }
+        return {
+          success: false,
+          output: null,
+          error: createError("ABORTED", "URL browsing was cancelled", false),
+          artifacts: [],
+          previews: [],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
+
       const result = await browserWorker.navigate(sessionId, input.url, input.takeScreenshot);
+
+      if (context.signal?.aborted) {
+        if (createdSession && sessionId) {
+          await browserWorker.destroySession(sessionId).catch(() => {});
+        }
+        return {
+          success: false,
+          output: null,
+          error: createError("ABORTED", "URL browsing was cancelled", false),
+          artifacts: [],
+          previews: [],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
 
       const artifacts: ToolArtifact[] = [];
       if (result.screenshot) {
@@ -542,6 +647,17 @@ const browseUrlTool: ToolDefinition = {
       if (createdSession && sessionId) {
         await browserWorker.destroySession(sessionId).catch(() => {});
       }
+      if (context.signal?.aborted) {
+        return {
+          success: false,
+          output: null,
+          error: createError("ABORTED", "URL browsing was cancelled", false),
+          artifacts: [],
+          previews: [],
+          logs: [],
+          metrics: { durationMs: Date.now() - startTime },
+        };
+      }
       return {
         success: false,
         output: null,
@@ -556,14 +672,14 @@ const browseUrlTool: ToolDefinition = {
 };
 
 const generateDocumentSchema = z.object({
-  type: z.enum(["word", "excel", "ppt"]).describe("Type of document to generate"),
+  type: z.enum(["word", "excel", "ppt", "csv"]).describe("Type of document to generate"),
   title: z.string().describe("Document title"),
-  content: z.string().describe("Document content (text for Word, data for Excel, slide structure for PPT)"),
+  content: z.string().describe("Document content (text for Word, data for Excel/CSV, slide structure for PPT)"),
 });
 
 const generateDocumentTool: ToolDefinition = {
   name: "generate_document",
-  description: "Generate Office documents (Word, Excel, PowerPoint). For Word: provide markdown/text content. For Excel: provide tabular data. For PowerPoint: provide slide content.",
+  description: "Generate Office documents (Word, Excel, PowerPoint, CSV). For Word: provide markdown/text content. For Excel/CSV: provide tabular data (rows separated by newlines, columns by tabs or commas). For PowerPoint: provide slide content.",
   inputSchema: generateDocumentSchema,
   capabilities: ["produces_artifacts", "writes_files"],
   execute: async (input, context): Promise<ToolResult> => {
@@ -592,6 +708,24 @@ const generateDocumentTool: ToolDefinition = {
           buffer = await generatePptDocument(input.title, slides);
           mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
           extension = "pptx";
+          break;
+
+        case "csv":
+          // Parse content as tabular data and convert to CSV format
+          const csvData = parseExcelFromText(input.content);
+          const csvContent = csvData.map(row => 
+            row.map(cell => {
+              const cellStr = String(cell ?? '');
+              // Escape cells that contain commas, quotes, or newlines
+              if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+                return `"${cellStr.replace(/"/g, '""')}"`;
+              }
+              return cellStr;
+            }).join(',')
+          ).join('\n');
+          buffer = Buffer.from(csvContent, 'utf-8');
+          mimeType = "text/csv";
+          extension = "csv";
           break;
 
         default:

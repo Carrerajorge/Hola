@@ -115,8 +115,8 @@ const AVAILABLE_TOOLS = [
   },
   {
     name: "generate_document",
-    description: "Generate Office documents (Word, Excel, PowerPoint).",
-    inputSchema: "{ type: 'word'|'excel'|'ppt', title: string, content: string }",
+    description: "Generate Office documents (Word, Excel, PowerPoint, CSV). For Word: provide markdown content. For Excel/CSV: provide tabular data with rows separated by newlines and columns by tabs or commas. For PowerPoint: provide slide titles and bullet points.",
+    inputSchema: "{ type: 'word'|'excel'|'ppt'|'csv', title: string, content: string }",
   },
   {
     name: "read_file",
@@ -156,6 +156,7 @@ export class AgentOrchestrator extends EventEmitter {
   public summary: string | null;
   
   private isCancelled: boolean;
+  private abortController: AbortController;
   private userMessage: string;
   private attachments: any[];
   
@@ -178,6 +179,7 @@ export class AgentOrchestrator extends EventEmitter {
     this.stepResults = [];
     this.summary = null;
     this.isCancelled = false;
+    this.abortController = new AbortController();
     this.userMessage = "";
     this.attachments = [];
   }
@@ -841,6 +843,15 @@ Respond with ONLY valid JSON in this exact format:
   }
 
   async executeStep(stepIndex: number): Promise<ToolResult> {
+    // Check for cancellation before starting step
+    if (this.isCancelled) {
+      return {
+        success: false,
+        output: null,
+        error: 'Run was cancelled',
+      };
+    }
+
     if (!this.plan) {
       throw new Error("No plan available. Call generatePlan first.");
     }
@@ -888,6 +899,7 @@ Respond with ONLY valid JSON in this exact format:
         chatId: this.chatId,
         runId: this.runId,
         userPlan: this.userPlan,
+        signal: this.abortController.signal,
       });
 
       const completedAt = Date.now();
@@ -1166,9 +1178,19 @@ Respond with ONLY valid JSON in this exact format:
   async cancel(): Promise<void> {
     this.isCancelled = true;
     this.status = "cancelled";
+    this.abortController.abort();
     this.logEvent('action', { type: 'cancel_requested' });
+    
+    // Emit cancelled trace event immediately via SSE so client is notified right away
+    await this.emitTraceEvent('cancelled', {
+      phase: 'cancelled',
+      status: 'cancelled',
+      stepIndex: this.currentStepIndex,
+      summary: `Run cancelled by user at step ${this.currentStepIndex + 1}`,
+    });
+    
     this.emitProgress();
-    console.log(`[AgentOrchestrator] Run ${this.runId} cancellation requested`);
+    console.log(`[AgentOrchestrator] Run ${this.runId} cancellation requested and abort signal sent`);
   }
 
   async generateSummary(): Promise<string> {
