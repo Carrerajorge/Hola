@@ -4,6 +4,7 @@ import { handleChatRequest, AVAILABLE_MODELS, DEFAULT_PROVIDER, DEFAULT_MODEL } 
 import { llmGateway } from "../lib/llmGateway";
 import { generateImage, detectImageRequest, extractImagePrompt } from "../services/imageGeneration";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../etl";
+import { extractAllAttachmentsContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -107,7 +108,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL } = req.body;
+      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -115,6 +116,22 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       const user = (req as any).user;
       const userId = user?.claims?.sub;
+
+      let attachmentContext = "";
+      const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
+      
+      if (hasAttachments) {
+        console.log(`[Chat API] Processing ${attachments.length} attachment(s)`);
+        try {
+          const extractedContents = await extractAllAttachmentsContent(attachments as Attachment[]);
+          if (extractedContents.length > 0) {
+            attachmentContext = formatAttachmentsAsContext(extractedContents);
+            console.log(`[Chat API] Extracted content from ${extractedContents.length} attachment(s), context length: ${attachmentContext.length}`);
+          }
+        } catch (attachmentError) {
+          console.error("[Chat API] Error extracting attachment content:", attachmentError);
+        }
+      }
 
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
@@ -131,6 +148,8 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         figmaMode,
         provider,
         model,
+        attachmentContext,
+        forceDirectResponse: hasAttachments && attachmentContext.length > 0,
         onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update)
       });
       

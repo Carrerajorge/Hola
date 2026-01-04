@@ -261,9 +261,11 @@ export async function handleChatRequest(
     figmaMode?: boolean;
     provider?: LLMProvider;
     model?: string;
+    attachmentContext?: string;
+    forceDirectResponse?: boolean;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, userId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL } = options;
+  const { useRag = true, conversationId, userId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false } = options;
   const hasImages = images && images.length > 0;
   
   // Fetch user settings for feature flags and preferences
@@ -404,69 +406,75 @@ export async function handleChatRequest(
     }
     
     // SEGUNDO: Si no es multi-intent o falló, usar routeMessage normal
-    const routeResult = await routeMessage(lastUserMessage.content);
+    // BUT: Skip agent mode if we have attachment content - answer directly from document
+    if (forceDirectResponse && attachmentContext) {
+      console.log("[ChatService] Force direct response mode - skipping agent pipeline for attachment-based query");
+      // Fall through to direct LLM response with attachment context
+    } else {
+      const routeResult = await routeMessage(lastUserMessage.content);
     
-    if (routeResult.decision === "agent" || routeResult.decision === "hybrid") {
-      const urls = routeResult.urls || [];
-      
-      for (const url of urls) {
-        try {
-          const sanitizedUrl = sanitizeUrl(url);
-          const securityCheck = await checkDomainPolicy(sanitizedUrl);
-          
-          if (!securityCheck.allowed) {
-            return {
-              content: `No puedo acceder a ${url}: ${securityCheck.reason}`,
-              role: "assistant"
-            };
+      if (routeResult.decision === "agent" || routeResult.decision === "hybrid") {
+        const urls = routeResult.urls || [];
+        
+        for (const url of urls) {
+          try {
+            const sanitizedUrl = sanitizeUrl(url);
+            const securityCheck = await checkDomainPolicy(sanitizedUrl);
+            
+            if (!securityCheck.allowed) {
+              return {
+                content: `No puedo acceder a ${url}: ${securityCheck.reason}`,
+                role: "assistant"
+              };
+            }
+            
+            const domain = new URL(sanitizedUrl).hostname;
+            if (!checkRateLimit(domain, securityCheck.rateLimit)) {
+              return {
+                content: `Límite de solicitudes alcanzado para ${domain}. Intenta de nuevo en un minuto.`,
+                role: "assistant"
+              };
+            }
+          } catch (e) {
+            console.error("URL validation error:", e);
           }
-          
-          const domain = new URL(sanitizedUrl).hostname;
-          if (!checkRateLimit(domain, securityCheck.rateLimit)) {
-            return {
-              content: `Límite de solicitudes alcanzado para ${domain}. Intenta de nuevo en un minuto.`,
-              role: "assistant"
-            };
-          }
-        } catch (e) {
-          console.error("URL validation error:", e);
         }
-      }
-      
-      if (!isValidObjective(routeResult.objective || lastUserMessage.content)) {
+        
+        if (!isValidObjective(routeResult.objective || lastUserMessage.content)) {
+          return {
+            content: "No puedo procesar solicitudes que involucren información sensible o actividades no permitidas.",
+            role: "assistant"
+          };
+        }
+        
+        const objective = routeResult.objective || lastUserMessage.content;
+        let lastBrowserSessionId: string | null = null;
+        
+        const pipelineResult = await runPipeline({
+          objective,
+          conversationId,
+          onProgress: (update) => {
+            onAgentProgress?.(update);
+            if (update.detail?.browserSessionId) {
+              lastBrowserSessionId = update.detail.browserSessionId;
+            }
+          }
+        });
+        
         return {
-          content: "No puedo procesar solicitudes que involucren información sensible o actividades no permitidas.",
-          role: "assistant"
+          content: pipelineResult.summary || "Tarea completada.",
+          role: "assistant",
+          sources: pipelineResult.artifacts
+            .filter(a => a.type === "text" && a.name)
+            .slice(0, 5)
+            .map(a => ({ fileName: a.name!, content: a.content?.slice(0, 200) || "" })),
+          agentRunId: pipelineResult.runId,
+          wasAgentTask: true,
+          pipelineSteps: pipelineResult.steps.length,
+          pipelineSuccess: pipelineResult.success,
+          browserSessionId: lastBrowserSessionId
         };
       }
-      
-      const objective = routeResult.objective || lastUserMessage.content;
-      let lastBrowserSessionId: string | null = null;
-      
-      const pipelineResult = await runPipeline({
-        objective,
-        conversationId,
-        onProgress: (update) => {
-          onAgentProgress?.(update);
-          if (update.detail?.browserSessionId) {
-            lastBrowserSessionId = update.detail.browserSessionId;
-          }
-        }
-      });
-      
-      return {
-        content: pipelineResult.summary || "Tarea completada.",
-        role: "assistant",
-        sources: pipelineResult.artifacts
-          .filter(a => a.type === "text" && a.name)
-          .slice(0, 5)
-          .map(a => ({ fileName: a.name!, content: a.content?.slice(0, 200) || "" })),
-        agentRunId: pipelineResult.runId,
-        wasAgentTask: true,
-        pipelineSteps: pipelineResult.steps.length,
-        pipelineSuccess: pipelineResult.success,
-        browserSessionId: lastBrowserSessionId
-      };
     }
   }
 
@@ -752,11 +760,12 @@ Si el usuario dice "dame un resumen" o "analiza esto", responde en texto, NO com
 ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
 
   // Use document mode prompt when in document editing mode
+  // Include attachment context for document-based Q&A
   const systemContent = documentModePrompt 
     ? documentModePrompt
     : (validatedGptConfig 
-        ? `${validatedGptConfig.systemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}`
-        : `${defaultSystemContent}${webSearchInfo}${contextInfo}`);
+        ? `${validatedGptConfig.systemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}${attachmentContext}`
+        : `${defaultSystemContent}${webSearchInfo}${contextInfo}${attachmentContext}`);
 
   const systemMessage: ChatMessage = {
     role: "system",

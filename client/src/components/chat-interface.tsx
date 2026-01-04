@@ -3644,6 +3644,7 @@ IMPORTANTE:
             pptMode: isPptMode,
             provider: selectedProvider,
             model: selectedModel,
+            attachments: attachments.length > 0 ? attachments : undefined,
             gptConfig: activeGpt ? {
               id: activeGpt.id,
               systemPrompt: activeGpt.systemPrompt,
