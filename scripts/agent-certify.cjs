@@ -175,7 +175,10 @@ function attemptAutoFix(stage, fixes) {
       const moduleName = moduleMatch[1];
       log(`  Detected missing module: ${moduleName}`, "yellow");
       
-      if (!moduleName.startsWith("./") && !moduleName.startsWith("../")) {
+      // Validate module name to prevent command injection
+      const isValidModuleName = /^[@a-zA-Z0-9_\-\/\.]+$/.test(moduleName);
+      
+      if (isValidModuleName && !moduleName.startsWith("./") && !moduleName.startsWith("../")) {
         try {
           log(`  Installing ${moduleName}...`, "yellow");
           runCommand(`npm install ${moduleName}`, 60000);
