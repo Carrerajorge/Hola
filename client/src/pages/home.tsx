@@ -32,6 +32,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useStreamingStore, useProcessingChatIds, usePendingBadges } from "@/stores/streamingStore";
+import { useAgentStore } from "@/stores/agent-store";
+import { pollingManager } from "@/lib/polling-manager";
 
 export default function Home() {
   const isMobile = useIsMobile();
@@ -175,6 +177,10 @@ export default function Home() {
     setAiProcessSteps([]);
     // Close any open dialogs
     setIsAppsDialogOpen(false);
+    
+    // Cancel all active agent runs and clear agent state
+    pollingManager.cancelAll();
+    useAgentStore.getState().clearAllRuns();
   };
   
   const handleSendNewChatMessage = useCallback((message: Message) => {

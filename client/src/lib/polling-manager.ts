@@ -73,6 +73,13 @@ class PollingManager {
     return this.instances.has(runId);
   }
 
+  cancelAll(): void {
+    const runIds = Array.from(this.instances.keys());
+    for (const runId of runIds) {
+      this.cancel(runId);
+    }
+  }
+
   handleHydratedRun(messageId: string, runId: string, status: string): void {
     if (['starting', 'queued', 'planning', 'running'].includes(status)) {
       this.start(messageId, runId);
