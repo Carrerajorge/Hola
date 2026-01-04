@@ -42,7 +42,7 @@ function runRegisteredCommand(commandKey, timeout = 300000) {
   
   const start = Date.now();
   try {
-    const output = execSync(COMMAND_REGISTRY[commandKey], { 
+    const output = execSync(command, { 
       encoding: "utf-8", 
       timeout,
       stdio: ["pipe", "pipe", "pipe"],
