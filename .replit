@@ -42,3 +42,10 @@ waitForPort = 5000
 [agent]
 mockupState = "FULLSTACK"
 integrations = ["javascript_xai:1.0.0", "javascript_object_storage:2.0.0", "javascript_replit_auth:2.0.0", "javascript_gemini:1.0.0", "stripe:2.0.0", "resend:1.0.0", "google-mail:1.0.0"]
+
+[userenv]
+
+[userenv.shared]
+ROUTER_CONFIDENCE_THRESHOLD = "0.65"
+MAX_AGENT_STEPS = "8"
+ENABLE_DYNAMIC_ESCALATION = "true"

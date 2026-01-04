@@ -9,6 +9,8 @@ import {
 } from "../services/analysisOrchestrator";
 import { analysisLogger } from "../lib/analysisLogger";
 import { complexityAnalyzer } from "../services/complexityAnalyzer";
+import { decideRoute, checkDynamicEscalation, type RouterDecision } from "../services/router";
+import { runAgent, type AgentState } from "../services/agentRunner";
 
 const analyzeRequestSchema = z.object({
   messageId: z.string().optional(),
@@ -29,6 +31,16 @@ function isSpreadsheetFile(filename: string): boolean {
 const complexityRequestSchema = z.object({
   message: z.string(),
   hasAttachments: z.boolean().optional().default(false),
+});
+
+const routerRequestSchema = z.object({
+  message: z.string(),
+  hasAttachments: z.boolean().optional().default(false),
+});
+
+const agentRunRequestSchema = z.object({
+  message: z.string(),
+  planHint: z.array(z.string()).optional().default([]),
 });
 
 export function createChatRoutes(): Router {
@@ -54,6 +66,70 @@ export function createChatRoutes(): Router {
     } catch (error: any) {
       console.error("[ChatRoutes] Complexity analysis error:", error);
       res.status(500).json({ error: error.message || "Failed to analyze complexity" });
+    }
+  });
+
+  router.post("/route", async (req: Request, res: Response) => {
+    try {
+      const validation = routerRequestSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ error: validation.error.message });
+      }
+
+      const { message, hasAttachments } = validation.data;
+      const decision = await decideRoute(message, hasAttachments);
+
+      console.log(`[ChatRoutes] Router decision: route=${decision.route}, confidence=${decision.confidence}`);
+
+      res.json(decision);
+    } catch (error: any) {
+      console.error("[ChatRoutes] Router error:", error);
+      res.status(500).json({ error: error.message || "Failed to route message" });
+    }
+  });
+
+  router.post("/agent-run", async (req: Request, res: Response) => {
+    try {
+      const validation = agentRunRequestSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ error: validation.error.message });
+      }
+
+      const { message, planHint } = validation.data;
+      
+      console.log(`[ChatRoutes] Starting agent run for: "${message.slice(0, 100)}..."`);
+      
+      const result = await runAgent(message, planHint);
+
+      res.json({
+        success: result.success,
+        result: result.result,
+        state: {
+          objective: result.state.objective,
+          plan: result.state.plan,
+          toolsUsed: result.state.toolsUsed,
+          stepsCompleted: result.state.history.length,
+          status: result.state.status,
+        },
+      });
+    } catch (error: any) {
+      console.error("[ChatRoutes] Agent run error:", error);
+      res.status(500).json({ error: error.message || "Failed to run agent" });
+    }
+  });
+
+  router.post("/escalation-check", async (req: Request, res: Response) => {
+    try {
+      const { response } = req.body;
+      if (!response || typeof response !== "string") {
+        return res.status(400).json({ error: "Response string required" });
+      }
+
+      const result = checkDynamicEscalation(response);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[ChatRoutes] Escalation check error:", error);
+      res.status(500).json({ error: error.message || "Failed to check escalation" });
     }
   });
 
