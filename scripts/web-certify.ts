@@ -117,8 +117,8 @@ function logPhase(phase: string): void {
   console.log("─".repeat(70));
 }
 
-function runCommand(
-  command: string,
+// Security: Command execution helper with hardcoded executable
+function spawnNpx(
   args: string[],
   timeoutMs: number = 300000
 ): Promise<{ success: boolean; output: string; exitCode: number }> {
@@ -126,7 +126,7 @@ function runCommand(
     let output = "";
     let timedOut = false;
 
-    const proc: ChildProcess = spawn(command, args, {
+    const proc: ChildProcess = spawn("npx", args, {
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
     });
@@ -180,7 +180,7 @@ async function runUnitTests(): Promise<PhaseResult> {
   logPhase("Unit Tests (vitest)");
   const startTime = performance.now();
 
-  const result = await runCommand("npx", [
+  const result = await spawnNpx([
     "vitest",
     "run",
     "--reporter=verbose",
@@ -213,7 +213,7 @@ async function runBenchmarks(): Promise<PhaseResult> {
   logPhase("Benchmarks (web-bench.ts)");
   const startTime = performance.now();
 
-  const result = await runCommand("npx", [
+  const result = await spawnNpx([
     "tsx",
     "scripts/web-bench.ts",
   ], 120000);
@@ -300,7 +300,7 @@ async function runSoakTest(config: CertifyConfig): Promise<PhaseResult> {
   logPhase(`Soak Test (${config.soakDurationSeconds}s, ${config.soakConcurrency} concurrent)`);
   const startTime = performance.now();
 
-  const result = await runCommand("npx", [
+  const result = await spawnNpx([
     "tsx",
     "scripts/web-soak-v2.ts",
     "--duration",

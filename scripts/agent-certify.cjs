@@ -33,14 +33,10 @@ const COMMAND_REGISTRY = {
         "`,
 };
 
-function runRegisteredCommand(commandKey, timeout = 300000) {
-  const cmd = COMMAND_REGISTRY[commandKey];
-  if (!cmd) {
-    throw new Error(`Unknown command key: ${commandKey}`);
-  }
+function execRegisteredCommand(registeredCmd, timeout) {
   const start = Date.now();
   try {
-    const output = execSync(cmd, { 
+    const output = execSync(registeredCmd, { 
       encoding: "utf-8", 
       timeout,
       stdio: ["pipe", "pipe", "pipe"],
@@ -54,6 +50,23 @@ function runRegisteredCommand(commandKey, timeout = 300000) {
       output: error.stdout?.toString() || error.stderr?.toString() || error.message,
       duration: Date.now() - start,
     };
+  }
+}
+
+function runRegisteredCommand(commandKey, timeout = 300000) {
+  switch (commandKey) {
+    case "vitest:tests":
+      return execRegisteredCommand(COMMAND_REGISTRY["vitest:tests"], timeout);
+    case "vitest:typecheck":
+      return execRegisteredCommand(COMMAND_REGISTRY["vitest:typecheck"], timeout);
+    case "npm:build":
+      return execRegisteredCommand(COMMAND_REGISTRY["npm:build"], timeout);
+    case "node:count-agent-files":
+      return execRegisteredCommand(COMMAND_REGISTRY["node:count-agent-files"], timeout);
+    case "node:soak-stress":
+      return execRegisteredCommand(COMMAND_REGISTRY["node:soak-stress"], timeout);
+    default:
+      throw new Error(`Unknown command key: ${commandKey}`);
   }
 }
 
