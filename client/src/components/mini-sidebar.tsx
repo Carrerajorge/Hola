@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
-import { SiraLogo } from "@/components/sira-logo";
+import { IliaGPTLogo } from "@/components/sira-logo";
 
 interface MiniSidebarProps {
   className?: string;
@@ -32,7 +32,7 @@ export function MiniSidebar({ className, onNewChat, onExpand }: MiniSidebarProps
                 className="h-10 w-10 rounded-xl hover:bg-accent transition-all duration-200"
                 onClick={onExpand}
               >
-                <SiraLogo size={28} />
+                <IliaGPTLogo size={28} />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">

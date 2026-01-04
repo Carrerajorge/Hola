@@ -941,7 +941,7 @@ export function AppsView({ onClose, onOpenGoogleForms, onOpenGmail }: AppsViewPr
         </div>
       </div>
       <p className="text-sm text-muted-foreground px-6 py-2">
-        Chatea con tus aplicaciones favoritas en Sira GPT
+        Chatea con tus aplicaciones favoritas en IliaGPT
       </p>
 
       <ScrollArea className="flex-1">

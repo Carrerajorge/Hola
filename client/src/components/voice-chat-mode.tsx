@@ -506,7 +506,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
               </motion.div>
             ) : (
               <div className="flex flex-col items-center">
-                <span className="text-white/80 text-sm">Sira</span>
+                <span className="text-white/80 text-sm">IliaGPT</span>
               </div>
             )}
           </motion.div>

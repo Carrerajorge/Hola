@@ -34,7 +34,7 @@ import {
   SquarePen,
   Pin
 } from "lucide-react";
-import { SiraLogo } from "@/components/sira-logo";
+import { IliaGPTLogo } from "@/components/sira-logo";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -383,7 +383,7 @@ export function Sidebar({
     <div className={cn("flex h-screen w-[260px] flex-col liquid-sidebar-light dark:liquid-sidebar text-sidebar-foreground", className)}>
       <div className="flex h-14 items-center justify-between px-4 py-2">
         <div className="flex items-center gap-2">
-          <SiraLogo size={32} />
+          <IliaGPTLogo size={32} />
           <div className="flex flex-col">
             <span className="text-sm font-semibold leading-none liquid-text-gradient">MICHAT</span>
             <span className="text-[10px] text-muted-foreground">AI Platform</span>

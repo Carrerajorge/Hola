@@ -1,6 +1,6 @@
 {
-  "name": "Sira GPT",
-  "short_name": "Sira",
+  "name": "IliaGPT",
+  "short_name": "IliaGPT",
   "description": "AI Assistant for autonomous tasks and document creation",
   "start_url": "/",
   "display": "standalone",

@@ -1,7 +1,7 @@
-# Sira GPT
+# IliaGPT
 
 ## Overview
-Sira GPT is an AI-powered chat application designed as an intelligent assistant for autonomous web browsing and document creation. Its core purpose is to offer a versatile platform for AI-driven tasks, including economic data analysis, multi-intent prompt processing, and professional document generation. The ambition is for Sira GPT to become a leading AI assistant for productivity.
+IliaGPT is an AI-powered chat application designed as an intelligent assistant for autonomous web browsing and document creation. Its core purpose is to offer a versatile platform for AI-driven tasks, including economic data analysis, multi-intent prompt processing, and professional document generation. The ambition is for IliaGPT to become a leading AI assistant for productivity.
 
 ## User Preferences
 Preferred communication style: Simple, everyday language.

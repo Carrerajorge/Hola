@@ -835,7 +835,7 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
               <div className="flex items-center gap-2">
                 <DialogTitle className="text-2xl font-semibold">Aplicaciones</DialogTitle>
                 <VisuallyHidden>
-                  <DialogDescription>Explora e integra aplicaciones con Sira GPT</DialogDescription>
+                  <DialogDescription>Explora e integra aplicaciones con IliaGPT</DialogDescription>
                 </VisuallyHidden>
                 <Badge variant="secondary" className="text-xs font-medium">BETA</Badge>
               </div>
@@ -851,7 +851,7 @@ export function AppsDialog({ open, onOpenChange, onOpenGoogleForms }: AppsDialog
               </div>
             </div>
             <p className="text-sm text-muted-foreground mt-1">
-              Chatea con tus aplicaciones favoritas en Sira GPT
+              Chatea con tus aplicaciones favoritas en IliaGPT
             </p>
           </DialogHeader>
 

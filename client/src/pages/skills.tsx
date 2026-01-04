@@ -293,7 +293,7 @@ export default function SkillsPage() {
               </div>
               <div>
                 <h1 className="text-lg font-semibold">Skills</h1>
-                <p className="text-xs text-muted-foreground">Capacidades modulares de Sira GPT</p>
+                <p className="text-xs text-muted-foreground">Capacidades modulares de IliaGPT</p>
               </div>
             </div>
           </div>

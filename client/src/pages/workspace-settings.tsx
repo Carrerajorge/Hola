@@ -32,7 +32,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { SiraLogo } from "@/components/sira-logo";
+import { IliaGPTLogo } from "@/components/sira-logo";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -1029,7 +1029,7 @@ export default function WorkspaceSettingsPage() {
 
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
-              <SiraLogo size={24} />
+              <IliaGPTLogo size={24} />
             </div>
             <span className="text-sm font-medium truncate">Espacio de trabajo de Jor...</span>
           </div>

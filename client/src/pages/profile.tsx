@@ -261,7 +261,7 @@ export default function ProfilePage() {
 
         <div className="text-center py-4">
           <p className="text-xs text-muted-foreground">
-            Sira GPT v1.0 · <button className="underline hover:text-foreground">Términos</button> · <button className="underline hover:text-foreground">Privacidad</button>
+            IliaGPT v1.0 · <button className="underline hover:text-foreground">Términos</button> · <button className="underline hover:text-foreground">Privacidad</button>
           </p>
         </div>
       </div>

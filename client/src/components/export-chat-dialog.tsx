@@ -172,7 +172,7 @@ function formatAsTxt(title: string, messages: Message[]): string {
   lines.push("");
 
   for (const msg of messages) {
-    const role = msg.role === "user" ? "Tú" : "Sira";
+    const role = msg.role === "user" ? "Tú" : "IliaGPT";
     const time = msg.timestamp
       ? new Date(msg.timestamp).toLocaleTimeString("es-ES", {
           hour: "2-digit",
@@ -215,7 +215,7 @@ function formatAsMarkdown(title: string, messages: Message[]): string {
   lines.push("");
 
   for (const msg of messages) {
-    const role = msg.role === "user" ? "**Tú**" : "**Sira**";
+    const role = msg.role === "user" ? "**Tú**" : "**IliaGPT**";
     lines.push(`### ${role}`);
     lines.push("");
     lines.push(msg.content);

@@ -286,7 +286,7 @@ export function SkillsExplorer({ open, onOpenChange }: SkillsExplorerProps) {
               <div>
                 <DialogTitle className="text-xl" data-testid="skills-title">Skills</DialogTitle>
                 <DialogDescription>
-                  Capacidades modulares que extienden la funcionalidad de Sira GPT
+                  Capacidades modulares que extienden la funcionalidad de IliaGPT
                 </DialogDescription>
               </div>
             </div>
