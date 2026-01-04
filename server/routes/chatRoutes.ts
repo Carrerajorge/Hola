@@ -8,6 +8,7 @@ import {
   getAnalysisResults,
 } from "../services/analysisOrchestrator";
 import { analysisLogger } from "../lib/analysisLogger";
+import { complexityAnalyzer } from "../services/complexityAnalyzer";
 
 const analyzeRequestSchema = z.object({
   messageId: z.string().optional(),
@@ -25,8 +26,36 @@ function isSpreadsheetFile(filename: string): boolean {
   return ['xlsx', 'xls', 'csv', 'tsv'].includes(ext);
 }
 
+const complexityRequestSchema = z.object({
+  message: z.string(),
+  hasAttachments: z.boolean().optional().default(false),
+});
+
 export function createChatRoutes(): Router {
   const router = Router();
+
+  router.post("/complexity", async (req: Request, res: Response) => {
+    try {
+      const validation = complexityRequestSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ error: validation.error.message });
+      }
+
+      const { message, hasAttachments } = validation.data;
+      const result = complexityAnalyzer.analyze(message, hasAttachments);
+
+      res.json({
+        agent_required: result.agent_required,
+        agent_reason: result.agent_reason,
+        complexity_score: result.score,
+        category: result.category,
+        signals: result.signals,
+      });
+    } catch (error: any) {
+      console.error("[ChatRoutes] Complexity analysis error:", error);
+      res.status(500).json({ error: error.message || "Failed to analyze complexity" });
+    }
+  });
 
   router.post("/uploads/:uploadId/analyze", async (req: Request, res: Response) => {
     try {

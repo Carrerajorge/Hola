@@ -11,6 +11,8 @@ export interface ComplexityResult {
     ambiguity_level: number;
     technical_depth: number;
   };
+  agent_required: boolean;
+  agent_reason?: string;
 }
 
 export class ComplexityAnalyzer {
@@ -64,7 +66,25 @@ export class ComplexityAnalyzer {
     /\blist\b|\blistar\b/i
   ];
 
-  analyze(prompt: string): ComplexityResult {
+  private readonly AGENT_REQUIRED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+    { pattern: /\b(busca|buscar|search|find|investigar|investigate|research)\b.*\b(web|internet|online|en línea)\b/i, reason: "Requiere búsqueda web" },
+    { pattern: /\b(navega|navigate|browse|visita|visit|abre|open)\b.*\b(página|page|sitio|site|url|web)\b/i, reason: "Requiere navegación web" },
+    { pattern: /\b(descarga|download|obtén|get|extrae|extract)\b.*\b(archivo|file|documento|document|datos|data)\b.*\b(de|from)\b/i, reason: "Requiere descarga de archivos" },
+    { pattern: /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|excel|pdf|csv|archivo|file|presentación|presentation|ppt|powerpoint)\b/i, reason: "Requiere generación de documentos" },
+    { pattern: /\b(analiza|analyze|procesa|process)\b.*\b(archivo|file|documento|document|excel|spreadsheet|hoja de cálculo)\b/i, reason: "Requiere análisis de archivos" },
+    { pattern: /\b(ejecuta|execute|run|corre)\b.*\b(código|code|script|programa|program|python|javascript|shell)\b/i, reason: "Requiere ejecución de código" },
+    { pattern: /\b(primero|first|luego|then|después|after|finalmente|finally)\b.*\b(luego|then|después|after|y|and)\b/i, reason: "Tarea de múltiples pasos" },
+    { pattern: /\b(paso\s+\d+|step\s+\d+|\d+\.\s+\w+)\b/i, reason: "Tarea de múltiples pasos enumerados" },
+    { pattern: /\b(automatiza|automate|automatizar|automation)\b/i, reason: "Requiere automatización" },
+    { pattern: /\b(compara|compare|comparar)\b.*\b(varios|multiple|diferentes|different|archivos|files|páginas|pages)\b/i, reason: "Comparación de múltiples fuentes" },
+    { pattern: /\b(recopila|collect|gather|obtén|get|busca|find)\b.*\b(información|information|datos|data)\b.*\b(de|from)\b.*\b(varias|several|múltiples|multiple)\b/i, reason: "Recopilación de múltiples fuentes" },
+    { pattern: /\b(cv|curriculum|resume|currículum)\b/i, reason: "Generación de CV/Resume" },
+    { pattern: /\b(informe|report|reporte)\b.*\b(completo|complete|detallado|detailed|análisis|analysis)\b/i, reason: "Generación de informe completo" },
+    { pattern: /\b(scrape|scrapear|extraer datos|extract data)\b/i, reason: "Extracción de datos web" },
+    { pattern: /\b(agente|agent)\b/i, reason: "Solicitud explícita de agente" }
+  ];
+
+  analyze(prompt: string, hasAttachments: boolean = false): ComplexityResult {
     const cached = this.getFromCache(prompt);
     if (cached) return cached;
 
@@ -93,17 +113,39 @@ export class ComplexityAnalyzer {
     score += this.calculateBoost(prompt);
     score = Math.max(1, Math.min(10, score));
 
+    const agentCheck = this.checkAgentRequired(prompt, hasAttachments, dimensions.steps_required);
+
     const result: ComplexityResult = {
       score,
       category: this.scoreToCategory(score),
       signals: this.detectSignals(prompt, dimensions, score),
       recommended_path: this.getRecommendedPath(score),
       estimated_tokens: this.estimateTokens(prompt, score),
-      dimensions
+      dimensions,
+      agent_required: agentCheck.required,
+      agent_reason: agentCheck.reason
     };
 
     this.setCache(prompt, result);
     return result;
+  }
+
+  private checkAgentRequired(prompt: string, hasAttachments: boolean, stepsScore: number): { required: boolean; reason?: string } {
+    for (const { pattern, reason } of this.AGENT_REQUIRED_PATTERNS) {
+      if (pattern.test(prompt)) {
+        return { required: true, reason };
+      }
+    }
+
+    if (stepsScore >= 4) {
+      return { required: true, reason: "Tarea compleja de múltiples pasos" };
+    }
+
+    if (hasAttachments && /\b(analiza|analyze|procesa|process|extrae|extract|resume|resumen|summarize)\b/i.test(prompt)) {
+      return { required: true, reason: "Análisis de archivo adjunto" };
+    }
+
+    return { required: false };
   }
 
   private isTrivial(prompt: string): boolean {
@@ -123,7 +165,8 @@ export class ComplexityAnalyzer {
       signals: ['trivial_pattern'],
       recommended_path: 'fast',
       estimated_tokens: Math.round(prompt.length / 4),
-      dimensions: { cognitive_load: 1, domain_breadth: 1, steps_required: 1, ambiguity_level: 1, technical_depth: 1 }
+      dimensions: { cognitive_load: 1, domain_breadth: 1, steps_required: 1, ambiguity_level: 1, technical_depth: 1 },
+      agent_required: false
     };
   }
 

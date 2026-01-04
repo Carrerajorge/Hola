@@ -83,6 +83,7 @@ import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview
 import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDetector";
 import { markdownToTipTap } from "@/lib/markdownToHtml";
 import { detectGmailIntent } from "@/lib/gmailIntentDetector";
+import { shouldAutoActivateAgent } from "@/lib/complexityDetector";
 import { useAgentStore, useAgentRun, type AgentRunState } from "@/stores/agent-store";
 import { useStartAgentRun, useCancelAgentRun, useAgentPolling, abortPendingAgentStart } from "@/hooks/use-agent-polling";
 import { useStreamingStore } from "@/stores/streamingStore";
@@ -2852,6 +2853,76 @@ export function ChatInterface({
       }
     }
 
+    // Auto-detect if task requires Agent mode
+    const hasAttachedFiles = uploadedFiles.length > 0;
+    const complexityCheck = shouldAutoActivateAgent(input, hasAttachedFiles);
+    
+    if (complexityCheck.agent_required && complexityCheck.confidence === 'high') {
+      console.log("[handleSubmit] Auto-activating Agent mode:", complexityCheck.agent_reason);
+      
+      const userMessageContent = input;
+      const readyFiles = uploadedFiles.filter(f => f.status === "ready");
+      const agentAttachments = readyFiles.map(f => ({
+        id: f.id,
+        name: f.name,
+        type: f.type,
+        spreadsheetData: f.spreadsheetData
+      }));
+      
+      setInput("");
+      if (chatId) {
+        clearDraft(chatId);
+      }
+      setUploadedFiles([]);
+      
+      const agentMessageId = `agent-${Date.now()}`;
+      setCurrentAgentMessageId(agentMessageId);
+      
+      try {
+        const result = await startAgentRun(
+          chatId || "",
+          userMessageContent,
+          agentMessageId,
+          agentAttachments
+        );
+        
+        if (result) {
+          toast({
+            title: "Modo Agente activado",
+            description: complexityCheck.agent_reason || "Tarea compleja detectada",
+            duration: 4000,
+          });
+          
+          const userMessage: Message = {
+            id: `user-${Date.now()}`,
+            role: "user",
+            content: userMessageContent,
+            timestamp: new Date(),
+          };
+          onSendMessage(userMessage);
+          
+          setSelectedTool(null);
+          if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
+            window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
+          }
+        } else {
+          setInput(userMessageContent);
+          setUploadedFiles(readyFiles);
+          toast({ 
+            title: "Error", 
+            description: "No se pudo iniciar el agente. Procesando como chat normal.", 
+            variant: "destructive" 
+          });
+        }
+      } catch (error) {
+        console.error("Failed to auto-start agent run:", error);
+        setInput(userMessageContent);
+        setUploadedFiles(readyFiles);
+        toast({ title: "Error", description: "Error al iniciar el agente. Procesando como chat normal.", variant: "destructive" });
+      }
+      return;
+    }
+
     const attachments = uploadedFiles
       .filter(f => f.status === "ready" || f.status === "processing")
       .map(f => ({
@@ -2876,8 +2947,7 @@ export function ChatInterface({
     const userInput = input;
     const currentFiles = [...uploadedFiles];
     
-    // Initialize process steps based on context
-    const hasAttachedFiles = currentFiles.length > 0;
+    // Initialize process steps based on context (reuse hasAttachedFiles from above)
     const initialSteps: {step: string; status: "pending" | "active" | "done"}[] = [];
     if (hasAttachedFiles) {
       initialSteps.push({ step: "Analizando archivos adjuntos", status: "active" });
