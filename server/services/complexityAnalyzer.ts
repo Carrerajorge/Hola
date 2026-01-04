@@ -66,22 +66,60 @@ export class ComplexityAnalyzer {
     /\blist\b|\blistar\b/i
   ];
 
-  private readonly AGENT_REQUIRED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-    { pattern: /\b(busca|buscar|search|find|investigar|investigate|research)\b.*\b(web|internet|online|en línea)\b/i, reason: "Requiere búsqueda web" },
-    { pattern: /\b(navega|navigate|browse|visita|visit|abre|open)\b.*\b(página|page|sitio|site|url|web)\b/i, reason: "Requiere navegación web" },
-    { pattern: /\b(descarga|download|obtén|get|extrae|extract)\b.*\b(archivo|file|documento|document|datos|data)\b.*\b(de|from)\b/i, reason: "Requiere descarga de archivos" },
-    { pattern: /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|excel|pdf|csv|archivo|file|presentación|presentation|ppt|powerpoint)\b/i, reason: "Requiere generación de documentos" },
-    { pattern: /\b(analiza|analyze|procesa|process)\b.*\b(archivo|file|documento|document|excel|spreadsheet|hoja de cálculo)\b/i, reason: "Requiere análisis de archivos" },
-    { pattern: /\b(ejecuta|execute|run|corre)\b.*\b(código|code|script|programa|program|python|javascript|shell)\b/i, reason: "Requiere ejecución de código" },
-    { pattern: /\b(primero|first|luego|then|después|after|finalmente|finally)\b.*\b(luego|then|después|after|y|and)\b/i, reason: "Tarea de múltiples pasos" },
-    { pattern: /\b(paso\s+\d+|step\s+\d+|\d+\.\s+\w+)\b/i, reason: "Tarea de múltiples pasos enumerados" },
-    { pattern: /\b(automatiza|automate|automatizar|automation)\b/i, reason: "Requiere automatización" },
-    { pattern: /\b(compara|compare|comparar)\b.*\b(varios|multiple|diferentes|different|archivos|files|páginas|pages)\b/i, reason: "Comparación de múltiples fuentes" },
-    { pattern: /\b(recopila|collect|gather|obtén|get|busca|find)\b.*\b(información|information|datos|data)\b.*\b(de|from)\b.*\b(varias|several|múltiples|multiple)\b/i, reason: "Recopilación de múltiples fuentes" },
-    { pattern: /\b(cv|curriculum|resume|currículum)\b/i, reason: "Generación de CV/Resume" },
-    { pattern: /\b(informe|report|reporte)\b.*\b(completo|complete|detallado|detailed|análisis|analysis)\b/i, reason: "Generación de informe completo" },
-    { pattern: /\b(scrape|scrapear|extraer datos|extract data)\b/i, reason: "Extracción de datos web" },
-    { pattern: /\b(agente|agent)\b/i, reason: "Solicitud explícita de agente" }
+  private readonly AGENT_REQUIRED_PATTERNS: Array<{ pattern: RegExp; reason: string; category: string }> = [
+    // === INVESTIGACIÓN Y ANÁLISIS ===
+    { pattern: /\b(busca|buscar|search|find|investigar|investigate|research)\b.*\b(web|internet|online|en línea|información|information)\b/i, reason: "Requiere búsqueda web", category: "research" },
+    { pattern: /\b(navega|navigate|browse|visita|visit|abre|open)\b.*\b(página|page|sitio|site|url|web)\b/i, reason: "Requiere navegación web", category: "research" },
+    { pattern: /\b(verifica|verify|comprueba|check|confirma|confirm)\b.*\b(hechos|facts|información|information|datos|data)\b/i, reason: "Verificación de hechos", category: "research" },
+    { pattern: /\b(recopila|collect|gather)\b.*\b(información|information|datos|data)\b.*\b(de|from|sobre|about|múltiples|multiple|varias|several)\b/i, reason: "Recopilación de información", category: "research" },
+    { pattern: /\b(tendencias|trends|mercado|market|análisis de mercado|market analysis)\b/i, reason: "Análisis de mercado/tendencias", category: "research" },
+    { pattern: /\b(informe|report|reporte)\b.*\b(investigación|research|completo|complete|detallado|detailed)\b/i, reason: "Generación de informe de investigación", category: "research" },
+    { pattern: /\b(scrape|scrapear|extraer datos|extract data|web scraping)\b/i, reason: "Extracción de datos web", category: "research" },
+    { pattern: /\b(gráfico|graph|chart|visualización|visualization|diagrama|diagram)\b.*\b(datos|data|estadísticas|statistics)\b/i, reason: "Generación de visualizaciones de datos", category: "research" },
+    
+    // === DESARROLLO DE SOFTWARE ===
+    { pattern: /\b(desarrolla|develop|construye|build|programa|program|crea|create)\b.*\b(aplicación|application|app|sitio web|website|página web|web page)\b/i, reason: "Desarrollo de aplicación web", category: "development" },
+    { pattern: /\b(landing page|página de aterrizaje|landing)\b/i, reason: "Creación de landing page", category: "development" },
+    { pattern: /\b(aplicación móvil|mobile app|app móvil|react native|expo)\b/i, reason: "Desarrollo de aplicación móvil", category: "development" },
+    { pattern: /\b(scaffold|scaffolding|inicializa|initialize|configura|configure)\b.*\b(proyecto|project|entorno|environment)\b/i, reason: "Scaffolding de proyecto", category: "development" },
+    { pattern: /\b(base de datos|database|autenticación|authentication|login|registro|register)\b.*\b(usuarios|users|sistema|system)\b/i, reason: "Sistema con base de datos/autenticación", category: "development" },
+    { pattern: /\b(debug|debugging|depura|depurar|corrige|fix)\b.*\b(código|code|error|bug|problema|problem)\b/i, reason: "Debugging de código", category: "development" },
+    { pattern: /\b(ejecuta|execute|run|corre)\b.*\b(código|code|script|programa|program|python|javascript|shell|comando|command)\b/i, reason: "Ejecución de código", category: "development" },
+    { pattern: /\b(instala|install|configura|configure|setup)\b.*\b(paquete|package|librería|library|dependencia|dependency)\b/i, reason: "Instalación/configuración de dependencias", category: "development" },
+    { pattern: /\b(api|endpoint|backend|servidor|server|frontend)\b.*\b(crea|create|desarrolla|develop|implementa|implement)\b/i, reason: "Desarrollo de API/backend", category: "development" },
+    
+    // === CREACIÓN DE CONTENIDO ===
+    { pattern: /\b(crea|create|genera|generate|haz|make|diseña|design)\b.*\b(documento|document|word|excel|pdf|csv|archivo|file)\b/i, reason: "Generación de documentos", category: "content" },
+    { pattern: /\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i, reason: "Creación de presentación", category: "content" },
+    { pattern: /\b(genera|generate|crea|create)\b.*\b(imagen|image|foto|photo|ilustración|illustration|gráfico|graphic)\b/i, reason: "Generación de imágenes", category: "content" },
+    { pattern: /\b(genera|generate|crea|create|produce)\b.*\b(video|vídeo|audio|sonido|sound|voz|voice)\b/i, reason: "Generación de multimedia", category: "content" },
+    { pattern: /\b(transcribe|transcripción|transcription|speech to text|voz a texto)\b/i, reason: "Transcripción de audio", category: "content" },
+    { pattern: /\b(redacta|write|escribe|draft|artículo|article|blog|post|contenido|content)\b.*\b(completo|complete|secciones|sections|partes|parts)\b/i, reason: "Redacción de contenido extenso", category: "content" },
+    { pattern: /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i, reason: "Generación de CV/documentos profesionales", category: "content" },
+    { pattern: /\b(edita|edit|modifica|modify)\b.*\b(imagen|image|foto|photo|video|audio)\b/i, reason: "Edición de multimedia", category: "content" },
+    
+    // === AUTOMATIZACIÓN Y PRODUCTIVIDAD ===
+    { pattern: /\b(automatiza|automate|automatizar|automation|workflow|flujo de trabajo)\b/i, reason: "Automatización de flujo de trabajo", category: "automation" },
+    { pattern: /\b(programa|schedule|agenda|planifica|plan)\b.*\b(tarea|task|recordatorio|reminder|recurrente|recurring)\b/i, reason: "Programación de tareas", category: "automation" },
+    { pattern: /\b(monitorea|monitor|supervisa|supervise|vigila|watch)\b.*\b(sitio|site|web|página|page|servicio|service)\b/i, reason: "Monitoreo de servicios web", category: "automation" },
+    { pattern: /\b(reserva|book|booking|compra|purchase|buy)\b.*\b(automática|automatic|proceso|process)\b/i, reason: "Automatización de reservas/compras", category: "automation" },
+    { pattern: /\b(gestiona|manage|organiza|organize)\b.*\b(archivos|files|carpetas|folders|sistema|system)\b/i, reason: "Gestión de archivos del sistema", category: "automation" },
+    { pattern: /\b(bot|robot|asistente automático|automatic assistant)\b/i, reason: "Creación de bot/asistente", category: "automation" },
+    
+    // === ANÁLISIS DE ARCHIVOS ===
+    { pattern: /\b(analiza|analyze|procesa|process|lee|read)\b.*\b(archivo|file|documento|document|excel|spreadsheet|hoja de cálculo|pdf)\b/i, reason: "Análisis de archivos", category: "files" },
+    { pattern: /\b(descarga|download|obtén|get|extrae|extract)\b.*\b(archivo|file|documento|document|datos|data)\b.*\b(de|from)\b/i, reason: "Descarga de archivos", category: "files" },
+    { pattern: /\b(compara|compare|comparar)\b.*\b(varios|multiple|diferentes|different|archivos|files|documentos|documents)\b/i, reason: "Comparación de múltiples archivos", category: "files" },
+    
+    // === TAREAS MULTI-PASO ===
+    { pattern: /\b(primero|first|luego|then|después|after|finalmente|finally)\b.*\b(luego|then|después|after|y después|and then)\b/i, reason: "Tarea de múltiples pasos", category: "multistep" },
+    { pattern: /\b(paso\s+\d+|step\s+\d+|\d+\.\s+\w+|\d+\)\s+\w+)\b/i, reason: "Tarea con pasos enumerados", category: "multistep" },
+    
+    // === SOLICITUD EXPLÍCITA ===
+    { pattern: /\b(usa el agente|use agent|modo agente|agent mode|con el agente|with agent)\b/i, reason: "Solicitud explícita de agente", category: "explicit" },
+    
+    // === URL DETECTADA ===
+    { pattern: /https?:\/\/[^\s]+/i, reason: "URL detectada - navegación requerida", category: "research" }
   ];
 
   analyze(prompt: string, hasAttachments: boolean = false): ComplexityResult {
