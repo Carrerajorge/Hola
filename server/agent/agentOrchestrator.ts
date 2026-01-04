@@ -2,6 +2,7 @@ import { toolRegistry, type ToolResult, type ToolArtifact } from "./toolRegistry
 import { geminiChat, type GeminiChatMessage } from "../lib/gemini";
 import type { User } from "@shared/schema";
 import { EventEmitter } from "events";
+import { agentEventBus } from "./eventBus";
 
 export interface PlanStep {
   index: number;
@@ -214,6 +215,35 @@ export class AgentOrchestrator extends EventEmitter {
     this.emit("event", { runId: this.runId, event, eventStream: this.eventStream });
     console.log(`[AgentOrchestrator][${this.runId}] Event: ${type} [${inferredStatus}]`, 
       inferredTitle || (typeof content === 'string' ? content.substring(0, 100) : JSON.stringify(content).substring(0, 100)));
+  }
+
+  private async emitTraceEvent(
+    eventType: 'task_start' | 'plan_created' | 'step_started' | 'tool_call' | 'tool_output' | 'tool_chunk' | 
+               'step_completed' | 'step_failed' | 'step_retried' | 'artifact_created' | 'verification' | 
+               'shell_output' | 'observation' | 'thinking' | 'replan' | 'error' | 'done' | 'cancelled',
+    options?: {
+      stepIndex?: number;
+      stepId?: string;
+      phase?: 'planning' | 'executing' | 'verifying' | 'completed' | 'failed' | 'cancelled';
+      status?: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'retrying';
+      tool_name?: string;
+      command?: string;
+      output_snippet?: string;
+      chunk_sequence?: number;
+      is_final_chunk?: boolean;
+      artifact?: { type: string; name: string; url?: string; data?: any };
+      plan?: { objective: string; steps: { index: number; toolName: string; description: string }[]; estimatedTime?: string };
+      error?: { code?: string; message: string; retryable?: boolean };
+      summary?: string;
+      confidence?: number;
+      metadata?: Record<string, any>;
+    }
+  ): Promise<void> {
+    try {
+      await agentEventBus.emit(this.runId, eventType, options);
+    } catch (err) {
+      console.error(`[AgentOrchestrator] Failed to emit trace event ${eventType}:`, err);
+    }
   }
 
   private inferEventStatus(type: EventType, content: any, explicitStatus?: EventStatus): EventStatus {
@@ -803,6 +833,15 @@ Respond with ONLY valid JSON in this exact format:
       input: step.input,
     }, stepIndex);
 
+    await this.emitTraceEvent('step_started', {
+      stepIndex,
+      stepId: `step-${stepIndex}`,
+      phase: 'executing',
+      status: 'running',
+      tool_name: step.toolName,
+      summary: step.description,
+    });
+
     console.log(`[AgentOrchestrator] Executing step ${stepIndex}: ${step.toolName}`);
 
     try {
@@ -841,6 +880,48 @@ Respond with ONLY valid JSON in this exact format:
         duration: completedAt - startedAt,
         error: result.error,
       }, stepIndex);
+
+      await this.emitTraceEvent('tool_output', {
+        stepIndex,
+        stepId: `step-${stepIndex}`,
+        tool_name: step.toolName,
+        output_snippet: typeof result.output === 'string' 
+          ? result.output.substring(0, 500) 
+          : JSON.stringify(result.output).substring(0, 500),
+        is_final_chunk: true,
+      });
+
+      if (result.success) {
+        await this.emitTraceEvent('step_completed', {
+          stepIndex,
+          stepId: `step-${stepIndex}`,
+          status: 'completed',
+          tool_name: step.toolName,
+        });
+      } else {
+        await this.emitTraceEvent('step_failed', {
+          stepIndex,
+          stepId: `step-${stepIndex}`,
+          status: 'failed',
+          tool_name: step.toolName,
+          error: { message: result.error || 'Unknown error', retryable: true },
+        });
+      }
+
+      if (result.artifacts && result.artifacts.length > 0) {
+        for (const artifact of result.artifacts) {
+          await this.emitTraceEvent('artifact_created', {
+            stepIndex,
+            stepId: `step-${stepIndex}`,
+            artifact: {
+              type: artifact.type,
+              name: artifact.name,
+              url: artifact.url,
+              data: artifact.data,
+            },
+          });
+        }
+      }
 
       this.emitProgress();
 
@@ -890,6 +971,21 @@ Respond with ONLY valid JSON in this exact format:
         throw new Error("No plan available. Call generatePlan first.");
       }
 
+      await this.emitTraceEvent('task_start', {
+        phase: 'executing',
+        status: 'running',
+        summary: this.plan.objective,
+      });
+
+      await this.emitTraceEvent('plan_created', {
+        phase: 'planning',
+        plan: {
+          objective: this.plan.objective,
+          steps: this.plan.steps.map(s => ({ index: s.index, toolName: s.toolName, description: s.description })),
+          estimatedTime: this.plan.estimatedTime,
+        },
+      });
+
       this.status = "running";
       this.initializeTodoList();
       this.emitProgress();
@@ -906,6 +1002,14 @@ Respond with ONLY valid JSON in this exact format:
           this.status = "cancelled";
           this.updateTodoList(i, 'skipped');
           this.logEvent('observation', { type: 'run_cancelled', atStep: i });
+          
+          await this.emitTraceEvent('cancelled', {
+            phase: 'cancelled',
+            status: 'cancelled',
+            stepIndex: i,
+            summary: `Run cancelled at step ${i + 1}`,
+          });
+
           this.emitProgress();
           console.log(`[AgentOrchestrator] Run ${this.runId} cancelled at step ${i}`);
           return;
@@ -961,6 +1065,20 @@ Respond with ONLY valid JSON in this exact format:
         failedSteps: this.stepResults.filter(r => !r.success).length,
         artifactCount: this.artifacts.length,
       });
+
+      const summary = await this.generateSummary();
+      await this.emitTraceEvent('done', {
+        phase: 'completed',
+        status: 'completed',
+        summary,
+        metadata: {
+          totalSteps: this.plan.steps.length,
+          successfulSteps: this.stepResults.filter(r => r.success).length,
+          failedSteps: this.stepResults.filter(r => !r.success).length,
+          artifactCount: this.artifacts.length,
+        },
+      });
+
       this.emitProgress();
 
       console.log(`[AgentOrchestrator] Run ${this.runId} completed successfully`);
@@ -971,6 +1089,13 @@ Respond with ONLY valid JSON in this exact format:
         error: error.message,
         stack: error.stack?.substring(0, 1000),
       });
+
+      await this.emitTraceEvent('error', {
+        phase: 'failed',
+        status: 'failed',
+        error: { message: error.message, retryable: false },
+      });
+
       this.emit("error", error);
       this.emitProgress();
       console.error(`[AgentOrchestrator] Run ${this.runId} failed:`, error.message);
