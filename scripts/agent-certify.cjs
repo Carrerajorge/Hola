@@ -16,43 +16,69 @@ function log(message, color = "reset") {
   console.log(`${COLORS[color]}${message}${COLORS.reset}`);
 }
 
-// Security: Command registry with hardcoded commands to prevent injection
+// Security: Command registry with hardcoded command arrays to prevent injection
 const COMMAND_REGISTRY = {
-  "vitest:tests": "npx vitest run server/agent/__tests__ 2>&1",
-  "vitest:typecheck": "npx vitest typecheck server/agent 2>&1 || true",
-  "npm:build": "npm run build 2>&1",
-  "node:count-agent-files": "node -e \"const fs = require('fs'); const path = require('path'); const files = fs.readdirSync('server/agent').filter(f => f.endsWith('.ts')); console.log('Agent files:', files.length);\"",
-  "node:soak-stress": `node -e "
-          const start = Date.now();
-          for(let i=0; i<1000; i++) {
-            const obj = { id: i, data: 'test'.repeat(100) };
-            JSON.stringify(obj);
-            JSON.parse(JSON.stringify(obj));
-          }
-          console.log('OK:', Date.now() - start);
-        "`,
+  "vitest:tests": {
+    cmd: "npx",
+    args: ["vitest", "run", "server/agent/__tests__"],
+    ignoreFailure: false,
+  },
+  "vitest:typecheck": {
+    cmd: "npx",
+    args: ["vitest", "typecheck", "server/agent"],
+    ignoreFailure: true,
+  },
+  "npm:build": {
+    cmd: "npm",
+    args: ["run", "build"],
+    ignoreFailure: false,
+  },
+  "node:count-agent-files": {
+    cmd: "node",
+    args: ["-e", "const fs = require('fs'); const path = require('path'); const files = fs.readdirSync('server/agent').filter(f => f.endsWith('.ts')); console.log('Agent files:', files.length);"],
+    ignoreFailure: false,
+  },
+  "node:soak-stress": {
+    cmd: "node",
+    args: ["-e", "const start = Date.now(); for(let i=0; i<1000; i++) { const obj = { id: i, data: 'test'.repeat(100) }; JSON.stringify(obj); JSON.parse(JSON.stringify(obj)); } console.log('OK:', Date.now() - start);"],
+    ignoreFailure: false,
+  },
 };
 
 function runRegisteredCommand(commandKey, timeout = 300000) {
   // Security: Only allow predefined command keys - lookup happens inline to avoid parameter injection
-  const command = COMMAND_REGISTRY[commandKey];
-  if (command === undefined) {
+  const commandConfig = COMMAND_REGISTRY[commandKey];
+  if (commandConfig === undefined) {
     throw new Error(`Unknown command key: ${commandKey}`);
   }
   
   const start = Date.now();
   try {
-    const output = execSync(command, { 
-      encoding: "utf-8", 
+    const result = spawnSync(commandConfig.cmd, commandConfig.args, {
+      encoding: "utf-8",
       timeout,
       stdio: ["pipe", "pipe", "pipe"],
       maxBuffer: 50 * 1024 * 1024,
-      shell: true,
+      shell: false,
     });
+    
+    if (result.error) {
+      throw result.error;
+    }
+    
+    const output = (result.stdout?.toString() || '') + (result.stderr?.toString() || '');
+    
+    if (result.status !== 0 && !commandConfig.ignoreFailure) {
+      const error = new Error(`Command failed with status ${result.status}`);
+      error.stdout = result.stdout;
+      error.stderr = result.stderr;
+      throw error;
+    }
+    
     return { success: true, output, duration: Date.now() - start };
   } catch (error) {
-    return { 
-      success: false, 
+    return {
+      success: false,
       output: error.stdout?.toString() || error.stderr?.toString() || error.message,
       duration: Date.now() - start,
     };
