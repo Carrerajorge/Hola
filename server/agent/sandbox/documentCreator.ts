@@ -241,12 +241,14 @@ export class DocumentCreator {
         }
 
         let yPosition = slideData.title ? 1.9 : 1.0;
+        const hasChart = !!slideData.chart;
+        const textWidth = hasChart ? 5 : 9;
 
         if (slideData.content) {
           slide.addText(slideData.content, {
             x: 0.5,
             y: yPosition,
-            w: 9,
+            w: textWidth,
             h: 1.0,
             fontSize: theme.bodyFontSize,
             color: "333333",
@@ -267,58 +269,19 @@ export class DocumentCreator {
             },
           }));
 
+          const bulletHeight = Math.min(slideData.bullets.length * 0.4 + 0.5, 3.5);
           slide.addText(bulletItems, {
             x: 0.5,
             y: yPosition,
-            w: 9,
-            h: 3.5,
+            w: textWidth,
+            h: bulletHeight,
             valign: "top",
           });
+          yPosition += bulletHeight + 0.2;
         }
 
-        if (slideData.imageUrl) {
-          try {
-            if (fs.existsSync(slideData.imageUrl)) {
-              slide.addImage({
-                path: slideData.imageUrl,
-                x: 7,
-                y: 1.5,
-                w: 2.5,
-                h: 2,
-              });
-            }
-          } catch {
-          }
-        }
-
-        if (slideData.imageBase64) {
-          try {
-            slide.addImage({
-              data: `image/png;base64,${slideData.imageBase64}`,
-              x: 7,
-              y: 1.5,
-              w: 2.5,
-              h: 2,
-            });
-          } catch {
-          }
-        }
-
-        if (slideData.generateImage) {
-          try {
-            const generatedImagePath = await this.generateAndSaveImage(slideData.generateImage);
-            slide.addImage({
-              path: generatedImagePath,
-              x: 7,
-              y: 1.5,
-              w: 2.5,
-              h: 2,
-            });
-          } catch (imgError) {
-            console.error("[DocumentCreator] Failed to generate image:", imgError);
-          }
-        }
-
+        const hasImage = !!(slideData.imageUrl || slideData.imageBase64 || slideData.generateImage);
+        
         if (slideData.chart) {
           try {
             const chartData: PptxGenJS.OptsChartData[] = [{
@@ -328,20 +291,52 @@ export class DocumentCreator {
             }];
 
             const chartType = this.getChartType(slideData.chart.type);
+            const hasBulletsOrContent = (slideData.bullets && slideData.bullets.length > 0) || slideData.content;
+            const chartH = hasImage ? 1.8 : 2.8;
             
             slide.addChart(chartType, chartData, {
-              x: 0.5,
-              y: yPosition,
-              w: 6,
-              h: 3,
+              x: hasBulletsOrContent ? 5.5 : 1.5,
+              y: slideData.title ? 1.9 : 1.2,
+              w: hasBulletsOrContent ? 4.0 : 7,
+              h: chartH,
               showTitle: !!slideData.chart.title,
               title: slideData.chart.title,
               showLegend: slideData.chart.type !== "pie",
-              legendPos: "b",
+              legendPos: "r",
               chartColors: [theme.primaryColor, theme.secondaryColor, theme.accentColor, "4A5568", "718096"],
             });
           } catch (chartError) {
             console.error("[DocumentCreator] Failed to add chart:", chartError);
+          }
+        }
+
+        if (hasImage) {
+          const imgX = 7.2;
+          const imgY = hasChart ? 3.9 : 1.5;
+          const imgW = 2.2;
+          const imgH = hasChart ? 1.2 : 1.8;
+          
+          if (slideData.imageUrl) {
+            try {
+              if (fs.existsSync(slideData.imageUrl)) {
+                slide.addImage({ path: slideData.imageUrl, x: imgX, y: imgY, w: imgW, h: imgH });
+              }
+            } catch {}
+          }
+
+          if (slideData.imageBase64) {
+            try {
+              slide.addImage({ data: `image/png;base64,${slideData.imageBase64}`, x: imgX, y: imgY, w: imgW, h: imgH });
+            } catch {}
+          }
+
+          if (slideData.generateImage) {
+            try {
+              const generatedImagePath = await this.generateAndSaveImage(slideData.generateImage);
+              slide.addImage({ path: generatedImagePath, x: imgX, y: imgY, w: imgW, h: imgH });
+            } catch (imgError) {
+              console.error("[DocumentCreator] Failed to generate image:", imgError);
+            }
           }
         }
 
