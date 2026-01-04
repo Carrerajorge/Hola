@@ -77,6 +77,7 @@ import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResults";
 import { normalizeAgentEvent, hasPayloadDetails, type MappedAgentEvent } from "@/lib/agent-event-mapper";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { AgentStepsDisplay, type AgentArtifact } from "@/components/agent-steps-display";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -1432,8 +1433,42 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
             </div>
           )}
 
-          {/* Summary/Response - show when completed */}
-          {agentRun.summary && agentRun.status === "completed" && (
+          {/* Claude-style steps display for completed runs */}
+          {agentRun.status === "completed" && agentRun.steps && agentRun.steps.length > 0 && (
+            <div className="mt-3">
+              <AgentStepsDisplay
+                steps={agentRun.steps}
+                summary={agentRun.summary}
+                artifacts={(agentRun as any).artifacts}
+                isRunning={false}
+                onDocumentClick={(artifact) => {
+                  console.log("Document clicked:", artifact);
+                }}
+                onDownload={(artifact) => {
+                  if (artifact.data?.base64) {
+                    const byteCharacters = atob(artifact.data.base64);
+                    const byteNumbers = new Array(byteCharacters.length);
+                    for (let i = 0; i < byteCharacters.length; i++) {
+                      byteNumbers[i] = byteCharacters.charCodeAt(i);
+                    }
+                    const byteArray = new Uint8Array(byteNumbers);
+                    const blob = new Blob([byteArray], { type: artifact.mimeType || 'application/octet-stream' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = artifact.name;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }
+                }}
+              />
+            </div>
+          )}
+
+          {/* Summary/Response - show when completed but no steps */}
+          {agentRun.summary && agentRun.status === "completed" && (!agentRun.steps || agentRun.steps.length === 0) && (
             <div className="mt-2 pt-2 border-t border-border/50">
               <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
                 <MarkdownErrorBoundary>
