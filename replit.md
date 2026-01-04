@@ -46,6 +46,25 @@ Preferred communication style: Simple, everyday language.
 - **Agent Cancellation System**: Robust cancellation with AbortController/CancellationToken propagated end-to-end. States: queued → planning → running → verifying → completed|failed|cancelled, with intermediate states `paused` and `cancelling`. Cancel button always active during active states (queued, planning, running, verifying, paused). Guarantees: (1) No tool calls after cancel request, (2) Cleanup handlers invoked for Playwright contexts/fetch/sandbox, (3) Events `run_cancel_requested` and `run_cancelled` emitted, (4) Status persisted with `cancel_requested_at` and `ended_at` timestamps. Pause/Resume supported via POST /api/agent/runs/:id/pause and /resume endpoints.
 - **Router System** (v1.0 - Production-Ready, Battle-Tested): Hybrid decision system that automatically routes messages between chat (simple responses) and agent mode (multi-step tasks with tools). Uses a cascade: (1) Heuristic patterns for quick detection, (2) ComplexityAnalyzer fallback, (3) LLM router for ambiguous cases. Configuration via environment variables: `ROUTER_CONFIDENCE_THRESHOLD` (default 0.65), `MAX_AGENT_STEPS` (default 8), `ENABLE_DYNAMIC_ESCALATION` (default true). Endpoints: POST /api/chat/route, POST /api/chat/agent-run, POST /api/chat/escalation-check. Validated: 100% routing accuracy (30/30 prompts), 0 crashes, deterministic behavior, concurrent isolation, graceful LLM degradation.
 - **AgentRunner** (v1.0 - Production-Ready): Simplified agent loop for executing multi-step tasks. Supports 4 tools: `web_search`, `open_url`, `extract_text`, `final_answer`. Features: heuristic fallback when LLM unavailable, event emission for progress tracking, configurable max steps, InMemoryRunStore with IRunStore interface (DB-ready), guardrails (maxConsecutiveFailures=2, warning banner at max steps), structured JSON logging with run_id/traceId/duration_ms.
+- **Sandbox Agent V2** (Production-Ready): Comprehensive TypeScript agent system with phase-based execution, automatic task decomposition, and secure sandboxed operations.
+  - **Core Modules**: Located in `server/agent/sandbox/`:
+    - `agentTypes.ts` - Zod schemas for phases, steps, task plans, and agent state
+    - `documentCreator.ts` - Creates professional PPTX, DOCX, XLSX documents using pptxgenjs, docx, and exceljs
+    - `tools.ts` - 8-tool system (shell, file, python, search, browser, document, message, research) with BaseTool abstract class
+    - `taskPlanner.ts` - Automatic task decomposition from user input with intent detection (12 intents, EN/ES support)
+    - `agentV2.ts` - Main orchestrator with state machine (idle → analyzing → planning → executing → delivering)
+  - **Security Hardening**: 
+    - HTTP API exposes only 5 safe tools: search, browser, document, message, research
+    - Shell/file tools require authenticated sandbox sessions via `sandboxService`
+    - All routes require authentication (`requireAuth` middleware)
+    - Max iterations capped at 50, timeout at 120s
+  - **API Endpoints** (via `sandboxAgentRouter.ts`):
+    - `POST /api/sandbox/agent/run` - Execute agent with user input
+    - `POST /api/sandbox/agent/tool` - Execute single tool (safe tools only)
+    - `POST /api/sandbox/agent/plan` - Create task plan without execution
+    - `POST /api/sandbox/agent/detect-intent` - Detect intent from text
+    - `GET /api/sandbox/agent/tools` - List available tools
+    - `POST/GET/DELETE /api/sandbox/session` - Session management
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt and multi-tenant validation.

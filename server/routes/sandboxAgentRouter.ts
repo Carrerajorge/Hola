@@ -1,0 +1,296 @@
+import { Router, Request, Response, NextFunction } from "express";
+import { z } from "zod";
+import { AgentV2 } from "../agent/sandbox/agentV2";
+import { taskPlanner } from "../agent/sandbox/taskPlanner";
+import { ToolRegistry, DocumentTool, SearchTool, BrowserTool, MessageTool, ResearchTool } from "../agent/sandbox/tools";
+import { sandboxService } from "../agent/sandbox/sandboxService";
+import type { ToolCategory } from "../agent/sandbox/agentTypes";
+
+const RunAgentRequestSchema = z.object({
+  input: z.string().min(1, "Input is required"),
+  sessionId: z.string().optional(),
+  config: z.object({
+    verbose: z.boolean().optional(),
+    maxIterations: z.number().int().positive().max(50).optional(),
+    timeout: z.number().int().positive().max(120000).optional(),
+  }).optional(),
+});
+
+const ExecuteToolRequestSchema = z.object({
+  toolName: z.string().min(1),
+  params: z.record(z.any()).default({}),
+});
+
+const CreatePlanRequestSchema = z.object({
+  input: z.string().min(1),
+});
+
+const DetectIntentRequestSchema = z.object({
+  text: z.string().min(1),
+});
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const user = (req as any).user;
+  if (!user) {
+    return res.status(401).json({ 
+      success: false, 
+      error: "Authentication required" 
+    });
+  }
+  next();
+}
+
+function createSafeToolRegistry(): ToolRegistry {
+  const registry = new ToolRegistry();
+  registry.register(new DocumentTool());
+  registry.register(new SearchTool());
+  registry.register(new BrowserTool());
+  registry.register(new MessageTool());
+  registry.register(new ResearchTool());
+  return registry;
+}
+
+const SAFE_TOOLS = new Set(["search", "browser", "document", "message", "research"]);
+
+export function createSandboxAgentRouter() {
+  const router = Router();
+
+  router.post("/sandbox/agent/run", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const validated = RunAgentRequestSchema.parse(req.body);
+      const user = (req as any).user;
+      const userId = user?.claims?.sub || user?.id || "anonymous";
+      
+      const safeRegistry = createSafeToolRegistry();
+      
+      const agent = new AgentV2({
+        ...validated.config,
+        name: `SafeAgent-${userId}`,
+        maxIterations: Math.min(validated.config?.maxIterations || 20, 50),
+        timeout: Math.min(validated.config?.timeout || 60000, 120000),
+      });
+      
+      (agent as any).tools = safeRegistry;
+      
+      const result = await agent.run(validated.input);
+      const status = agent.getStatus();
+      
+      res.json({
+        success: true,
+        result,
+        status,
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Validation error",
+          details: error.errors 
+        });
+      }
+      console.error("[SandboxAgent] Run error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Internal server error" 
+      });
+    }
+  });
+
+  router.post("/sandbox/agent/tool", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const validated = ExecuteToolRequestSchema.parse(req.body);
+      
+      if (!SAFE_TOOLS.has(validated.toolName)) {
+        return res.status(403).json({
+          success: false,
+          error: `Tool '${validated.toolName}' is not available via HTTP. Only safe tools (${Array.from(SAFE_TOOLS).join(", ")}) are allowed.`
+        });
+      }
+      
+      const registry = createSafeToolRegistry();
+      const result = await registry.execute(validated.toolName, validated.params);
+      
+      res.json({
+        success: result.success,
+        result,
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Validation error",
+          details: error.errors 
+        });
+      }
+      console.error("[SandboxAgent] Tool execution error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Internal server error" 
+      });
+    }
+  });
+
+  router.post("/sandbox/agent/plan", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const validated = CreatePlanRequestSchema.parse(req.body);
+      const plan = await taskPlanner.createPlan(validated.input);
+      
+      plan.phases.forEach(phase => {
+        phase.steps = phase.steps.filter(step => SAFE_TOOLS.has(step.tool));
+      });
+      plan.phases = plan.phases.filter(phase => phase.steps.length > 0);
+      
+      res.json({
+        success: true,
+        plan,
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Validation error",
+          details: error.errors 
+        });
+      }
+      console.error("[SandboxAgent] Plan creation error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Internal server error" 
+      });
+    }
+  });
+
+  router.post("/sandbox/agent/detect-intent", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const validated = DetectIntentRequestSchema.parse(req.body);
+      const intentResult = await taskPlanner.detectIntent(validated.text);
+      
+      res.json({
+        success: true,
+        ...intentResult,
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Validation error",
+          details: error.errors 
+        });
+      }
+      console.error("[SandboxAgent] Intent detection error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Internal server error" 
+      });
+    }
+  });
+
+  router.get("/sandbox/agent/tools", async (_req: Request, res: Response) => {
+    try {
+      const registry = createSafeToolRegistry();
+      const tools = registry.listToolsWithInfo();
+      
+      res.json({
+        success: true,
+        tools,
+        count: tools.length,
+        note: "Only safe tools are exposed via HTTP. Shell and file operations require sandbox session."
+      });
+    } catch (error: any) {
+      console.error("[SandboxAgent] List tools error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Internal server error" 
+      });
+    }
+  });
+
+  router.get("/sandbox/agent/status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub || user?.id || "anonymous";
+      
+      res.json({
+        success: true,
+        status: {
+          userId,
+          availableTools: Array.from(SAFE_TOOLS),
+          sandboxEnabled: true,
+        },
+      });
+    } catch (error: any) {
+      console.error("[SandboxAgent] Status error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Internal server error" 
+      });
+    }
+  });
+
+  router.get("/sandbox/session/:sessionId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const sandbox = sandboxService.getSession(sessionId);
+      
+      if (!sandbox) {
+        return res.status(404).json({ 
+          success: false, 
+          error: "Session not found" 
+        });
+      }
+      
+      const status = await sandbox.getStatus();
+      res.json({
+        success: true,
+        sessionId,
+        status,
+      });
+    } catch (error: any) {
+      console.error("[SandboxAgent] Session status error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Internal server error" 
+      });
+    }
+  });
+
+  router.post("/sandbox/session", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const sessionId = await sandboxService.createSession();
+      const sandbox = sandboxService.getSession(sessionId);
+      const status = sandbox ? await sandbox.getStatus() : null;
+      
+      res.json({
+        success: true,
+        sessionId,
+        status,
+      });
+    } catch (error: any) {
+      console.error("[SandboxAgent] Create session error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Internal server error" 
+      });
+    }
+  });
+
+  router.delete("/sandbox/session/:sessionId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const result = await sandboxService.destroySession(sessionId);
+      
+      res.json({
+        success: result,
+        message: result ? "Session destroyed" : "Session not found",
+      });
+    } catch (error: any) {
+      console.error("[SandboxAgent] Destroy session error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || "Internal server error" 
+      });
+    }
+  });
+
+  return router;
+}
