@@ -1,11 +1,11 @@
 import siraLogoSrc from "@/assets/sira-logo.png";
 
-interface SiraLogoProps {
+interface IliaGPTLogoProps {
   size?: number;
   className?: string;
 }
 
-export function SiraLogo({ size = 32, className = "" }: SiraLogoProps) {
+export function IliaGPTLogo({ size = 32, className = "" }: IliaGPTLogoProps) {
   return (
     <img 
       src={siraLogoSrc} 
