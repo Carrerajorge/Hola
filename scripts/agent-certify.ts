@@ -26,7 +26,17 @@ function log(message: string, color: keyof typeof COLORS = 'reset') {
   console.log(`${COLORS[color]}${message}${COLORS.reset}`);
 }
 
+const ALLOWED_COMMANDS: ReadonlySet<string> = new Set([
+  'npx vitest run server/agent/__tests__ 2>&1',
+  'npx vitest run server/agent/__tests__/benchmarks.test.ts 2>&1',
+  'npx vitest run server/agent/__tests__/chaos.test.ts 2>&1',
+  'npx vitest run server/agent/__tests__/webtool-cache-isolation.test.ts 2>&1',
+]);
+
 function runTest(name: string, command: string): CertificationResult {
+  if (!ALLOWED_COMMANDS.has(command)) {
+    throw new Error(`Command not in allowlist: ${command}`);
+  }
   const startTime = Date.now();
   let output = '';
   let passed = false;
