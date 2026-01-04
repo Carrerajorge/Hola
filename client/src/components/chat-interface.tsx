@@ -84,7 +84,7 @@ import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDete
 import { markdownToTipTap } from "@/lib/markdownToHtml";
 import { detectGmailIntent } from "@/lib/gmailIntentDetector";
 import { useAgentStore, useAgentRun, type AgentRunState } from "@/stores/agent-store";
-import { useStartAgentRun, useCancelAgentRun, useAgentPolling } from "@/hooks/use-agent-polling";
+import { useStartAgentRun, useCancelAgentRun, useAgentPolling, abortPendingAgentStart } from "@/hooks/use-agent-polling";
 import { useStreamingStore } from "@/stores/streamingStore";
 import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
@@ -1092,7 +1092,8 @@ export function ChatInterface({
           toast({ title: "Error", description: "No se pudo detener el agente", variant: "destructive" });
         }
       } else {
-        // If still in starting/queued state without runId, cancel locally
+        // If still in starting/queued state without runId, abort the pending request and cancel locally
+        abortPendingAgentStart(currentAgentMessageId);
         useAgentStore.getState().cancelRun(currentAgentMessageId);
         toast({ description: "Agente cancelado", duration: 3000 });
       }

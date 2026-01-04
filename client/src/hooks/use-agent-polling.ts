@@ -2,6 +2,17 @@ import { useEffect, useRef, useCallback } from "react";
 import { useAgentStore, useAgentRun } from "@/stores/agent-store";
 import { pollingManager } from "@/lib/polling-manager";
 
+// Global map of AbortControllers for pending agent start requests
+const pendingAgentStartControllers = new Map<string, AbortController>();
+
+export function abortPendingAgentStart(messageId: string): void {
+  const controller = pendingAgentStartControllers.get(messageId);
+  if (controller) {
+    controller.abort();
+    pendingAgentStartControllers.delete(messageId);
+  }
+}
+
 export function useAgentPolling(messageId: string | null) {
   const agentRun = useAgentRun(messageId || "");
   const hasValidMessageId = Boolean(messageId && messageId.length > 0);
@@ -39,7 +50,7 @@ export function useAgentPolling(messageId: string | null) {
 }
 
 export function useStartAgentRun() {
-  const { createRun, setRunId, failRun } = useAgentStore();
+  const { createRun, setRunId, failRun, cancelRun } = useAgentStore();
   
   const startRun = useCallback(async (
     chatId: string,
@@ -47,6 +58,10 @@ export function useStartAgentRun() {
     messageId: string,
     attachments?: any[]
   ): Promise<{ runId: string; chatId: string } | null> => {
+    // Create AbortController for this request
+    const abortController = new AbortController();
+    pendingAgentStartControllers.set(messageId, abortController);
+    
     createRun(chatId, userMessage, messageId);
     
     try {
@@ -57,6 +72,7 @@ export function useStartAgentRun() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
+          signal: abortController.signal,
           body: JSON.stringify({
             title: userMessage.substring(0, 50) + (userMessage.length > 50 ? "..." : ""),
             model: "gemini-3-flash-preview",
@@ -71,6 +87,7 @@ export function useStartAgentRun() {
       // Check if run was cancelled while waiting for chat creation
       const currentRun = useAgentStore.getState().runs[messageId];
       if (currentRun?.status === 'cancelled') {
+        pendingAgentStartControllers.delete(messageId);
         return null;
       }
       
@@ -78,6 +95,7 @@ export function useStartAgentRun() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        signal: abortController.signal,
         body: JSON.stringify({
           chatId: resolvedChatId,
           message: userMessage,
@@ -91,6 +109,7 @@ export function useStartAgentRun() {
       // Check again if cancelled while waiting for API response
       const runAfterApi = useAgentStore.getState().runs[messageId];
       if (runAfterApi?.status === 'cancelled') {
+        pendingAgentStartControllers.delete(messageId);
         // Attempt to cancel the backend run that was just created
         try {
           await fetch(`/api/agent/runs/${runData.id}/cancel`, {
@@ -111,13 +130,20 @@ export function useStartAgentRun() {
         pollingManager.start(messageId, runData.id);
       }
       
+      pendingAgentStartControllers.delete(messageId);
       return { runId: runData.id, chatId: runData.chatId };
       
     } catch (error: any) {
+      pendingAgentStartControllers.delete(messageId);
+      // Handle abort errors gracefully - don't fail the run, it was user-initiated
+      if (error.name === 'AbortError') {
+        cancelRun(messageId);
+        return null;
+      }
       failRun(messageId, error.message);
       return null;
     }
-  }, [createRun, setRunId, failRun]);
+  }, [createRun, setRunId, failRun, cancelRun]);
   
   return { startRun };
 }
