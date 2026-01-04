@@ -1276,47 +1276,66 @@ export function ChatInterface({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
+  const lastScrollTimeRef = useRef<number>(0);
+  const scrollThrottleMs = 300;
 
-  // Smart auto-scroll: only scroll if user is near bottom or AI is responding
-  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
-    messagesEndRef.current?.scrollIntoView({ behavior });
-  };
+  const scrollToBottom = useCallback((force = false) => {
+    if (userHasScrolledUp && !force) return;
+    
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ 
+        behavior: 'smooth',
+        block: 'end'
+      });
+    });
+  }, [userHasScrolledUp]);
 
-  // Check if user is near bottom of scroll
-  const isNearBottom = () => {
+  const isNearBottom = useCallback(() => {
     const container = messagesContainerRef.current;
     if (!container) return true;
-    const threshold = 150; // pixels from bottom
+    const threshold = 150;
     return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-  };
+  }, []);
 
-  // Handle scroll event to show/hide scroll button
-  const handleScroll = () => {
+  const handleScroll = useCallback(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
     
-    const nearBottom = isNearBottom();
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    
+    const nearBottom = distanceFromBottom < 150;
     setShowScrollButton(!nearBottom);
-    setUserHasScrolledUp(!nearBottom);
-  };
-
-  // Auto-scroll to bottom when AI is thinking or streaming (only if user hasn't scrolled up)
-  useEffect(() => {
-    if ((aiState !== "idle" || streamingContent) && !userHasScrolledUp) {
-      scrollToBottom();
+    
+    if (distanceFromBottom > 200) {
+      setUserHasScrolledUp(true);
+    } else if (distanceFromBottom < 50) {
+      setUserHasScrolledUp(false);
     }
-  }, [aiState, streamingContent, userHasScrolledUp]);
+  }, []);
 
-  // Always scroll to bottom when new messages arrive
   useEffect(() => {
-    if (displayMessages.length > 0) {
-      // Reset user scroll state when AI finishes responding
-      if (aiState === "idle" && !streamingContent) {
-        setUserHasScrolledUp(false);
-      }
-      scrollToBottom();
+    if (aiState === "idle" && !streamingContent) return;
+    if (userHasScrolledUp) return;
+    
+    const now = Date.now();
+    if (now - lastScrollTimeRef.current < scrollThrottleMs) return;
+    lastScrollTimeRef.current = now;
+    
+    scrollToBottom();
+  }, [aiState, streamingContent, userHasScrolledUp, scrollToBottom]);
+
+  const prevMessageCountRef = useRef(displayMessages.length);
+  useEffect(() => {
+    const prevCount = prevMessageCountRef.current;
+    const currentCount = displayMessages.length;
+    prevMessageCountRef.current = currentCount;
+    
+    if (currentCount > prevCount) {
+      setUserHasScrolledUp(false);
+      scrollToBottom(true);
     }
-  }, [displayMessages.length]);
+  }, [displayMessages.length, scrollToBottom]);
 
   useEffect(() => {
     return () => {
