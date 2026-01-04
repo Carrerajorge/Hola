@@ -73,18 +73,37 @@ export function createChatRoutes(): Router {
     try {
       const validation = routerRequestSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ error: validation.error.message });
+        return res.status(400).json({ 
+          error: "Invalid request body", 
+          details: validation.error.message,
+          code: "VALIDATION_ERROR"
+        });
       }
 
       const { message, hasAttachments } = validation.data;
       const decision = await decideRoute(message, hasAttachments);
 
-      console.log(`[ChatRoutes] Router decision: route=${decision.route}, confidence=${decision.confidence}`);
+      console.log(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        component: "Router",
+        event: "route_decision",
+        route: decision.route,
+        confidence: decision.confidence,
+        reasons: decision.reasons,
+      }));
 
       res.json(decision);
     } catch (error: any) {
-      console.error("[ChatRoutes] Router error:", error);
-      res.status(500).json({ error: error.message || "Failed to route message" });
+      const errorMsg = error.message || "Failed to route message";
+      console.error("[ChatRoutes] Router error:", JSON.stringify({ error: errorMsg }));
+      res.json({
+        route: "chat",
+        confidence: 0.5,
+        reasons: ["Router fallback due to error: " + errorMsg],
+        tool_needs: [],
+        plan_hint: [],
+      });
     }
   });
 
@@ -92,17 +111,28 @@ export function createChatRoutes(): Router {
     try {
       const validation = agentRunRequestSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ error: validation.error.message });
+        return res.status(400).json({ 
+          error: "Invalid request body", 
+          details: validation.error.message,
+          code: "VALIDATION_ERROR"
+        });
       }
 
       const { message, planHint } = validation.data;
       
-      console.log(`[ChatRoutes] Starting agent run for: "${message.slice(0, 100)}..."`);
+      console.log(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        component: "ChatRoutes",
+        event: "agent_run_started",
+        objective: message.slice(0, 100),
+      }));
       
       const result = await runAgent(message, planHint);
 
       res.json({
         success: result.success,
+        run_id: result.run_id,
         result: result.result,
         state: {
           objective: result.state.objective,
@@ -113,8 +143,13 @@ export function createChatRoutes(): Router {
         },
       });
     } catch (error: any) {
-      console.error("[ChatRoutes] Agent run error:", error);
-      res.status(500).json({ error: error.message || "Failed to run agent" });
+      const errorMsg = error.message || "Failed to run agent";
+      console.error("[ChatRoutes] Agent run error:", JSON.stringify({ error: errorMsg, stack: error.stack?.slice(0, 500) }));
+      res.status(500).json({ 
+        error: errorMsg, 
+        code: "AGENT_RUN_ERROR",
+        suggestion: "Check server logs for details. If LLM is unavailable, heuristic fallback should apply."
+      });
     }
   });
 

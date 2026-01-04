@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { nanoid } from "nanoid";
 
 export interface AgentState {
   objective: string;
@@ -26,6 +27,7 @@ export interface AgentRunnerConfig {
   maxSteps: number;
   stepTimeoutMs: number;
   enableLogging: boolean;
+  maxConsecutiveFailures: number;
 }
 
 export interface ToolResult {
@@ -34,24 +36,80 @@ export interface ToolResult {
   error?: string;
 }
 
+export interface AgentRunRecord {
+  run_id: string;
+  objective: string;
+  route: "agent";
+  confidence: number;
+  plan: string[];
+  tools_used: string[];
+  steps: number;
+  duration_ms: number;
+  status: "completed" | "failed" | "cancelled";
+  result: any;
+  error?: string;
+  created_at: Date;
+  completed_at: Date;
+}
+
+export interface IRunStore {
+  save(record: AgentRunRecord): Promise<void>;
+  get(runId: string): Promise<AgentRunRecord | null>;
+  list(limit?: number): Promise<AgentRunRecord[]>;
+}
+
+class InMemoryRunStore implements IRunStore {
+  private runs: Map<string, AgentRunRecord> = new Map();
+  private maxRuns = 100;
+
+  async save(record: AgentRunRecord): Promise<void> {
+    this.runs.set(record.run_id, record);
+    if (this.runs.size > this.maxRuns) {
+      const oldest = Array.from(this.runs.keys())[0];
+      this.runs.delete(oldest);
+    }
+  }
+
+  async get(runId: string): Promise<AgentRunRecord | null> {
+    return this.runs.get(runId) || null;
+  }
+
+  async list(limit = 20): Promise<AgentRunRecord[]> {
+    return Array.from(this.runs.values())
+      .sort((a, b) => b.created_at.getTime() - a.created_at.getTime())
+      .slice(0, limit);
+  }
+}
+
+export const runStore: IRunStore = new InMemoryRunStore();
+
 const DEFAULT_CONFIG: AgentRunnerConfig = {
   maxSteps: parseInt(process.env.MAX_AGENT_STEPS || "8", 10),
   stepTimeoutMs: 60000,
   enableLogging: true,
+  maxConsecutiveFailures: 2,
 };
 
 export class AgentRunner extends EventEmitter {
   private config: AgentRunnerConfig;
   private state: AgentState | null = null;
   private abortController: AbortController | null = null;
+  private runId: string = "";
+  private startTime: number = 0;
+  private consecutiveFailures: number = 0;
+  private lastFailedTool: string = "";
 
   constructor(config: Partial<AgentRunnerConfig> = {}) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.log(`AgentRunner initialized with maxSteps=${this.config.maxSteps}`);
+    this.logStructured("debug", "initialized", { maxSteps: this.config.maxSteps, maxConsecutiveFailures: this.config.maxConsecutiveFailures });
   }
 
-  async run(objective: string, planHint: string[] = []): Promise<{ success: boolean; result: any; state: AgentState }> {
+  async run(objective: string, planHint: string[] = []): Promise<{ success: boolean; result: any; state: AgentState; run_id: string }> {
+    this.runId = nanoid(12);
+    this.startTime = Date.now();
+    this.consecutiveFailures = 0;
+    this.lastFailedTool = "";
     this.abortController = new AbortController();
     
     this.state = {
@@ -64,15 +122,14 @@ export class AgentRunner extends EventEmitter {
       status: "running",
     };
 
-    this.log(`Starting agent run for objective: "${objective}"`);
-    this.log(`Plan: ${this.state.plan.join(" → ")}`);
-    this.emit("started", { objective, plan: this.state.plan });
+    this.logStructured("info", "run_started", { run_id: this.runId, objective: objective.slice(0, 200), plan: this.state.plan });
+    this.emit("started", { run_id: this.runId, objective, plan: this.state.plan });
 
     try {
       while (this.state.currentStep < this.config.maxSteps && this.state.status === "running") {
         if (this.abortController.signal.aborted) {
           this.state.status = "cancelled";
-          this.log("Agent run cancelled");
+          await this.persistRun("cancelled", null, "Run cancelled by user");
           break;
         }
 
@@ -80,37 +137,108 @@ export class AgentRunner extends EventEmitter {
         
         if (stepResult.action === "final_answer") {
           this.state.status = "completed";
-          this.log(`Agent completed with final answer`);
-          this.emit("completed", { result: stepResult.output, state: this.state });
-          return { success: true, result: stepResult.output, state: this.state };
+          await this.persistRun("completed", stepResult.output);
+          this.emit("completed", { run_id: this.runId, result: stepResult.output, state: this.state });
+          return { success: true, result: stepResult.output, state: this.state, run_id: this.runId };
         }
 
         if (!stepResult.success) {
-          this.log(`Step ${this.state.currentStep} failed: ${stepResult.error}`);
-          if (this.state.history.filter(h => !h.success).length >= 3) {
-            this.state.status = "failed";
-            this.emit("failed", { error: "Too many step failures", state: this.state });
-            return { success: false, result: { error: "Too many step failures" }, state: this.state };
+          if (stepResult.tool === this.lastFailedTool) {
+            this.consecutiveFailures++;
+          } else {
+            this.consecutiveFailures = 1;
+            this.lastFailedTool = stepResult.tool;
           }
+
+          if (this.consecutiveFailures >= this.config.maxConsecutiveFailures) {
+            const errorMsg = `Tool "${stepResult.tool}" failed ${this.consecutiveFailures} consecutive times. Aborting run.`;
+            this.logStructured("error", "consecutive_failures", { run_id: this.runId, tool: stepResult.tool, failures: this.consecutiveFailures });
+            this.state.status = "failed";
+            await this.persistRun("failed", null, errorMsg);
+            this.emit("failed", { run_id: this.runId, error: errorMsg, state: this.state });
+            return { 
+              success: false, 
+              result: { error: errorMsg, partial_observations: this.state.observations }, 
+              state: this.state,
+              run_id: this.runId 
+            };
+          }
+        } else {
+          this.consecutiveFailures = 0;
+          this.lastFailedTool = "";
         }
 
         this.state.currentStep++;
       }
 
       if (this.state.currentStep >= this.config.maxSteps) {
-        this.log(`Max steps (${this.config.maxSteps}) reached`);
+        this.logStructured("warn", "max_steps_reached", { run_id: this.runId, steps: this.config.maxSteps });
         const summaryResult = await this.generateSummary();
+        const warningMsg = `[WARNING: Max steps (${this.config.maxSteps}) reached. Response may be incomplete.]`;
+        const resultWithWarning = `${warningMsg}\n\n${summaryResult}`;
         this.state.status = "completed";
-        this.emit("completed", { result: summaryResult, state: this.state });
-        return { success: true, result: summaryResult, state: this.state };
+        await this.persistRun("completed", resultWithWarning);
+        this.emit("completed", { run_id: this.runId, result: resultWithWarning, state: this.state });
+        return { success: true, result: resultWithWarning, state: this.state, run_id: this.runId };
       }
 
-      return { success: this.state.status === "completed", result: this.state.observations, state: this.state };
+      await this.persistRun(this.state.status as any, this.state.observations);
+      return { success: this.state.status === "completed", result: this.state.observations, state: this.state, run_id: this.runId };
     } catch (error: any) {
       this.state.status = "failed";
-      this.log(`Agent run failed: ${error.message}`);
-      this.emit("failed", { error: error.message, state: this.state });
-      return { success: false, result: { error: error.message }, state: this.state };
+      const errorMsg = error.message || "Unknown error";
+      this.logStructured("error", "run_failed", { run_id: this.runId, error: errorMsg });
+      await this.persistRun("failed", null, errorMsg);
+      this.emit("failed", { run_id: this.runId, error: errorMsg, state: this.state });
+      return { success: false, result: { error: errorMsg }, state: this.state, run_id: this.runId };
+    }
+  }
+
+  private async persistRun(status: "completed" | "failed" | "cancelled", result: any, error?: string): Promise<void> {
+    const record: AgentRunRecord = {
+      run_id: this.runId,
+      objective: this.state!.objective,
+      route: "agent",
+      confidence: 1.0,
+      plan: this.state!.plan,
+      tools_used: this.state!.toolsUsed,
+      steps: this.state!.history.length,
+      duration_ms: Date.now() - this.startTime,
+      status,
+      result,
+      error,
+      created_at: new Date(this.startTime),
+      completed_at: new Date(),
+    };
+
+    this.logStructured("info", "run_completed", {
+      run_id: record.run_id,
+      route: record.route,
+      tools_used: record.tools_used,
+      steps: record.steps,
+      duration_ms: record.duration_ms,
+      status: record.status,
+    });
+
+    await runStore.save(record);
+  }
+
+  private logStructured(level: "debug" | "info" | "warn" | "error", event: string, data: Record<string, any>): void {
+    const entry = {
+      timestamp: new Date().toISOString(),
+      level,
+      component: "AgentRunner",
+      event,
+      ...data,
+    };
+    if (level === "error") {
+      console.error(JSON.stringify(entry));
+    } else if (level === "warn") {
+      console.warn(JSON.stringify(entry));
+    } else if (level === "debug" && this.config.enableLogging) {
+      console.log(JSON.stringify(entry));
+    } else if (level === "info") {
+      console.log(JSON.stringify(entry));
     }
   }
 
@@ -126,7 +254,7 @@ export class AgentRunner extends EventEmitter {
 
     const nextAction = await this.decideNextAction();
     
-    this.log(`Step ${stepIndex}: ${nextAction.tool}(${JSON.stringify(nextAction.input)})`);
+    this.logStructured("debug", "step_started", { run_id: this.runId, stepIndex, tool: nextAction.tool, input: nextAction.input });
     this.emit("step_started", { stepIndex, action: nextAction });
 
     let result: ToolResult;
@@ -163,7 +291,7 @@ export class AgentRunner extends EventEmitter {
     }
 
     this.emit("step_completed", { step, state: this.state });
-    this.log(`Step ${stepIndex} completed: success=${result.success}, duration=${step.duration}ms`);
+    this.logStructured("debug", "step_completed", { run_id: this.runId, stepIndex, tool: nextAction.tool, success: result.success, duration_ms: step.duration });
 
     return step;
   }
@@ -171,7 +299,7 @@ export class AgentRunner extends EventEmitter {
   private async decideNextAction(): Promise<{ action: string; tool: string; input: Record<string, any> }> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      this.log("GEMINI_API_KEY not configured, using heuristic action");
+      this.logStructured("debug", "llm_unavailable", { run_id: this.runId, reason: "GEMINI_API_KEY not configured", fallback: "heuristic" });
       return this.heuristicNextAction();
     }
 
@@ -218,7 +346,7 @@ Si ya tienes suficiente información, usa final_answer.`;
       const jsonMatch = responseText.match(/\{[\s\S]*?\}/);
       
       if (!jsonMatch) {
-        this.log("No valid JSON in LLM response, using heuristic");
+        this.logStructured("debug", "llm_parse_failed", { run_id: this.runId, reason: "No valid JSON in response", fallback: "heuristic" });
         return this.heuristicNextAction();
       }
 
@@ -229,7 +357,7 @@ Si ya tienes suficiente información, usa final_answer.`;
         input: parsed.input || {},
       };
     } catch (error: any) {
-      this.log(`LLM decision failed: ${error.message}, using heuristic`);
+      this.logStructured("debug", "llm_decision_failed", { run_id: this.runId, error: error.message, fallback: "heuristic" });
       return this.heuristicNextAction();
     }
   }
@@ -265,7 +393,7 @@ Si ya tienes suficiente información, usa final_answer.`;
   }
 
   private async executeTool(toolName: string, input: Record<string, any>): Promise<ToolResult> {
-    this.log(`Executing tool: ${toolName}`);
+    this.logStructured("debug", "tool_executing", { run_id: this.runId, tool: toolName, input });
 
     switch (toolName) {
       case "web_search":
@@ -363,7 +491,7 @@ Si ya tienes suficiente información, usa final_answer.`;
         }
       }
     } catch (error) {
-      this.log(`Plan generation failed, using heuristic`);
+      this.logStructured("debug", "plan_generation_failed", { run_id: this.runId, fallback: "heuristic" });
     }
 
     return this.heuristicPlan(objective);
@@ -414,10 +542,7 @@ Si ya tienes suficiente información, usa final_answer.`;
   }
 
   private log(message: string): void {
-    if (this.config.enableLogging) {
-      const timestamp = new Date().toISOString();
-      console.log(`[AgentRunner ${timestamp}] ${message}`);
-    }
+    this.logStructured("debug", "trace", { run_id: this.runId, message });
   }
 }
 

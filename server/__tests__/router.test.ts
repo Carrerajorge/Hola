@@ -192,3 +192,95 @@ describe("Router - Edge cases", () => {
     expect(decision).toHaveProperty("route");
   });
 });
+
+describe("Router - Fail-safe behavior", () => {
+  it("should fall back to heuristics without API key", async () => {
+    const originalKey = process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    
+    const router = new Router();
+    const decision = await router.decide("Busca en la web el precio del bitcoin");
+    
+    expect(decision.route).toBe("agent");
+    expect(decision.tool_needs).toContain("web_search");
+    
+    process.env.GEMINI_API_KEY = originalKey;
+  });
+
+  it("should always return valid RouterDecision structure", async () => {
+    const router = new Router();
+    const decision = await router.decide("Random ambiguous message");
+    
+    expect(decision).toMatchObject({
+      route: expect.stringMatching(/^(chat|agent)$/),
+      confidence: expect.any(Number),
+      reasons: expect.any(Array),
+      tool_needs: expect.any(Array),
+      plan_hint: expect.any(Array),
+    });
+  });
+});
+
+describe("AgentRunner - Guardrails", () => {
+  it("should include run_id in result", async () => {
+    const { AgentRunner } = await import("../services/agentRunner");
+    const agent = new AgentRunner({ maxSteps: 2, enableLogging: false });
+    const result = await agent.run("Simple test objective");
+    
+    expect(result).toHaveProperty("run_id");
+    expect(typeof result.run_id).toBe("string");
+    expect(result.run_id.length).toBeGreaterThan(0);
+  });
+
+  it("should include warning when max steps reached", async () => {
+    const { AgentRunner } = await import("../services/agentRunner");
+    const agent = new AgentRunner({ maxSteps: 1, enableLogging: false });
+    const result = await agent.run("Test max steps with very limited steps");
+    
+    if (result.state.status === "completed" && typeof result.result === "string") {
+      expect(result.result).toContain("WARNING");
+    }
+  });
+
+  it("should have configurable maxConsecutiveFailures", async () => {
+    const { AgentRunner } = await import("../services/agentRunner");
+    const agent = new AgentRunner({ maxConsecutiveFailures: 3 });
+    
+    expect(agent["config"].maxConsecutiveFailures).toBe(3);
+  });
+});
+
+describe("RunStore - Persistence interface", () => {
+  it("should save and retrieve runs", async () => {
+    const { runStore, AgentRunRecord } = await import("../services/agentRunner");
+    
+    const testRecord: any = {
+      run_id: "test-run-123",
+      objective: "Test objective",
+      route: "agent",
+      confidence: 0.9,
+      plan: ["Step 1", "Step 2"],
+      tools_used: ["web_search"],
+      steps: 2,
+      duration_ms: 1000,
+      status: "completed",
+      result: "Test result",
+      created_at: new Date(),
+      completed_at: new Date(),
+    };
+    
+    await runStore.save(testRecord);
+    const retrieved = await runStore.get("test-run-123");
+    
+    expect(retrieved).not.toBeNull();
+    expect(retrieved?.run_id).toBe("test-run-123");
+    expect(retrieved?.objective).toBe("Test objective");
+  });
+
+  it("should list recent runs", async () => {
+    const { runStore } = await import("../services/agentRunner");
+    
+    const runs = await runStore.list(10);
+    expect(Array.isArray(runs)).toBe(true);
+  });
+});

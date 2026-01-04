@@ -41,7 +41,15 @@ export ENABLE_DYNAMIC_ESCALATION=true
 
 Decide la ruta para un mensaje.
 
-**Request:**
+**Request Schema:**
+```typescript
+{
+  message: string;          // Required: User message to route
+  hasAttachments?: boolean; // Optional: Whether attachments are included (default: false)
+}
+```
+
+**Request Example:**
 ```json
 {
   "message": "Busca el precio del bitcoin hoy",
@@ -49,7 +57,18 @@ Decide la ruta para un mensaje.
 }
 ```
 
-**Response:**
+**Response Schema:**
+```typescript
+{
+  route: "chat" | "agent";  // Routing decision
+  confidence: number;       // 0.0 to 1.0
+  reasons: string[];        // Explanation for the decision
+  tool_needs: string[];     // Tools that would be needed
+  plan_hint: string[];      // Suggested plan steps
+}
+```
+
+**Response Example:**
 ```json
 {
   "route": "agent",
@@ -60,11 +79,30 @@ Decide la ruta para un mensaje.
 }
 ```
 
+**Fail-safe Behavior:** If an error occurs, returns fallback to chat mode:
+```json
+{
+  "route": "chat",
+  "confidence": 0.5,
+  "reasons": ["Router fallback due to error: ..."],
+  "tool_needs": [],
+  "plan_hint": []
+}
+```
+
 ### POST /api/chat/agent-run
 
 Ejecuta el agente con un objetivo.
 
-**Request:**
+**Request Schema:**
+```typescript
+{
+  message: string;          // Required: Objective for the agent
+  planHint?: string[];      // Optional: Suggested plan steps
+}
+```
+
+**Request Example:**
 ```json
 {
   "message": "Investiga el precio actual del bitcoin",
@@ -72,18 +110,44 @@ Ejecuta el agente con un objetivo.
 }
 ```
 
-**Response:**
+**Response Schema:**
+```typescript
+{
+  success: boolean;
+  run_id: string;           // Unique identifier for the run
+  result: string | object;  // Final answer or error object
+  state: {
+    objective: string;
+    plan: string[];
+    toolsUsed: string[];
+    stepsCompleted: number;
+    status: "completed" | "failed" | "cancelled";
+  }
+}
+```
+
+**Response Example:**
 ```json
 {
   "success": true,
+  "run_id": "a1b2c3d4e5f6",
   "result": "El precio actual del bitcoin es...",
   "state": {
-    "objective": "...",
-    "plan": ["..."],
-    "toolsUsed": ["web_search"],
+    "objective": "Investiga el precio actual del bitcoin",
+    "plan": ["Buscar información en la web", "Analizar resultados", "Generar respuesta"],
+    "toolsUsed": ["web_search", "final_answer"],
     "stepsCompleted": 3,
     "status": "completed"
   }
+}
+```
+
+**Error Response (500):**
+```json
+{
+  "error": "Tool web_search failed 2 consecutive times. Aborting run.",
+  "code": "AGENT_RUN_ERROR",
+  "suggestion": "Check server logs for details."
 }
 ```
 
@@ -91,20 +155,112 @@ Ejecuta el agente con un objetivo.
 
 Verifica si una respuesta de chat necesita escalarse a agente.
 
-**Request:**
+**Request Schema:**
+```typescript
+{
+  response: string;  // Required: Draft chat response to evaluate
+}
+```
+
+**Request Example:**
 ```json
 {
   "response": "Necesito buscar información actualizada para responder."
 }
 ```
 
-**Response:**
+**Response Schema:**
+```typescript
+{
+  shouldEscalate: boolean;
+  reason?: string;  // Optional: Explanation if escalation is needed
+}
+```
+
+**Response Example:**
 ```json
 {
   "shouldEscalate": true,
   "reason": "Necesita búsqueda web"
 }
 ```
+
+## Guardrails y Límites
+
+### Max Steps Reached
+
+Si el agente alcanza `MAX_AGENT_STEPS` sin completar:
+- Se genera un resumen parcial con la información recopilada
+- Se añade un warning técnico al inicio de la respuesta:
+  ```
+  [WARNING: Max steps (8) reached. Response may be incomplete.]
+  ```
+
+### Consecutive Tool Failures
+
+Si una herramienta falla `maxConsecutiveFailures` (default: 2) veces consecutivas:
+- El run se aborta con error estructurado
+- Se incluyen observaciones parciales para debugging
+
+### Fail-safe Sin API Key
+
+Si `GEMINI_API_KEY` no está configurado:
+- Router: Usa heurísticas deterministas
+- AgentRunner: Usa `heuristicNextAction()` y `heuristicPlan()`
+- Nunca devuelve 500 sin mensaje técnico claro
+
+## Run Persistence (In-Memory)
+
+Los runs se almacenan en memoria con interfaz preparada para DB:
+
+```typescript
+interface AgentRunRecord {
+  run_id: string;
+  objective: string;
+  route: "agent";
+  confidence: number;
+  plan: string[];
+  tools_used: string[];
+  steps: number;
+  duration_ms: number;
+  status: "completed" | "failed" | "cancelled";
+  result: any;
+  error?: string;
+  created_at: Date;
+  completed_at: Date;
+}
+
+interface IRunStore {
+  save(record: AgentRunRecord): Promise<void>;
+  get(runId: string): Promise<AgentRunRecord | null>;
+  list(limit?: number): Promise<AgentRunRecord[]>;
+}
+```
+
+## Structured Logging
+
+Cada run emite logs estructurados:
+
+```json
+{
+  "timestamp": "2026-01-04T16:45:00.000Z",
+  "level": "info",
+  "component": "AgentRunner",
+  "event": "run_completed",
+  "run_id": "a1b2c3d4e5f6",
+  "route": "agent",
+  "tools_used": ["web_search", "final_answer"],
+  "steps": 3,
+  "duration_ms": 4500,
+  "status": "completed"
+}
+```
+
+Niveles de log:
+- `debug`: Detalles de tools (solo si `enableLogging: true`)
+- `info`: Decisiones de routing, inicio/fin de runs
+- `warn`: Max steps reached
+- `error`: Abortos, fallos de tools consecutivos
 
 ## Herramientas del Agente
 
