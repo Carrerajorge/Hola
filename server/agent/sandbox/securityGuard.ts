@@ -142,8 +142,35 @@ export class SecurityGuard {
       }
     }
 
+    if (this.containsShellMetacharacters(command)) {
+      matchedRules.push("SHELL_METACHAR");
+      this.stats.blocked++;
+      this.logBlocked(command, "Shell metacharacters detected");
+      return {
+        command,
+        isSafe: false,
+        threatLevel: "high",
+        action: "log_and_block",
+        matchedRules,
+        warnings: ["Comando bloqueado: metacaracteres de shell no permitidos"],
+      };
+    }
+
+    if (matchedRules.length > 0) {
+      this.stats.blocked++;
+      this.logBlocked(command, `Medium risk patterns: ${matchedRules.join(", ")}`);
+      return {
+        command,
+        isSafe: false,
+        threatLevel: "high",
+        action: "log_and_block",
+        matchedRules,
+        warnings,
+      };
+    }
+
     const baseCommand = command.split(/\s+/)[0] || "";
-    if (SecurityGuard.SAFE_COMMANDS.has(baseCommand) && matchedRules.length === 0) {
+    if (SecurityGuard.SAFE_COMMANDS.has(baseCommand)) {
       this.stats.allowed++;
       return {
         command,
@@ -155,26 +182,15 @@ export class SecurityGuard {
       };
     }
 
-    if (matchedRules.length > 0) {
-      this.stats.warned++;
-      return {
-        command,
-        isSafe: false,
-        threatLevel: "medium",
-        action: "require_confirmation",
-        matchedRules,
-        warnings,
-      };
-    }
-
-    this.stats.allowed++;
+    this.stats.blocked++;
+    this.logBlocked(command, `Command '${baseCommand}' not in allowlist`);
     return {
       command,
-      isSafe: true,
-      threatLevel: "low",
-      action: "allow",
-      matchedRules: [],
-      warnings: ["Comando no reconocido, ejecutando con precaución"],
+      isSafe: false,
+      threatLevel: "high",
+      action: "log_and_block",
+      matchedRules: ["COMMAND_NOT_ALLOWLISTED"],
+      warnings: [`Comando '${baseCommand}' no está en la lista permitida`],
     };
   }
 
@@ -263,5 +279,13 @@ export class SecurityGuard {
 
   getBlockedHistory(): BlockedEntry[] {
     return [...this.blockedHistory];
+  }
+
+  private containsShellMetacharacters(command: string): boolean {
+    const DANGEROUS_CHARS = /[;&|`$(){}[\]<>\\]/;
+    const inQuotes = (text: string): string => {
+      return text.replace(/'[^']*'|"[^"]*"/g, "");
+    };
+    return DANGEROUS_CHARS.test(inQuotes(command));
   }
 }

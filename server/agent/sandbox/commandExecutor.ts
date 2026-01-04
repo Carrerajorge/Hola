@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, SpawnOptions } from "child_process";
+import { spawn, execFile, ChildProcess, SpawnOptions } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -53,7 +53,7 @@ export class CommandExecutor {
     let securityResult: SecurityAnalysis | undefined;
     if (this.config.enableSecurity) {
       securityResult = this.security.analyzeCommand(command);
-      if (securityResult.action === "log_and_block") {
+      if (!securityResult.isSafe || securityResult.action === "log_and_block" || securityResult.action === "block") {
         return this.createBlockedResult(command, securityResult, startTime);
       }
     }
@@ -66,13 +66,27 @@ export class CommandExecutor {
       let stderr = "";
       let killed = false;
 
-      const spawnOptions: SpawnOptions = {
-        shell: this.config.shell,
+      const parsed = this.parseCommand(command);
+      if (!parsed) {
+        resolve({
+          command,
+          status: "failed",
+          returnCode: 1,
+          stdout: "",
+          stderr: "Failed to parse command",
+          executionTime: Date.now() - startTime,
+          errorMessage: "Could not parse command",
+          securityAnalysis: securityResult,
+        });
+        return;
+      }
+
+      const childProcess = execFile(parsed.cmd, parsed.args, {
         cwd: workPath,
         env: execEnv,
-      };
-
-      const childProcess = spawn(command, [], spawnOptions);
+        maxBuffer: this.config.maxOutputSize,
+        timeout: 0,
+      });
       const processId = `${childProcess.pid}_${Date.now()}`;
       this.activeProcesses.set(processId, { process: childProcess, startTime });
 
@@ -277,5 +291,45 @@ export class CommandExecutor {
 
   getWorkingDirectory(): string {
     return this.workingDir;
+  }
+
+  private parseCommand(commandStr: string): { cmd: string; args: string[] } | null {
+    const trimmed = commandStr.trim();
+    if (!trimmed) return null;
+
+    const parts: string[] = [];
+    let current = "";
+    let inQuote = false;
+    let quoteChar = "";
+
+    for (let i = 0; i < trimmed.length; i++) {
+      const char = trimmed[i];
+
+      if (inQuote) {
+        if (char === quoteChar) {
+          inQuote = false;
+        } else {
+          current += char;
+        }
+      } else if (char === '"' || char === "'") {
+        inQuote = true;
+        quoteChar = char;
+      } else if (char === " " || char === "\t") {
+        if (current) {
+          parts.push(current);
+          current = "";
+        }
+      } else {
+        current += char;
+      }
+    }
+
+    if (current) {
+      parts.push(current);
+    }
+
+    if (parts.length === 0) return null;
+
+    return { cmd: parts[0], args: parts.slice(1) };
   }
 }

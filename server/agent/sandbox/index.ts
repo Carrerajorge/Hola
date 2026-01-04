@@ -4,3 +4,4 @@ export * from "./commandExecutor";
 export * from "./fileManager";
 export * from "./stateManager";
 export * from "./sandboxEnvironment";
+export * from "./sandboxService";
