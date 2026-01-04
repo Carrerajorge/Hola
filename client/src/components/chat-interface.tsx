@@ -2707,11 +2707,6 @@ export function ChatInterface({
           spreadsheetData: f.spreadsheetData
         }));
         
-        // Clear input immediately
-        setInput("");
-        setUploadedFiles([]);
-        setSelectedTool(null);
-        
         // Generate a unique message ID for tracking in the store
         const agentMessageId = `agent-${Date.now()}`;
         setCurrentAgentMessageId(agentMessageId);
@@ -2739,16 +2734,29 @@ export function ChatInterface({
         console.log("[Agent Mode] Run result:", result);
         
         if (result) {
+          // Clear input and tool only after successful start
+          setInput("");
+          setUploadedFiles([]);
+          setSelectedTool(null);
+          
           // Navigate to new chat if created
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
             console.log("[Agent Mode] Navigating to chat:", result.chatId);
             window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
           }
           // Polling is handled automatically by useAgentPolling hook
+        } else {
+          // Show error when agent run fails to start
+          console.error("[Agent Mode] Failed to start run, result is null");
+          toast({ 
+            title: "Error", 
+            description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.", 
+            variant: "destructive" 
+          });
         }
       } catch (error) {
         console.error("Failed to start agent run:", error);
-        toast({ title: "Error", description: "Failed to start agent", variant: "destructive" });
+        toast({ title: "Error", description: "Error al iniciar el agente", variant: "destructive" });
       }
       return;
     }

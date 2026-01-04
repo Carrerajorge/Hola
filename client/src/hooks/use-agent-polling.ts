@@ -15,7 +15,7 @@ export function useAgentPolling(messageId: string | null) {
       return;
     }
     
-    const isActiveStatus = ['starting', 'queued', 'planning', 'running'].includes(status || '');
+    const isActiveStatus = ['starting', 'queued', 'planning', 'running', 'verifying', 'replanning'].includes(status || '');
     
     if (isActiveStatus && runId !== lastStartedRunIdRef.current) {
       lastStartedRunIdRef.current = runId;
