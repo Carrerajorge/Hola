@@ -18,7 +18,7 @@ export class PdfParser implements FileParser {
     
     try {
       
-      const parsePromise = this.parseWithPageStructure(pdfParse, content);
+      const parsePromise = this.parseWithPageStructure(content);
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error(`PDF parsing timed out after ${this.TIMEOUT_MS}ms`)), this.TIMEOUT_MS);
       });
@@ -46,7 +46,7 @@ export class PdfParser implements FileParser {
     }
   }
 
-  private async parseWithPageStructure(pdfParse: any, content: Buffer): Promise<ParsedResult> {
+  private async parseWithPageStructure(content: Buffer): Promise<ParsedResult> {
     const pageTexts: string[] = [];
     let currentPage = 0;
 
