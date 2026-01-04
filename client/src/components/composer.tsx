@@ -481,8 +481,8 @@ export function Composer({
           size="icon" 
           aria-label="Open tools menu"
           className={cn(
-            "h-9 w-9 rounded-full text-muted-foreground hover:text-foreground flex-shrink-0 focus-visible:ring-2 focus-visible:ring-primary/50",
-            isDocumentMode && "h-10 w-10"
+            "liquid-plus-button h-10 w-10 flex-shrink-0 focus-visible:ring-2 focus-visible:ring-primary/50",
+            isDocumentMode && "h-11 w-11"
           )}
         >
           <Plus className="h-5 w-5" />
