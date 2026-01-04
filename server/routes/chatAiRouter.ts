@@ -4,7 +4,7 @@ import { handleChatRequest, AVAILABLE_MODELS, DEFAULT_PROVIDER, DEFAULT_MODEL } 
 import { llmGateway } from "../lib/llmGateway";
 import { generateImage, detectImageRequest, extractImagePrompt } from "../services/imageGeneration";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../etl";
-import { extractAllAttachmentsContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
+import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -123,10 +123,36 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       if (hasAttachments) {
         console.log(`[Chat API] Processing ${attachments.length} attachment(s)`);
         try {
-          const extractedContents = await extractAllAttachmentsContent(attachments as Attachment[]);
-          if (extractedContents.length > 0) {
-            attachmentContext = formatAttachmentsAsContext(extractedContents);
-            console.log(`[Chat API] Extracted content from ${extractedContents.length} attachment(s), context length: ${attachmentContext.length}`);
+          const extractedContents: { extracted: Awaited<ReturnType<typeof extractAttachmentContent>>; attachment: Attachment }[] = [];
+          for (const attachment of attachments as Attachment[]) {
+            const extracted = await extractAttachmentContent(attachment);
+            extractedContents.push({ extracted, attachment });
+          }
+          
+          const successfulExtractions = extractedContents.filter(e => e.extracted !== null).map(e => e.extracted!);
+          if (successfulExtractions.length > 0) {
+            attachmentContext = formatAttachmentsAsContext(successfulExtractions);
+            console.log(`[Chat API] Extracted content from ${successfulExtractions.length} attachment(s), context length: ${attachmentContext.length}`);
+          }
+          
+          if (conversationId) {
+            for (const { extracted, attachment } of extractedContents) {
+              if (extracted) {
+                try {
+                  await storage.createConversationDocument({
+                    chatId: conversationId,
+                    fileName: extracted.fileName,
+                    storagePath: attachment.storagePath || null,
+                    mimeType: extracted.mimeType || "application/octet-stream",
+                    extractedText: extracted.content,
+                    metadata: { fileId: attachment.fileId }
+                  });
+                  console.log(`[Chat API] Persisted document: ${extracted.fileName} to conversation ${conversationId}`);
+                } catch (persistError) {
+                  console.error(`[Chat API] Error persisting document ${extracted.fileName}:`, persistError);
+                }
+              }
+            }
           }
         } catch (attachmentError) {
           console.error("[Chat API] Error extracting attachment content:", attachmentError);

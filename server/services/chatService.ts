@@ -326,6 +326,26 @@ export async function handleChatRequest(
   // Extract user profile for context
   const userProfile = userSettings?.userProfile || null;
   
+  // Load persistent conversation documents for context continuity
+  let persistentDocumentContext = "";
+  if (conversationId) {
+    try {
+      const conversationDocs = await storage.getConversationDocuments(conversationId);
+      if (conversationDocs.length > 0) {
+        const parts: string[] = ["\n\n=== DOCUMENTOS DE ESTA CONVERSACIÓN ===\n"];
+        for (const doc of conversationDocs) {
+          parts.push(`\n--- Archivo: ${doc.fileName} ---\n`);
+          parts.push(doc.extractedText || "[Sin contenido extraído]");
+          parts.push("\n--- Fin del archivo ---\n");
+        }
+        persistentDocumentContext = parts.join("");
+        console.log(`[ChatService] Loaded ${conversationDocs.length} persistent document(s) for conversation ${conversationId}`);
+      }
+    } catch (error) {
+      console.error("[ChatService] Error loading conversation documents:", error);
+    }
+  }
+
   let validatedGptConfig = gptConfig;
   if (gptConfig?.id) {
     try {
@@ -761,11 +781,13 @@ ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
 
   // Use document mode prompt when in document editing mode
   // Include attachment context for document-based Q&A
+  // Combine persistent conversation documents with current attachments
+  const fullDocumentContext = persistentDocumentContext + attachmentContext;
   const systemContent = documentModePrompt 
     ? documentModePrompt
     : (validatedGptConfig 
-        ? `${validatedGptConfig.systemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}${attachmentContext}`
-        : `${defaultSystemContent}${webSearchInfo}${contextInfo}${attachmentContext}`);
+        ? `${validatedGptConfig.systemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`
+        : `${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`);
 
   const systemMessage: ChatMessage = {
     role: "system",
