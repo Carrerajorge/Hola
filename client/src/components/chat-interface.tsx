@@ -2431,9 +2431,37 @@ export function ChatInterface({
     "image/tiff",
   ];
 
+  const MAX_FILE_SIZE_MB = 100;
+  const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
   const processFilesForUpload = async (files: File[]) => {
+    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE_BYTES);
+    const invalidTypeFiles = files.filter(file => 
+      !ALLOWED_TYPES.includes(file.type) && !file.type.startsWith("image/")
+    );
+    
+    if (oversizedFiles.length > 0) {
+      const names = oversizedFiles.map(f => f.name).join(", ");
+      const sizes = oversizedFiles.map(f => `${(f.size / (1024 * 1024)).toFixed(1)}MB`).join(", ");
+      toast({
+        title: "Archivo demasiado grande",
+        description: `El archivo "${names}" (${sizes}) excede el límite de ${MAX_FILE_SIZE_MB}MB.`,
+        variant: "destructive",
+      });
+    }
+    
+    if (invalidTypeFiles.length > 0) {
+      const names = invalidTypeFiles.map(f => f.name).join(", ");
+      toast({
+        title: "Tipo de archivo no soportado",
+        description: `El archivo "${names}" no es un tipo de archivo permitido.`,
+        variant: "destructive",
+      });
+    }
+    
     const validFiles = files.filter(file => 
-      ALLOWED_TYPES.includes(file.type) || file.type.startsWith("image/")
+      (ALLOWED_TYPES.includes(file.type) || file.type.startsWith("image/")) &&
+      file.size <= MAX_FILE_SIZE_BYTES
     );
     
     if (validFiles.length === 0) return;
