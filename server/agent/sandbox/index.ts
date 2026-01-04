@@ -8,3 +8,5 @@ export * from "./sandboxEnvironment";
 export * from "./sandboxService";
 export * from "./documentCreator";
 export * from "./tools";
+export * from "./taskPlanner";
+export * from "./agentV2";
