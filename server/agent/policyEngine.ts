@@ -75,6 +75,46 @@ const DEFAULT_TOOL_POLICIES: Record<string, Partial<ToolPolicy>> = {
     maxRetries: 1,
     deniedByDefault: true,
   },
+  read_file: {
+    capabilities: ["reads_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 10000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  write_file: {
+    capabilities: ["writes_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 15000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  shell_command: {
+    capabilities: ["executes_code", "high_risk"],
+    allowedPlans: ["pro", "admin"],
+    requiresConfirmation: true,
+    maxExecutionTimeMs: 60000,
+    maxRetries: 1,
+    deniedByDefault: false,
+  },
+  list_files: {
+    capabilities: ["reads_files"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 5000,
+    maxRetries: 2,
+    deniedByDefault: false,
+  },
+  web_search_retrieve: {
+    capabilities: ["requires_network", "accesses_external_api"],
+    allowedPlans: ["free", "pro", "admin"],
+    requiresConfirmation: false,
+    maxExecutionTimeMs: 60000,
+    maxRetries: 3,
+    deniedByDefault: false,
+  },
 };
 
 export interface PolicyCheckResult {

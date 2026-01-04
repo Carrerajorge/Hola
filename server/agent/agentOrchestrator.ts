@@ -1176,14 +1176,17 @@ Respond with ONLY valid JSON in this exact format:
     const completedSteps = this.stepResults.filter((r) => r.success);
     const failedSteps = this.stepResults.filter((r) => !r.success);
 
-    const stepSummaries = this.stepResults.map((result) => {
-      const step = this.plan!.steps[result.stepIndex];
-      const status = result.success ? "✓" : "✗";
-      const artifactCount = result.artifacts.length;
-      return `${status} Step ${result.stepIndex + 1}: ${step.description}${
-        artifactCount > 0 ? ` (${artifactCount} artifacts)` : ""
-      }${result.error ? ` - Error: ${result.error}` : ""}`;
-    }).join("\n");
+    const stepSummaries = this.stepResults
+      .filter((result) => result && this.plan!.steps[result.stepIndex])
+      .map((result) => {
+        const step = this.plan!.steps[result.stepIndex];
+        const status = result.success ? "✓" : "✗";
+        const artifactCount = result.artifacts?.length || 0;
+        const description = step?.description || `Step ${result.stepIndex + 1}`;
+        return `${status} Step ${result.stepIndex + 1}: ${description}${
+          artifactCount > 0 ? ` (${artifactCount} artifacts)` : ""
+        }${result.error ? ` - Error: ${result.error}` : ""}`;
+      }).join("\n");
 
     const artifactSummary = this.artifacts.length > 0
       ? `\n\nArtifacts generated:\n${this.artifacts.map((a) => `- ${a.name} (${a.type})`).join("\n")}`
