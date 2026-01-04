@@ -22,7 +22,8 @@ const ALLOWED_COMMAND_PATTERNS = [
   /^npx vitest typecheck server\/agent( 2>&1)?( \|\| true)?$/,
   /^npm run build( 2>&1)?$/,
   /^npm install [@a-zA-Z0-9_\-\/]+$/,
-  /^node -e "/,
+  /^node -e "const fs = require\('fs'\); const path = require\('path'\); const files = fs\.readdirSync\('server\/agent'\)\.filter\(f => f\.endsWith\('\.ts'\)\); console\.log\('Agent files:', files\.length\);"$/,
+  /^node -e "\s*const start = Date\.now\(\);\s*for\(let i=0; i<1000; i\+\+\) \{\s*const obj = \{ id: i, data: 'test'\.repeat\(100\) \};\s*JSON\.stringify\(obj\);\s*JSON\.parse\(JSON\.stringify\(obj\)\);\s*\}\s*console\.log\('OK:', Date\.now\(\) - start\);\s*"$/,
 ];
 
 function isCommandAllowed(cmd) {
