@@ -3,7 +3,9 @@ import { createRequire } from "node:module";
 
 // Use createRequire to properly load CommonJS module pdf-parse
 const require = createRequire(import.meta.url);
-const pdfParse = require("pdf-parse");
+const pdfParseModule = require("pdf-parse");
+// Handle both default export and direct export patterns
+const pdfParse = pdfParseModule.default || pdfParseModule;
 
 export class PdfParser implements FileParser {
   name = "pdf";
