@@ -153,6 +153,7 @@ export class AgentOrchestrator extends EventEmitter {
   public currentStepIndex: number;
   public artifacts: ToolArtifact[];
   public stepResults: StepResult[];
+  public summary: string | null;
   
   private isCancelled: boolean;
   private userMessage: string;
@@ -175,6 +176,7 @@ export class AgentOrchestrator extends EventEmitter {
     this.currentStepIndex = 0;
     this.artifacts = [];
     this.stepResults = [];
+    this.summary = null;
     this.isCancelled = false;
     this.userMessage = "";
     this.attachments = [];
@@ -1124,6 +1126,7 @@ Respond with ONLY valid JSON in this exact format:
       });
 
       const summary = await this.generateSummary();
+      this.summary = summary;
       await this.emitTraceEvent('done', {
         phase: 'completed',
         status: 'completed',

@@ -117,10 +117,45 @@ class PollingManager {
       const store = useAgentStore.getState();
 
       if (data.status === 'completed') {
+        // Try to extract summary from various sources
+        let summary = data.summary || data.result || '';
+        
+        // If no summary, try to extract from event stream
+        if (!summary && data.eventStream?.length > 0) {
+          const events = data.eventStream;
+          
+          // Look for done/result/run_completed events (check both type and kind fields, and content.type)
+          const completionEvent = events.find((e: any) => 
+            e.type === 'done' || e.type === 'run_completed' ||
+            e.kind === 'result' || e.kind === 'done' ||
+            e.content?.type === 'run_completed'
+          );
+          if (completionEvent?.summary) {
+            summary = completionEvent.summary;
+          }
+          
+          // If still no summary, try conversational response from plan event
+          if (!summary) {
+            const planEvent = events.find((e: any) => e.kind === 'plan' || e.type === 'plan');
+            if (planEvent?.content?.conversationalResponse) {
+              summary = planEvent.content.conversationalResponse;
+            }
+          }
+          
+          // Last resort: look at the last observation event's summary
+          if (!summary) {
+            const observationEvents = events.filter((e: any) => e.kind === 'observation' || e.type === 'observation');
+            const lastObs = observationEvents[observationEvents.length - 1];
+            if (lastObs?.summary) {
+              summary = lastObs.summary;
+            }
+          }
+        }
+        
         store.updateRun(instance.messageId, {
           status: 'completed',
           eventStream: data.eventStream || [],
-          summary: data.summary || data.result || '',
+          summary: summary,
         });
         store.stopPolling(instance.messageId);
         this.stop(runId);

@@ -951,21 +951,25 @@ export function ChatInterface({
   // Use the store-based polling hook for the active agent run (only when valid messageId exists)
   useAgentPolling(currentAgentMessageId);
   
-  // Get the active run from the store for the current chat
+  // Get store runs reactively to trigger re-render when store updates
+  const allAgentRuns = useAgentStore(state => state.runs);
+  
+  // Get the active run from the store for the current chat (use reactive allAgentRuns)
   const activeAgentRun = useMemo(() => {
     if (currentAgentMessageId) {
-      return agentStore.runs[currentAgentMessageId] || null;
+      return allAgentRuns[currentAgentMessageId] || null;
     }
     // Also check if there's an active run for this chatId from the store
-    return agentStore.getRunByChatId(chatId || "");
-  }, [currentAgentMessageId, agentStore.runs, chatId, agentStore]);
+    const runs = Object.values(allAgentRuns);
+    return runs.find(r => r.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(r.status)) || null;
+  }, [currentAgentMessageId, allAgentRuns, chatId]);
   
   // Combined messages: prop messages + agent runs from store
   const displayMessages = useMemo(() => {
     const msgMap = new Map(messages.map(m => [m.id, m]));
     
-    // Merge agent runs from the store into messages
-    Object.entries(agentStore.runs).forEach(([messageId, runState]) => {
+    // Merge agent runs from the store into messages (use reactive allAgentRuns)
+    Object.entries(allAgentRuns).forEach(([messageId, runState]) => {
       // Only include runs for the current chat
       if (runState.chatId === chatId || (!chatId && runState.chatId)) {
         const existingMsg = msgMap.get(messageId);
@@ -1007,10 +1011,7 @@ export function ChatInterface({
     return Array.from(msgMap.values()).sort((a, b) => 
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
-  }, [messages, agentStore.runs, chatId]);
-  
-  // Get store runs to trigger re-render when store rehydrates
-  const allAgentRuns = useAgentStore(state => state.runs);
+  }, [messages, allAgentRuns, chatId]);
   
   // Reset current agent message ID when chatId changes - polling auto-starts via useAgentPolling
   useEffect(() => {
@@ -2189,7 +2190,14 @@ export function ChatInterface({
 
   const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
     try {
-      await cancelAgentRun(messageId, runId);
+      if (runId) {
+        // Cancel via API when we have a runId
+        await cancelAgentRun(messageId, runId);
+      } else {
+        // Cancel locally when no runId yet (starting/queued state)
+        abortPendingAgentStart(messageId);
+        useAgentStore.getState().cancelRun(messageId);
+      }
       toast({ title: "Cancelado", description: "La ejecución del agente ha sido cancelada" });
     } catch (error) {
       console.error("Failed to cancel agent run:", error);

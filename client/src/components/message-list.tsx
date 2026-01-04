@@ -1534,7 +1534,7 @@ const AssistantMessage = memo(function AssistantMessage({
       {message.agentRun && (
         <AgentRunContent 
           agentRun={message.agentRun}
-          onCancel={message.agentRun.runId && onAgentCancel ? () => onAgentCancel(message.id, message.agentRun!.runId!) : undefined}
+          onCancel={onAgentCancel ? () => onAgentCancel(message.id, message.agentRun!.runId || "") : undefined}
           onRetry={onAgentRetry ? () => onAgentRetry(message.id, message.agentRun?.userMessage || "") : undefined}
         />
       )}

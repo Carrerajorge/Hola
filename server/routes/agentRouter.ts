@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
+import { eq } from "drizzle-orm";
 import { storage } from "../storage";
 import { db } from "../db";
-import { agentModeRuns } from "@shared/schema";
+import { agentModeRuns, agentModeSteps } from "@shared/schema";
 import { agentOrchestrator, agentManager, guardrails } from "../agent";
 import { browserSessionManager, SessionEvent } from "../agent/browser";
 
@@ -183,9 +184,9 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         const workspaceFiles = orchestrator?.getWorkspaceFiles ? 
           Object.fromEntries(orchestrator.getWorkspaceFiles()) : {};
 
-        // Get conversational response from plan if available
+        // Get summary from orchestrator or conversational response from plan
         const conversationalResponse = (progress.plan as any)?.conversationalResponse;
-        const summary = conversationalResponse || null;
+        const summary = orchestrator?.summary || conversationalResponse || null;
 
         return res.json({
           id: progress.runId,
@@ -212,6 +213,40 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         });
       }
       
+      // Try agentModeRuns first (new table with summary), then fallback to old agentRuns
+      const [modeRun] = await db.select().from(agentModeRuns).where(eq(agentModeRuns.id, req.params.id));
+      
+      if (modeRun) {
+        // Load steps from agentModeSteps table
+        const modeSteps = await db.select().from(agentModeSteps)
+          .where(eq(agentModeSteps.runId, req.params.id))
+          .orderBy(agentModeSteps.stepIndex);
+        
+        return res.json({ 
+          id: modeRun.id,
+          chatId: modeRun.chatId,
+          status: modeRun.status,
+          plan: modeRun.plan,
+          steps: modeSteps.map(s => ({
+            stepIndex: s.stepIndex,
+            toolName: s.toolName,
+            status: s.status,
+            output: s.toolOutput,
+            error: s.error,
+            startedAt: s.startedAt?.toISOString() || null,
+            completedAt: s.completedAt?.toISOString() || null
+          })),
+          artifacts: modeRun.artifacts || [],
+          eventStream: [],
+          todoList: [],
+          workspaceFiles: {},
+          summary: modeRun.summary,
+          error: modeRun.error,
+          createdAt: modeRun.createdAt?.toISOString() || new Date().toISOString(),
+          updatedAt: modeRun.completedAt?.toISOString() || modeRun.startedAt?.toISOString() || modeRun.createdAt?.toISOString()
+        });
+      }
+      
       const run = await storage.getAgentRun(req.params.id);
       if (!run) {
         return res.status(404).json({ error: "Run not found" });
@@ -234,7 +269,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         eventStream: [],
         todoList: [],
         workspaceFiles: {},
-        summary: run.summary,
+        summary: null,
         error: run.error,
         createdAt: run.createdAt,
         updatedAt: run.updatedAt
