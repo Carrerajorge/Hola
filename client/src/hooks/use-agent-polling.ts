@@ -68,6 +68,12 @@ export function useStartAgentRun() {
         resolvedChatId = newChat.id;
       }
       
+      // Check if run was cancelled while waiting for chat creation
+      const currentRun = useAgentStore.getState().runs[messageId];
+      if (currentRun?.status === 'cancelled') {
+        return null;
+      }
+      
       const runRes = await fetch('/api/agent/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,8 +88,28 @@ export function useStartAgentRun() {
       if (!runRes.ok) throw new Error('Error al iniciar el agente');
       const runData = await runRes.json();
       
+      // Check again if cancelled while waiting for API response
+      const runAfterApi = useAgentStore.getState().runs[messageId];
+      if (runAfterApi?.status === 'cancelled') {
+        // Attempt to cancel the backend run that was just created
+        try {
+          await fetch(`/api/agent/runs/${runData.id}/cancel`, {
+            method: 'POST',
+            credentials: 'include'
+          });
+        } catch {
+          // Best effort cancellation
+        }
+        return null;
+      }
+      
       setRunId(messageId, runData.id, runData.chatId);
-      pollingManager.start(messageId, runData.id);
+      
+      // Verify state is still active after setRunId before starting polling
+      const stateAfterSetRunId = useAgentStore.getState().runs[messageId];
+      if (stateAfterSetRunId?.status && !['cancelled', 'failed', 'completed'].includes(stateAfterSetRunId.status)) {
+        pollingManager.start(messageId, runData.id);
+      }
       
       return { runId: runData.id, chatId: runData.chatId };
       

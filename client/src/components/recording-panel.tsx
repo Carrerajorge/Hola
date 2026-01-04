@@ -19,6 +19,8 @@ interface RecordingPanelProps {
   onSubmit: () => void;
   aiState: "idle" | "thinking" | "responding";
   hasContent: boolean;
+  isAgentRunning?: boolean;
+  onAgentStop?: () => void;
 }
 
 function formatRecordingTime(seconds: number): string {
@@ -42,7 +44,19 @@ export function RecordingPanel({
   onSubmit,
   aiState,
   hasContent,
+  isAgentRunning,
+  onAgentStop,
 }: RecordingPanelProps) {
+  // Show stop button if either AI is processing OR agent is running
+  const showStopButton = aiState !== "idle" || isAgentRunning;
+  
+  const handleStop = () => {
+    if (isAgentRunning && onAgentStop) {
+      onAgentStop();
+    } else {
+      onStopChat();
+    }
+  };
   if (isRecording) {
     return (
       <motion.div
@@ -158,12 +172,12 @@ export function RecordingPanel({
         <TooltipContent>Dictar texto</TooltipContent>
       </Tooltip>
 
-      {aiState !== "idle" ? (
+      {showStopButton ? (
         <Button 
-          onClick={onStopChat}
+          onClick={handleStop}
           size="icon" 
           className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50 focus-visible:ring-2 focus-visible:ring-white/50"
-          aria-label="Stop AI response"
+          aria-label={isAgentRunning ? "Stop agent" : "Stop AI response"}
           data-testid="button-stop-chat"
         >
           <Square className="h-5 w-5 fill-current" aria-hidden="true" />

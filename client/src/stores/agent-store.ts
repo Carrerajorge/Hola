@@ -105,6 +105,10 @@ export const useAgentStore = create<AgentStore>()(
         set(state => {
           const existing = state.runs[messageId];
           if (!existing) return state;
+          // Don't overwrite terminal states (cancelled, failed, completed)
+          if (['cancelled', 'failed', 'completed'].includes(existing.status)) {
+            return state;
+          }
           return {
             runs: {
               ...state.runs,

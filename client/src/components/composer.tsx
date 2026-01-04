@@ -90,6 +90,8 @@ export interface ComposerProps {
   resumeVoiceRecording: () => void;
   sendVoiceRecording: () => void;
   handleStopChat: () => void;
+  isAgentRunning?: boolean;
+  handleAgentStop?: () => void;
   setIsVoiceChatOpen: (value: boolean) => void;
   browserSession: BrowserSession;
   isBrowserOpen: boolean;
@@ -154,6 +156,8 @@ export function Composer({
   resumeVoiceRecording,
   sendVoiceRecording,
   handleStopChat,
+  isAgentRunning,
+  handleAgentStop,
   setIsVoiceChatOpen,
   browserSession,
   isBrowserOpen,
@@ -1032,6 +1036,8 @@ export function Composer({
                 onSubmit={handleSubmit}
                 aiState={aiState}
                 hasContent={hasContent}
+                isAgentRunning={isAgentRunning}
+                onAgentStop={handleAgentStop}
               />
             </div>
           </div>

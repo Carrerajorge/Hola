@@ -1073,6 +1073,32 @@ export function ChatInterface({
     prevAgentStatusRef.current = currentStatus;
   }, [activeAgentRun?.status, activeAgentRun?.error, toast]);
   
+  // Compute whether agent is actively running (for stop button)
+  const isAgentRunning = useMemo(() => {
+    const status = activeAgentRun?.status;
+    return status === 'starting' || status === 'queued' || status === 'planning' || status === 'running' || status === 'replanning';
+  }, [activeAgentRun?.status]);
+  
+  // Handle stopping the agent
+  const handleAgentStop = useCallback(async () => {
+    if (activeAgentRun && currentAgentMessageId) {
+      // If runId is available, cancel via API
+      if (activeAgentRun.runId) {
+        try {
+          await cancelAgentRun(currentAgentMessageId, activeAgentRun.runId);
+          toast({ description: "Agente detenido", duration: 3000 });
+        } catch (error) {
+          console.error("Failed to stop agent:", error);
+          toast({ title: "Error", description: "No se pudo detener el agente", variant: "destructive" });
+        }
+      } else {
+        // If still in starting/queued state without runId, cancel locally
+        useAgentStore.getState().cancelRun(currentAgentMessageId);
+        toast({ description: "Agente cancelado", duration: 3000 });
+      }
+    }
+  }, [activeAgentRun, currentAgentMessageId, cancelAgentRun, toast]);
+  
   const { availableModels, isLoading: isModelsLoading, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
   
   const selectedModelData = useMemo(() => {
@@ -2720,6 +2746,10 @@ export function ChatInterface({
         };
         onSendMessage(userMessage);
         
+        // Clear input IMMEDIATELY after capturing the value to prevent duplicates
+        setInput("");
+        setUploadedFiles([]);
+        
         console.log("[Agent Mode] Starting run with input:", userMessageContent);
         
         // Use the store-based approach for starting the run
@@ -2734,9 +2764,7 @@ export function ChatInterface({
         console.log("[Agent Mode] Run result:", result);
         
         if (result) {
-          // Clear input and tool only after successful start
-          setInput("");
-          setUploadedFiles([]);
+          // Tool already cleared above; now clear selected tool
           setSelectedTool(null);
           
           // Navigate to new chat if created
@@ -4118,6 +4146,8 @@ IMPORTANTE:
             resumeVoiceRecording={resumeVoiceRecording}
             sendVoiceRecording={sendVoiceRecording}
             handleStopChat={handleStopChat}
+            isAgentRunning={isAgentRunning}
+            handleAgentStop={handleAgentStop}
             setIsVoiceChatOpen={setIsVoiceChatOpen}
             browserSession={browserSession}
             isBrowserOpen={isBrowserOpen}
@@ -4383,6 +4413,8 @@ IMPORTANTE:
             resumeVoiceRecording={resumeVoiceRecording}
             sendVoiceRecording={sendVoiceRecording}
             handleStopChat={handleStopChat}
+            isAgentRunning={isAgentRunning}
+            handleAgentStop={handleAgentStop}
             setIsVoiceChatOpen={setIsVoiceChatOpen}
             browserSession={browserSession}
             isBrowserOpen={isBrowserOpen}

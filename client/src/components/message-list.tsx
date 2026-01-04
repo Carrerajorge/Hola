@@ -1007,18 +1007,41 @@ interface AgentRunContentProps {
 const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRetry, onPause, onResume }: AgentRunContentProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [showAllEvents, setShowAllEvents] = useState(false);
+  const [isSlowConnection, setIsSlowConnection] = useState(false);
+  const [waitingSeconds, setWaitingSeconds] = useState(0);
   const eventsEndRef = useRef<HTMLDivElement>(null);
   
   const isCancellable = ["starting", "running", "queued", "planning", "verifying", "paused", "replanning"].includes(agentRun.status);
   const isActive = ["starting", "running", "queued", "planning", "verifying", "cancelling", "replanning"].includes(agentRun.status);
   const isPaused = agentRun.status === "paused";
   const isCancelling = agentRun.status === "cancelling";
+  const isWaitingForResponse = agentRun.status === "starting" || agentRun.status === "queued";
   
   useEffect(() => {
     if (isActive && eventsEndRef.current) {
       eventsEndRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
   }, [agentRun.eventStream?.length, isActive]);
+  
+  useEffect(() => {
+    if (!isWaitingForResponse) {
+      setIsSlowConnection(false);
+      setWaitingSeconds(0);
+      return;
+    }
+    
+    const interval = setInterval(() => {
+      setWaitingSeconds(prev => {
+        const newVal = prev + 1;
+        if (newVal >= 10) {
+          setIsSlowConnection(true);
+        }
+        return newVal;
+      });
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [isWaitingForResponse]);
 
   const getStatusIcon = () => {
     switch (agentRun.status) {
@@ -1314,8 +1337,22 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
               </div>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Procesando tu solicitud...</span>
+                <span>
+                  {agentRun.status === "starting" && "Conectando con IA..."}
+                  {agentRun.status === "queued" && "En cola de procesamiento..."}
+                  {agentRun.status === "planning" && "Planificando pasos..."}
+                  {agentRun.status === "running" && "Ejecutando..."}
+                  {agentRun.status === "verifying" && "Verificando resultados..."}
+                  {agentRun.status === "replanning" && "Ajustando plan..."}
+                  {!["starting", "queued", "planning", "running", "verifying", "replanning"].includes(agentRun.status) && "Procesando tu solicitud..."}
+                </span>
               </div>
+              {isSlowConnection && (
+                <div className="flex items-center gap-2 text-sm text-yellow-600 dark:text-yellow-400 mt-2 p-2 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>La conexión está tardando más de lo esperado ({waitingSeconds}s). Por favor, espera un momento...</span>
+                </div>
+              )}
             </div>
           )}
 
