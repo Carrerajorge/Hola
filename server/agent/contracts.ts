@@ -126,12 +126,24 @@ export const PlanStepSchema = z.object({
   dependencies: z.array(z.number().int().nonnegative()).default([]),
   optional: z.boolean().default(false),
   timeoutMs: z.number().int().positive().optional(),
+  phaseId: z.string().optional(),
 });
 export type PlanStep = z.infer<typeof PlanStepSchema>;
 
+export const PlanPhaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  status: z.enum(["pending", "in_progress", "completed", "failed", "skipped"]).default("pending"),
+  stepIndices: z.array(z.number().int().nonnegative()).default([]),
+});
+export type PlanPhase = z.infer<typeof PlanPhaseSchema>;
+
 export const AgentPlanSchema = z.object({
   objective: z.string().min(1),
-  steps: z.array(PlanStepSchema).min(1).max(10),
+  steps: z.array(PlanStepSchema).min(1).max(20),
+  phases: z.array(PlanPhaseSchema).optional(),
+  currentPhaseIndex: z.number().int().nonnegative().optional(),
   estimatedTimeMs: z.number().int().positive(),
   reasoning: z.string().optional(),
   createdAt: z.date(),

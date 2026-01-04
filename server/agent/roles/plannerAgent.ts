@@ -41,29 +41,55 @@ export const PlannerConfigSchema = z.object({
 });
 export type PlannerConfig = z.infer<typeof PlannerConfigSchema>;
 
-const DEFAULT_SYSTEM_PROMPT = `You are an expert task planner that breaks down complex objectives into executable steps.
+const DEFAULT_SYSTEM_PROMPT = `You are an expert autonomous agent task planner. You break down complex objectives into executable steps organized by phases.
+
+AVAILABLE TOOL CATEGORIES:
+- WEB: search_web (web search), web_navigate (visit URLs), extract_content (parse HTML)
+- FILES: file_operations (read/write/edit/search files), generate_file (create documents)
+- CODE: generate_code (generate code/SQL/diagrams/regex), shell_execute (run commands in sandbox)
+- DEVELOPMENT: webdev_scaffold (scaffold React/Vue/Next.js projects)
+- PRESENTATIONS: slides_generate (create PowerPoint presentations)
+- DATA: transform_data (restructure data), analyze_data (extract insights)
+- RESPONSE: respond (generate final response to user)
 
 For each step, you must specify:
-1. toolName: The exact tool to use (from the available tools list)
+1. toolName: The exact tool to use from the available tools list
 2. description: Clear description of what this step accomplishes
-3. input: The parameters to pass to the tool
+3. input: The parameters to pass to the tool (must match tool's inputSchema)
 4. expectedOutput: What result is expected from this step
 5. dependencies: Array of step indices this step depends on (0-indexed)
 6. optional: Whether the step can be skipped if it fails
-7. timeoutMs: Maximum execution time for this step
+7. phaseId: Which phase this step belongs to
+
+PHASES:
+Organize steps into logical phases to structure the work:
+- research: Information gathering (search, navigate, extract)
+- planning: Preparation and setup
+- execution: Main work (generate code, create files, run commands)
+- verification: Check and validate results
+- delivery: Prepare final response and artifacts
 
 Guidelines:
-- Break complex tasks into atomic, reusable steps
-- Identify dependencies between steps correctly
-- For research tasks, always include verification steps
-- Estimate realistic timeouts based on step complexity
-- If citations are required, ensure steps collect source information
-- Prefer parallel execution where possible (minimize dependencies)
+- Use the most appropriate specialized tool for each task
+- For code generation, use generate_code with action: "code"
+- For file operations, use file_operations with appropriate action
+- For shell commands, use shell_execute (runs in sandbox)
+- For presentations, use slides_generate
+- For project scaffolding, use webdev_scaffold
+- Always end with a respond step to deliver results to user
+- Prefer parallel execution where steps have no dependencies
 
 Return a JSON object with this structure:
 {
   "objective": "the original objective",
-  "steps": [...],
+  "phases": [
+    { "id": "research", "name": "Research Phase", "description": "Gather information", "stepIndices": [0, 1] },
+    { "id": "execution", "name": "Execution Phase", "description": "Generate outputs", "stepIndices": [2, 3] },
+    { "id": "delivery", "name": "Delivery Phase", "description": "Final response", "stepIndices": [4] }
+  ],
+  "steps": [
+    { "toolName": "...", "description": "...", "input": {...}, "expectedOutput": "...", "dependencies": [], "phaseId": "research" }
+  ],
   "estimatedTimeMs": total estimated time,
   "reasoning": "brief explanation of the plan"
 }`;
@@ -232,16 +258,109 @@ export class PlannerAgent {
         dependencies: step.dependencies || [],
         optional: step.optional || false,
         timeoutMs: step.timeoutMs || step.timeout_ms || 30000,
+        phaseId: step.phaseId || step.phase_id || undefined,
       })
     );
+
+    const phases = (parsed.phases || []).map((phase: any) => ({
+      id: phase.id,
+      name: phase.name,
+      description: phase.description || "",
+      status: "pending" as const,
+      stepIndices: phase.stepIndices || phase.step_indices || [],
+    }));
 
     return {
       objective: parsed.objective || objective,
       steps,
+      phases: phases.length > 0 ? phases : this.inferPhasesFromSteps(steps),
+      currentPhaseIndex: 0,
       estimatedTimeMs: parsed.estimatedTimeMs || parsed.estimated_time_ms || this.estimateTotalTime(steps),
       reasoning: parsed.reasoning || undefined,
       createdAt: new Date(),
     };
+  }
+
+  private inferPhasesFromSteps(steps: PlanStep[]): any[] {
+    const phaseGroups: Record<string, number[]> = {};
+    
+    for (const step of steps) {
+      const rawPhaseId = step.phaseId || this.inferPhaseFromTool(step.toolName);
+      const phaseId = rawPhaseId && rawPhaseId !== "undefined" ? rawPhaseId : "execution";
+      if (!phaseGroups[phaseId]) {
+        phaseGroups[phaseId] = [];
+      }
+      phaseGroups[phaseId].push(step.index);
+    }
+
+    const phaseOrder = ["research", "planning", "execution", "verification", "delivery"];
+    const phases = [];
+
+    for (const id of phaseOrder) {
+      if (phaseGroups[id]) {
+        phases.push({
+          id,
+          name: this.getPhaseDisplayName(id),
+          description: this.getPhaseDescription(id),
+          status: "pending" as const,
+          stepIndices: phaseGroups[id],
+        });
+      }
+    }
+
+    for (const [id, indices] of Object.entries(phaseGroups)) {
+      if (!phaseOrder.includes(id)) {
+        phases.push({
+          id,
+          name: id.charAt(0).toUpperCase() + id.slice(1),
+          description: "",
+          status: "pending" as const,
+          stepIndices: indices,
+        });
+      }
+    }
+
+    return phases;
+  }
+
+  private inferPhaseFromTool(toolName: string): string {
+    const toolPhaseMap: Record<string, string> = {
+      search_web: "research",
+      web_navigate: "research",
+      extract_content: "research",
+      generate_code: "execution",
+      generate_file: "execution",
+      file_operations: "execution",
+      shell_execute: "execution",
+      webdev_scaffold: "execution",
+      slides_generate: "execution",
+      transform_data: "execution",
+      analyze_data: "verification",
+      respond: "delivery",
+    };
+    return toolPhaseMap[toolName] || "execution";
+  }
+
+  private getPhaseDisplayName(phaseId: string): string {
+    const names: Record<string, string> = {
+      research: "Research & Discovery",
+      planning: "Planning",
+      execution: "Execution",
+      verification: "Verification",
+      delivery: "Delivery",
+    };
+    return names[phaseId] || phaseId;
+  }
+
+  private getPhaseDescription(phaseId: string): string {
+    const descriptions: Record<string, string> = {
+      research: "Gathering information and resources",
+      planning: "Preparing and organizing work",
+      execution: "Performing main tasks",
+      verification: "Validating results",
+      delivery: "Preparing final response",
+    };
+    return descriptions[phaseId] || "";
   }
 
   private validatePlan(

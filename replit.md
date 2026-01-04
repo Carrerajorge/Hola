@@ -26,6 +26,15 @@ Preferred communication style: Simple, everyday language.
 - **System Observability**: Structured JSON logging with correlation IDs, health monitoring, and request tracing.
 - **Agent Infrastructure**: Modular plugin architecture with a StateMachine, Typed Contracts (Zod schemas), Event Sourcing, a PolicyEngine for RBAC, and an ExecutionEngine with circuit breakers and exponential backoff.
 - **Tool Registry**: Registers 9 core tools: `analyze_spreadsheet`, `web_search`, `generate_image`, `browse_url`, `generate_document`, `read_file`, `write_file`, `shell_command`, `list_files`, with standardized outputs and sandboxed execution.
+- **Enhanced Pipeline Tools**: 12 specialized tools for agent execution:
+  - **Web**: `search_web`, `web_navigate`, `extract_content` - Web search and content extraction
+  - **Files**: `generate_file`, `file_operations` (read/write/edit/search/copy/move) - Comprehensive file management
+  - **Code**: `generate_code` (code/SQL/diagrams/regex/API specs), `shell_execute` - Sandboxed code generation and execution
+  - **Development**: `webdev_scaffold` (React/Vue/Next.js/Express/FastAPI scaffolding) - Project initialization
+  - **Documents**: `slides_generate` (PowerPoint via pptxgenjs) - Presentation creation
+  - **Data**: `transform_data`, `analyze_data` - Data processing and insights
+  - **Response**: `respond` - Final response generation
+- **Phase-Based Planning**: Agent plans organized into logical phases (Research → Planning → Execution → Verification → Delivery) for structured task execution.
 - **WebTool Module**: Layered architecture for web navigation and information retrieval (SearchAdapter, FetchAdapter, BrowserAdapter, RetrievalPipeline) with URL canonicalization, content deduplication, quality scoring, content extraction, and sandbox security.
 - **Ultra-Fast Web Retrieval System**: High-performance web retrieval with parallel execution, intelligent caching (in-memory, LRU), relevance filtering, and streaming results.
 - **Web Retrieval V2**: Enhancements for robustness and stability with BudgetEnforcer, DomainCircuitBreaker, NegativeCache, RequestDeduplicator, HedgedRequestManager, StaleWhileRevalidate, BrowserWatchdog, SourceQualityScorer, DomainDiversityChecker, CitationCoverageEnforcer, and LeakDetection with WorkerRecovery.
