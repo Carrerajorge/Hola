@@ -776,7 +776,15 @@ Si el usuario dice "dame un resumen" o "analiza esto", responde en texto, NO com
       }`
     : '';
 
-  const defaultSystemContent = `Eres Sira GPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.${userProfileContext}${customInstructionsSection}${responseStyleModifier}${companyKnowledgeSection}
+  // Current date/time context for real-time awareness
+  const now = new Date();
+  const currentDateTimeContext = `\n\n**FECHA Y HORA ACTUAL:**
+- Fecha: ${now.toLocaleDateString('es-PE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Lima' })}
+- Hora (Perú/Lima): ${now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'America/Lima' })}
+- Hora UTC: ${now.toISOString()}
+Usa esta información para responder preguntas sobre la hora, fecha o día actual.`;
+
+  const defaultSystemContent = `Eres IliaGPT, un asistente de IA conciso y directo. Responde de forma breve y al punto. Evita introducciones largas y despedidas innecesarias. Ve directo a la respuesta sin rodeos.${currentDateTimeContext}${userProfileContext}${customInstructionsSection}${responseStyleModifier}${companyKnowledgeSection}
 ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
 
   // Use document mode prompt when in document editing mode

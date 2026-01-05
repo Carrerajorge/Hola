@@ -25,7 +25,9 @@ const WEB_ACTION_KEYWORDS = [
   "lee", "read", "muéstrame", "show me",
   "descarga", "download", "investiga", "research",
   "compara", "compare", "analiza", "analyze",
-  "visita", "visit", "revisa", "check", "consulta"
+  "visita", "visit", "revisa", "check", "consulta",
+  "clima", "weather", "noticias", "news", "precio", "price",
+  "cotización", "stock", "mercado", "market"
 ];
 
 const CONTENT_CREATION_KEYWORDS = [
