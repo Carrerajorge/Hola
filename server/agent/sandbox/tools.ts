@@ -280,10 +280,13 @@ export class SearchTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { query, maxResults = 10, timeout, sources } = params;
+    // Accept multiple parameter variations LLM might use
+    const query = params.query || params.search || params.term || params.q || params.text || params.input;
+    const maxResults = params.maxResults || params.max_results || params.limit || 10;
+    const { timeout, sources } = params;
 
     if (!query || typeof query !== "string") {
-      return this.createResult(false, null, "", "Search query is required", startTime);
+      return this.createResult(false, null, "", "Search query is required. Use: { query: 'your search' }", startTime);
     }
 
     try {
@@ -334,10 +337,13 @@ export class BrowserTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { url, extractText = true, maxLength } = params;
+    // Accept multiple URL parameter names
+    const url = params.url || params.link || params.href || params.page || params.website || params.address;
+    const extractText = params.extractText !== false && params.extract_text !== false;
+    const maxLength = params.maxLength || params.max_length || params.limit;
 
     if (!url || typeof url !== "string") {
-      return this.createResult(false, null, "", "URL is required", startTime);
+      return this.createResult(false, null, "", "URL is required. Use: { url: 'https://...' }", startTime);
     }
 
     try {
@@ -491,10 +497,14 @@ export class MessageTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { content, format = "text", title, type = "info" } = params;
+    // Accept multiple content parameter names
+    const content = params.content || params.message || params.text || params.body || params.response || params.output;
+    const format = params.format || "text";
+    const title = params.title || params.subject || params.header;
+    const type = params.type || "info";
 
     if (!content) {
-      return this.createResult(false, null, "", "Message content is required", startTime);
+      return this.createResult(false, null, "", "Message content is required. Use: { content: 'your message' }", startTime);
     }
 
     try {
@@ -587,10 +597,15 @@ export class SlidesTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { topic, title, slideCount = 5, theme = "professional", outline } = params;
+    // Accept multiple parameter variations
+    const topic = params.topic || params.subject || params.about || params.prompt || params.content || params.theme_topic;
+    const title = params.title || params.name || params.presentation_title;
+    const slideCount = params.slideCount || params.slide_count || params.num_slides || params.slides || 5;
+    const theme = params.theme || params.style || params.design || "professional";
+    const outline = params.outline || params.structure || params.slides_content;
 
-    if (!topic && !outline) {
-      return this.createResult(false, null, "", "Topic or outline is required", startTime);
+    if (!topic && !outline && !title) {
+      return this.createResult(false, null, "", "Topic, title, or outline is required. Use: { topic: 'your topic' }", startTime);
     }
 
     try {
@@ -685,12 +700,19 @@ export class ScheduleTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { action = "create", task, delay, taskId, cron } = params;
+    // Accept multiple parameter variations
+    const action = params.action || params.operation || "create";
+    const task = params.task || params.description || params.name || params.job || params.command;
+    const delay = params.delay || params.wait || params.after || 0;
+    const taskId = params.taskId || params.task_id || params.id;
+    const cron = params.cron || params.schedule || params.interval;
 
     try {
       switch (action) {
         case "create":
-          if (!task) return this.createResult(false, null, "", "Task description is required", startTime);
+        case "add":
+        case "new":
+          if (!task) return this.createResult(false, null, "", "Task description is required. Use: { task: 'your task' }", startTime);
           const id = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           const scheduledAt = new Date(Date.now() + (delay || 0));
           this.scheduledTasks.set(id, { task, scheduledAt, status: "scheduled" });
@@ -729,12 +751,18 @@ export class ExposeTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { action = "expose", port, duration = 3600 } = params;
+    // Accept multiple parameter variations and convert port to number
+    const action = params.action || params.operation || "expose";
+    const portRaw = params.port || params.portNumber || params.port_number;
+    const port = typeof portRaw === "string" ? parseInt(portRaw, 10) : portRaw;
+    const duration = params.duration || params.timeout || params.ttl || 3600;
 
     try {
       switch (action) {
         case "expose":
-          if (!port || typeof port !== "number") return this.createResult(false, null, "", "Port number is required", startTime);
+        case "open":
+        case "start":
+          if (!port || isNaN(port)) return this.createResult(false, null, "", "Port number is required. Use: { port: 3000 }", startTime);
           const replitUrl = process.env.REPLIT_DEV_DOMAIN || process.env.REPL_SLUG;
           const publicUrl = replitUrl ? `https://${replitUrl}` : `http://localhost:${port}`;
           const expiresAt = new Date(Date.now() + duration * 1000);
