@@ -827,10 +827,12 @@ export class ResearchTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { query, maxPages = this.maxPages, extractContent = true, concurrencyLimit = 3 } = params;
+    // Accept both 'query' and 'topic' as the research query (LLM may use either)
+    const query = params.query || params.topic;
+    const { maxPages = this.maxPages, extractContent = true, concurrencyLimit = 3 } = params;
 
     if (!query || typeof query !== "string") {
-      return this.createResult(false, null, "", "Research query is required", startTime);
+      return this.createResult(false, null, "", "Research query or topic is required", startTime);
     }
 
     try {

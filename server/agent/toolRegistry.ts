@@ -16,6 +16,7 @@ import { ToolOutputSchema, ToolCapabilitySchema, type ToolCapability } from "./c
 import { randomUUID } from "crypto";
 import { metricsCollector } from "./metricsCollector";
 import { validateOrThrow } from "./validation";
+import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 
 export const ToolDefinitionSchema = z.object({
   name: z.string().min(1, "Tool name is required"),
@@ -156,6 +157,132 @@ export class ToolRegistry {
     }
     
     if (!tool) {
+      // Try sandbox tools as fallback with proper adaptation
+      if (sandboxToolRegistry.has(name)) {
+        addLog("info", `Using sandbox tool: ${name}`);
+        
+        // Check abort signal before sandbox execution
+        if (context.signal?.aborted) {
+          return {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "ABORTED",
+              message: "Tool execution was cancelled before sandbox tool",
+              retryable: false,
+            },
+          };
+        }
+        
+        try {
+          const sandboxResult = await sandboxToolRegistry.execute(name, input);
+          const artifacts: ToolArtifact[] = [];
+          const previews: ToolPreview[] = [];
+          
+          // Convert sandbox file outputs to artifacts
+          if (sandboxResult.filesCreated && sandboxResult.filesCreated.length > 0) {
+            for (const filePath of sandboxResult.filesCreated) {
+              const ext = filePath.split('.').pop()?.toLowerCase();
+              let type: ArtifactType = "file";
+              let mimeType = "application/octet-stream";
+              
+              if (ext === "pptx") { type = "document"; mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation"; }
+              else if (ext === "docx") { type = "document"; mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"; }
+              else if (ext === "xlsx") { type = "document"; mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; }
+              else if (ext === "png" || ext === "jpg" || ext === "jpeg") { type = "image"; mimeType = `image/${ext}`; }
+              
+              artifacts.push({
+                id: randomUUID(),
+                type,
+                name: filePath.split('/').pop() || filePath,
+                mimeType,
+                url: `/api/files/download?path=${encodeURIComponent(filePath)}`,
+                data: { path: filePath },
+                createdAt: new Date(),
+              });
+            }
+          }
+          
+          // Properly format output based on sandbox tool type
+          let output: any;
+          if (sandboxResult.data) {
+            // For structured data tools (search, browser, etc.), preserve the data structure
+            output = sandboxResult.data;
+            
+            // Add preview for search results
+            if (name === "search" && sandboxResult.data.results) {
+              previews.push({
+                type: "markdown",
+                content: `### Search Results\n${sandboxResult.data.results.slice(0, 5).map((r: any) => 
+                  `- **[${r.title}](${r.url})**\n  ${r.snippet || ''}`
+                ).join('\n\n')}`,
+                title: `Search: ${input.query || "results"}`,
+              });
+            }
+            
+            // Add preview for browser content
+            if (name === "browser" && sandboxResult.data.content) {
+              previews.push({
+                type: "text",
+                content: sandboxResult.data.content.substring(0, 1000) + (sandboxResult.data.content.length > 1000 ? "..." : ""),
+                title: sandboxResult.data.title || input.url,
+              });
+            }
+          } else {
+            output = sandboxResult.message;
+          }
+          
+          metricsCollector.record({
+            toolName: name,
+            latencyMs: sandboxResult.executionTimeMs || (Date.now() - startTime),
+            success: sandboxResult.success,
+            timestamp: new Date(),
+          });
+          
+          return {
+            success: sandboxResult.success,
+            output,
+            artifacts,
+            previews,
+            logs,
+            metrics: { durationMs: sandboxResult.executionTimeMs || (Date.now() - startTime) },
+            error: sandboxResult.error ? {
+              code: "SANDBOX_ERROR",
+              message: sandboxResult.error,
+              retryable: true,
+            } : undefined,
+          };
+        } catch (sandboxError: any) {
+          addLog("error", `Sandbox tool error: ${sandboxError.message}`);
+          
+          metricsCollector.record({
+            toolName: name,
+            latencyMs: Date.now() - startTime,
+            success: false,
+            errorCode: "SANDBOX_ERROR",
+            timestamp: new Date(),
+          });
+          
+          return {
+            success: false,
+            output: null,
+            artifacts: [],
+            previews: [],
+            logs,
+            metrics: { durationMs: Date.now() - startTime },
+            error: {
+              code: "SANDBOX_ERROR",
+              message: sandboxError.message,
+              retryable: false,
+            },
+          };
+        }
+      }
+      
       return {
         success: false,
         output: null,

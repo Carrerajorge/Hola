@@ -3,6 +3,7 @@ import { geminiChat, type GeminiChatMessage } from "../lib/gemini";
 import type { User } from "@shared/schema";
 import { EventEmitter } from "events";
 import { agentEventBus } from "./eventBus";
+import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
 
 export interface PlanStep {
   index: number;
@@ -92,53 +93,45 @@ export interface AgentProgress {
   eventStream?: AgentEvent[];
 }
 
-const AVAILABLE_TOOLS = [
-  {
-    name: "analyze_spreadsheet",
-    description: "Analyze Excel or CSV spreadsheet files. Performs data analysis, generates insights, charts, and summaries.",
-    inputSchema: "{ uploadId: string, scope: 'active'|'selected'|'all', analysisMode: 'full'|'summary'|'extract_tasks'|'text_only'|'custom', userPrompt?: string }",
-  },
-  {
-    name: "web_search",
-    description: "Search the web for information. Can search general web or academic sources.",
-    inputSchema: "{ query: string, maxResults: number (1-20), academic: boolean }",
-  },
-  {
-    name: "generate_image",
-    description: "Generate an image using AI based on a text description.",
-    inputSchema: "{ prompt: string }",
-  },
-  {
-    name: "browse_url",
-    description: "Navigate to a URL using a headless browser. Returns page content and optionally a screenshot.",
-    inputSchema: "{ url: string, takeScreenshot: boolean }",
-  },
-  {
-    name: "generate_document",
-    description: "Generate Office documents (Word, Excel, PowerPoint, CSV). For Word: provide markdown content. For Excel/CSV: provide tabular data with rows separated by newlines and columns by tabs or commas. For PowerPoint: provide slide titles and bullet points.",
-    inputSchema: "{ type: 'word'|'excel'|'ppt'|'csv', title: string, content: string }",
-  },
-  {
-    name: "read_file",
-    description: "Read contents of a file from the agent's workspace.",
-    inputSchema: "{ filepath: string }",
-  },
-  {
-    name: "write_file",
-    description: "Write or create a file in the agent's workspace.",
-    inputSchema: "{ filepath: string, content: string }",
-  },
-  {
-    name: "shell_command",
-    description: "Execute a shell command in the agent's sandbox. Limited to safe operations.",
-    inputSchema: "{ command: string, timeout?: number (1000-60000, default 30000) }",
-  },
-  {
-    name: "list_files",
-    description: "List files and directories in the agent's workspace.",
-    inputSchema: "{ directory?: string (default '.') }",
-  },
-];
+// Combined tool list (lazy-loaded to avoid circular dependencies at module load)
+let _cachedTools: Array<{ name: string; description: string; inputSchema: string }> | null = null;
+
+function getAvailableToolDescriptions() {
+  if (_cachedTools) return _cachedTools;
+  
+  const legacyTools = [
+    { name: "analyze_spreadsheet", description: "Analyze Excel or CSV spreadsheet files.", inputSchema: "{ uploadId, scope, analysisMode, userPrompt? }" },
+    { name: "web_search", description: "Search the web for information.", inputSchema: "{ query, maxResults?, academic? }" },
+    { name: "generate_image", description: "Generate an image using AI.", inputSchema: "{ prompt }" },
+    { name: "browse_url", description: "Navigate to a URL using a browser.", inputSchema: "{ url, takeScreenshot? }" },
+    { name: "generate_document", description: "Generate Office documents (Word, Excel, PowerPoint).", inputSchema: "{ type, title, content }" },
+    { name: "read_file", description: "Read contents of a file.", inputSchema: "{ filepath }" },
+    { name: "write_file", description: "Write or create a file.", inputSchema: "{ filepath, content }" },
+    { name: "shell_command", description: "Execute a shell command.", inputSchema: "{ command, timeout? }" },
+    { name: "list_files", description: "List files and directories.", inputSchema: "{ directory? }" },
+  ];
+  
+  // Add sandbox tools (lazy access to avoid circular deps)
+  try {
+    const sandboxTools = sandboxToolRegistry.listToolsWithInfo().map(t => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: `{ params specific to ${t.name} }`,
+    }));
+    
+    // Merge, preferring sandbox tools for same-name entries
+    const toolMap = new Map<string, { name: string; description: string; inputSchema: string }>();
+    for (const tool of legacyTools) toolMap.set(tool.name, tool);
+    for (const tool of sandboxTools) toolMap.set(tool.name, tool);
+    
+    _cachedTools = Array.from(toolMap.values());
+  } catch {
+    _cachedTools = legacyTools;
+  }
+  
+  return _cachedTools;
+}
+
 
 const MAX_RETRY_ATTEMPTS = 2;
 const MAX_REPLAN_ATTEMPTS = 2;
@@ -578,7 +571,7 @@ Respond with ONLY valid JSON:
         return `✗ Step ${r.stepIndex + 1}: ${step.description} - Error: ${r.error}`;
       }).join('\n');
 
-    const toolDescriptions = AVAILABLE_TOOLS.map(
+    const toolDescriptions = getAvailableToolDescriptions().map(
       (t) => `- ${t.name}: ${t.description}\n  Input: ${t.inputSchema}`
     ).join("\n");
 
@@ -746,7 +739,7 @@ Respond with ONLY valid JSON:
       return this.plan;
     }
 
-    const toolDescriptions = AVAILABLE_TOOLS.map(
+    const toolDescriptions = getAvailableToolDescriptions().map(
       (t) => `- ${t.name}: ${t.description}\n  Input: ${t.inputSchema}`
     ).join("\n");
 
