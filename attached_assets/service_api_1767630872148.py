@@ -40,7 +40,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 
 # Importar el agente
-from agent_v5 import (
+from agente_ia_v5 import (
     Agent, AgentConfig, VERSION, OUTPUT_DIR, SCREENSHOTS_DIR,
     cache, browser, viz
 )
