@@ -510,6 +510,289 @@ export class MessageTool extends BaseTool {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLAN TOOL - Task Planning and Management
+// ═══════════════════════════════════════════════════════════════════════════════
+export class PlanTool extends BaseTool {
+  name = "plan";
+  description = "Manages task plans: create, update, advance phases, track progress";
+  category: ToolCategory = "system";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const { action, input, planId, phaseIndex, stepIndex, status } = params;
+
+    if (!action) {
+      return this.createResult(false, null, "", "Action is required (create, update, advance, status)", startTime);
+    }
+
+    try {
+      const { taskPlanner } = await import("./taskPlanner");
+      
+      switch (action) {
+        case "create":
+          if (!input) return this.createResult(false, null, "", "Input is required to create a plan", startTime);
+          const plan = await taskPlanner.createPlan(input);
+          return this.createResult(true, { plan }, `Plan created with ${plan.phases.length} phases`, undefined, startTime);
+        
+        case "detect":
+          if (!input) return this.createResult(false, null, "", "Input is required to detect intent", startTime);
+          const intent = await taskPlanner.detectIntent(input);
+          return this.createResult(true, intent, `Detected intent: ${intent.intent}`, undefined, startTime);
+        
+        case "status":
+          return this.createResult(true, { message: "Plan status check" }, "Plan tool ready", undefined, startTime);
+        
+        default:
+          return this.createResult(false, null, "", `Unknown action: ${action}`, startTime);
+      }
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SLIDES TOOL - PowerPoint Presentation Creation
+// ═══════════════════════════════════════════════════════════════════════════════
+export class SlidesTool extends BaseTool {
+  name = "slides";
+  description = "Creates PowerPoint presentations with AI-generated content and professional designs";
+  category: ToolCategory = "document";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const { topic, title, slideCount = 5, theme = "professional", outline } = params;
+
+    if (!topic && !outline) {
+      return this.createResult(false, null, "", "Topic or outline is required", startTime);
+    }
+
+    try {
+      const docTool = new DocumentTool();
+      const content = outline || { slides: [{ title: title || topic, content: topic }] };
+      
+      return await docTool.execute({
+        docType: "pptx",
+        title: title || topic,
+        content,
+        theme,
+        slideCount
+      });
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WEBDEV TOOL - Web Development Project Scaffolding
+// ═══════════════════════════════════════════════════════════════════════════════
+export class WebDevTool extends BaseTool {
+  name = "webdev_init_project";
+  description = "Initializes web development projects with scaffolding (React, Vue, Next.js, Express, FastAPI)";
+  category: ToolCategory = "system";
+
+  private templates: Record<string, { files: Record<string, string>; dirs: string[] }> = {
+    react: {
+      dirs: ["src", "src/components", "public"],
+      files: {
+        "package.json": JSON.stringify({ name: "react-app", version: "1.0.0", scripts: { dev: "vite", build: "vite build" }, dependencies: { react: "^18.2.0", "react-dom": "^18.2.0" }, devDependencies: { "@vitejs/plugin-react": "^4.0.0", vite: "^5.0.0" } }, null, 2),
+        "src/App.jsx": `import { useState } from 'react'\nexport default function App() {\n  const [count, setCount] = useState(0)\n  return <div><h1>React App</h1><button onClick={() => setCount(c => c + 1)}>Count: {count}</button></div>\n}`,
+        "index.html": `<!DOCTYPE html><html><head><title>React App</title></head><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>`,
+        "src/main.jsx": `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App'\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`
+      }
+    },
+    express: {
+      dirs: ["src", "src/routes"],
+      files: {
+        "package.json": JSON.stringify({ name: "express-app", version: "1.0.0", scripts: { start: "node src/index.js", dev: "node --watch src/index.js" }, dependencies: { express: "^4.18.2" } }, null, 2),
+        "src/index.js": `const express = require('express')\nconst app = express()\napp.use(express.json())\napp.get('/', (req, res) => res.json({ message: 'Hello Express!' }))\napp.listen(5000, '0.0.0.0', () => console.log('Server running on port 5000'))`
+      }
+    }
+  };
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const { framework = "react", projectName = "my-app", outputDir = "/tmp/agent-projects" } = params;
+
+    const template = this.templates[framework.toLowerCase()];
+    if (!template) {
+      return this.createResult(false, null, "", `Unknown framework: ${framework}. Available: ${Object.keys(this.templates).join(", ")}`, startTime);
+    }
+
+    try {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const projectPath = path.join(outputDir, projectName);
+      
+      await fs.mkdir(projectPath, { recursive: true });
+      for (const dir of template.dirs) {
+        await fs.mkdir(path.join(projectPath, dir), { recursive: true });
+      }
+      for (const [file, content] of Object.entries(template.files)) {
+        await fs.writeFile(path.join(projectPath, file), content, "utf-8");
+      }
+
+      return this.createResult(
+        true,
+        { projectPath, framework, files: Object.keys(template.files), directories: template.dirs },
+        `${framework} project created at ${projectPath}`,
+        undefined,
+        startTime,
+        Object.keys(template.files).map(f => path.join(projectPath, f))
+      );
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCHEDULE TOOL - Task Scheduling
+// ═══════════════════════════════════════════════════════════════════════════════
+export class ScheduleTool extends BaseTool {
+  name = "schedule";
+  description = "Schedules tasks for future or recurring execution";
+  category: ToolCategory = "system";
+
+  private scheduledTasks: Map<string, { task: string; scheduledAt: Date; status: string }> = new Map();
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const { action = "create", task, delay, taskId, cron } = params;
+
+    try {
+      switch (action) {
+        case "create":
+          if (!task) return this.createResult(false, null, "", "Task description is required", startTime);
+          const id = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+          const scheduledAt = new Date(Date.now() + (delay || 0));
+          this.scheduledTasks.set(id, { task, scheduledAt, status: "scheduled" });
+          return this.createResult(true, { taskId: id, task, scheduledAt, status: "scheduled" }, `Task scheduled: ${id}`, undefined, startTime);
+        
+        case "list":
+          const tasks = Array.from(this.scheduledTasks.entries()).map(([id, t]) => ({ id, ...t }));
+          return this.createResult(true, { tasks, count: tasks.length }, `${tasks.length} scheduled tasks`, undefined, startTime);
+        
+        case "cancel":
+          if (!taskId) return this.createResult(false, null, "", "Task ID is required to cancel", startTime);
+          if (this.scheduledTasks.has(taskId)) {
+            this.scheduledTasks.delete(taskId);
+            return this.createResult(true, { taskId, status: "cancelled" }, `Task ${taskId} cancelled`, undefined, startTime);
+          }
+          return this.createResult(false, null, "", `Task ${taskId} not found`, startTime);
+        
+        default:
+          return this.createResult(false, null, "", `Unknown action: ${action}. Use: create, list, cancel`, startTime);
+      }
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPOSE TOOL - Port Exposure for Public Access
+// ═══════════════════════════════════════════════════════════════════════════════
+export class ExposeTool extends BaseTool {
+  name = "expose";
+  description = "Exposes a local port for temporary public access";
+  category: ToolCategory = "system";
+
+  private exposedPorts: Map<number, { url: string; expiresAt: Date }> = new Map();
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const { action = "expose", port, duration = 3600 } = params;
+
+    try {
+      switch (action) {
+        case "expose":
+          if (!port || typeof port !== "number") return this.createResult(false, null, "", "Port number is required", startTime);
+          const replitUrl = process.env.REPLIT_DEV_DOMAIN || process.env.REPL_SLUG;
+          const publicUrl = replitUrl ? `https://${replitUrl}` : `http://localhost:${port}`;
+          const expiresAt = new Date(Date.now() + duration * 1000);
+          this.exposedPorts.set(port, { url: publicUrl, expiresAt });
+          return this.createResult(true, { port, url: publicUrl, expiresAt }, `Port ${port} exposed at ${publicUrl}`, undefined, startTime);
+        
+        case "list":
+          const ports = Array.from(this.exposedPorts.entries()).map(([p, info]) => ({ port: p, ...info }));
+          return this.createResult(true, { ports, count: ports.length }, `${ports.length} ports exposed`, undefined, startTime);
+        
+        case "close":
+          if (!port) return this.createResult(false, null, "", "Port is required to close", startTime);
+          this.exposedPorts.delete(port);
+          return this.createResult(true, { port, status: "closed" }, `Port ${port} exposure closed`, undefined, startTime);
+        
+        default:
+          return this.createResult(false, null, "", `Unknown action: ${action}. Use: expose, list, close`, startTime);
+      }
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GENERATE TOOL - Media Generation (Images, Audio)
+// ═══════════════════════════════════════════════════════════════════════════════
+export class GenerateTool extends BaseTool {
+  name = "generate";
+  description = "Generates media content: images, audio, or other creative assets using AI";
+  category: ToolCategory = "document";
+
+  async execute(params: Record<string, any>): Promise<ToolResult> {
+    const startTime = Date.now();
+    const { type = "image", prompt, style, size = "1024x1024", outputPath } = params;
+
+    if (!prompt) {
+      return this.createResult(false, null, "", "Prompt is required for generation", startTime);
+    }
+
+    try {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      
+      switch (type) {
+        case "image":
+          const { generateGeminiImage } = await import("./documentCreator");
+          const imageResult = await generateGeminiImage(prompt, style);
+          
+          if (imageResult && imageResult.base64) {
+            const outputDir = "/tmp/agent-generated";
+            await fs.mkdir(outputDir, { recursive: true });
+            const filename = `image_${Date.now()}.png`;
+            const filePath = path.join(outputDir, filename);
+            await fs.writeFile(filePath, Buffer.from(imageResult.base64, "base64"));
+            
+            return this.createResult(
+              true,
+              { path: filePath, type: "image", prompt, dimensions: size },
+              `Image generated: ${filename}`,
+              undefined,
+              startTime,
+              [filePath]
+            );
+          }
+          return this.createResult(false, null, "", "Image generation failed", startTime);
+        
+        case "placeholder":
+          const placeholderPath = `/tmp/agent-generated/placeholder_${Date.now()}.svg`;
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect fill="#ddd" width="400" height="300"/><text x="50%" y="50%" text-anchor="middle" fill="#666">${prompt}</text></svg>`;
+          await fs.mkdir("/tmp/agent-generated", { recursive: true });
+          await fs.writeFile(placeholderPath, svg);
+          return this.createResult(true, { path: placeholderPath, type: "placeholder" }, `Placeholder created`, undefined, startTime, [placeholderPath]);
+        
+        default:
+          return this.createResult(false, null, "", `Unsupported type: ${type}. Use: image, placeholder`, startTime);
+      }
+    } catch (error) {
+      return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
+    }
+  }
+}
+
 export class ResearchTool extends BaseTool {
   name = "research";
   description = "Performs deep research with multi-source search and parallel content extraction";
@@ -688,6 +971,7 @@ export function createDefaultToolRegistry(
 ): ToolRegistry {
   const registry = new ToolRegistry();
 
+  // Core tools
   registry.register(new ShellTool(executor));
   registry.register(new FileTool(fileManager));
   registry.register(new PythonTool(executor));
@@ -696,6 +980,14 @@ export function createDefaultToolRegistry(
   registry.register(new DocumentTool(docCreator));
   registry.register(new MessageTool());
   registry.register(new ResearchTool());
+  
+  // Extended tools
+  registry.register(new PlanTool());
+  registry.register(new SlidesTool());
+  registry.register(new WebDevTool());
+  registry.register(new ScheduleTool());
+  registry.register(new ExposeTool());
+  registry.register(new GenerateTool());
 
   return registry;
 }

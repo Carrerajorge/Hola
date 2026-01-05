@@ -2,7 +2,11 @@ import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { AgentV2 } from "../agent/sandbox/agentV2";
 import { taskPlanner } from "../agent/sandbox/taskPlanner";
-import { ToolRegistry, DocumentTool, SearchTool, BrowserTool, MessageTool, ResearchTool } from "../agent/sandbox/tools";
+import { 
+  ToolRegistry, DocumentTool, SearchTool, BrowserTool, MessageTool, ResearchTool,
+  PlanTool, SlidesTool, WebDevTool, ScheduleTool, ExposeTool, GenerateTool,
+  ShellTool, FileTool
+} from "../agent/sandbox/tools";
 import { sandboxService } from "../agent/sandbox/sandboxService";
 import type { ToolCategory } from "../agent/sandbox/agentTypes";
 
@@ -42,15 +46,38 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 function createSafeToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
+  // Core safe tools
   registry.register(new DocumentTool());
   registry.register(new SearchTool());
   registry.register(new BrowserTool());
   registry.register(new MessageTool());
   registry.register(new ResearchTool());
+  // Extended tools
+  registry.register(new PlanTool());
+  registry.register(new SlidesTool());
+  registry.register(new WebDevTool());
+  registry.register(new ScheduleTool());
+  registry.register(new ExposeTool());
+  registry.register(new GenerateTool());
   return registry;
 }
 
-const SAFE_TOOLS = new Set(["search", "browser", "document", "message", "research"]);
+function createFullToolRegistry(): ToolRegistry {
+  const registry = createSafeToolRegistry();
+  // System tools (require authentication)
+  registry.register(new ShellTool());
+  registry.register(new FileTool());
+  return registry;
+}
+
+const SAFE_TOOLS = new Set([
+  "search", "browser", "document", "message", "research",
+  "plan", "slides", "webdev_init_project", "schedule", "expose", "generate"
+]);
+
+const ALL_TOOLS = new Set([
+  ...SAFE_TOOLS, "shell", "file"
+]);
 
 export function createSandboxAgentRouter() {
   const router = Router();
