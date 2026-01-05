@@ -239,6 +239,26 @@ export class SandboxService {
 
     return cleaned;
   }
+
+  // Helper methods for router compatibility
+  async createSession(): Promise<string> {
+    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    await this.getSessionSandbox(sessionId);
+    return sessionId;
+  }
+
+  getSession(sessionId: string): SandboxEnvironment | null {
+    const session = this.sessions.get(sessionId);
+    return session?.sandbox || null;
+  }
+
+  async destroySession(sessionId: string): Promise<boolean> {
+    if (this.sessions.has(sessionId)) {
+      await this.closeSession(sessionId);
+      return true;
+    }
+    return false;
+  }
 }
 
 export const sandboxService = SandboxService.getInstance();

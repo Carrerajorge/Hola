@@ -5,7 +5,7 @@ import { taskPlanner } from "../agent/sandbox/taskPlanner";
 import { 
   ToolRegistry, DocumentTool, SearchTool, BrowserTool, MessageTool, ResearchTool,
   PlanTool, SlidesTool, WebDevTool, ScheduleTool, ExposeTool, GenerateTool,
-  ShellTool, FileTool
+  ShellTool, FileTool, PythonTool
 } from "../agent/sandbox/tools";
 import { sandboxService } from "../agent/sandbox/sandboxService";
 import type { ToolCategory } from "../agent/sandbox/agentTypes";
@@ -67,17 +67,24 @@ function createFullToolRegistry(): ToolRegistry {
   // System tools - ONLY for authenticated, sandboxed access
   registry.register(new ShellTool());
   registry.register(new FileTool());
+  registry.register(new PythonTool());
   return registry;
 }
 
-const SAFE_TOOLS = new Set([
+// Use arrays to avoid Set iteration issues with TypeScript
+const SAFE_TOOLS_ARRAY = [
   "search", "browser", "document", "message", "research",
   "plan", "slides", "webdev_init_project", "schedule", "expose", "generate"
-]);
+];
 
-const SYSTEM_TOOLS = new Set(["shell", "file"]);
+const SYSTEM_TOOLS_ARRAY = ["shell", "file", "python"];
 
-const ALL_TOOLS = new Set([...SAFE_TOOLS, ...SYSTEM_TOOLS]);
+const ALL_TOOLS_ARRAY = [...SAFE_TOOLS_ARRAY, ...SYSTEM_TOOLS_ARRAY];
+
+// Sets for O(1) lookup
+const SAFE_TOOLS = new Set(SAFE_TOOLS_ARRAY);
+const SYSTEM_TOOLS = new Set(SYSTEM_TOOLS_ARRAY);
+const ALL_TOOLS = new Set(ALL_TOOLS_ARRAY);
 
 export function createSandboxAgentRouter() {
   const router = Router();
@@ -130,7 +137,7 @@ export function createSandboxAgentRouter() {
       if (!ALL_TOOLS.has(validated.toolName)) {
         return res.status(403).json({
           success: false,
-          error: `Tool '${validated.toolName}' is not available. Available tools: ${Array.from(ALL_TOOLS).join(", ")}`
+          error: `Tool '${validated.toolName}' is not available. Available tools: ${ALL_TOOLS_ARRAY.join(", ")}`
         });
       }
       
@@ -221,9 +228,9 @@ export function createSandboxAgentRouter() {
         success: true,
         tools,
         count: tools.length,
-        safeTools: Array.from(SAFE_TOOLS),
-        systemTools: Array.from(SYSTEM_TOOLS),
-        note: "All 13 tools available. System tools (shell, file) require authentication."
+        safeTools: SAFE_TOOLS_ARRAY,
+        systemTools: SYSTEM_TOOLS_ARRAY,
+        note: "All 14 tools available. System tools (shell, file, python) require authentication."
       });
     } catch (error: any) {
       console.error("[SandboxAgent] List tools error:", error);
@@ -243,9 +250,9 @@ export function createSandboxAgentRouter() {
         success: true,
         status: {
           userId,
-          availableTools: Array.from(ALL_TOOLS),
-          safeTools: Array.from(SAFE_TOOLS),
-          systemTools: Array.from(SYSTEM_TOOLS),
+          availableTools: ALL_TOOLS_ARRAY,
+          safeTools: SAFE_TOOLS_ARRAY,
+          systemTools: SYSTEM_TOOLS_ARRAY,
           sandboxEnabled: true,
         },
       });

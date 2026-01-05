@@ -885,26 +885,20 @@ export class GenerateTool extends BaseTool {
       
       switch (type) {
         case "image":
-          const { generateGeminiImage } = await import("./documentCreator");
-          const imageResult = await generateGeminiImage(prompt, style);
+          const { generateImage } = await import("../../services/imageGeneration");
+          const imageResult = await generateImage(prompt);
           
-          if (imageResult && imageResult.base64) {
-            const outputDir = "/tmp/agent-generated";
-            await fs.mkdir(outputDir, { recursive: true });
-            const filename = `image_${Date.now()}.png`;
-            const filePath = path.join(outputDir, filename);
-            await fs.writeFile(filePath, Buffer.from(imageResult.base64, "base64"));
-            
+          if (imageResult && imageResult.success && imageResult.imageUrl) {
             return this.createResult(
               true,
-              { path: filePath, type: "image", prompt, dimensions: size },
-              `Image generated: ${filename}`,
+              { url: imageResult.imageUrl, type: "image", prompt, dimensions: size },
+              `Image generated successfully`,
               undefined,
               startTime,
-              [filePath]
+              []
             );
           }
-          return this.createResult(false, null, "", "Image generation failed", startTime);
+          return this.createResult(false, null, "", imageResult?.error || "Image generation failed", startTime);
         
         case "placeholder":
           const placeholderPath = `/tmp/agent-generated/placeholder_${Date.now()}.svg`;
