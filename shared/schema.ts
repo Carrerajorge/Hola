@@ -2278,6 +2278,85 @@ export type InsertAgentWorkspace = z.infer<typeof insertAgentWorkspaceSchema>;
 export type AgentWorkspace = typeof agentWorkspaces.$inferSelect;
 
 // ==========================================
+// Custom Skills Schema - User-defined Agent Skills
+// ==========================================
+
+export const skillCategorySchema = z.enum(["documents", "data", "integrations", "automation", "custom"]);
+export const skillActionTypeSchema = z.enum(["api_call", "shell_command", "file_operation", "llm_prompt", "chain", "conditional"]);
+
+export const skillParameterSchema = z.object({
+  name: z.string(),
+  type: z.enum(["string", "number", "boolean", "array", "object", "file"]),
+  description: z.string(),
+  required: z.boolean().default(true),
+  defaultValue: z.any().optional(),
+  validation: z.string().optional(),
+  options: z.array(z.string()).optional(),
+});
+
+export const skillActionSchema = z.object({
+  id: z.string(),
+  type: skillActionTypeSchema,
+  name: z.string(),
+  description: z.string().optional(),
+  config: z.record(z.any()),
+  dependsOn: z.array(z.string()).optional(),
+  condition: z.string().optional(),
+  onSuccess: z.string().optional(),
+  onError: z.string().optional(),
+});
+
+export const skillTriggerSchema = z.object({
+  type: z.enum(["keyword", "pattern", "intent", "manual"]),
+  value: z.string(),
+  priority: z.number().default(0),
+});
+
+export const customSkills = pgTable("custom_skills", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 100 }).notNull(),
+  description: text("description"),
+  instructions: text("instructions"),
+  category: varchar("category", { length: 50 }).notNull().default("custom"),
+  icon: varchar("icon", { length: 50 }),
+  color: varchar("color", { length: 20 }),
+  enabled: boolean("enabled").default(true),
+  isPublic: boolean("is_public").default(false),
+  version: integer("version").default(1),
+  parameters: jsonb("parameters").$type<z.infer<typeof skillParameterSchema>[]>().default([]),
+  actions: jsonb("actions").$type<z.infer<typeof skillActionSchema>[]>().default([]),
+  triggers: jsonb("triggers").$type<z.infer<typeof skillTriggerSchema>[]>().default([]),
+  outputFormat: varchar("output_format", { length: 50 }),
+  features: text("features").array(),
+  tags: text("tags").array(),
+  usageCount: integer("usage_count").default(0),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("custom_skills_user_id_idx").on(table.userId),
+  index("custom_skills_category_idx").on(table.category),
+  index("custom_skills_enabled_idx").on(table.enabled),
+]);
+
+export const insertCustomSkillSchema = createInsertSchema(customSkills).omit({
+  id: true,
+  usageCount: true,
+  lastUsedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCustomSkill = z.infer<typeof insertCustomSkillSchema>;
+export type CustomSkill = typeof customSkills.$inferSelect;
+export type SkillCategory = z.infer<typeof skillCategorySchema>;
+export type SkillActionType = z.infer<typeof skillActionTypeSchema>;
+export type SkillParameter = z.infer<typeof skillParameterSchema>;
+export type SkillAction = z.infer<typeof skillActionSchema>;
+export type SkillTrigger = z.infer<typeof skillTriggerSchema>;
+
+// ==========================================
 // Agent Event Schema - Standardized Contract
 // ==========================================
 
