@@ -54,10 +54,14 @@ export class ShellTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { command, timeout, workingDir, env } = params;
+    // Accept multiple parameter variations
+    const command = params.command || params.cmd || params.shell || params.exec || params.run;
+    const timeout = params.timeout || params.time_limit || 30000;
+    const workingDir = params.workingDir || params.working_dir || params.cwd || params.directory;
+    const env = params.env || params.environment || params.variables;
 
     if (!command || typeof command !== "string") {
-      return this.createResult(false, null, "", "Command is required and must be a string", startTime);
+      return this.createResult(false, null, "", "Command is required. Use: { command: 'your shell command' }", startTime);
     }
 
     try {
@@ -107,10 +111,17 @@ export class FileTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { operation, path, content, encoding, recursive, pattern, createDirs } = params;
+    // Accept multiple parameter variations
+    const operation = params.operation || params.action || params.op || params.mode || "read";
+    const path = params.path || params.file || params.filepath || params.file_path || params.filename;
+    const content = params.content || params.data || params.text || params.body;
+    const encoding = params.encoding || params.charset || "utf-8";
+    const recursive = params.recursive !== false;
+    const pattern = params.pattern || params.glob || params.filter;
+    const createDirs = params.createDirs !== false && params.create_dirs !== false;
 
     if (!operation) {
-      return this.createResult(false, null, "", "Operation is required (read, write, delete, list, mkdir, process)", startTime);
+      return this.createResult(false, null, "", "Operation is required. Use: { operation: 'read|write|delete|list|mkdir|process', path: '...' }", startTime);
     }
 
     try {
@@ -240,10 +251,12 @@ export class PythonTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { code, timeout } = params;
+    // Accept multiple parameter variations
+    const code = params.code || params.script || params.python || params.source || params.program;
+    const timeout = params.timeout || params.time_limit || 60000;
 
     if (!code || typeof code !== "string") {
-      return this.createResult(false, null, "", "Python code is required", startTime);
+      return this.createResult(false, null, "", "Python code is required. Use: { code: 'print(\"hello\")' }", startTime);
     }
 
     try {
@@ -438,14 +451,13 @@ export class DocumentTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { type, title, filename } = params;
+    // Accept multiple parameter variations
+    const type = params.type || params.format || params.doc_type || params.document_type || "docx";
+    const title = params.title || params.name || params.heading || params.subject || "Untitled";
+    const filename = params.filename || params.file_name || params.output || params.file;
 
     if (!type) {
-      return this.createResult(false, null, "", "Document type is required (pptx, docx, xlsx)", startTime);
-    }
-
-    if (!title) {
-      return this.createResult(false, null, "", "Document title is required", startTime);
+      return this.createResult(false, null, "", "Document type is required. Use: { type: 'pptx|docx|xlsx', title: '...' }", startTime);
     }
 
     try {
@@ -454,24 +466,32 @@ export class DocumentTool extends BaseTool {
       switch (type.toLowerCase()) {
         case "pptx":
         case "powerpoint":
-          const { slides = [], theme } = params;
+        case "presentation":
+        case "slides":
+          const slides = params.slides || params.content || params.pages || [];
+          const theme = params.theme || params.style || params.design;
           result = await this.creator.createPptx(title, slides, theme, filename);
           break;
 
         case "docx":
         case "word":
-          const { sections = [], author } = params;
+        case "doc":
+        case "document":
+          const sections = params.sections || params.content || params.paragraphs || [];
+          const author = params.author || params.creator || params.by;
           result = await this.creator.createDocx(title, sections, author, filename);
           break;
 
         case "xlsx":
         case "excel":
-          const { sheets = [] } = params;
+        case "spreadsheet":
+        case "xls":
+          const sheets = params.sheets || params.content || params.data || [];
           result = await this.creator.createXlsx(title, sheets, filename);
           break;
 
         default:
-          return this.createResult(false, null, "", `Unknown document type: ${type}`, startTime);
+          return this.createResult(false, null, "", `Unknown document type: ${type}. Use: pptx, docx, xlsx`, startTime);
       }
 
       return {
@@ -555,31 +575,39 @@ export class PlanTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { action, input, planId, phaseIndex, stepIndex, status } = params;
-
-    if (!action) {
-      return this.createResult(false, null, "", "Action is required (create, update, advance, status)", startTime);
-    }
+    // Accept multiple parameter variations
+    const action = params.action || params.operation || params.command || "create";
+    const input = params.input || params.text || params.query || params.task || params.objective || params.goal;
+    const planId = params.planId || params.plan_id || params.id;
+    const phaseIndex = params.phaseIndex || params.phase_index || params.phase;
+    const stepIndex = params.stepIndex || params.step_index || params.step;
+    const status = params.status || params.state;
 
     try {
       const { taskPlanner } = await import("./taskPlanner");
       
       switch (action) {
         case "create":
-          if (!input) return this.createResult(false, null, "", "Input is required to create a plan", startTime);
+        case "new":
+        case "generate":
+          if (!input) return this.createResult(false, null, "", "Input/task is required to create a plan. Use: { input: 'your task' }", startTime);
           const plan = await taskPlanner.createPlan(input);
           return this.createResult(true, { plan }, `Plan created with ${plan.phases.length} phases`, undefined, startTime);
         
         case "detect":
+        case "analyze":
+        case "intent":
           if (!input) return this.createResult(false, null, "", "Input is required to detect intent", startTime);
           const intent = await taskPlanner.detectIntent(input);
           return this.createResult(true, intent, `Detected intent: ${intent.intent}`, undefined, startTime);
         
         case "status":
-          return this.createResult(true, { message: "Plan status check" }, "Plan tool ready", undefined, startTime);
+        case "check":
+        case "get":
+          return this.createResult(true, { message: "Plan tool ready", available: true }, "Plan tool ready", undefined, startTime);
         
         default:
-          return this.createResult(false, null, "", `Unknown action: ${action}`, startTime);
+          return this.createResult(false, null, "", `Unknown action: ${action}. Use: create, detect, status`, startTime);
       }
     } catch (error) {
       return this.createResult(false, null, "", error instanceof Error ? error.message : String(error), startTime);
@@ -649,14 +677,42 @@ export class WebDevTool extends BaseTool {
         "package.json": JSON.stringify({ name: "express-app", version: "1.0.0", scripts: { start: "node src/index.js", dev: "node --watch src/index.js" }, dependencies: { express: "^4.18.2" } }, null, 2),
         "src/index.js": `const express = require('express')\nconst app = express()\napp.use(express.json())\napp.get('/', (req, res) => res.json({ message: 'Hello Express!' }))\napp.listen(5000, '0.0.0.0', () => console.log('Server running on port 5000'))`
       }
+    },
+    vue: {
+      dirs: ["src", "src/components", "public"],
+      files: {
+        "package.json": JSON.stringify({ name: "vue-app", version: "1.0.0", scripts: { dev: "vite", build: "vite build" }, dependencies: { vue: "^3.4.0" }, devDependencies: { "@vitejs/plugin-vue": "^5.0.0", vite: "^5.0.0" } }, null, 2),
+        "src/App.vue": `<template><div><h1>Vue App</h1><button @click="count++">Count: {{ count }}</button></div></template>\n<script setup>\nimport { ref } from 'vue'\nconst count = ref(0)\n</script>`,
+        "index.html": `<!DOCTYPE html><html><head><title>Vue App</title></head><body><div id="app"></div><script type="module" src="/src/main.js"></script></body></html>`,
+        "src/main.js": `import { createApp } from 'vue'\nimport App from './App.vue'\ncreateApp(App).mount('#app')`
+      }
+    },
+    nextjs: {
+      dirs: ["app", "public"],
+      files: {
+        "package.json": JSON.stringify({ name: "nextjs-app", version: "1.0.0", scripts: { dev: "next dev", build: "next build", start: "next start" }, dependencies: { next: "^14.0.0", react: "^18.2.0", "react-dom": "^18.2.0" } }, null, 2),
+        "app/page.tsx": `export default function Home() {\n  return <main><h1>Next.js App</h1></main>\n}`,
+        "app/layout.tsx": `export default function RootLayout({ children }: { children: React.ReactNode }) {\n  return <html lang="en"><body>{children}</body></html>\n}`
+      }
+    },
+    fastapi: {
+      dirs: ["app", "app/routers"],
+      files: {
+        "requirements.txt": "fastapi>=0.109.0\nuvicorn>=0.27.0",
+        "app/main.py": `from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get("/")\ndef read_root():\n    return {"message": "Hello FastAPI!"}\n\nif __name__ == "__main__":\n    import uvicorn\n    uvicorn.run(app, host="0.0.0.0", port=5000)`
+      }
     }
   };
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { framework = "react", projectName = "my-app", outputDir = "/tmp/agent-projects" } = params;
+    // Accept multiple parameter variations
+    const framework = params.framework || params.type || params.template || params.stack || "react";
+    const projectName = params.projectName || params.project_name || params.name || params.app_name || "my-app";
+    const outputDir = params.outputDir || params.output_dir || params.directory || params.path || "/tmp/agent-projects";
 
-    const template = this.templates[framework.toLowerCase()];
+    const normalizedFramework = framework.toLowerCase().replace(/[.-]/g, "");
+    const template = this.templates[normalizedFramework] || this.templates[framework.toLowerCase()];
     if (!template) {
       return this.createResult(false, null, "", `Unknown framework: ${framework}. Available: ${Object.keys(this.templates).join(", ")}`, startTime);
     }
@@ -797,10 +853,15 @@ export class GenerateTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    const { type = "image", prompt, style, size = "1024x1024", outputPath } = params;
+    // Accept multiple parameter variations
+    const type = params.type || params.media_type || params.format || params.kind || "image";
+    const prompt = params.prompt || params.description || params.text || params.input || params.query;
+    const style = params.style || params.theme || params.aesthetic;
+    const size = params.size || params.dimensions || params.resolution || "1024x1024";
+    const outputPath = params.outputPath || params.output_path || params.path;
 
     if (!prompt) {
-      return this.createResult(false, null, "", "Prompt is required for generation", startTime);
+      return this.createResult(false, null, "", "Prompt/description is required. Use: { prompt: 'your description' }", startTime);
     }
 
     try {
@@ -855,12 +916,14 @@ export class ResearchTool extends BaseTool {
 
   async execute(params: Record<string, any>): Promise<ToolResult> {
     const startTime = Date.now();
-    // Accept both 'query' and 'topic' as the research query (LLM may use either)
-    const query = params.query || params.topic;
-    const { maxPages = this.maxPages, extractContent = true, concurrencyLimit = 3 } = params;
+    // Accept multiple parameter variations
+    const query = params.query || params.topic || params.subject || params.search || params.question || params.input;
+    const maxPages = params.maxPages || params.max_pages || params.limit || params.pages || this.maxPages;
+    const extractContent = params.extractContent !== false && params.extract_content !== false;
+    const concurrencyLimit = params.concurrencyLimit || params.concurrency_limit || params.parallel || 3;
 
     if (!query || typeof query !== "string") {
-      return this.createResult(false, null, "", "Research query or topic is required", startTime);
+      return this.createResult(false, null, "", "Research query/topic is required. Use: { query: 'your topic' }", startTime);
     }
 
     try {
