@@ -468,7 +468,12 @@ export class DocumentTool extends BaseTool {
         case "powerpoint":
         case "presentation":
         case "slides":
-          const slides = params.slides || params.content || params.pages || [];
+          // Handle slides array or object with slides property
+          let slides = params.slides || params.pages || [];
+          if (!Array.isArray(slides) && params.content) {
+            slides = Array.isArray(params.content) ? params.content : (params.content.slides || []);
+          }
+          if (!Array.isArray(slides)) slides = [];
           const theme = params.theme || params.style || params.design;
           result = await this.creator.createPptx(title, slides, theme, filename);
           break;
@@ -477,7 +482,12 @@ export class DocumentTool extends BaseTool {
         case "word":
         case "doc":
         case "document":
-          const sections = params.sections || params.content || params.paragraphs || [];
+          // Handle sections array or object with sections property
+          let sections = params.sections || params.paragraphs || [];
+          if (!Array.isArray(sections) && params.content) {
+            sections = Array.isArray(params.content) ? params.content : (params.content.sections || []);
+          }
+          if (!Array.isArray(sections)) sections = [];
           const author = params.author || params.creator || params.by;
           result = await this.creator.createDocx(title, sections, author, filename);
           break;
@@ -486,7 +496,12 @@ export class DocumentTool extends BaseTool {
         case "excel":
         case "spreadsheet":
         case "xls":
-          const sheets = params.sheets || params.content || params.data || [];
+          // Handle sheets array or object with sheets property
+          let sheets = params.sheets || params.data || [];
+          if (!Array.isArray(sheets) && params.content) {
+            sheets = Array.isArray(params.content) ? params.content : (params.content.sheets || []);
+          }
+          if (!Array.isArray(sheets)) sheets = [];
           result = await this.creator.createXlsx(title, sheets, filename);
           break;
 
