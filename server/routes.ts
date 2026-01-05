@@ -42,6 +42,7 @@ import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } fr
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
+import { runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError } from "./services/pythonAgentClient";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -78,6 +79,96 @@ export async function registerRoutes(
   app.use("/api/chat", createChatRoutes());
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api", createSandboxAgentRouter());
+
+  // ===== Python Agent v5.0 Endpoints =====
+  
+  // POST /api/python-agent/run - Execute the Python agent
+  app.post("/api/python-agent/run", async (req: Request, res: Response) => {
+    try {
+      const { input, verbose = false, timeout = 60 } = req.body;
+      
+      if (!input || typeof input !== "string") {
+        return res.status(400).json({
+          success: false,
+          error: "Missing or invalid 'input' field",
+        });
+      }
+      
+      const result = await runAgent(input, { verbose, timeout });
+      res.json(result);
+    } catch (error: any) {
+      console.error("[PythonAgent] Run error:", error);
+      
+      if (error instanceof PythonAgentClientError) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({
+          success: false,
+          error: error.message,
+          details: error.details,
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to execute Python agent",
+      });
+    }
+  });
+
+  // GET /api/python-agent/tools - List available tools
+  app.get("/api/python-agent/tools", async (_req: Request, res: Response) => {
+    try {
+      const tools = await getTools();
+      res.json({
+        success: true,
+        data: tools,
+      });
+    } catch (error: any) {
+      console.error("[PythonAgent] Tools error:", error);
+      
+      if (error instanceof PythonAgentClientError) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({
+          success: false,
+          error: error.message,
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get Python agent tools",
+      });
+    }
+  });
+
+  // GET /api/python-agent/health - Check Python agent service health
+  app.get("/api/python-agent/health", async (_req: Request, res: Response) => {
+    try {
+      const health = await pythonAgentHealthCheck();
+      res.json({
+        success: true,
+        data: health,
+      });
+    } catch (error: any) {
+      console.error("[PythonAgent] Health check error:", error);
+      
+      res.status(503).json({
+        success: false,
+        error: error.message || "Python agent service unavailable",
+        status: "unhealthy",
+      });
+    }
+  });
+
+  // GET /api/python-agent/status - Quick availability check
+  app.get("/api/python-agent/status", async (_req: Request, res: Response) => {
+    const available = await isServiceAvailable();
+    res.json({
+      success: true,
+      available,
+      service: "python-agent-v5",
+    });
+  });
 
   // ===== Public Models Endpoint (for user-facing selector) =====
   app.get("/api/models/available", async (req: Request, res: Response) => {
