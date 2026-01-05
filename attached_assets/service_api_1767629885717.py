@@ -13,9 +13,6 @@ Endpoints:
 - POST /search        - Búsqueda web
 - POST /document      - Crear documento
 - POST /execute       - Ejecutar herramienta directa
-- GET  /files         - Listar archivos creados
-- GET  /files/{name}  - Descargar archivo
-- DELETE /cache       - Limpiar caché
 """
 
 import asyncio
@@ -26,8 +23,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 
-# Añadir el directorio actual al path para importar el agente
-sys.path.insert(0, str(Path(__file__).parent))
+# Añadir el directorio padre al path para importar el agente
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Instalar dependencias del servidor
 import subprocess
@@ -42,8 +39,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 
-# Importar el agente (nombre del archivo en el proyecto)
-from agent_v5 import (
+# Importar el agente
+from agente_ia_v5 import (
     Agent, AgentConfig, VERSION, OUTPUT_DIR, SCREENSHOTS_DIR,
     cache, browser, viz
 )
@@ -126,7 +123,7 @@ async def lifespan(app: FastAPI):
     # Inicializar agente
     agent = Agent(AgentConfig(
         name="Agente IA v5.0 API",
-        verbose=False,
+        verbose=False,  # Menos verbose en modo API
         max_iterations=100,
         timeout=60
     ))
@@ -179,9 +176,7 @@ async def root():
             "document": "POST /document - Crear documento",
             "execute": "POST /execute - Ejecutar herramienta",
             "status": "GET /status - Estado del agente",
-            "health": "GET /health - Health check",
-            "files": "GET /files - Listar archivos creados",
-            "cache": "DELETE /cache - Limpiar caché"
+            "health": "GET /health - Health check"
         }
     }
 
@@ -247,6 +242,7 @@ async def run_agent(request: RunRequest):
     if not agent:
         raise HTTPException(status_code=503, detail="Agente no inicializado")
     
+    # Configurar verbosidad temporal
     original_verbose = agent.config.verbose
     agent.config.verbose = request.verbose
     
@@ -255,6 +251,7 @@ async def run_agent(request: RunRequest):
     try:
         result = await agent.run(request.message)
         
+        # Recopilar archivos creados
         files_created = []
         screenshots = []
         
@@ -401,6 +398,7 @@ async def execute_tool(request: ExecuteRequest):
 @app.get("/files/{filename}", tags=["Files"])
 async def download_file(filename: str):
     """Descargar archivo creado."""
+    # Buscar en output y screenshots
     for directory in [OUTPUT_DIR, SCREENSHOTS_DIR]:
         filepath = directory / filename
         if filepath.exists():

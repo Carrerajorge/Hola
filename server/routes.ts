@@ -42,7 +42,11 @@ import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } fr
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
-import { runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError } from "./services/pythonAgentClient";
+import { 
+  runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError,
+  browse as pythonAgentBrowse, search as pythonAgentSearch, createDocument as pythonAgentCreateDocument,
+  executeTool as pythonAgentExecuteTool, listFiles as pythonAgentListFiles, getStatus as pythonAgentGetStatus
+} from "./services/pythonAgentClient";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -168,6 +172,84 @@ export async function registerRoutes(
       available,
       service: "python-agent-v5",
     });
+  });
+
+  // POST /api/python-agent/browse - Browse URL with Python agent
+  app.post("/api/python-agent/browse", async (req: Request, res: Response) => {
+    try {
+      const result = await pythonAgentBrowse(req.body);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      if (error instanceof PythonAgentClientError) {
+        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+      }
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // POST /api/python-agent/search - Web search with Python agent
+  app.post("/api/python-agent/search", async (req: Request, res: Response) => {
+    try {
+      const result = await pythonAgentSearch(req.body);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      if (error instanceof PythonAgentClientError) {
+        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+      }
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // POST /api/python-agent/document - Create document with Python agent
+  app.post("/api/python-agent/document", async (req: Request, res: Response) => {
+    try {
+      const result = await pythonAgentCreateDocument(req.body);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      if (error instanceof PythonAgentClientError) {
+        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+      }
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // POST /api/python-agent/execute - Execute specific tool
+  app.post("/api/python-agent/execute", async (req: Request, res: Response) => {
+    try {
+      const result = await pythonAgentExecuteTool(req.body);
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      if (error instanceof PythonAgentClientError) {
+        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+      }
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET /api/python-agent/files - List files created by Python agent
+  app.get("/api/python-agent/files", async (_req: Request, res: Response) => {
+    try {
+      const result = await pythonAgentListFiles();
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      if (error instanceof PythonAgentClientError) {
+        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+      }
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET /api/python-agent/agent-status - Detailed agent status
+  app.get("/api/python-agent/agent-status", async (_req: Request, res: Response) => {
+    try {
+      const result = await pythonAgentGetStatus();
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      if (error instanceof PythonAgentClientError) {
+        return res.status(error.statusCode || 500).json({ success: false, error: error.message });
+      }
+      res.status(500).json({ success: false, error: error.message });
+    }
   });
 
   // ===== Public Models Endpoint (for user-facing selector) =====

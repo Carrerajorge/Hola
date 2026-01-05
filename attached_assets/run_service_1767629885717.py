@@ -11,7 +11,7 @@ from pathlib import Path
 def main():
     # Asegurar que estamos en el directorio correcto
     script_dir = Path(__file__).parent
-    os.chdir(script_dir)
+    os.chdir(script_dir.parent)  # Ir al directorio agente-ia-v5
     
     print("🔧 Verificando dependencias...")
     
@@ -28,7 +28,8 @@ def main():
     print()
     
     # Importar y ejecutar el servicio
-    from service import run_server
+    sys.path.insert(0, str(script_dir.parent))
+    from server.service import run_server
     
     run_server(host="0.0.0.0", port=8081)
 

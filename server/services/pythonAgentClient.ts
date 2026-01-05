@@ -223,6 +223,249 @@ export async function isServiceAvailable(): Promise<boolean> {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXTENDED API - Additional endpoints for Python Agent v5.0
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface BrowseRequest {
+  url: string;
+  screenshot?: boolean;
+  scroll?: boolean;
+  wait_for?: 'load' | 'domcontentloaded' | 'networkidle';
+}
+
+interface BrowseResponse {
+  success: boolean;
+  data: any;
+  message: string;
+  error: string | null;
+  screenshots: string[];
+}
+
+interface SearchRequest {
+  query: string;
+  num_results?: number;
+  use_browser?: boolean;
+}
+
+interface SearchResponse {
+  success: boolean;
+  query: string;
+  results: Array<{ title: string; url: string; snippet: string }>;
+  total: number;
+  cached: boolean;
+}
+
+interface DocumentRequest {
+  doc_type: 'pptx' | 'docx' | 'xlsx';
+  title: string;
+  content: any;
+  theme?: string;
+  filename?: string;
+}
+
+interface DocumentResponse {
+  success: boolean;
+  message: string;
+  files_created: string[];
+  error: string | null;
+}
+
+interface ExecuteRequest {
+  tool: string;
+  params: Record<string, any>;
+}
+
+interface ExecuteResponse {
+  success: boolean;
+  tool: string;
+  data: any;
+  message: string;
+  error: string | null;
+  files_created: string[];
+  screenshots: string[];
+  execution_time: number;
+}
+
+interface FileInfo {
+  name: string;
+  category: string;
+  size: number;
+  modified: string;
+  download_url: string;
+}
+
+interface FilesResponse {
+  files: FileInfo[];
+  count: number;
+}
+
+/**
+ * Browse a URL using the Python agent's browser.
+ */
+export async function browse(request: BrowseRequest): Promise<BrowseResponse> {
+  try {
+    const response = await fetchWithTimeout(`${PYTHON_AGENT_BASE_URL}/browse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      timeout: 60000,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new PythonAgentClientError(
+        errorData.detail || `HTTP ${response.status}`,
+        response.status,
+        errorData
+      );
+    }
+    
+    return await response.json() as BrowseResponse;
+  } catch (error: any) {
+    if (error instanceof PythonAgentClientError) throw error;
+    throw new PythonAgentClientError(`Browse failed: ${error.message}`);
+  }
+}
+
+/**
+ * Search the web using the Python agent.
+ */
+export async function search(request: SearchRequest): Promise<SearchResponse> {
+  try {
+    const response = await fetchWithTimeout(`${PYTHON_AGENT_BASE_URL}/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      timeout: 30000,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new PythonAgentClientError(
+        errorData.detail || `HTTP ${response.status}`,
+        response.status,
+        errorData
+      );
+    }
+    
+    return await response.json() as SearchResponse;
+  } catch (error: any) {
+    if (error instanceof PythonAgentClientError) throw error;
+    throw new PythonAgentClientError(`Search failed: ${error.message}`);
+  }
+}
+
+/**
+ * Create a document using the Python agent.
+ */
+export async function createDocument(request: DocumentRequest): Promise<DocumentResponse> {
+  try {
+    const response = await fetchWithTimeout(`${PYTHON_AGENT_BASE_URL}/document`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      timeout: 120000,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new PythonAgentClientError(
+        errorData.detail || `HTTP ${response.status}`,
+        response.status,
+        errorData
+      );
+    }
+    
+    return await response.json() as DocumentResponse;
+  } catch (error: any) {
+    if (error instanceof PythonAgentClientError) throw error;
+    throw new PythonAgentClientError(`Document creation failed: ${error.message}`);
+  }
+}
+
+/**
+ * Execute a specific tool directly.
+ */
+export async function executeTool(request: ExecuteRequest): Promise<ExecuteResponse> {
+  try {
+    const response = await fetchWithTimeout(`${PYTHON_AGENT_BASE_URL}/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      timeout: 60000,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new PythonAgentClientError(
+        errorData.detail || `HTTP ${response.status}`,
+        response.status,
+        errorData
+      );
+    }
+    
+    return await response.json() as ExecuteResponse;
+  } catch (error: any) {
+    if (error instanceof PythonAgentClientError) throw error;
+    throw new PythonAgentClientError(`Tool execution failed: ${error.message}`);
+  }
+}
+
+/**
+ * List files created by the Python agent.
+ */
+export async function listFiles(): Promise<FilesResponse> {
+  try {
+    const response = await fetchWithTimeout(`${PYTHON_AGENT_BASE_URL}/files`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 10000,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new PythonAgentClientError(
+        errorData.detail || `HTTP ${response.status}`,
+        response.status,
+        errorData
+      );
+    }
+    
+    return await response.json() as FilesResponse;
+  } catch (error: any) {
+    if (error instanceof PythonAgentClientError) throw error;
+    throw new PythonAgentClientError(`List files failed: ${error.message}`);
+  }
+}
+
+/**
+ * Get agent status.
+ */
+export async function getStatus(): Promise<any> {
+  try {
+    const response = await fetchWithTimeout(`${PYTHON_AGENT_BASE_URL}/status`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 10000,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new PythonAgentClientError(
+        errorData.detail || `HTTP ${response.status}`,
+        response.status,
+        errorData
+      );
+    }
+    
+    return await response.json();
+  } catch (error: any) {
+    if (error instanceof PythonAgentClientError) throw error;
+    throw new PythonAgentClientError(`Get status failed: ${error.message}`);
+  }
+}
+
 export type {
   RunAgentRequest,
   RunAgentResponse,
@@ -230,6 +473,16 @@ export type {
   ToolsResponse,
   HealthResponse,
   AgentStatus,
+  BrowseRequest,
+  BrowseResponse,
+  SearchRequest,
+  SearchResponse,
+  DocumentRequest,
+  DocumentResponse,
+  ExecuteRequest,
+  ExecuteResponse,
+  FileInfo,
+  FilesResponse,
 };
 
 export { PythonAgentClientError };
