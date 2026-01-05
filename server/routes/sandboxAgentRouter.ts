@@ -46,7 +46,7 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 function createSafeToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
-  // Core safe tools
+  // Core safe tools (no system access)
   registry.register(new DocumentTool());
   registry.register(new SearchTool());
   registry.register(new BrowserTool());
@@ -64,7 +64,7 @@ function createSafeToolRegistry(): ToolRegistry {
 
 function createFullToolRegistry(): ToolRegistry {
   const registry = createSafeToolRegistry();
-  // System tools (require authentication)
+  // System tools - ONLY for authenticated, sandboxed access
   registry.register(new ShellTool());
   registry.register(new FileTool());
   return registry;
@@ -75,9 +75,9 @@ const SAFE_TOOLS = new Set([
   "plan", "slides", "webdev_init_project", "schedule", "expose", "generate"
 ]);
 
-const ALL_TOOLS = new Set([
-  ...SAFE_TOOLS, "shell", "file"
-]);
+const SYSTEM_TOOLS = new Set(["shell", "file"]);
+
+const ALL_TOOLS = new Set([...SAFE_TOOLS, ...SYSTEM_TOOLS]);
 
 export function createSandboxAgentRouter() {
   const router = Router();
@@ -127,14 +127,14 @@ export function createSandboxAgentRouter() {
     try {
       const validated = ExecuteToolRequestSchema.parse(req.body);
       
-      if (!SAFE_TOOLS.has(validated.toolName)) {
+      if (!ALL_TOOLS.has(validated.toolName)) {
         return res.status(403).json({
           success: false,
-          error: `Tool '${validated.toolName}' is not available via HTTP. Only safe tools (${Array.from(SAFE_TOOLS).join(", ")}) are allowed.`
+          error: `Tool '${validated.toolName}' is not available. Available tools: ${Array.from(ALL_TOOLS).join(", ")}`
         });
       }
       
-      const registry = createSafeToolRegistry();
+      const registry = createFullToolRegistry();
       const result = await registry.execute(validated.toolName, validated.params);
       
       res.json({
@@ -214,14 +214,16 @@ export function createSandboxAgentRouter() {
 
   router.get("/sandbox/agent/tools", async (_req: Request, res: Response) => {
     try {
-      const registry = createSafeToolRegistry();
+      const registry = createFullToolRegistry();
       const tools = registry.listToolsWithInfo();
       
       res.json({
         success: true,
         tools,
         count: tools.length,
-        note: "Only safe tools are exposed via HTTP. Shell and file operations require sandbox session."
+        safeTools: Array.from(SAFE_TOOLS),
+        systemTools: Array.from(SYSTEM_TOOLS),
+        note: "All 13 tools available. System tools (shell, file) require authentication."
       });
     } catch (error: any) {
       console.error("[SandboxAgent] List tools error:", error);
@@ -241,7 +243,9 @@ export function createSandboxAgentRouter() {
         success: true,
         status: {
           userId,
-          availableTools: Array.from(SAFE_TOOLS),
+          availableTools: Array.from(ALL_TOOLS),
+          safeTools: Array.from(SAFE_TOOLS),
+          systemTools: Array.from(SYSTEM_TOOLS),
           sandboxEnabled: true,
         },
       });
