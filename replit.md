@@ -65,6 +65,27 @@ Preferred communication style: Simple, everyday language.
     - `POST /api/sandbox/agent/detect-intent` - Detect intent from text
     - `GET /api/sandbox/agent/tools` - List available tools
     - `POST/GET/DELETE /api/sandbox/session` - Session management
+- **Python Agent v5.0** (Enterprise Edition): Standalone Python-based agent system with advanced features.
+  - **Location**: `server/agent/python_agent/`
+  - **Core Features**:
+    - `agent_v5.py` - Full agent implementation with 8 tools (shell, file, python, search, browser, document, message, research)
+    - Multi-level cache (Memory + Disk) with LRU eviction
+    - Per-domain rate limiting with token bucket algorithm
+    - Rich console visualization with real-time progress
+    - Browser pool with Playwright/Selenium/HTTPX fallback
+    - Security guard with command/URL validation
+    - Pattern-based intent detection for 14 intents (EN/ES)
+  - **HTTP Service** (`service.py`):
+    - FastAPI-based REST API on port 8081
+    - Endpoints: `/run`, `/health`, `/tools`, `/status`
+    - CORS enabled, async support
+  - **API Routes** (via main Express server):
+    - `POST /api/python-agent/run` - Execute Python agent
+    - `GET /api/python-agent/tools` - List Python agent tools
+    - `GET /api/python-agent/health` - Health check
+    - `GET /api/python-agent/status` - Quick availability check
+  - **Document Generation**: PowerPoint, Word, Excel with premium themes
+  - **Usage**: Start service with `cd server/agent/python_agent && python run_service.py`
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt and multi-tenant validation.
