@@ -573,7 +573,7 @@ export class SlidesTool extends BaseTool {
       const content = outline || { slides: [{ title: title || topic, content: topic }] };
       
       return await docTool.execute({
-        docType: "pptx",
+        type: "pptx",
         title: title || topic,
         content,
         theme,
