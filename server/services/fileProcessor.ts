@@ -61,6 +61,10 @@ const MIME_TO_CATEGORY: Record<string, FileCategory> = {
   "image/gif": "image",
   "image/webp": "image",
   "image/svg+xml": "image",
+  "image/bmp": "image",
+  "image/tiff": "image",
+  "image/x-icon": "image",
+  "image/avif": "image",
   "application/zip": "archive",
   "application/x-zip-compressed": "archive",
   "application/x-tar": "archive",
@@ -92,6 +96,11 @@ export function detectMimeType(filename: string, content?: Buffer): string {
     ".gif": "image/gif",
     ".webp": "image/webp",
     ".svg": "image/svg+xml",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+    ".ico": "image/x-icon",
+    ".avif": "image/avif",
     ".zip": "application/zip",
     ".tar": "application/x-tar",
     ".gz": "application/gzip",
@@ -128,12 +137,20 @@ export function detectMimeType(filename: string, content?: Buffer): string {
   }
   
   if (content && content.length >= 4) {
-    const header = content.slice(0, 4);
+    const header = content.slice(0, 12);
     if (header[0] === 0x50 && header[1] === 0x4B) return "application/zip";
     if (header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46) return "application/pdf";
     if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) return "image/png";
     if (header[0] === 0xFF && header[1] === 0xD8) return "image/jpeg";
     if (header[0] === 0x47 && header[1] === 0x49 && header[2] === 0x46) return "image/gif";
+    if (header[0] === 0x42 && header[1] === 0x4D) return "image/bmp";
+    if ((header[0] === 0x49 && header[1] === 0x49 && header[2] === 0x2A && header[3] === 0x00) ||
+        (header[0] === 0x4D && header[1] === 0x4D && header[2] === 0x00 && header[3] === 0x2A)) return "image/tiff";
+    if (header[0] === 0x00 && header[1] === 0x00 && header[2] === 0x01 && header[3] === 0x00) return "image/x-icon";
+    if (content.length >= 12 && header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70 &&
+        header[8] === 0x61 && header[9] === 0x76 && header[10] === 0x69 && header[11] === 0x66) return "image/avif";
+    if (content.length >= 12 && header.slice(0, 4).toString() === "RIFF" && 
+        content.slice(8, 12).toString() === "WEBP") return "image/webp";
   }
   
   return "application/octet-stream";
