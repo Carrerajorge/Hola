@@ -1,4 +1,5 @@
-import PptxGenJS from "pptxgenjs";
+import pptxgen from "pptxgenjs";
+const PptxGenJS = (pptxgen as any).default || pptxgen;
 import {
   Document,
   Packer,
