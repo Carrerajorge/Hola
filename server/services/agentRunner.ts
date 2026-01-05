@@ -1,5 +1,7 @@
 import { EventEmitter } from "events";
 import { nanoid } from "nanoid";
+import { defaultToolRegistry, ToolRegistry } from "../agent/sandbox/tools";
+import type { ToolResult as SandboxToolResult } from "../agent/sandbox/agentTypes";
 
 export interface AgentState {
   objective: string;
@@ -318,6 +320,10 @@ export class AgentRunner extends EventEmitter {
         observations: this.state!.observations.slice(-3),
       };
 
+      // Get all available tools from the registry
+      const availableTools = defaultToolRegistry.listToolsWithInfo();
+      const toolsDescription = availableTools.map(t => `- ${t.name}: ${t.description}`).join("\n");
+
       const prompt = `Eres un agente autónomo ejecutando una tarea.
 
 Objetivo: ${context.objective}
@@ -327,15 +333,21 @@ Acciones previas: ${JSON.stringify(context.previousActions)}
 Observaciones: ${context.observations.join("\n---\n")}
 
 Herramientas disponibles:
-- web_search(query: string): Busca información en la web
-- open_url(url: string): Navega a una URL y extrae contenido
-- extract_text(content: string): Extrae y procesa texto
-- final_answer(answer: string): Devuelve la respuesta final
+${toolsDescription}
+- final_answer(answer: string): Devuelve la respuesta final al usuario
+
+IMPORTANTE - Parámetros de herramientas:
+- slides: {"title": "Título", "slides": [{"title": "Slide 1", "content": "Contenido"}, ...], "theme": "modern"}
+- document: {"type": "docx", "title": "Título", "content": "Contenido del documento"}
+- search: {"query": "búsqueda", "mode": "quick|deep"}
+- browser: {"url": "https://...", "action": "extract"}
+- file: {"operation": "read|write|list|delete", "path": "ruta", "content": "para write"}
+- shell: {"command": "comando a ejecutar"}
 
 Decide la siguiente acción. Responde SOLO con JSON (sin markdown):
 {"action":"descripción","tool":"nombre_herramienta","input":{"param":"valor"}}
 
-Si ya tienes suficiente información, usa final_answer.`;
+Si ya tienes suficiente información para responder, usa final_answer.`;
 
       const result = await geminiChat(
         [{ role: "user", parts: [{ text: prompt }] }],
@@ -364,9 +376,64 @@ Si ya tienes suficiente información, usa final_answer.`;
 
   private heuristicNextAction(): { action: string; tool: string; input: Record<string, any> } {
     const objective = this.state!.objective.toLowerCase();
+    const originalObjective = this.state!.objective;
     const hasObservations = this.state!.observations.length > 0;
     const currentStep = this.state!.currentStep;
 
+    // Check for presentation/slides request
+    if (/presentaci[oó]n|slides?|pptx|powerpoint|diapositivas/i.test(objective) && !this.state!.toolsUsed.includes("slides")) {
+      const titleMatch = originalObjective.match(/sobre\s+(.+?)(?:\s+con|\s+de\s+\d+|\.|$)/i);
+      const slideCountMatch = originalObjective.match(/(\d+)\s*(?:slides?|diapositivas)/i);
+      const slideCount = slideCountMatch ? parseInt(slideCountMatch[1]) : 3;
+      const topic = titleMatch ? titleMatch[1].trim() : originalObjective.replace(/crea|genera|haz|make|create|una|presentaci[oó]n|sobre|de|slides/gi, "").trim();
+      
+      const slides = [];
+      for (let i = 0; i < slideCount; i++) {
+        slides.push({
+          title: i === 0 ? `Introducción a ${topic}` : i === slideCount - 1 ? "Conclusiones" : `Punto ${i}`,
+          content: `Contenido sobre ${topic}`
+        });
+      }
+      
+      return { 
+        action: "Create presentation", 
+        tool: "slides", 
+        input: { title: `Presentación sobre ${topic}`, slides, theme: "modern" } 
+      };
+    }
+
+    // Check for document request
+    if (/documento|document|docx|word|informe|report|carta|letter/i.test(objective) && !this.state!.toolsUsed.includes("document")) {
+      const titleMatch = originalObjective.match(/(?:sobre|titled?|llamad[oa]?)\s+["']?(.+?)["']?(?:\s+con|\.|$)/i);
+      const topic = titleMatch ? titleMatch[1].trim() : "Documento";
+      
+      return { 
+        action: "Create document", 
+        tool: "document", 
+        input: { type: "docx", title: topic, content: `Este es un documento sobre ${topic}.` } 
+      };
+    }
+
+    // Check for file listing request
+    if (/lista.*archivos|list.*files|directorio|directory|ls\b|mostrar archivos/i.test(objective) && !this.state!.toolsUsed.includes("file")) {
+      return { 
+        action: "List files in directory", 
+        tool: "file", 
+        input: { operation: "list", path: "." } 
+      };
+    }
+
+    // Check for shell command request
+    if (/ejecut[ae]|run|comando|command|shell|terminal/i.test(objective) && !this.state!.toolsUsed.includes("shell")) {
+      const cmdMatch = originalObjective.match(/["'`](.+?)["'`]/);
+      return { 
+        action: "Execute shell command", 
+        tool: "shell", 
+        input: { command: cmdMatch ? cmdMatch[1] : "echo 'Hello World'" } 
+      };
+    }
+
+    // If we have observations and enough steps, generate final answer
     if (hasObservations && currentStep >= 2) {
       return { 
         action: "Generate final answer from observations", 
@@ -375,14 +442,16 @@ Si ya tienes suficiente información, usa final_answer.`;
       };
     }
 
+    // Check for URL in objective
     const urlMatch = objective.match(/https?:\/\/[^\s]+/);
-    if (urlMatch && !this.state!.toolsUsed.includes("open_url")) {
-      return { action: "Navigate to URL", tool: "open_url", input: { url: urlMatch[0] } };
+    if (urlMatch && !this.state!.toolsUsed.includes("browser")) {
+      return { action: "Navigate to URL", tool: "browser", input: { url: urlMatch[0], action: "extract" } };
     }
 
-    if (!this.state!.toolsUsed.includes("web_search")) {
-      const searchQuery = objective.replace(/busca|search|encuentra|find|investiga/gi, "").trim().slice(0, 100);
-      return { action: "Search for information", tool: "web_search", input: { query: searchQuery || objective.slice(0, 100) } };
+    // Default to search if no specific tool matched
+    if (!this.state!.toolsUsed.includes("search")) {
+      const searchQuery = objective.replace(/busca|search|encuentra|find|investiga|informaci[oó]n|dame|give me/gi, "").trim().slice(0, 100);
+      return { action: "Search for information", tool: "search", input: { query: searchQuery || objective.slice(0, 100), mode: "quick" } };
     }
 
     return { 
@@ -395,6 +464,76 @@ Si ya tienes suficiente información, usa final_answer.`;
   private async executeTool(toolName: string, input: Record<string, any>): Promise<ToolResult> {
     this.logStructured("debug", "tool_executing", { run_id: this.runId, tool: toolName, input });
 
+    // Handle special internal tools first
+    if (toolName === "final_answer") {
+      return { success: true, data: input.answer || input.response || "Tarea completada" };
+    }
+
+    // Handle extract_text locally (doesn't need sandbox tool)
+    if (toolName === "extract_text") {
+      return this.toolExtractText(input.content || input.html || input.markdown || input.text);
+    }
+
+    // Map some common tool aliases
+    const toolAliases: Record<string, string> = {
+      "web_search": "search",
+      "open_url": "browser",
+      "create_presentation": "slides",
+      "create_document": "document",
+      "create_pptx": "slides",
+      "create_docx": "document",
+      "run_command": "shell",
+      "execute_shell": "shell",
+      "read_file": "file",
+      "write_file": "file",
+      "list_files": "file",
+    };
+
+    const actualToolName = toolAliases[toolName] || toolName;
+
+    // Check if tool exists in sandbox registry
+    if (defaultToolRegistry.has(actualToolName)) {
+      this.logStructured("info", "sandbox_tool_executing", { run_id: this.runId, tool: actualToolName, originalTool: toolName });
+      
+      try {
+        // Adapt input for specific tools
+        let adaptedInput = { ...input };
+        
+        // Adapt web_search to search tool format
+        if (toolName === "web_search" && input.query) {
+          adaptedInput = { query: input.query, mode: "quick" };
+        }
+        
+        // Adapt open_url to browser tool format
+        if (toolName === "open_url" && input.url) {
+          adaptedInput = { url: input.url, action: "extract" };
+        }
+        
+        // Adapt file operations
+        if (toolName === "read_file") {
+          adaptedInput = { operation: "read", path: input.path || input.file };
+        }
+        if (toolName === "write_file") {
+          adaptedInput = { operation: "write", path: input.path || input.file, content: input.content };
+        }
+        if (toolName === "list_files") {
+          adaptedInput = { operation: "list", path: input.path || input.directory || "." };
+        }
+
+        const result: SandboxToolResult = await defaultToolRegistry.execute(actualToolName, adaptedInput);
+        
+        return {
+          success: result.success,
+          data: result.data,
+          error: result.error,
+        };
+      } catch (error: any) {
+        this.logStructured("error", "sandbox_tool_error", { run_id: this.runId, tool: actualToolName, error: error.message });
+        return { success: false, error: error.message };
+      }
+    }
+
+    // Fallback to legacy implementations for backward compatibility
     switch (toolName) {
       case "web_search":
         return this.toolWebSearch(input.query);
@@ -405,11 +544,8 @@ Si ya tienes suficiente información, usa final_answer.`;
       case "extract_text":
         return this.toolExtractText(input.content || input.html || input.markdown);
       
-      case "final_answer":
-        return { success: true, data: input.answer || input.response || "Tarea completada" };
-      
       default:
-        return { success: false, error: `Unknown tool: ${toolName}` };
+        return { success: false, error: `Unknown tool: ${toolName}. Available tools: ${defaultToolRegistry.listTools().join(", ")}` };
     }
   }
 
@@ -500,15 +636,27 @@ Si ya tienes suficiente información, usa final_answer.`;
   private heuristicPlan(objective: string): string[] {
     const lower = objective.toLowerCase();
     
+    if (/presentaci[oó]n|slides?|pptx|powerpoint|diapositivas/.test(lower)) {
+      return ["Analizar tema de la presentación", "Crear estructura de slides", "Generar archivo PPTX", "Entregar resultado"];
+    }
+    
+    if (/documento|document|docx|word|informe|report/.test(lower)) {
+      return ["Analizar contenido requerido", "Estructurar documento", "Generar archivo DOCX", "Entregar resultado"];
+    }
+    
+    if (/lista.*archivos|list.*files|directorio|directory/.test(lower)) {
+      return ["Listar archivos del directorio", "Formatear resultado", "Entregar lista"];
+    }
+    
     if (/https?:\/\//.test(objective)) {
       return ["Navegar a la URL", "Extraer contenido", "Analizar información", "Generar respuesta"];
     }
     
-    if (/busca|search|investiga|research|encuentra|find/.test(lower)) {
+    if (/busca|search|investiga|research|encuentra|find|informaci[oó]n/.test(lower)) {
       return ["Buscar información en la web", "Analizar resultados", "Generar respuesta"];
     }
     
-    if (/analiza|analyze|procesa|process/.test(lower)) {
+    if (/analiza|analyze|procesa|process|codigo|code/.test(lower)) {
       return ["Obtener datos", "Procesar información", "Generar análisis"];
     }
     
