@@ -95,7 +95,7 @@ export class ShellTool extends BaseTool {
 
 export class FileTool extends BaseTool {
   name = "file";
-  description = "Performs file operations: read, write, delete, list, mkdir";
+  description = "Performs file operations: read, write, delete, list, mkdir, process (universal file parsing for PDF, DOCX, XLSX, code files, etc.)";
   category: ToolCategory = "file";
 
   private fileManager: FileManager;
@@ -110,7 +110,7 @@ export class FileTool extends BaseTool {
     const { operation, path, content, encoding, recursive, pattern, createDirs } = params;
 
     if (!operation) {
-      return this.createResult(false, null, "", "Operation is required", startTime);
+      return this.createResult(false, null, "", "Operation is required (read, write, delete, list, mkdir, process)", startTime);
     }
 
     try {
@@ -118,6 +118,31 @@ export class FileTool extends BaseTool {
       const filesCreated: string[] = [];
 
       switch (operation) {
+        case "process":
+          if (!path) {
+            return this.createResult(false, null, "", "Path is required for process operation", startTime);
+          }
+          try {
+            const { processFile } = await import("../../services/fileProcessor");
+            const processed = await processFile(path);
+            return this.createResult(
+              processed.success,
+              {
+                filename: processed.filename,
+                mimeType: processed.mimeType,
+                category: processed.category,
+                content: processed.content,
+                metadata: processed.metadata,
+                size: processed.size,
+              },
+              processed.success ? `File processed: ${processed.filename} (${processed.category})` : "Failed to process file",
+              processed.error,
+              startTime
+            );
+          } catch (processError) {
+            return this.createResult(false, null, "", `Process error: ${processError instanceof Error ? processError.message : String(processError)}`, startTime);
+          }
+
         case "read":
           if (!path) {
             return this.createResult(false, null, "", "Path is required for read operation", startTime);
