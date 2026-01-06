@@ -34,6 +34,8 @@ import { createChatRoutes } from "./routes/chatRoutes";
 import { createAgentModeRouter } from "./routes/agentRoutes";
 import { createSandboxAgentRouter } from "./routes/sandboxAgentRouter";
 import { createLangGraphRouter } from "./routes/langGraphRouter";
+import { createRegistryRouter } from "./routes/registryRouter";
+import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
 import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
@@ -87,6 +89,13 @@ export async function registerRoutes(
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api", createSandboxAgentRouter());
   app.use("/api", createLangGraphRouter());
+  app.use("/api", createRegistryRouter());
+
+  initializeAgentSystem({ runSmokeTest: false }).then(result => {
+    console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
+  }).catch(err => {
+    console.error("[AgentSystem] Initialization failed:", err.message);
+  });
 
   // ===== Simple Tools & Agents Endpoints =====
   
