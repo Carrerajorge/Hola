@@ -1,4 +1,6 @@
 import { Router, Request, Response } from "express";
+import * as fs from "fs";
+import * as path from "path";
 import {
   toolRegistry,
   agentRegistry,
@@ -8,6 +10,7 @@ import {
   getSystemStatus,
   isInitialized,
 } from "../agent/registry";
+import { productionWorkflowRunner, classifyIntent, isGenerationIntent } from "../agent/registry/productionWorkflowRunner";
 
 export function createRegistryRouter(): Router {
   const router = Router();
@@ -512,6 +515,228 @@ export function createRegistryRouter(): Router {
         data: {
           tools: Object.fromEntries(toolHealth),
           agents: Object.fromEntries(agentHealth),
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.post("/registry/workflows", async (req: Request, res: Response) => {
+    try {
+      const { query } = req.body;
+      
+      if (!query || typeof query !== "string") {
+        return res.status(400).json({
+          success: false,
+          error: "Query is required",
+        });
+      }
+
+      const result = await productionWorkflowRunner.startRun(query);
+      
+      res.status(202).json({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.get("/registry/workflows/:runId", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const run = productionWorkflowRunner.getRunStatus(runId);
+      
+      if (!run) {
+        return res.status(404).json({
+          success: false,
+          error: `Run ${runId} not found`,
+        });
+      }
+      
+      res.json({
+        success: true,
+        data: {
+          runId: run.runId,
+          requestId: run.requestId,
+          status: run.status,
+          startedAt: run.startedAt,
+          updatedAt: run.updatedAt,
+          completedAt: run.completedAt,
+          currentStepIndex: run.currentStepIndex,
+          totalSteps: run.totalSteps,
+          replansCount: run.replansCount,
+          intent: run.intent,
+          evidence: run.evidence,
+          artifacts: run.artifacts,
+          error: run.error,
+          errorType: run.errorType,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.get("/registry/workflows/:runId/events", async (req: Request, res: Response) => {
+    const { runId } = req.params;
+    
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const sendEvent = (event: any) => {
+      res.write(`event: ${event.eventType}\n`);
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+
+    const existingEvents = productionWorkflowRunner.getRunEvents(runId);
+    for (const event of existingEvents) {
+      sendEvent(event);
+    }
+
+    const eventHandler = (event: any) => {
+      if (event.runId === runId) {
+        sendEvent(event);
+        
+        if (event.eventType === "run_completed" || 
+            event.eventType === "run_failed" || 
+            event.eventType === "run_cancelled") {
+          res.end();
+        }
+      }
+    };
+
+    productionWorkflowRunner.on("event", eventHandler);
+
+    const heartbeatInterval = setInterval(() => {
+      res.write(`event: heartbeat\n`);
+      res.write(`data: {"timestamp":"${new Date().toISOString()}"}\n\n`);
+    }, 15000);
+
+    req.on("close", () => {
+      clearInterval(heartbeatInterval);
+      productionWorkflowRunner.off("event", eventHandler);
+    });
+  });
+
+  router.post("/registry/workflows/:runId/cancel", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const { reason } = req.body;
+      
+      const cancelled = await productionWorkflowRunner.cancelRun(runId, reason);
+      
+      if (!cancelled) {
+        return res.status(404).json({
+          success: false,
+          error: `Run ${runId} not found or already completed`,
+        });
+      }
+      
+      res.json({
+        success: true,
+        message: `Run ${runId} cancelled`,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.get("/artifacts/:filename/download", async (req: Request, res: Response) => {
+    try {
+      const { filename } = req.params;
+      const artifactsDir = path.join(process.cwd(), "artifacts");
+      const filePath = path.join(artifactsDir, filename);
+      
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({
+          success: false,
+          error: "Artifact not found",
+        });
+      }
+      
+      res.download(filePath);
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.get("/artifacts/:filename/preview", async (req: Request, res: Response) => {
+    try {
+      const { filename } = req.params;
+      const artifactsDir = path.join(process.cwd(), "artifacts");
+      const filePath = path.join(artifactsDir, filename);
+      
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({
+          success: false,
+          error: "Artifact not found",
+        });
+      }
+      
+      const ext = path.extname(filename).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".pdf": "application/pdf",
+        ".html": "text/html",
+        ".txt": "text/plain",
+      };
+      
+      const contentType = mimeTypes[ext] || "application/octet-stream";
+      res.type(contentType);
+      res.sendFile(filePath);
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.post("/registry/classify-intent", async (req: Request, res: Response) => {
+    try {
+      const { query } = req.body;
+      
+      if (!query || typeof query !== "string") {
+        return res.status(400).json({
+          success: false,
+          error: "Query is required",
+        });
+      }
+      
+      const intent = classifyIntent(query);
+      const isGeneration = isGenerationIntent(intent);
+      
+      res.json({
+        success: true,
+        data: {
+          query,
+          intent,
+          isGenerationIntent: isGeneration,
         },
       });
     } catch (error: any) {
