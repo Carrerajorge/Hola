@@ -826,76 +826,6 @@ export function Composer({
     );
   };
 
-  const renderQuickActions = () => {
-    if (isDocumentMode || hasContent || isRecording || aiState !== "idle") return null;
-    
-    const sortedTemplates = [...quickActionTemplates].sort((a, b) => {
-      const aIndex = recentTemplates.indexOf(a.id);
-      const bIndex = recentTemplates.indexOf(b.id);
-      if (aIndex === -1 && bIndex === -1) return 0;
-      if (aIndex === -1) return 1;
-      if (bIndex === -1) return -1;
-      return aIndex - bIndex;
-    });
-
-    return (
-      <div className="mb-3 animate-in fade-in slide-in-from-bottom-2 duration-200" data-testid="quick-actions-container">
-        <div className="flex items-center gap-1.5 mb-2">
-          <Sparkles className="h-3 w-3 text-muted-foreground" />
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-            Acciones rápidas
-          </span>
-          {recentTemplates.length > 0 && (
-            <span className="flex items-center gap-0.5 text-[9px] text-muted-foreground/60 ml-auto">
-              <Clock className="h-2.5 w-2.5" />
-              Recientes primero
-            </span>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {sortedTemplates.map((action) => {
-            const IconComponent = action.icon;
-            const isRecent = recentTemplates.includes(action.id);
-            return (
-              <TooltipProvider key={action.id}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => handleQuickAction(action.id, action.template)}
-                      className={cn(
-                        "group inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium",
-                        "border transition-all duration-200 ease-out",
-                        "hover:scale-[1.02] hover:shadow-md active:scale-[0.98]",
-                        action.bgColor,
-                        action.textColor,
-                        action.borderColor,
-                        isRecent && "ring-1 ring-offset-1 ring-offset-background ring-current/20"
-                      )}
-                      data-testid={`quick-action-${action.id}`}
-                    >
-                      <div className={cn(
-                        "flex items-center justify-center w-5 h-5 rounded-md",
-                        "bg-gradient-to-br",
-                        action.color,
-                        "shadow-sm"
-                      )}>
-                        <IconComponent className="h-3 w-3 text-white" />
-                      </div>
-                      <span>{action.label}</span>
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs">
-                    <p>Clic para prefrellenar: "{action.template}..."</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
   const containerClass = isDocumentMode
     ? cn(
         "p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
@@ -1082,8 +1012,6 @@ export function Composer({
           </div>
         )}
 
-        {renderQuickActions()}
-        
         <div className="flex flex-col relative">
           <Textarea
             ref={textareaRef}
