@@ -22,6 +22,20 @@ import { REASONING_TOOLS, reasonTool, reflectTool, verifyTool } from "./reasonin
 import { ORCHESTRATION_TOOLS, orchestrateTool, workflowTool, strategicPlanTool } from "./orchestrationTools";
 import { COMMUNICATION_TOOLS, decideTool, clarifyTool, summarizeTool, explainTool } from "./communicationTools";
 import { ADVANCED_SYSTEM_TOOLS, codeExecuteTool, fileConvertTool, environmentTool, searchSemanticTool } from "./systemTools";
+import { WEB_TOOLS } from "./webTools";
+import { GENERATION_TOOLS } from "./generationTools";
+import { PROCESSING_TOOLS } from "./processingTools";
+import { DATA_TOOLS } from "./dataTools";
+import { DOCUMENT_TOOLS } from "./documentTools";
+import { DEVELOPMENT_TOOLS } from "./developmentTools";
+import { DIAGRAM_TOOLS } from "./diagramTools";
+import { API_TOOLS } from "./apiTools";
+import { PRODUCTIVITY_TOOLS } from "./productivityTools";
+import { SECURITY_TOOLS } from "./securityTools";
+import { AUTOMATION_TOOLS } from "./automationTools";
+import { DATABASE_TOOLS } from "./databaseTools";
+import { MONITORING_TOOLS } from "./monitoringTools";
+import { UTILITY_TOOLS } from "./utilityTools";
 
 const sandboxTools = {
   document: new DocumentTool(),
@@ -326,6 +340,34 @@ export { COMMUNICATION_TOOLS, decideTool, clarifyTool, summarizeTool, explainToo
 
 export { ADVANCED_SYSTEM_TOOLS, codeExecuteTool, fileConvertTool, environmentTool, searchSemanticTool };
 
+export { WEB_TOOLS };
+
+export { GENERATION_TOOLS };
+
+export { PROCESSING_TOOLS };
+
+export { DATA_TOOLS };
+
+export { DOCUMENT_TOOLS };
+
+export { DEVELOPMENT_TOOLS };
+
+export { DIAGRAM_TOOLS };
+
+export { API_TOOLS };
+
+export { PRODUCTIVITY_TOOLS };
+
+export { SECURITY_TOOLS };
+
+export { AUTOMATION_TOOLS };
+
+export { DATABASE_TOOLS };
+
+export { MONITORING_TOOLS };
+
+export { UTILITY_TOOLS };
+
 export const ALL_TOOLS = [
   ...SAFE_TOOLS,
   ...SYSTEM_TOOLS,
@@ -334,17 +376,69 @@ export const ALL_TOOLS = [
   ...ORCHESTRATION_TOOLS,
   ...COMMUNICATION_TOOLS,
   ...ADVANCED_SYSTEM_TOOLS,
+  ...WEB_TOOLS,
+  ...GENERATION_TOOLS,
+  ...PROCESSING_TOOLS,
+  ...DATA_TOOLS,
+  ...DOCUMENT_TOOLS,
+  ...DEVELOPMENT_TOOLS,
+  ...DIAGRAM_TOOLS,
+  ...API_TOOLS,
+  ...PRODUCTIVITY_TOOLS,
+  ...SECURITY_TOOLS,
+  ...AUTOMATION_TOOLS,
+  ...DATABASE_TOOLS,
+  ...MONITORING_TOOLS,
+  ...UTILITY_TOOLS,
 ];
 
-export function getToolsByCategory(
-  includeSafe = true,
-  includeSystem = false,
-  includeMemory = false,
-  includeReasoning = false,
-  includeOrchestration = false,
-  includeCommunication = false,
-  includeAdvancedSystem = false
-) {
+export function getToolsByCategory(options: {
+  includeSafe?: boolean;
+  includeSystem?: boolean;
+  includeMemory?: boolean;
+  includeReasoning?: boolean;
+  includeOrchestration?: boolean;
+  includeCommunication?: boolean;
+  includeAdvancedSystem?: boolean;
+  includeWeb?: boolean;
+  includeGeneration?: boolean;
+  includeProcessing?: boolean;
+  includeData?: boolean;
+  includeDocument?: boolean;
+  includeDevelopment?: boolean;
+  includeDiagram?: boolean;
+  includeApi?: boolean;
+  includeProductivity?: boolean;
+  includeSecurity?: boolean;
+  includeAutomation?: boolean;
+  includeDatabase?: boolean;
+  includeMonitoring?: boolean;
+  includeUtility?: boolean;
+} = {}) {
+  const {
+    includeSafe = true,
+    includeSystem = false,
+    includeMemory = false,
+    includeReasoning = false,
+    includeOrchestration = false,
+    includeCommunication = false,
+    includeAdvancedSystem = false,
+    includeWeb = false,
+    includeGeneration = false,
+    includeProcessing = false,
+    includeData = false,
+    includeDocument = false,
+    includeDevelopment = false,
+    includeDiagram = false,
+    includeApi = false,
+    includeProductivity = false,
+    includeSecurity = false,
+    includeAutomation = false,
+    includeDatabase = false,
+    includeMonitoring = false,
+    includeUtility = false,
+  } = options;
+  
   const tools = [];
   if (includeSafe) tools.push(...SAFE_TOOLS);
   if (includeSystem) tools.push(...SYSTEM_TOOLS);
@@ -353,6 +447,20 @@ export function getToolsByCategory(
   if (includeOrchestration) tools.push(...ORCHESTRATION_TOOLS);
   if (includeCommunication) tools.push(...COMMUNICATION_TOOLS);
   if (includeAdvancedSystem) tools.push(...ADVANCED_SYSTEM_TOOLS);
+  if (includeWeb) tools.push(...WEB_TOOLS);
+  if (includeGeneration) tools.push(...GENERATION_TOOLS);
+  if (includeProcessing) tools.push(...PROCESSING_TOOLS);
+  if (includeData) tools.push(...DATA_TOOLS);
+  if (includeDocument) tools.push(...DOCUMENT_TOOLS);
+  if (includeDevelopment) tools.push(...DEVELOPMENT_TOOLS);
+  if (includeDiagram) tools.push(...DIAGRAM_TOOLS);
+  if (includeApi) tools.push(...API_TOOLS);
+  if (includeProductivity) tools.push(...PRODUCTIVITY_TOOLS);
+  if (includeSecurity) tools.push(...SECURITY_TOOLS);
+  if (includeAutomation) tools.push(...AUTOMATION_TOOLS);
+  if (includeDatabase) tools.push(...DATABASE_TOOLS);
+  if (includeMonitoring) tools.push(...MONITORING_TOOLS);
+  if (includeUtility) tools.push(...UTILITY_TOOLS);
   return tools;
 }
 
