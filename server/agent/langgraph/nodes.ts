@@ -1,9 +1,11 @@
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, BaseMessage } from "@langchain/core/messages";
 import { ToolCall } from "@langchain/core/messages/tool";
+import { DynamicStructuredTool } from "@langchain/core/tools";
 import OpenAI from "openai";
 import { ALL_TOOLS, getToolByName } from "./tools";
 import { memoryStore } from "./memory";
 import type { AgentState } from "./index";
+import { z } from "zod";
 
 const xaiClient = new OpenAI({
   baseURL: "https://api.x.ai/v1",
@@ -11,6 +13,60 @@ const xaiClient = new OpenAI({
 });
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
+
+function validateAndFixToolArgs(
+  tool: DynamicStructuredTool<any>,
+  args: Record<string, any>,
+  userMessage: string
+): { valid: boolean; fixedArgs: Record<string, any>; error?: string; validationErrors?: string[] } {
+  const schema = tool.schema;
+  if (!schema) {
+    return { valid: true, fixedArgs: args };
+  }
+
+  const parseResult = schema.safeParse(args);
+  
+  if (parseResult.success) {
+    return { valid: true, fixedArgs: parseResult.data };
+  }
+
+  const errors = parseResult.error.errors;
+  const validationErrors = errors.map(e => `${e.path.join('.')}: ${e.message}`);
+  const fixedArgs = { ...args };
+  let fixApplied = false;
+
+  for (const error of errors) {
+    const path = error.path[0] as string;
+    
+    if (!path) continue;
+    
+    if (error.code === 'invalid_type' && error.received === 'undefined') {
+      if (['task', 'goal', 'query', 'question', 'content', 'text', 'statement', 'topic'].includes(path)) {
+        fixedArgs[path] = userMessage;
+        fixApplied = true;
+      }
+    }
+  }
+
+  if (fixApplied) {
+    const revalidate = schema.safeParse(fixedArgs);
+    if (revalidate.success) {
+      return { 
+        valid: true, 
+        fixedArgs: revalidate.data, 
+        error: `Auto-fixed: ${validationErrors.join('; ')}`,
+        validationErrors 
+      };
+    }
+  }
+
+  return { 
+    valid: false, 
+    fixedArgs: args, 
+    error: `Schema validation failed: ${validationErrors.join('; ')}`,
+    validationErrors 
+  };
+}
 
 interface ToolDef {
   type: "function";
@@ -154,6 +210,8 @@ export async function executorNode(state: AgentState): Promise<Partial<AgentStat
   const executedTools: Array<{ name: string; success: boolean; latencyMs: number }> = [];
 
   const lastAiMessage = [...messages].reverse().find((m) => m instanceof AIMessage) as AIMessage | undefined;
+  const lastUserMessage = [...messages].reverse().find((m) => m instanceof HumanMessage) as HumanMessage | undefined;
+  const userMessageContent = (lastUserMessage?.content as string) || "";
 
   if (!lastAiMessage?.tool_calls || lastAiMessage.tool_calls.length === 0) {
     return {
@@ -177,8 +235,33 @@ export async function executorNode(state: AgentState): Promise<Partial<AgentStat
       continue;
     }
 
+    const validation = validateAndFixToolArgs(tool, toolCall.args || {}, userMessageContent);
+    
+    if (validation.error) {
+      console.log(`[ExecutorNode] ${toolCall.name}: ${validation.error}`);
+    }
+
+    if (!validation.valid) {
+      console.error(`[ExecutorNode] ${toolCall.name}: Validation failed, cannot auto-fix`);
+      toolResults.push(
+        new ToolMessage({
+          content: JSON.stringify({ 
+            success: false, 
+            error: validation.error,
+            hint: "The tool requires specific parameters that could not be inferred. Please provide the required fields explicitly.",
+            requiredFields: validation.validationErrors 
+          }),
+          tool_call_id: toolCall.id || `call_${Date.now()}`,
+        })
+      );
+      executedTools.push({ name: toolCall.name, success: false, latencyMs: Date.now() - toolStartTime });
+      continue;
+    }
+
+    const argsToUse = validation.fixedArgs;
+
     try {
-      const result = await tool.invoke(toolCall.args);
+      const result = await tool.invoke(argsToUse);
 
       toolResults.push(
         new ToolMessage({
@@ -191,14 +274,20 @@ export async function executorNode(state: AgentState): Promise<Partial<AgentStat
 
       if (threadId) {
         await memoryStore.addMessage(threadId, "tool", typeof result === "string" ? result : JSON.stringify(result), [
-          { name: toolCall.name, args: toolCall.args, result: typeof result === "string" ? result : JSON.stringify(result) },
+          { name: toolCall.name, args: argsToUse, result: typeof result === "string" ? result : JSON.stringify(result) },
         ]);
       }
     } catch (error: any) {
       console.error(`[ExecutorNode] Tool ${toolCall.name} error:`, error.message);
+      
       toolResults.push(
         new ToolMessage({
-          content: JSON.stringify({ success: false, error: error.message }),
+          content: JSON.stringify({ 
+            success: false, 
+            error: error.message,
+            toolName: toolCall.name,
+            argsProvided: Object.keys(argsToUse)
+          }),
           tool_call_id: toolCall.id || `call_${Date.now()}`,
         })
       );

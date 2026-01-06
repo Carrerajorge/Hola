@@ -19,7 +19,9 @@ import {
 import type { ToolResult } from "../sandbox/agentTypes";
 import { MEMORY_TOOLS, memoryStoreTool, memoryRetrieveTool, contextManageTool, sessionStateTool } from "./memoryTools";
 import { REASONING_TOOLS, reasonTool, reflectTool, verifyTool } from "./reasoningTools";
-import { ORCHESTRATION_TOOLS, orchestrateTool, workflowTool } from "./orchestrationTools";
+import { ORCHESTRATION_TOOLS, orchestrateTool, workflowTool, strategicPlanTool } from "./orchestrationTools";
+import { COMMUNICATION_TOOLS, decideTool, clarifyTool, summarizeTool, explainTool } from "./communicationTools";
+import { ADVANCED_SYSTEM_TOOLS, codeExecuteTool, fileConvertTool, environmentTool, searchSemanticTool } from "./systemTools";
 
 const sandboxTools = {
   document: new DocumentTool(),
@@ -318,17 +320,39 @@ export { MEMORY_TOOLS, memoryStoreTool, memoryRetrieveTool, contextManageTool, s
 
 export { REASONING_TOOLS, reasonTool, reflectTool, verifyTool };
 
-export { ORCHESTRATION_TOOLS, orchestrateTool, workflowTool };
+export { ORCHESTRATION_TOOLS, orchestrateTool, workflowTool, strategicPlanTool };
 
-export const ALL_TOOLS = [...SAFE_TOOLS, ...SYSTEM_TOOLS, ...MEMORY_TOOLS, ...REASONING_TOOLS, ...ORCHESTRATION_TOOLS];
+export { COMMUNICATION_TOOLS, decideTool, clarifyTool, summarizeTool, explainTool };
 
-export function getToolsByCategory(includeSafe = true, includeSystem = false, includeMemory = false, includeReasoning = false, includeOrchestration = false) {
+export { ADVANCED_SYSTEM_TOOLS, codeExecuteTool, fileConvertTool, environmentTool, searchSemanticTool };
+
+export const ALL_TOOLS = [
+  ...SAFE_TOOLS,
+  ...SYSTEM_TOOLS,
+  ...MEMORY_TOOLS,
+  ...REASONING_TOOLS,
+  ...ORCHESTRATION_TOOLS,
+  ...COMMUNICATION_TOOLS,
+  ...ADVANCED_SYSTEM_TOOLS,
+];
+
+export function getToolsByCategory(
+  includeSafe = true,
+  includeSystem = false,
+  includeMemory = false,
+  includeReasoning = false,
+  includeOrchestration = false,
+  includeCommunication = false,
+  includeAdvancedSystem = false
+) {
   const tools = [];
   if (includeSafe) tools.push(...SAFE_TOOLS);
   if (includeSystem) tools.push(...SYSTEM_TOOLS);
   if (includeMemory) tools.push(...MEMORY_TOOLS);
   if (includeReasoning) tools.push(...REASONING_TOOLS);
   if (includeOrchestration) tools.push(...ORCHESTRATION_TOOLS);
+  if (includeCommunication) tools.push(...COMMUNICATION_TOOLS);
+  if (includeAdvancedSystem) tools.push(...ADVANCED_SYSTEM_TOOLS);
   return tools;
 }
 
