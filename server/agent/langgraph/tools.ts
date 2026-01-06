@@ -1,0 +1,325 @@
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
+import {
+  DocumentTool,
+  SearchTool,
+  BrowserTool,
+  MessageTool,
+  ResearchTool,
+  PlanTool,
+  SlidesTool,
+  WebDevTool,
+  ScheduleTool,
+  ExposeTool,
+  GenerateTool,
+  ShellTool,
+  FileTool,
+  PythonTool,
+} from "../sandbox/tools";
+import type { ToolResult } from "../sandbox/agentTypes";
+
+const sandboxTools = {
+  document: new DocumentTool(),
+  search: new SearchTool(),
+  browser: new BrowserTool(),
+  message: new MessageTool(),
+  research: new ResearchTool(),
+  plan: new PlanTool(),
+  slides: new SlidesTool(),
+  webdev_init_project: new WebDevTool(),
+  schedule: new ScheduleTool(),
+  expose: new ExposeTool(),
+  generate: new GenerateTool(),
+  shell: new ShellTool(),
+  file: new FileTool(),
+  python: new PythonTool(),
+};
+
+function formatToolResult(result: ToolResult): string {
+  if (result.success) {
+    return JSON.stringify({
+      success: true,
+      message: result.message,
+      data: result.data,
+      filesCreated: result.filesCreated,
+    });
+  }
+  return JSON.stringify({
+    success: false,
+    error: result.error || "Tool execution failed",
+  });
+}
+
+export const documentTool = tool(
+  async (input) => {
+    const result = await sandboxTools.document.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "document",
+    description: "Creates professional documents: PPTX, DOCX, XLSX. Use type='pptx' for presentations, 'docx' for Word documents, 'xlsx' for spreadsheets.",
+    schema: z.object({
+      type: z.enum(["pptx", "docx", "xlsx", "powerpoint", "word", "excel"]).describe("Document type to create"),
+      title: z.string().describe("Document title"),
+      filename: z.string().optional().describe("Output filename"),
+      slides: z.array(z.object({
+        title: z.string().optional(),
+        content: z.string().optional(),
+        bullets: z.array(z.string()).optional(),
+      })).optional().describe("Slides for presentations"),
+      sections: z.array(z.object({
+        title: z.string().optional(),
+        content: z.string().optional(),
+        bullets: z.array(z.string()).optional(),
+        level: z.number().optional(),
+      })).optional().describe("Sections for Word documents"),
+      sheets: z.array(z.object({
+        name: z.string(),
+        headers: z.array(z.string()),
+        rows: z.array(z.array(z.any())),
+      })).optional().describe("Sheets for Excel documents"),
+    }),
+  }
+);
+
+export const searchTool = tool(
+  async (input) => {
+    const result = await sandboxTools.search.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "search",
+    description: "Performs web search using multiple sources with intelligent fallback (SearXNG, Brave, DuckDuckGo). Returns search results with titles, snippets, and URLs.",
+    schema: z.object({
+      query: z.string().describe("Search query"),
+      maxResults: z.number().optional().default(10).describe("Maximum number of results"),
+    }),
+  }
+);
+
+export const browserTool = tool(
+  async (input) => {
+    const result = await sandboxTools.browser.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "browser",
+    description: "Fetches and extracts readable text content from URLs. Use this to read web pages.",
+    schema: z.object({
+      url: z.string().url().describe("URL to fetch"),
+      extractText: z.boolean().optional().default(true).describe("Extract readable text"),
+      maxLength: z.number().optional().describe("Maximum content length"),
+    }),
+  }
+);
+
+export const messageTool = tool(
+  async (input) => {
+    const result = await sandboxTools.message.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "message",
+    description: "Returns formatted messages to the user in various formats.",
+    schema: z.object({
+      content: z.union([z.string(), z.array(z.string())]).describe("Message content"),
+      format: z.enum(["text", "markdown", "json", "list", "bullet"]).optional().default("text"),
+      title: z.string().optional().describe("Optional title/header"),
+      type: z.enum(["info", "success", "warning", "error"]).optional().default("info"),
+    }),
+  }
+);
+
+export const researchTool = tool(
+  async (input) => {
+    const result = await sandboxTools.research.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "research",
+    description: "Performs deep research on a topic by combining web search with content extraction and analysis.",
+    schema: z.object({
+      topic: z.string().describe("Research topic"),
+      depth: z.enum(["quick", "standard", "deep"]).optional().default("standard"),
+      maxSources: z.number().optional().default(5),
+    }),
+  }
+);
+
+export const planTool = tool(
+  async (input) => {
+    const result = await sandboxTools.plan.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "plan",
+    description: "Manages task plans: create, detect intent, track progress. Creates structured execution plans.",
+    schema: z.object({
+      action: z.enum(["create", "detect", "status"]).describe("Action to perform"),
+      input: z.string().optional().describe("Task description or text to analyze"),
+    }),
+  }
+);
+
+export const slidesTool = tool(
+  async (input) => {
+    const result = await sandboxTools.slides.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "slides",
+    description: "Creates PowerPoint presentations with AI-generated content and professional designs.",
+    schema: z.object({
+      topic: z.string().describe("Presentation topic"),
+      slideCount: z.number().optional().default(5).describe("Number of slides"),
+      style: z.string().optional().describe("Presentation style/theme"),
+    }),
+  }
+);
+
+export const webdevTool = tool(
+  async (input) => {
+    const result = await sandboxTools.webdev_init_project.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "webdev_init_project",
+    description: "Initializes web development projects with specified frameworks and configurations.",
+    schema: z.object({
+      projectName: z.string().describe("Project name"),
+      framework: z.enum(["react", "vue", "next", "express", "fastapi"]).optional(),
+      typescript: z.boolean().optional().default(true),
+    }),
+  }
+);
+
+export const scheduleTool = tool(
+  async (input) => {
+    const result = await sandboxTools.schedule.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "schedule",
+    description: "Creates and manages schedules, timelines, and calendar events.",
+    schema: z.object({
+      action: z.enum(["create", "list", "update"]).describe("Action to perform"),
+      title: z.string().optional().describe("Event title"),
+      startTime: z.string().optional().describe("Start time (ISO format)"),
+      endTime: z.string().optional().describe("End time (ISO format)"),
+      description: z.string().optional(),
+    }),
+  }
+);
+
+export const exposeTool = tool(
+  async (input) => {
+    const result = await sandboxTools.expose.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "expose",
+    description: "Exposes local services or creates shareable URLs for development.",
+    schema: z.object({
+      port: z.number().describe("Port to expose"),
+      protocol: z.enum(["http", "https"]).optional().default("http"),
+    }),
+  }
+);
+
+export const generateTool = tool(
+  async (input) => {
+    const result = await sandboxTools.generate.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "generate",
+    description: "Generates various content types: code, text, data, etc.",
+    schema: z.object({
+      type: z.enum(["code", "text", "data", "image"]).describe("Content type to generate"),
+      prompt: z.string().describe("Generation prompt"),
+      language: z.string().optional().describe("Programming language for code"),
+    }),
+  }
+);
+
+export const shellTool = tool(
+  async (input) => {
+    const result = await sandboxTools.shell.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "shell",
+    description: "Executes shell commands in a sandboxed environment. Use for system operations, file manipulation, and running scripts.",
+    schema: z.object({
+      command: z.string().describe("Shell command to execute"),
+      timeout: z.number().optional().default(30000).describe("Timeout in milliseconds"),
+      workingDir: z.string().optional().describe("Working directory"),
+    }),
+  }
+);
+
+export const fileTool = tool(
+  async (input) => {
+    const result = await sandboxTools.file.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "file",
+    description: "Performs file operations: read, write, delete, list, mkdir, process. Universal file parsing for PDF, DOCX, XLSX, code files.",
+    schema: z.object({
+      operation: z.enum(["read", "write", "delete", "list", "mkdir", "exists", "copy", "move", "process"]).describe("File operation"),
+      path: z.string().describe("File or directory path"),
+      content: z.string().optional().describe("Content for write operation"),
+      encoding: z.string().optional().default("utf-8"),
+      recursive: z.boolean().optional().default(true),
+    }),
+  }
+);
+
+export const pythonTool = tool(
+  async (input) => {
+    const result = await sandboxTools.python.execute(input);
+    return formatToolResult(result);
+  },
+  {
+    name: "python",
+    description: "Executes Python code in a sandboxed environment. Use for data analysis, calculations, and scripting.",
+    schema: z.object({
+      code: z.string().describe("Python code to execute"),
+      timeout: z.number().optional().default(60000).describe("Timeout in milliseconds"),
+    }),
+  }
+);
+
+export const SAFE_TOOLS = [
+  documentTool,
+  searchTool,
+  browserTool,
+  messageTool,
+  researchTool,
+  planTool,
+  slidesTool,
+  webdevTool,
+  scheduleTool,
+  exposeTool,
+  generateTool,
+];
+
+export const SYSTEM_TOOLS = [
+  shellTool,
+  fileTool,
+  pythonTool,
+];
+
+export const ALL_TOOLS = [...SAFE_TOOLS, ...SYSTEM_TOOLS];
+
+export function getToolsByCategory(includeSafe = true, includeSystem = false) {
+  const tools = [];
+  if (includeSafe) tools.push(...SAFE_TOOLS);
+  if (includeSystem) tools.push(...SYSTEM_TOOLS);
+  return tools;
+}
+
+export function getToolByName(name: string) {
+  return ALL_TOOLS.find((t) => t.name === name);
+}

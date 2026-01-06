@@ -33,6 +33,7 @@ import { createSpreadsheetRouter } from "./routes/spreadsheetRoutes";
 import { createChatRoutes } from "./routes/chatRoutes";
 import { createAgentModeRouter } from "./routes/agentRoutes";
 import { createSandboxAgentRouter } from "./routes/sandboxAgentRouter";
+import { createLangGraphRouter } from "./routes/langGraphRouter";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
@@ -83,6 +84,7 @@ export async function registerRoutes(
   app.use("/api/chat", createChatRoutes());
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api", createSandboxAgentRouter());
+  app.use("/api", createLangGraphRouter());
 
   // ===== Python Agent v5.0 Endpoints =====
   
