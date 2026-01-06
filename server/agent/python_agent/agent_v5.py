@@ -679,6 +679,16 @@ class SecurityGuard:
         r">\s*/dev/sd[a-z]", r"echo\s+.*>\s*/etc/(passwd|shadow)",
     ]
     
+    # Shell injection patterns - command chaining and dangerous redirects
+    INJECTION_PATTERNS = [
+        r";\s*(rm|curl|wget|nc|netcat|bash|sh|python|perl|ruby)\s+",
+        r"\|\s*(bash|sh|python|perl|ruby|nc|netcat)\s*",
+        r"&&\s*(rm|curl|wget|nc|netcat|bash|sh|python)\s+",
+        r"\|\|\s*(rm|curl|wget|nc|netcat|bash|sh)\s+",
+        r"`.*rm\s+",
+        r"\$\(.*rm\s+",
+    ]
+    
     SAFE_COMMANDS = {
         'ls', 'pwd', 'cd', 'cat', 'head', 'tail', 'less', 'more', 'echo',
         'date', 'whoami', 'hostname', 'uname', 'uptime', 'free', 'df', 'du',
@@ -697,6 +707,7 @@ class SecurityGuard:
         self.sandbox_root = Path(sandbox_root or WORKSPACE).resolve()
         self.sandbox_root.mkdir(parents=True, exist_ok=True)
         self._critical = [re.compile(p, re.I) for p in self.CRITICAL_PATTERNS]
+        self._injection = [re.compile(p, re.I) for p in self.INJECTION_PATTERNS]
         self.blocked_count = 0
         self.allowed_count = 0
     
@@ -711,6 +722,13 @@ class SecurityGuard:
                 self.blocked_count += 1
                 return SecurityAnalysis(cmd, False, ThreatLevel.CRITICAL, 
                     SecurityAction.LOG_AND_BLOCK, ["🚨 COMANDO PELIGROSO BLOQUEADO"], 100.0)
+        
+        # Shell injection detection
+        for p in self._injection:
+            if p.search(cmd):
+                self.blocked_count += 1
+                return SecurityAnalysis(cmd, False, ThreatLevel.CRITICAL,
+                    SecurityAction.LOG_AND_BLOCK, ["🚨 POSIBLE INYECCIÓN DE COMANDOS BLOQUEADA"], 100.0)
         
         # Comando base
         base = cmd.split()[0].split('/')[-1] if cmd.split() else ""
