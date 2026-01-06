@@ -464,3 +464,20 @@ export function createAgent(config?: AgentConfig): LangGraphAgent {
 export { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS, getToolsByCategory } from "./tools";
 export { checkpointer, memoryStore, type ConversationMemory } from "./memory";
 export { plannerNode, executorNode, verifierNode, responderNode, humanApprovalNode } from "./nodes";
+export { 
+  initializeAgents, 
+  getAllAgents, 
+  getAgent, 
+  getAgentSummary, 
+  SPECIALIZED_AGENTS,
+  orchestratorAgent,
+  researchAgent,
+  codeAgent,
+  dataAgent,
+  contentAgent,
+  communicationAgent,
+  browserAgent,
+  documentAgent,
+  qaAgent,
+  securityAgent,
+} from "./agents";
