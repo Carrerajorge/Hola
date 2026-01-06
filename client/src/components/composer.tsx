@@ -20,7 +20,10 @@ import {
   Calendar,
   Contact,
   Settings2,
-  Wand2
+  Wand2,
+  Sparkles,
+  Presentation,
+  Clock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -191,6 +194,75 @@ export function Composer({
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
   const [showToolSuggestions, setShowToolSuggestions] = useState(true);
+  const [recentTemplates, setRecentTemplates] = useState<string[]>([]);
+
+  const quickActionTemplates = [
+    {
+      id: "image",
+      label: "Generar imagen",
+      icon: Sparkles,
+      template: "Genera una imagen de ",
+      color: "from-pink-500 to-rose-500",
+      bgColor: "bg-pink-50 dark:bg-pink-950/30",
+      textColor: "text-pink-600 dark:text-pink-400",
+      borderColor: "border-pink-200 dark:border-pink-800",
+    },
+    {
+      id: "document",
+      label: "Crear documento",
+      icon: FileText,
+      template: "Crea un documento Word sobre ",
+      color: "from-blue-500 to-blue-600",
+      bgColor: "bg-blue-50 dark:bg-blue-950/30",
+      textColor: "text-blue-600 dark:text-blue-400",
+      borderColor: "border-blue-200 dark:border-blue-800",
+    },
+    {
+      id: "presentation",
+      label: "Crear presentación",
+      icon: Presentation,
+      template: "Crea una presentación PowerPoint sobre ",
+      color: "from-orange-500 to-amber-500",
+      bgColor: "bg-orange-50 dark:bg-orange-950/30",
+      textColor: "text-orange-600 dark:text-orange-400",
+      borderColor: "border-orange-200 dark:border-orange-800",
+    },
+    {
+      id: "web",
+      label: "Buscar en web",
+      icon: Search,
+      template: "Busca en la web información sobre ",
+      color: "from-cyan-500 to-teal-500",
+      bgColor: "bg-cyan-50 dark:bg-cyan-950/30",
+      textColor: "text-cyan-600 dark:text-cyan-400",
+      borderColor: "border-cyan-200 dark:border-cyan-800",
+    },
+  ];
+
+  useEffect(() => {
+    const stored = localStorage.getItem("recentQuickTemplates");
+    if (stored) {
+      try {
+        setRecentTemplates(JSON.parse(stored));
+      } catch {
+        setRecentTemplates([]);
+      }
+    }
+  }, []);
+
+  const handleQuickAction = useCallback((templateId: string, template: string) => {
+    setInput(template);
+    textareaRef.current?.focus();
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.setSelectionRange(template.length, template.length);
+      }
+    }, 0);
+    
+    const newRecent = [templateId, ...recentTemplates.filter(id => id !== templateId)].slice(0, 4);
+    setRecentTemplates(newRecent);
+    localStorage.setItem("recentQuickTemplates", JSON.stringify(newRecent));
+  }, [setInput, textareaRef, recentTemplates]);
 
   const toolSuggestions = useToolSuggestions(input);
   const { connectedSources, getSourceActive, setSourceActive } = useConnectedSources();
@@ -754,6 +826,76 @@ export function Composer({
     );
   };
 
+  const renderQuickActions = () => {
+    if (isDocumentMode || hasContent || isRecording || aiState !== "idle") return null;
+    
+    const sortedTemplates = [...quickActionTemplates].sort((a, b) => {
+      const aIndex = recentTemplates.indexOf(a.id);
+      const bIndex = recentTemplates.indexOf(b.id);
+      if (aIndex === -1 && bIndex === -1) return 0;
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    });
+
+    return (
+      <div className="mb-3 animate-in fade-in slide-in-from-bottom-2 duration-200" data-testid="quick-actions-container">
+        <div className="flex items-center gap-1.5 mb-2">
+          <Sparkles className="h-3 w-3 text-muted-foreground" />
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+            Acciones rápidas
+          </span>
+          {recentTemplates.length > 0 && (
+            <span className="flex items-center gap-0.5 text-[9px] text-muted-foreground/60 ml-auto">
+              <Clock className="h-2.5 w-2.5" />
+              Recientes primero
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {sortedTemplates.map((action) => {
+            const IconComponent = action.icon;
+            const isRecent = recentTemplates.includes(action.id);
+            return (
+              <TooltipProvider key={action.id}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => handleQuickAction(action.id, action.template)}
+                      className={cn(
+                        "group inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium",
+                        "border transition-all duration-200 ease-out",
+                        "hover:scale-[1.02] hover:shadow-md active:scale-[0.98]",
+                        action.bgColor,
+                        action.textColor,
+                        action.borderColor,
+                        isRecent && "ring-1 ring-offset-1 ring-offset-background ring-current/20"
+                      )}
+                      data-testid={`quick-action-${action.id}`}
+                    >
+                      <div className={cn(
+                        "flex items-center justify-center w-5 h-5 rounded-md",
+                        "bg-gradient-to-br",
+                        action.color,
+                        "shadow-sm"
+                      )}>
+                        <IconComponent className="h-3 w-3 text-white" />
+                      </div>
+                      <span>{action.label}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    <p>Clic para prefrellenar: "{action.template}..."</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const containerClass = isDocumentMode
     ? cn(
         "p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
@@ -939,6 +1081,8 @@ export function Composer({
             </div>
           </div>
         )}
+
+        {renderQuickActions()}
         
         <div className="flex flex-col relative">
           <Textarea

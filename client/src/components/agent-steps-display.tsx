@@ -26,8 +26,14 @@ import {
   ShieldCheck,
   PartyPopper,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  Copy,
+  WifiOff,
+  ServerCrash,
+  Ban,
+  AlertCircle
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,6 +56,326 @@ export interface AgentArtifact {
 
 type AgentPhase = 'planning' | 'executing' | 'verifying' | 'completed' | 'failed' | 'cancelled' | 'idle';
 
+export type ErrorType = 'transient' | 'permanent' | 'unknown';
+
+export interface ClassifiedError {
+  type: ErrorType;
+  isRetryable: boolean;
+  userMessage: string;
+  technicalDetails: string;
+  icon: React.ElementType;
+}
+
+const TRANSIENT_ERROR_PATTERNS = [
+  /timeout/i,
+  /timed out/i,
+  /network/i,
+  /connection/i,
+  /econnrefused/i,
+  /econnreset/i,
+  /rate limit/i,
+  /too many requests/i,
+  /429/,
+  /503/,
+  /502/,
+  /504/,
+  /temporarily unavailable/i,
+  /service unavailable/i,
+  /try again/i,
+  /overloaded/i,
+  /busy/i,
+  /socket hang up/i,
+  /fetch failed/i,
+  /aborted/i,
+];
+
+const PERMANENT_ERROR_PATTERNS = [
+  /unauthorized/i,
+  /forbidden/i,
+  /not found/i,
+  /invalid.*key/i,
+  /invalid.*token/i,
+  /permission denied/i,
+  /access denied/i,
+  /authentication/i,
+  /401/,
+  /403/,
+  /404/,
+  /invalid request/i,
+  /bad request/i,
+  /400/,
+  /not supported/i,
+  /deprecated/i,
+  /quota exceeded/i,
+  /billing/i,
+  /payment required/i,
+  /402/,
+];
+
+export function classifyError(error: string | null | undefined, stepErrors?: string[]): ClassifiedError {
+  const errorText = error || stepErrors?.join(' ') || '';
+  
+  if (!errorText) {
+    return {
+      type: 'unknown',
+      isRetryable: true,
+      userMessage: 'Ocurrió un error inesperado',
+      technicalDetails: 'No hay detalles disponibles',
+      icon: AlertCircle,
+    };
+  }
+
+  const isTransient = TRANSIENT_ERROR_PATTERNS.some(pattern => pattern.test(errorText));
+  const isPermanent = PERMANENT_ERROR_PATTERNS.some(pattern => pattern.test(errorText));
+
+  if (isTransient && !isPermanent) {
+    let userMessage = 'Problema de conexión temporal';
+    let icon: React.ElementType = WifiOff;
+    
+    if (/rate limit|too many requests|429/i.test(errorText)) {
+      userMessage = 'Límite de solicitudes alcanzado';
+      icon = Clock;
+    } else if (/timeout|timed out/i.test(errorText)) {
+      userMessage = 'La solicitud tardó demasiado';
+      icon = Clock;
+    } else if (/503|502|504|service unavailable|overloaded/i.test(errorText)) {
+      userMessage = 'El servidor está temporalmente ocupado';
+      icon = ServerCrash;
+    }
+    
+    return {
+      type: 'transient',
+      isRetryable: true,
+      userMessage,
+      technicalDetails: errorText,
+      icon,
+    };
+  }
+
+  if (isPermanent) {
+    let userMessage = 'Error de configuración o permisos';
+    let icon: React.ElementType = Ban;
+    
+    if (/unauthorized|401|authentication|invalid.*key|invalid.*token/i.test(errorText)) {
+      userMessage = 'Error de autenticación - verifica tus credenciales';
+      icon = Ban;
+    } else if (/forbidden|403|permission denied|access denied/i.test(errorText)) {
+      userMessage = 'No tienes permiso para esta acción';
+      icon = Ban;
+    } else if (/not found|404/i.test(errorText)) {
+      userMessage = 'Recurso no encontrado';
+      icon = AlertCircle;
+    } else if (/quota exceeded|billing|payment required|402/i.test(errorText)) {
+      userMessage = 'Límite de uso alcanzado o problema de facturación';
+      icon = AlertTriangle;
+    }
+    
+    return {
+      type: 'permanent',
+      isRetryable: false,
+      userMessage,
+      technicalDetails: errorText,
+      icon,
+    };
+  }
+
+  return {
+    type: 'unknown',
+    isRetryable: true,
+    userMessage: 'Ocurrió un error durante la ejecución',
+    technicalDetails: errorText,
+    icon: AlertCircle,
+  };
+}
+
+interface ErrorBannerProps {
+  error: string | null;
+  steps?: AgentStep[];
+  status?: AgentRunStatus;
+  onRetry?: () => void;
+  className?: string;
+}
+
+export const ErrorBanner = memo(function ErrorBanner({
+  error,
+  steps = [],
+  status,
+  onRetry,
+  className,
+}: ErrorBannerProps) {
+  const [isCopied, setIsCopied] = useState(false);
+  
+  const stepErrors = useMemo(() => 
+    steps.filter(s => s.status === 'failed' && s.error).map(s => s.error!),
+    [steps]
+  );
+  
+  const classifiedError = useMemo(() => 
+    classifyError(error, stepErrors),
+    [error, stepErrors]
+  );
+  
+  const fullErrorLog = useMemo(() => {
+    const logs: string[] = [];
+    logs.push(`=== Error Log ===`);
+    logs.push(`Fecha: ${new Date().toISOString()}`);
+    logs.push(`Estado: ${status || 'unknown'}`);
+    logs.push(`Tipo de error: ${classifiedError.type}`);
+    logs.push(`Mensaje: ${classifiedError.userMessage}`);
+    logs.push('');
+    logs.push(`=== Detalles técnicos ===`);
+    logs.push(classifiedError.technicalDetails);
+    
+    if (stepErrors.length > 0) {
+      logs.push('');
+      logs.push(`=== Errores en pasos (${stepErrors.length}) ===`);
+      steps.filter(s => s.status === 'failed').forEach((step, i) => {
+        logs.push(`[Paso ${step.stepIndex}] ${step.toolName}: ${step.error}`);
+      });
+    }
+    
+    return logs.join('\n');
+  }, [status, classifiedError, stepErrors, steps]);
+  
+  const handleCopyLog = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(fullErrorLog);
+      setIsCopied(true);
+      toast.success('Log copiado al portapapeles');
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      toast.error('No se pudo copiar el log');
+    }
+  }, [fullErrorLog]);
+
+  const handleRetry = useCallback(() => {
+    if (onRetry) {
+      onRetry();
+    } else {
+      toast.info('Para reintentar, envía tu mensaje nuevamente');
+    }
+  }, [onRetry]);
+  
+  if (status !== 'failed' && status !== 'cancelled') {
+    return null;
+  }
+  
+  const Icon = classifiedError.icon;
+  const isTransient = classifiedError.type === 'transient';
+  const isPermanent = classifiedError.type === 'permanent';
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className={cn(
+        "rounded-lg border p-4 space-y-3",
+        isTransient && "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800",
+        isPermanent && "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800",
+        !isTransient && !isPermanent && "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800",
+        className
+      )}
+      data-testid="error-banner"
+    >
+      <div className="flex items-start gap-3">
+        <div className={cn(
+          "flex items-center justify-center w-9 h-9 rounded-full shrink-0",
+          isTransient && "bg-amber-100 dark:bg-amber-900/50",
+          isPermanent && "bg-red-100 dark:bg-red-900/50",
+          !isTransient && !isPermanent && "bg-red-100 dark:bg-red-900/50"
+        )}>
+          <Icon className={cn(
+            "h-5 w-5",
+            isTransient && "text-amber-600 dark:text-amber-400",
+            isPermanent && "text-red-600 dark:text-red-400",
+            !isTransient && !isPermanent && "text-red-600 dark:text-red-400"
+          )} />
+        </div>
+        
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
+            <h4 className={cn(
+              "font-medium text-sm",
+              isTransient && "text-amber-800 dark:text-amber-200",
+              isPermanent && "text-red-800 dark:text-red-200",
+              !isTransient && !isPermanent && "text-red-800 dark:text-red-200"
+            )}>
+              {classifiedError.userMessage}
+            </h4>
+            {classifiedError.isRetryable && (
+              <Badge 
+                variant="outline" 
+                className={cn(
+                  "text-[10px] px-1.5 py-0 h-4",
+                  isTransient && "border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300"
+                )}
+              >
+                Reintentable
+              </Badge>
+            )}
+          </div>
+          
+          <p className="text-xs text-muted-foreground line-clamp-2">
+            {classifiedError.technicalDetails.slice(0, 200)}
+            {classifiedError.technicalDetails.length > 200 && '...'}
+          </p>
+          
+          {stepErrors.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {stepErrors.length} paso{stepErrors.length !== 1 ? 's' : ''} fallido{stepErrors.length !== 1 ? 's' : ''}
+            </p>
+          )}
+        </div>
+      </div>
+      
+      <div className="flex items-center gap-2 pt-2 border-t border-inherit">
+        {classifiedError.isRetryable && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRetry}
+            className={cn(
+              "gap-1.5",
+              isTransient && "border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/50"
+            )}
+            data-testid="error-retry-button"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Reintentar
+          </Button>
+        )}
+        
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleCopyLog}
+          className="gap-1.5 text-muted-foreground"
+          data-testid="error-copy-log-button"
+        >
+          {isCopied ? (
+            <>
+              <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+              Copiado
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5" />
+              Copiar log
+            </>
+          )}
+        </Button>
+        
+        {!classifiedError.isRetryable && (
+          <span className="text-xs text-muted-foreground ml-auto">
+            Este error requiere acción manual
+          </span>
+        )}
+      </div>
+    </motion.div>
+  );
+});
+
 interface AgentStepsDisplayProps {
   steps: AgentStep[];
   summary?: string | null;
@@ -58,9 +384,11 @@ interface AgentStepsDisplayProps {
   status?: AgentRunStatus;
   eventStream?: AgentEvent[];
   startTime?: number;
+  error?: string | null;
   onDocumentClick?: (artifact: AgentArtifact) => void;
   onDownload?: (artifact: AgentArtifact) => void;
   onImageExpand?: (imageUrl: string) => void;
+  onRetry?: () => void;
   className?: string;
 }
 
@@ -960,9 +1288,11 @@ export const AgentStepsDisplay = memo(function AgentStepsDisplay({
   status,
   eventStream = [],
   startTime,
+  error,
   onDocumentClick,
   onDownload,
   onImageExpand,
+  onRetry,
   className
 }: AgentStepsDisplayProps) {
   const hasSteps = steps.length > 0;
@@ -1019,7 +1349,9 @@ export const AgentStepsDisplay = memo(function AgentStepsDisplay({
     onImageExpand?.(imageUrl);
   }, [onImageExpand]);
 
-  if (!hasSteps && !hasArtifacts && !hasSummary && !isRunning) {
+  const hasError = status === 'failed' || (error && error.trim().length > 0);
+  
+  if (!hasSteps && !hasArtifacts && !hasSummary && !isRunning && !hasError) {
     return null;
   }
 
@@ -1070,12 +1402,21 @@ export const AgentStepsDisplay = memo(function AgentStepsDisplay({
         />
       )}
 
-      {hasSummary && isTerminal && (
+      {hasSummary && isTerminal && status !== 'failed' && (
         <CompletionSummary
           summary={summary!}
           steps={steps}
           startTime={startTime}
           status={status || 'completed'}
+        />
+      )}
+
+      {(status === 'failed' || status === 'cancelled') && (
+        <ErrorBanner
+          error={error || null}
+          steps={steps}
+          status={status}
+          onRetry={onRetry}
         />
       )}
 
@@ -1098,3 +1439,34 @@ export const AgentStepsDisplay = memo(function AgentStepsDisplay({
 });
 
 export default AgentStepsDisplay;
+
+export function showAgentErrorToast(error: string | null, options?: { 
+  isRetryable?: boolean;
+  onRetry?: () => void;
+}) {
+  const classified = classifyError(error);
+  
+  if (classified.type === 'transient' || options?.isRetryable) {
+    toast.error(classified.userMessage, {
+      description: classified.technicalDetails.slice(0, 100),
+      duration: 8000,
+      action: options?.onRetry ? {
+        label: 'Reintentar',
+        onClick: options.onRetry,
+      } : undefined,
+    });
+  } else {
+    toast.error(classified.userMessage, {
+      description: 'Revisa los detalles del error para más información',
+      duration: 10000,
+    });
+  }
+}
+
+export function showCriticalAgentError(error: string, details?: string) {
+  toast.error('Error crítico del agente', {
+    description: error.slice(0, 150),
+    duration: 15000,
+    important: true,
+  });
+}
