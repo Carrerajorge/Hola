@@ -1,6 +1,14 @@
 import { z } from "zod";
 import crypto from "crypto";
 import { executeRealHandler, hasRealHandler, RealToolResult } from "./realToolHandlers";
+import {
+  CircuitBreaker,
+  CircuitBreakerConfig,
+  CircuitState,
+  globalHealthManager,
+  getOrCreateCircuitBreaker,
+  getAllResilienceMetrics,
+} from "./resilience";
 
 export interface StrictE2EResult {
   toolName: string;
@@ -179,6 +187,7 @@ class ToolRegistry {
   private traces: ToolCallTrace[] = [];
   private rateLimiter = new RateLimiter();
   private maxTraces = 10000;
+  private circuitBreakers: Map<string, CircuitBreaker> = new Map();
 
   register<TInput, TOutput>(tool: RegisteredTool<TInput, TOutput>): void {
     const { name } = tool.metadata;
@@ -194,6 +203,22 @@ class ToolRegistry {
       ...tool,
       metadata: validatedMetadata,
       config: validatedConfig,
+    });
+
+    const category = validatedMetadata.category;
+    if (!this.circuitBreakers.has(category)) {
+      this.circuitBreakers.set(category, getOrCreateCircuitBreaker(`tool_category_${category}`, {
+        failureThreshold: 5,
+        successThreshold: 3,
+        resetTimeoutMs: 30000,
+      }));
+    }
+
+    globalHealthManager.registerHealthCheck(`tool_${name}`, async () => {
+      if (tool.healthCheck) {
+        return await tool.healthCheck();
+      }
+      return true;
     });
 
     console.log(`[ToolRegistry] Registered tool: ${name} (${tool.metadata.category})`);
@@ -264,6 +289,21 @@ class ToolRegistry {
 
       trace.category = tool.metadata.category;
 
+      const circuitBreaker = this.circuitBreakers.get(tool.metadata.category);
+      if (circuitBreaker && !circuitBreaker.canExecute()) {
+        const error: ToolError = {
+          code: "DEPENDENCY_ERROR",
+          message: `Circuit breaker open for category "${tool.metadata.category}"`,
+          retryable: true,
+        };
+        trace.status = "error";
+        trace.error = error;
+        trace.endTime = Date.now();
+        trace.durationMs = trace.endTime - trace.startTime;
+        this.addTrace(trace);
+        return { success: false, error, trace };
+      }
+
       if (!options?.skipRateLimit) {
         const allowed = this.rateLimiter.check(
           name,
@@ -326,6 +366,7 @@ class ToolRegistry {
           trace.durationMs = trace.endTime - trace.startTime;
           this.addTrace(trace);
           
+          circuitBreaker?.recordSuccess();
           return { success: true, data: result as TOutput, trace };
         } catch (err: any) {
           const isTimeout = err.message?.includes("timed out");
@@ -348,6 +389,7 @@ class ToolRegistry {
       trace.durationMs = trace.endTime - trace.startTime;
       this.addTrace(trace);
       
+      circuitBreaker?.recordFailure();
       return { success: false, error: lastError, trace };
     } catch (err: any) {
       const error: ToolError = {
@@ -468,6 +510,71 @@ class ToolRegistry {
     }
     
     return results;
+  }
+
+  getResilienceMetrics(): {
+    global: ReturnType<typeof getAllResilienceMetrics>;
+    byCategory: Record<string, { state: CircuitState; failureCount: number; successCount: number }>;
+    toolHealth: ReturnType<typeof globalHealthManager.getOverallHealth>;
+  } {
+    const byCategory: Record<string, { state: CircuitState; failureCount: number; successCount: number }> = {};
+    
+    for (const [category, breaker] of this.circuitBreakers) {
+      const metrics = breaker.getMetrics();
+      byCategory[category] = {
+        state: metrics.state,
+        failureCount: metrics.failureCount,
+        successCount: metrics.successCount,
+      };
+    }
+
+    return {
+      global: getAllResilienceMetrics(),
+      byCategory,
+      toolHealth: globalHealthManager.getOverallHealth(),
+    };
+  }
+
+  getToolResilienceMetrics(name: string): {
+    circuitBreaker: { state: CircuitState; failureCount: number; successCount: number } | null;
+    healthStatus: ReturnType<typeof globalHealthManager.getHealthStatus> | undefined;
+    recentTraces: ToolCallTrace[];
+  } | null {
+    const tool = this.tools.get(name);
+    if (!tool) return null;
+
+    const category = tool.metadata.category;
+    const breaker = this.circuitBreakers.get(category);
+    
+    let circuitBreakerInfo = null;
+    if (breaker) {
+      const metrics = breaker.getMetrics();
+      circuitBreakerInfo = {
+        state: metrics.state,
+        failureCount: metrics.failureCount,
+        successCount: metrics.successCount,
+      };
+    }
+
+    return {
+      circuitBreaker: circuitBreakerInfo,
+      healthStatus: globalHealthManager.getHealthStatus(`tool_${name}`),
+      recentTraces: this.getTraces({ toolName: name, limit: 10 }),
+    };
+  }
+
+  getCircuitBreakerState(category: string): CircuitState | null {
+    const breaker = this.circuitBreakers.get(category);
+    return breaker ? breaker.getState() : null;
+  }
+
+  resetCircuitBreaker(category: string): boolean {
+    const breaker = this.circuitBreakers.get(category);
+    if (breaker) {
+      breaker.reset();
+      return true;
+    }
+    return false;
   }
 
   async executeStrictE2E<TInput>(

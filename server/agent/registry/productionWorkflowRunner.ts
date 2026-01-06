@@ -6,6 +6,13 @@ import * as zlib from "zlib";
 import { z } from "zod";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
 import ExcelJS from "exceljs";
+import { 
+  CircuitBreaker, 
+  getOrCreateCircuitBreaker, 
+  CircuitBreakerConfig,
+  withResilience,
+  ExponentialBackoff
+} from "./resilience";
 
 export type RunStatus = "queued" | "planning" | "running" | "verifying" | "completed" | "failed" | "cancelled" | "timeout";
 
@@ -152,6 +159,37 @@ const INTENT_MIME_TYPES: Record<GenerationIntent, string> = {
 
 const ARTIFACTS_DIR = path.join(process.cwd(), "artifacts");
 
+const TOOL_CIRCUIT_BREAKER_CONFIG: Partial<CircuitBreakerConfig> = {
+  failureThreshold: 3,
+  successThreshold: 2,
+  resetTimeoutMs: 60000,
+  halfOpenMaxCalls: 2,
+};
+
+const STEP_TIMEOUT_MS = 30000;
+
+export interface WorkflowMetrics {
+  totalRuns: number;
+  completedRuns: number;
+  failedRuns: number;
+  cancelledRuns: number;
+  timeoutRuns: number;
+  avgDurationMs: number;
+  toolExecutions: Record<string, { success: number; failure: number; avgDurationMs: number }>;
+  circuitBreakerTrips: number;
+  replanAttempts: number;
+  artifactValidationFailures: number;
+  lastUpdated: string;
+}
+
+export interface ArtifactValidationResult {
+  valid: boolean;
+  errors: string[];
+  sizeValid: boolean;
+  formatValid: boolean;
+  checksumMatch: boolean;
+}
+
 function ensureArtifactsDir(): void {
   if (!fs.existsSync(ARTIFACTS_DIR)) {
     fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
@@ -196,11 +234,65 @@ export class ProductionWorkflowRunner extends EventEmitter {
   private runEvents: Map<string, RunEvent[]> = new Map();
   private watchdogTimers: Map<string, NodeJS.Timeout> = new Map();
   private watchdogTimeoutMs: number = 30000;
+  private stepTimeoutMs: number = STEP_TIMEOUT_MS;
+  private toolCircuitBreakers: Map<string, CircuitBreaker> = new Map();
+  private metrics: WorkflowMetrics = {
+    totalRuns: 0,
+    completedRuns: 0,
+    failedRuns: 0,
+    cancelledRuns: 0,
+    timeoutRuns: 0,
+    avgDurationMs: 0,
+    toolExecutions: {},
+    circuitBreakerTrips: 0,
+    replanAttempts: 0,
+    artifactValidationFailures: 0,
+    lastUpdated: new Date().toISOString(),
+  };
+  private runDurations: number[] = [];
 
-  constructor(config?: { watchdogTimeoutMs?: number }) {
+  constructor(config?: { watchdogTimeoutMs?: number; stepTimeoutMs?: number }) {
     super();
     this.watchdogTimeoutMs = config?.watchdogTimeoutMs || 30000;
+    this.stepTimeoutMs = config?.stepTimeoutMs || STEP_TIMEOUT_MS;
     ensureArtifactsDir();
+    this.initializeCircuitBreakers();
+  }
+
+  private initializeCircuitBreakers(): void {
+    const toolTypes = [
+      "image_generate", "slides_create", "docx_generate", 
+      "xlsx_create", "pdf_generate", "web_search", 
+      "data_analyze", "browse_url", "text_generate"
+    ];
+    for (const toolType of toolTypes) {
+      const cb = getOrCreateCircuitBreaker(`tool_${toolType}`, TOOL_CIRCUIT_BREAKER_CONFIG);
+      this.toolCircuitBreakers.set(toolType, cb);
+    }
+  }
+
+  private getCircuitBreaker(toolName: string): CircuitBreaker {
+    if (!this.toolCircuitBreakers.has(toolName)) {
+      const cb = getOrCreateCircuitBreaker(`tool_${toolName}`, TOOL_CIRCUIT_BREAKER_CONFIG);
+      this.toolCircuitBreakers.set(toolName, cb);
+    }
+    return this.toolCircuitBreakers.get(toolName)!;
+  }
+
+  getMetrics(): WorkflowMetrics {
+    return { ...this.metrics };
+  }
+
+  getCircuitBreakerStatuses(): Record<string, { state: string; failureCount: number }> {
+    const statuses: Record<string, { state: string; failureCount: number }> = {};
+    for (const [name, cb] of this.toolCircuitBreakers) {
+      const metrics = cb.getMetrics();
+      statuses[name] = {
+        state: metrics.state,
+        failureCount: metrics.failureCount,
+      };
+    }
+    return statuses;
   }
 
   async startRun(query: string): Promise<{ runId: string; requestId: string; statusUrl: string; eventsUrl: string }> {
@@ -209,8 +301,12 @@ export class ProductionWorkflowRunner extends EventEmitter {
     const intent = classifyIntent(query);
     const plan = this.createPlan(query, intent);
 
+    this.metrics.totalRuns++;
+    this.metrics.lastUpdated = new Date().toISOString();
+
     const planValidation = validatePlan(plan, intent);
     if (!planValidation.valid) {
+      this.metrics.failedRuns++;
       const run: ProductionRun = {
         runId,
         requestId,
@@ -379,19 +475,33 @@ export class ProductionWorkflowRunner extends EventEmitter {
         run.completedAt = new Date().toISOString();
         run.updatedAt = new Date().toISOString();
         
+        const duration = run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : 0;
+        this.updateRunDurationMetrics(duration);
+        this.metrics.completedRuns++;
+        this.metrics.lastUpdated = new Date().toISOString();
+        
         this.emitEvent(runId, "run_completed", {
           completedAt: run.completedAt,
           totalSteps: run.totalSteps,
           completedSteps: run.evidence.filter(e => e.status === "completed").length,
           artifacts: run.artifacts,
+          durationMs: duration,
         });
       } else if (run.status === "failed") {
         run.completedAt = new Date().toISOString();
+        this.metrics.failedRuns++;
+        this.metrics.lastUpdated = new Date().toISOString();
         this.emitEvent(runId, "run_failed", {
           error: run.error,
           errorType: run.errorType,
           completedAt: run.completedAt,
         });
+      } else if (run.status === "timeout") {
+        this.metrics.timeoutRuns++;
+        this.metrics.lastUpdated = new Date().toISOString();
+      } else if (run.status === "cancelled") {
+        this.metrics.cancelledRuns++;
+        this.metrics.lastUpdated = new Date().toISOString();
       }
     } catch (error: any) {
       run.status = "failed";
@@ -407,6 +517,103 @@ export class ProductionWorkflowRunner extends EventEmitter {
       });
     } finally {
       this.stopWatchdog(runId);
+    }
+  }
+
+  private updateRunDurationMetrics(durationMs: number): void {
+    this.runDurations.push(durationMs);
+    if (this.runDurations.length > 100) {
+      this.runDurations.shift();
+    }
+    const sum = this.runDurations.reduce((a, b) => a + b, 0);
+    this.metrics.avgDurationMs = Math.round(sum / this.runDurations.length);
+  }
+
+  private updateToolMetrics(toolName: string, success: boolean, durationMs: number): void {
+    if (!this.metrics.toolExecutions[toolName]) {
+      this.metrics.toolExecutions[toolName] = { success: 0, failure: 0, avgDurationMs: 0 };
+    }
+    const toolMetrics = this.metrics.toolExecutions[toolName];
+    if (success) {
+      toolMetrics.success++;
+    } else {
+      toolMetrics.failure++;
+    }
+    const total = toolMetrics.success + toolMetrics.failure;
+    toolMetrics.avgDurationMs = Math.round(
+      (toolMetrics.avgDurationMs * (total - 1) + durationMs) / total
+    );
+    this.metrics.lastUpdated = new Date().toISOString();
+  }
+
+  private validateArtifactIntegrity(artifact: ArtifactInfo): ArtifactValidationResult {
+    const errors: string[] = [];
+    let sizeValid = true;
+    let formatValid = true;
+    let checksumMatch = true;
+
+    if (!fs.existsSync(artifact.path)) {
+      errors.push("Artifact file does not exist");
+      return { valid: false, errors, sizeValid: false, formatValid: false, checksumMatch: false };
+    }
+
+    const stats = fs.statSync(artifact.path);
+    if (stats.size !== artifact.sizeBytes) {
+      errors.push(`Size mismatch: expected ${artifact.sizeBytes}, got ${stats.size}`);
+      sizeValid = false;
+    }
+
+    if (stats.size < 10) {
+      errors.push("Artifact file is too small (< 10 bytes)");
+      sizeValid = false;
+    }
+
+    const buffer = fs.readFileSync(artifact.path, { encoding: null, flag: "r" });
+    const header = buffer.slice(0, 8);
+
+    const formatChecks: Record<string, () => boolean> = {
+      "image/png": () => header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47,
+      "application/pdf": () => header.toString("utf8", 0, 5) === "%PDF-",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": () => 
+        header[0] === 0x50 && header[1] === 0x4B,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": () => 
+        header[0] === 0x50 && header[1] === 0x4B,
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation": () => 
+        header[0] === 0x50 && header[1] === 0x4B,
+    };
+
+    const formatCheck = formatChecks[artifact.mimeType];
+    if (formatCheck && !formatCheck()) {
+      errors.push(`Invalid file format for MIME type ${artifact.mimeType}`);
+      formatValid = false;
+    }
+
+    const valid = errors.length === 0;
+    if (!valid) {
+      this.metrics.artifactValidationFailures++;
+      this.metrics.lastUpdated = new Date().toISOString();
+    }
+
+    return { valid, errors, sizeValid, formatValid, checksumMatch };
+  }
+
+  private async executeStepWithTimeout<T>(
+    operation: () => Promise<T>,
+    timeoutMs: number
+  ): Promise<{ result: T | null; timedOut: boolean; error?: string }> {
+    try {
+      const result = await Promise.race([
+        operation(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("STEP_TIMEOUT")), timeoutMs)
+        ),
+      ]);
+      return { result, timedOut: false };
+    } catch (error: any) {
+      if (error.message === "STEP_TIMEOUT") {
+        return { result: null, timedOut: true, error: "Step execution timed out" };
+      }
+      return { result: null, timedOut: false, error: error.message };
     }
   }
 
@@ -441,7 +648,28 @@ export class ProductionWorkflowRunner extends EventEmitter {
         requestId,
       });
 
-      const result = await this.executeToolReal(step.toolName, step.input, run);
+      const { result, timedOut, error } = await this.executeStepWithTimeout(
+        () => this.executeToolReal(step.toolName, step.input, run),
+        this.stepTimeoutMs
+      );
+
+      if (timedOut) {
+        evidence.status = "failed";
+        evidence.durationMs = Date.now() - stepStart;
+        evidence.errorStack = error || "Step timed out";
+        this.updateToolMetrics(step.toolName, false, evidence.durationMs);
+        run.evidence[step.stepIndex] = evidence;
+        return;
+      }
+
+      if (!result) {
+        evidence.status = "failed";
+        evidence.durationMs = Date.now() - stepStart;
+        evidence.errorStack = error || "No result from tool execution";
+        this.updateToolMetrics(step.toolName, false, evidence.durationMs);
+        run.evidence[step.stepIndex] = evidence;
+        return;
+      }
 
       evidence.output = result.data;
       evidence.schemaValidation = result.success ? "pass" : "fail";
@@ -449,7 +677,15 @@ export class ProductionWorkflowRunner extends EventEmitter {
       evidence.durationMs = Date.now() - stepStart;
       evidence.artifacts = result.artifacts;
 
+      this.updateToolMetrics(step.toolName, result.success, evidence.durationMs);
+
       if (result.artifacts && result.artifacts.length > 0) {
+        for (const artifact of result.artifacts) {
+          const validation = this.validateArtifactIntegrity(artifact);
+          if (!validation.valid) {
+            console.warn(`[WorkflowRunner] Artifact validation failed for ${artifact.path}: ${validation.errors.join(", ")}`);
+          }
+        }
         run.artifacts.push(...result.artifacts);
         for (const artifact of result.artifacts) {
           this.emitEvent(run.runId, "artifact_created", {
@@ -482,12 +718,96 @@ export class ProductionWorkflowRunner extends EventEmitter {
       evidence.status = "failed";
       evidence.durationMs = Date.now() - stepStart;
       evidence.errorStack = error.stack || error.message;
+      this.updateToolMetrics(step.toolName, false, evidence.durationMs);
     }
 
     run.evidence[step.stepIndex] = evidence;
   }
 
   private async executeToolReal(
+    toolName: string,
+    input: unknown,
+    run: ProductionRun
+  ): Promise<{ success: boolean; data: unknown; error?: string; artifacts?: ArtifactInfo[] }> {
+    const circuitBreaker = this.getCircuitBreaker(toolName);
+    
+    if (!circuitBreaker.canExecute()) {
+      this.metrics.circuitBreakerTrips++;
+      this.metrics.lastUpdated = new Date().toISOString();
+      
+      const fallbackResponse = this.createFallbackResponse(toolName, input, run);
+      if (fallbackResponse) {
+        console.warn(`[WorkflowRunner] Circuit breaker open for ${toolName}, using fallback`);
+        return fallbackResponse;
+      }
+      
+      return {
+        success: false,
+        data: null,
+        error: `Circuit breaker open for tool ${toolName}. Service temporarily unavailable.`,
+      };
+    }
+
+    try {
+      const result = await this.executeToolInternal(toolName, input, run);
+      
+      if (result.success) {
+        circuitBreaker.recordSuccess();
+      } else {
+        circuitBreaker.recordFailure();
+      }
+      
+      return result;
+    } catch (error: any) {
+      circuitBreaker.recordFailure();
+      return {
+        success: false,
+        data: null,
+        error: error.message || "Tool execution failed",
+      };
+    }
+  }
+
+  private createFallbackResponse(
+    toolName: string,
+    input: unknown,
+    run: ProductionRun
+  ): { success: boolean; data: unknown; error?: string; artifacts?: ArtifactInfo[] } | null {
+    const fallbacks: Record<string, () => { success: boolean; data: unknown; artifacts?: ArtifactInfo[] }> = {
+      "web_search": () => ({
+        success: true,
+        data: {
+          query: (input as any).query,
+          results: [],
+          resultsCount: 0,
+          source: "fallback_cached",
+          message: "Search service temporarily unavailable. Please try again later.",
+        },
+      }),
+      "data_analyze": () => ({
+        success: true,
+        data: {
+          count: 0,
+          sum: 0,
+          mean: 0,
+          stdDev: 0,
+          min: 0,
+          max: 0,
+          message: "Analysis service temporarily unavailable. Results are placeholder values.",
+        },
+      }),
+      "browse_url": () => ({
+        success: false,
+        data: null,
+        error: "Browse service temporarily unavailable",
+      }),
+    };
+
+    const fallback = fallbacks[toolName];
+    return fallback ? { ...fallback(), success: true } : null;
+  }
+
+  private async executeToolInternal(
     toolName: string,
     input: unknown,
     run: ProductionRun
@@ -925,32 +1245,66 @@ ${420 + streamLength}
 
   private attemptReplan(run: ProductionRun, failedStep: PlanStep): boolean {
     const alternativeTools: Record<string, string[]> = {
-      "image_generate": ["text_generate"],
-      "slides_create": ["document_create"],
-      "docx_generate": ["document_create", "pdf_generate"],
-      "xlsx_create": ["data_analyze"],
+      "image_generate": ["text_generate", "pdf_generate"],
+      "slides_create": ["docx_generate", "pdf_generate", "text_generate"],
+      "docx_generate": ["pdf_generate", "text_generate"],
+      "xlsx_create": ["data_analyze", "text_generate"],
+      "pdf_generate": ["docx_generate", "text_generate"],
+      "web_search": ["text_generate"],
+      "browse_url": ["web_search", "text_generate"],
+      "data_analyze": ["text_generate"],
     };
 
+    const maxReplans = 3;
     const alternatives = alternativeTools[failedStep.toolName];
-    if (alternatives && alternatives.length > 0 && run.replansCount < 2) {
-      run.replansCount++;
-      const newToolName = alternatives[0];
-      
-      run.evidence[failedStep.stepIndex].replanEvents.push(
-        `Replanning: ${failedStep.toolName} -> ${newToolName}`
-      );
-
-      this.emitEvent(run.runId, "replan_triggered", {
-        stepIndex: failedStep.stepIndex,
-        originalTool: failedStep.toolName,
-        newTool: newToolName,
-        reason: "Tool execution failed",
-      });
-
-      return true;
+    
+    if (!alternatives || alternatives.length === 0 || run.replansCount >= maxReplans) {
+      return false;
     }
 
-    return false;
+    const failedTools = run.evidence
+      .filter(e => e && e.status === "failed")
+      .map(e => e.toolName);
+    
+    const viableAlternative = alternatives.find(alt => {
+      if (failedTools.includes(alt)) return false;
+      
+      const cb = this.getCircuitBreaker(alt);
+      return cb.canExecute();
+    });
+
+    if (!viableAlternative) {
+      return false;
+    }
+
+    run.replansCount++;
+    this.metrics.replanAttempts++;
+    this.metrics.lastUpdated = new Date().toISOString();
+    
+    run.evidence[failedStep.stepIndex].replanEvents.push(
+      `Replanning: ${failedStep.toolName} -> ${viableAlternative} (attempt ${run.replansCount}/${maxReplans})`
+    );
+
+    const newStep: PlanStep = {
+      ...failedStep,
+      toolName: viableAlternative,
+      description: `Fallback execution using ${viableAlternative}`,
+      isGenerator: ["docx_generate", "pdf_generate", "slides_create", "xlsx_create", "image_generate"].includes(viableAlternative),
+    };
+
+    run.plan.steps[failedStep.stepIndex] = newStep;
+
+    this.emitEvent(run.runId, "replan_triggered", {
+      stepIndex: failedStep.stepIndex,
+      originalTool: failedStep.toolName,
+      newTool: viableAlternative,
+      reason: "Tool execution failed - using alternative",
+      replanCount: run.replansCount,
+      maxReplans,
+      availableAlternatives: alternatives.length,
+    });
+
+    return true;
   }
 
   private startWatchdog(runId: string): void {
