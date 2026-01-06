@@ -51,6 +51,14 @@ export interface AgentRunData {
   error: string | null;
 }
 
+export interface MessageArtifact {
+  artifactId: string;
+  type: "image" | "document" | "spreadsheet" | "presentation" | "pdf";
+  mimeType: string;
+  sizeBytes?: number;
+  downloadUrl: string;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -70,6 +78,7 @@ export interface Message {
   googleFormPreview?: GoogleFormPreview;
   gmailPreview?: GmailPreview;
   agentRun?: AgentRunData;
+  artifact?: MessageArtifact; // Generated artifact from ProductionWorkflowRunner
 }
 
 export interface Chat {

@@ -2881,11 +2881,29 @@ export function ChatInterface({
       }
     }
 
-    // Auto-detect if task requires Agent mode
+    // GENERATION INTENT DETECTION: Handle image, document, spreadsheet, presentation requests
+    // These are handled directly by /api/chat + ProductionWorkflowRunner - no agent mode needed
+    const generationPatterns = [
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i,
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|docx)\b/i,
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(excel|hoja de cálculo|spreadsheet|xlsx)\b/i,
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i,
+      /\b(crea|create|genera|generate|haz|make)\b.*\b(pdf)\b/i,
+      /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i,
+    ];
+    const isGenerationRequest = generationPatterns.some(p => p.test(input));
+    
+    if (isGenerationRequest) {
+      console.log("[handleSubmit] Generation intent detected - routing directly to /api/chat");
+      // Don't use agent mode - let /api/chat handle it with ProductionWorkflowRunner
+      // Fall through to normal chat processing below
+    }
+    
+    // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
     const hasAttachedFiles = uploadedFiles.length > 0;
     const complexityCheck = shouldAutoActivateAgent(input, hasAttachedFiles);
     
-    if (complexityCheck.agent_required && complexityCheck.confidence === 'high') {
+    if (!isGenerationRequest && complexityCheck.agent_required && complexityCheck.confidence === 'high') {
       console.log("[handleSubmit] Auto-activating Agent mode:", complexityCheck.agent_reason);
       
       const userMessageContent = input;
@@ -2934,21 +2952,26 @@ export function ChatInterface({
             window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
           }
         } else {
+          // Agent failed - DON'T return, fall through to normal chat processing
+          console.log("[handleSubmit] Agent mode failed, falling back to chat");
           setInput(userMessageContent);
           setUploadedFiles(readyFiles);
-          toast({ 
-            title: "Error", 
-            description: "No se pudo iniciar el agente. Procesando como chat normal.", 
-            variant: "destructive" 
-          });
+          setCurrentAgentMessageId(null);
+          // Continue to normal chat processing below instead of returning
         }
       } catch (error) {
         console.error("Failed to auto-start agent run:", error);
+        // Agent failed - DON'T return, fall through to normal chat processing
         setInput(userMessageContent);
         setUploadedFiles(readyFiles);
-        toast({ title: "Error", description: "Error al iniciar el agente. Procesando como chat normal.", variant: "destructive" });
+        setCurrentAgentMessageId(null);
+        // Continue to normal chat processing below instead of returning
       }
-      return;
+      
+      // Only return if agent succeeded (result is truthy)
+      if (useAgentStore.getState().runs[agentMessageId]?.runId) {
+        return;
+      }
     }
 
     const attachments = uploadedFiles
@@ -3679,6 +3702,7 @@ IMPORTANTE:
         const fullContent = data.content;
         const responseSources = data.sources || [];
         const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
+        const responseArtifact = data.artifact;
         
         // If Figma diagram was generated, add it to chat with simulated streaming
         if (figmaDiagram) {
@@ -3825,6 +3849,7 @@ IMPORTANTE:
                 requestId: generateRequestId(),
                 userMessageId: userMsgId,
                 sources: responseSources.length > 0 ? responseSources : undefined,
+                artifact: responseArtifact,
               };
               onSendMessage(aiMsg);
             }

@@ -1841,6 +1841,50 @@ const AssistantMessage = memo(function AssistantMessage({
         </div>
       )}
 
+      {message.artifact && (
+        <div className="mt-3 w-full">
+          <div className="p-4 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                "w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0",
+                message.artifact.type === "image" && "bg-purple-600",
+                message.artifact.type === "document" && "bg-blue-600",
+                message.artifact.type === "spreadsheet" && "bg-green-600",
+                message.artifact.type === "presentation" && "bg-orange-600",
+                message.artifact.type === "pdf" && "bg-red-600"
+              )}>
+                {message.artifact.type === "image" && <ImageIcon className="h-6 w-6 text-white" />}
+                {message.artifact.type === "document" && <FileText className="h-6 w-6 text-white" />}
+                {message.artifact.type === "spreadsheet" && <FileSpreadsheet className="h-6 w-6 text-white" />}
+                {message.artifact.type === "presentation" && <FileIcon className="h-6 w-6 text-white" />}
+                {message.artifact.type === "pdf" && <FileText className="h-6 w-6 text-white" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {message.artifact.type === "image" && "Imagen generada"}
+                  {message.artifact.type === "document" && "Documento Word"}
+                  {message.artifact.type === "spreadsheet" && "Hoja de cálculo Excel"}
+                  {message.artifact.type === "presentation" && "Presentación PowerPoint"}
+                  {message.artifact.type === "pdf" && "Documento PDF"}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {message.artifact.sizeBytes ? `${Math.round(message.artifact.sizeBytes / 1024)}KB` : "Listo para descargar"}
+                </p>
+              </div>
+              <a
+                href={message.artifact.downloadUrl}
+                download
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors"
+                data-testid={`button-download-artifact-${message.id}`}
+              >
+                <Download className="h-4 w-4" />
+                Descargar
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       {message.googleFormPreview && (
         <div className="mt-3 w-full">
           <InlineGoogleFormPreview
