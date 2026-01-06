@@ -341,18 +341,41 @@ export function createRegistryRouter(): Router {
 
   router.post("/registry/execute-workflow", async (req: Request, res: Response) => {
     try {
-      const { query, workflowId } = req.body;
+      const { query, workflowId, strict_e2e = false } = req.body;
+      
+      if (!query && !workflowId) {
+        return res.status(400).json({
+          success: false,
+          error: "Either 'query' or 'workflowId' is required",
+        });
+      }
+
+      if (strict_e2e && query) {
+        const result = await orchestrator.executeStrictE2E(query, true);
+        return res.json({
+          success: result.success,
+          type: result.type,
+          intent: result.intent,
+          evidence: result.evidence,
+          summary: result.summary,
+          artifacts: result.artifacts,
+          firstFailure: result.firstFailure,
+        });
+      }
       
       let workflow;
       let evidence: Array<{
         stepId: string;
         toolName: string;
-        status: string;
-        durationMs: number;
+        input?: unknown;
         output: any;
+        schemaValidation?: string;
+        requestId?: string;
+        durationMs: number;
+        retryCount?: number;
+        replanEvents?: string[];
+        status: string;
         error?: string;
-        traceRequestId?: string;
-        replanEvent?: { cause: string; decision: string };
       }> = [];
       
       if (workflowId) {
@@ -370,12 +393,25 @@ export function createRegistryRouter(): Router {
             evidence: result.toolResults.map((r, i) => ({
               stepId: `step_${i + 1}`,
               toolName: r.trace.toolName,
-              status: r.success ? "completed" : "failed",
-              durationMs: r.trace.durationMs || 0,
+              input: r.trace.args,
               output: r.data,
+              schemaValidation: r.success ? "pass" : "fail",
+              requestId: r.trace.requestId,
+              durationMs: r.trace.durationMs || 0,
+              retryCount: r.trace.retryCount,
+              replanEvents: [],
+              status: r.success ? "completed" : "failed",
               error: r.error?.message,
-              traceRequestId: r.trace.requestId,
             })),
+            summary: {
+              totalSteps: result.toolResults.length,
+              completedSteps: result.toolResults.filter(r => r.success).length,
+              failedSteps: result.toolResults.filter(r => !r.success).length,
+              skippedSteps: 0,
+              totalDurationMs: result.toolResults.reduce((sum, r) => sum + (r.trace.durationMs || 0), 0),
+              replans: 0,
+              allValidationsPassed: result.toolResults.every(r => r.success),
+            },
           });
         } else if (result.agentResult) {
           return res.json({
@@ -385,35 +421,49 @@ export function createRegistryRouter(): Router {
             evidence: [{
               stepId: "agent_execution",
               toolName: result.intent.suggestedAgent,
-              status: result.agentResult.success ? "completed" : "failed",
-              durationMs: result.agentResult.trace?.durationMs || 0,
+              input: { query },
               output: result.agentResult.output,
+              schemaValidation: result.agentResult.success ? "pass" : "fail",
+              requestId: result.agentResult.trace?.requestId,
+              durationMs: result.agentResult.trace?.durationMs || 0,
+              retryCount: 0,
+              replanEvents: [],
+              status: result.agentResult.success ? "completed" : "failed",
               error: result.agentResult.error,
-              traceRequestId: result.agentResult.trace?.requestId,
             }],
+            summary: {
+              totalSteps: 1,
+              completedSteps: result.agentResult.success ? 1 : 0,
+              failedSteps: result.agentResult.success ? 0 : 1,
+              skippedSteps: 0,
+              totalDurationMs: result.agentResult.trace?.durationMs || 0,
+              replans: 0,
+              allValidationsPassed: result.agentResult.success,
+            },
           });
         }
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: "Either 'query' or 'workflowId' is required",
-        });
       }
       
       if (workflow) {
         evidence = workflow.steps.map(step => ({
           stepId: step.id,
           toolName: step.name,
-          status: step.status,
-          durationMs: step.duration || 0,
+          input: step.input,
           output: step.result?.data || step.result?.output,
+          schemaValidation: step.status === "completed" ? "pass" : "fail",
+          requestId: step.result?.trace?.requestId,
+          durationMs: step.duration || 0,
+          retryCount: step.result?.trace?.retryCount || 0,
+          replanEvents: step.status === "failed" && step.result?.error?.retryable
+            ? [`Retry attempted for ${step.name}`]
+            : [],
+          status: step.status,
           error: step.error,
-          traceRequestId: step.result?.trace?.requestId,
-          replanEvent: step.status === "failed" && step.result?.error?.retryable
-            ? { cause: step.error || "unknown", decision: "attempted_retry" }
-            : undefined,
         }));
       }
+      
+      const completedSteps = evidence.filter(e => e.status === "completed").length;
+      const failedSteps = evidence.filter(e => e.status === "failed").length;
       
       res.json({
         success: workflow?.status === "completed",
@@ -429,17 +479,19 @@ export function createRegistryRouter(): Router {
         evidence,
         summary: {
           totalSteps: evidence.length,
-          completedSteps: evidence.filter(e => e.status === "completed").length,
-          failedSteps: evidence.filter(e => e.status === "failed").length,
+          completedSteps,
+          failedSteps,
           skippedSteps: evidence.filter(e => e.status === "skipped").length,
           totalDurationMs: evidence.reduce((sum, e) => sum + e.durationMs, 0),
-          replans: evidence.filter(e => e.replanEvent).length,
+          replans: evidence.filter(e => e.replanEvents && e.replanEvents.length > 0).length,
+          allValidationsPassed: failedSteps === 0,
         },
       });
     } catch (error: any) {
       res.status(500).json({
         success: false,
         error: error.message,
+        stack: error.stack,
       });
     }
   });

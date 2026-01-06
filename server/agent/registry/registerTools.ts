@@ -1,6 +1,7 @@
 import { z } from "zod";
 import crypto from "crypto";
 import { toolRegistry, RegisteredTool, ToolConfig, ToolMetadata, ToolCallTrace, ToolCategory, ToolImplementationStatusType } from "./toolRegistry";
+import { realWebSearch, realBrowseUrl, realDocumentCreate, realPdfGenerate, realDataAnalyze, realHashGenerate } from "./realToolHandlers";
 
 const DEFAULT_CONFIG: ToolConfig = {
   timeout: 30000,
@@ -136,7 +137,10 @@ function registerWebTools(): void {
       searchEngine: z.enum(["auto", "google", "bing", "duckduckgo"]).optional(),
     }),
     ToolOutputSchema,
-    async (input) => ({ success: true, data: { results: [], query: input.query }, message: "Search completed" }),
+    async (input) => {
+      const result = await realWebSearch({ query: input.query, maxResults: input.maxResults });
+      return { success: result.success, data: result.data, message: result.message };
+    },
     EXTERNAL_CONFIG
   ));
 
@@ -150,7 +154,10 @@ function registerWebTools(): void {
       selector: z.string().optional(),
     }),
     ToolOutputSchema,
-    async (input) => ({ success: true, data: { url: input.url, content: "" }, message: "Page browsed" }),
+    async (input) => {
+      const result = await realBrowseUrl({ url: input.url });
+      return { success: result.success, data: result.data, message: result.message };
+    },
     EXTERNAL_CONFIG
   ));
 
@@ -359,6 +366,22 @@ function registerProcessingTools(): void {
 
 function registerDataTools(): void {
   toolRegistry.register(createSimpleTool(
+    "data_analyze",
+    "Analyze datasets and compute statistics",
+    "Data",
+    z.object({
+      data: z.array(z.any()),
+      operation: z.string().default("statistics"),
+    }),
+    ToolOutputSchema,
+    async (input) => {
+      const result = await realDataAnalyze({ data: input.data, operation: input.operation });
+      return { success: result.success, data: result.data, message: result.message };
+    },
+    FAST_CONFIG
+  ));
+
+  toolRegistry.register(createSimpleTool(
     "data_transform",
     "Transform and manipulate data structures",
     "Data",
@@ -467,7 +490,10 @@ function registerDocumentTools(): void {
       template: z.string().optional(),
     }),
     ToolOutputSchema,
-    async (input) => ({ success: true, data: { fileUrl: "" }, message: "Document created" }),
+    async (input) => {
+      const result = await realDocumentCreate({ title: input.title, content: input.content, type: input.type });
+      return { success: result.success, data: result.data, message: result.message };
+    },
     DEFAULT_CONFIG
   ));
 
@@ -481,7 +507,10 @@ function registerDocumentTools(): void {
       options: z.record(z.any()).optional(),
     }),
     ToolOutputSchema,
-    async (input) => ({ success: true, data: { pdfUrl: "" }, message: "PDF generated" }),
+    async (input) => {
+      const result = await realPdfGenerate({ title: input.title, content: input.content });
+      return { success: result.success, data: result.data, message: result.message };
+    },
     DEFAULT_CONFIG
   ));
 

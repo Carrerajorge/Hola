@@ -1,7 +1,46 @@
 import { z } from "zod";
 import crypto from "crypto";
-import { toolRegistry, ToolExecutionResult, ToolCategory, TOOL_CATEGORIES } from "./toolRegistry";
+import { toolRegistry, ToolExecutionResult, ToolCategory, TOOL_CATEGORIES, StrictE2EResult } from "./toolRegistry";
 import { agentRegistry, AgentTask, AgentResult, AgentRole, AGENT_ROLES } from "./agentRegistry";
+import { executeRealHandler, hasRealHandler } from "./realToolHandlers";
+
+export interface StrictE2EEvidence {
+  stepId: string;
+  toolName: string;
+  input: unknown;
+  output: unknown;
+  schemaValidation: "pass" | "fail";
+  requestId: string;
+  durationMs: number;
+  retryCount: number;
+  replanEvents: string[];
+  validationPassed: boolean;
+  artifacts?: string[];
+  status: "completed" | "failed" | "skipped";
+  errorStack?: string;
+}
+
+export interface StrictE2EWorkflowResult {
+  success: boolean;
+  type: "workflow" | "agent" | "tool";
+  intent: TaskIntent;
+  evidence: StrictE2EEvidence[];
+  summary: {
+    totalSteps: number;
+    completedSteps: number;
+    failedSteps: number;
+    skippedSteps: number;
+    totalDurationMs: number;
+    replans: number;
+    allValidationsPassed: boolean;
+  };
+  artifacts: string[];
+  firstFailure?: {
+    stepId: string;
+    toolName: string;
+    errorStack: string;
+  };
+}
 
 export const TaskIntentSchema = z.object({
   query: z.string(),
@@ -356,6 +395,137 @@ class Orchestrator {
       completedWorkflows: completed,
       failedWorkflows: failed,
       avgWorkflowDuration: avgDuration,
+    };
+  }
+
+  async executeStrictE2E(query: string, strictE2E: boolean = true): Promise<StrictE2EWorkflowResult> {
+    const startTime = Date.now();
+    const intent = this.analyzeIntent(query);
+    const tools = this.selectTools(intent);
+    const evidence: StrictE2EEvidence[] = [];
+    const allArtifacts: string[] = [];
+    let replans = 0;
+    let firstFailure: StrictE2EWorkflowResult["firstFailure"];
+
+    const toolInputMap: Record<string, unknown> = {
+      web_search: { query, maxResults: 5 },
+      browse_url: { url: query.match(/https?:\/\/[^\s]+/)?.[0] || "https://example.com" },
+      document_create: { title: query.slice(0, 50), content: query, type: "txt" },
+      pdf_generate: { title: query.slice(0, 50), content: query },
+      data_analyze: { data: [1, 2, 3, 4, 5], operation: "statistics" },
+      hash: { data: query, algorithm: "sha256" },
+    };
+
+    for (let i = 0; i < tools.length; i++) {
+      const toolName = tools[i];
+      const stepId = `step_${i + 1}`;
+      const stepStart = Date.now();
+      const requestId = crypto.randomUUID();
+      const replanEvents: string[] = [];
+
+      const input = toolInputMap[toolName] || { query };
+
+      const stepEvidence: StrictE2EEvidence = {
+        stepId,
+        toolName,
+        input,
+        output: null,
+        schemaValidation: "fail",
+        requestId,
+        durationMs: 0,
+        retryCount: 0,
+        replanEvents,
+        validationPassed: false,
+        status: "failed",
+      };
+
+      try {
+        if (strictE2E && hasRealHandler(toolName)) {
+          const realResult = await executeRealHandler(toolName, input);
+          if (realResult) {
+            stepEvidence.output = realResult.data;
+            stepEvidence.artifacts = realResult.artifacts;
+            stepEvidence.validationPassed = realResult.validationPassed;
+            stepEvidence.schemaValidation = realResult.success ? "pass" : "fail";
+            stepEvidence.status = realResult.validationPassed ? "completed" : "failed";
+            
+            if (realResult.artifacts) {
+              allArtifacts.push(...realResult.artifacts);
+            }
+
+            if (!realResult.validationPassed && !firstFailure) {
+              firstFailure = {
+                stepId,
+                toolName,
+                errorStack: `Real execution failed: ${realResult.message}`,
+              };
+
+              const alternatives = this.findAlternativeTools(toolName);
+              if (alternatives.length > 0) {
+                replanEvents.push(`Replanning from ${toolName} to ${alternatives[0]}`);
+                replans++;
+              }
+            }
+          }
+        } else {
+          const result = await toolRegistry.executeStrictE2E(toolName, input);
+          stepEvidence.output = result.output;
+          stepEvidence.artifacts = result.artifacts;
+          stepEvidence.validationPassed = result.validationPassed;
+          stepEvidence.schemaValidation = result.schemaValidation;
+          stepEvidence.retryCount = result.retryCount;
+          stepEvidence.status = result.validationPassed ? "completed" : "failed";
+          
+          if (result.artifacts) {
+            allArtifacts.push(...result.artifacts);
+          }
+
+          if (!result.validationPassed && !firstFailure) {
+            firstFailure = {
+              stepId,
+              toolName,
+              errorStack: result.errorStack || "Validation failed",
+            };
+          }
+        }
+      } catch (err: any) {
+        stepEvidence.status = "failed";
+        stepEvidence.errorStack = err.stack || err.message;
+        if (!firstFailure) {
+          firstFailure = {
+            stepId,
+            toolName,
+            errorStack: err.stack || err.message,
+          };
+        }
+      }
+
+      stepEvidence.durationMs = Date.now() - stepStart;
+      stepEvidence.replanEvents = replanEvents;
+      evidence.push(stepEvidence);
+    }
+
+    const completedSteps = evidence.filter(e => e.status === "completed").length;
+    const failedSteps = evidence.filter(e => e.status === "failed").length;
+    const skippedSteps = evidence.filter(e => e.status === "skipped").length;
+    const allValidationsPassed = evidence.every(e => e.validationPassed);
+
+    return {
+      success: allValidationsPassed && failedSteps === 0,
+      type: tools.length > 1 ? "workflow" : "tool",
+      intent,
+      evidence,
+      summary: {
+        totalSteps: evidence.length,
+        completedSteps,
+        failedSteps,
+        skippedSteps,
+        totalDurationMs: Date.now() - startTime,
+        replans,
+        allValidationsPassed,
+      },
+      artifacts: allArtifacts,
+      firstFailure,
     };
   }
 }

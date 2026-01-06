@@ -1,5 +1,20 @@
 import { z } from "zod";
 import crypto from "crypto";
+import { executeRealHandler, hasRealHandler, RealToolResult } from "./realToolHandlers";
+
+export interface StrictE2EResult {
+  toolName: string;
+  input: unknown;
+  output: unknown;
+  schemaValidation: "pass" | "fail";
+  requestId: string;
+  durationMs: number;
+  retryCount: number;
+  replanEvents: string[];
+  validationPassed: boolean;
+  artifacts?: string[];
+  errorStack?: string;
+}
 
 export const ToolErrorCodeSchema = z.enum([
   "VALIDATION_ERROR",
@@ -453,6 +468,90 @@ class ToolRegistry {
     }
     
     return results;
+  }
+
+  async executeStrictE2E<TInput>(
+    name: string,
+    input: TInput,
+    options?: { forceReal?: boolean }
+  ): Promise<StrictE2EResult> {
+    const requestId = crypto.randomUUID();
+    const startTime = Date.now();
+    const replanEvents: string[] = [];
+    
+    const result: StrictE2EResult = {
+      toolName: name,
+      input,
+      output: null,
+      schemaValidation: "fail",
+      requestId,
+      durationMs: 0,
+      retryCount: 0,
+      replanEvents,
+      validationPassed: false,
+    };
+
+    try {
+      const tool = this.tools.get(name);
+      if (!tool) {
+        result.errorStack = `Tool "${name}" not found`;
+        result.durationMs = Date.now() - startTime;
+        return result;
+      }
+
+      const parseResult = tool.inputSchema.safeParse(input);
+      if (!parseResult.success) {
+        result.errorStack = `Input validation failed: ${parseResult.error.message}`;
+        result.durationMs = Date.now() - startTime;
+        return result;
+      }
+
+      if (hasRealHandler(name)) {
+        const realResult = await executeRealHandler(name, input);
+        if (realResult) {
+          result.output = realResult.data;
+          result.artifacts = realResult.artifacts;
+          result.validationPassed = realResult.validationPassed;
+          result.schemaValidation = realResult.success ? "pass" : "fail";
+          result.durationMs = Date.now() - startTime;
+          
+          if (!realResult.validationPassed) {
+            result.errorStack = `Real execution failed validation: ${realResult.message}`;
+          }
+          return result;
+        }
+      }
+
+      const execResult = await this.execute(name, input);
+      result.output = execResult.data;
+      result.retryCount = execResult.trace.retryCount;
+      result.durationMs = Date.now() - startTime;
+      
+      if (execResult.success) {
+        result.schemaValidation = "pass";
+        
+        const output = execResult.data as any;
+        const hasRealData = output && (
+          (output.data && Object.keys(output.data).length > 0 && !output.data.stub) ||
+          (output.results && Array.isArray(output.results) && output.results.length > 0) ||
+          (output.filePath && typeof output.filePath === "string") ||
+          (output.hash && typeof output.hash === "string")
+        );
+        
+        result.validationPassed = hasRealData;
+        if (!hasRealData) {
+          result.errorStack = "Output appears to be mock/empty data";
+        }
+      } else {
+        result.errorStack = execResult.error?.message || "Execution failed";
+      }
+
+      return result;
+    } catch (err: any) {
+      result.errorStack = err.stack || err.message || "Unknown error";
+      result.durationMs = Date.now() - startTime;
+      return result;
+    }
   }
 
   toJSON(): object {
