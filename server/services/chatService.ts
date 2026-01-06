@@ -9,6 +9,7 @@ import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRate
 import type { PipelineResponse } from "../../shared/schemas/multiIntent";
 import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
 import { detectEmailIntent, handleEmailChatRequest } from "./gmailChatIntegration";
+import { productionWorkflowRunner, classifyIntent, isGenerationIntent } from "../agent/registry/productionWorkflowRunner";
 
 export type LLMProvider = "xai" | "gemini";
 
@@ -383,6 +384,45 @@ export async function handleChatRequest(
         }
       } catch (error) {
         console.error("[Gmail Chat] Error handling email request:", error);
+      }
+    }
+
+    // PRODUCTION WORKFLOW: Route generation intents (image, slides, docs) through ProductionWorkflowRunner
+    // This ensures real artifacts are generated with proper termination guarantees
+    if (!documentMode && !figmaMode && !hasImages) {
+      const intent = classifyIntent(lastUserMessage.content);
+      if (isGenerationIntent(intent)) {
+        console.log(`[ChatService] Generation intent detected: ${intent}, routing to ProductionWorkflowRunner`);
+        try {
+          const { run, response } = await productionWorkflowRunner.executeAndWait(lastUserMessage.content);
+          
+          // Build response with artifact information
+          let artifactInfo = null;
+          if (run.artifacts.length > 0) {
+            const artifact = run.artifacts[0];
+            artifactInfo = {
+              artifactId: artifact.artifactId,
+              type: artifact.type,
+              mimeType: artifact.mimeType,
+              sizeBytes: artifact.sizeBytes,
+              downloadUrl: `/api/registry/artifacts/${artifact.artifactId}/download`,
+            };
+          }
+          
+          return {
+            content: response,
+            role: "assistant",
+            wasAgentTask: true,
+            agentRunId: run.runId,
+            artifact: artifactInfo,
+          };
+        } catch (error: any) {
+          console.error(`[ChatService] ProductionWorkflowRunner error:`, error);
+          return {
+            content: `Error al procesar la solicitud: ${error.message || "Error desconocido"}`,
+            role: "assistant",
+          };
+        }
       }
     }
     

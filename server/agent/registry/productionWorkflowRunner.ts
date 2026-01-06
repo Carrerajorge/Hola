@@ -1037,6 +1037,129 @@ ${420 + streamLength}
 
     return true;
   }
+
+  async waitForCompletion(runId: string, timeoutMs: number = 35000): Promise<ProductionRun> {
+    return new Promise((resolve, reject) => {
+      let timeoutHandle: NodeJS.Timeout | null = null;
+      let resolved = false;
+
+      const cleanup = () => {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+        this.removeListener("run_completed", onComplete);
+        this.removeListener("run_failed", onFailed);
+        this.removeListener("run_cancelled", onCancelled);
+        this.removeListener("timeout_error", onTimeout);
+      };
+
+      const finish = (run: ProductionRun) => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(run);
+      };
+
+      const onComplete = (event: RunEvent) => {
+        if (event.runId === runId) {
+          const run = this.activeRuns.get(runId);
+          if (run) finish(run);
+        }
+      };
+
+      const onFailed = (event: RunEvent) => {
+        if (event.runId === runId) {
+          const run = this.activeRuns.get(runId);
+          if (run) finish(run);
+        }
+      };
+
+      const onCancelled = (event: RunEvent) => {
+        if (event.runId === runId) {
+          const run = this.activeRuns.get(runId);
+          if (run) finish(run);
+        }
+      };
+
+      const onTimeout = (event: RunEvent) => {
+        if (event.runId === runId) {
+          const run = this.activeRuns.get(runId);
+          if (run) finish(run);
+        }
+      };
+
+      this.on("run_completed", onComplete);
+      this.on("run_failed", onFailed);
+      this.on("run_cancelled", onCancelled);
+      this.on("timeout_error", onTimeout);
+
+      const run = this.activeRuns.get(runId);
+      if (!run) {
+        cleanup();
+        reject(new Error(`Run ${runId} not found`));
+        return;
+      }
+      
+      if (["completed", "failed", "cancelled", "timeout"].includes(run.status)) {
+        finish(run);
+        return;
+      }
+
+      timeoutHandle = setTimeout(() => {
+        if (resolved) return;
+        const currentRun = this.activeRuns.get(runId);
+        if (currentRun) {
+          finish(currentRun);
+        } else {
+          resolved = true;
+          cleanup();
+          reject(new Error(`Run ${runId} not found after timeout`));
+        }
+      }, timeoutMs);
+    });
+  }
+
+  async executeAndWait(query: string): Promise<{ run: ProductionRun; response: string }> {
+    const { runId } = await this.startRun(query);
+    const run = await this.waitForCompletion(runId);
+    
+    let response = "";
+    if (run.status === "completed") {
+      if (run.artifacts.length > 0) {
+        const artifact = run.artifacts[0];
+        const downloadUrl = `/api/registry/artifacts/${artifact.artifactId}/download`;
+        response = `He completado la tarea. ${this.formatArtifactDescription(run.intent, artifact)}
+
+Descargar: ${downloadUrl}`;
+      } else {
+        response = "He completado la tarea.";
+      }
+    } else if (run.status === "failed" || run.status === "timeout") {
+      response = `Error: ${run.error || "La tarea no pudo completarse"}`;
+    } else if (run.status === "cancelled") {
+      response = "La tarea fue cancelada.";
+    }
+    
+    return { run, response };
+  }
+
+  private formatArtifactDescription(intent: GenerationIntent, artifact: ArtifactInfo): string {
+    switch (intent) {
+      case "image_generate":
+        return `He generado una imagen (${Math.round(artifact.sizeBytes / 1024)}KB).`;
+      case "slides_create":
+        return `He creado una presentación PowerPoint (${Math.round(artifact.sizeBytes / 1024)}KB).`;
+      case "docx_generate":
+        return `He generado un documento Word (${Math.round(artifact.sizeBytes / 1024)}KB).`;
+      case "xlsx_create":
+        return `He creado una hoja de cálculo Excel (${Math.round(artifact.sizeBytes / 1024)}KB).`;
+      case "pdf_generate":
+        return `He generado un documento PDF (${artifact.sizeBytes} bytes).`;
+      default:
+        return `Archivo generado (${artifact.sizeBytes} bytes).`;
+    }
+  }
 }
 
 export const productionWorkflowRunner = new ProductionWorkflowRunner({ watchdogTimeoutMs: 30000 });
