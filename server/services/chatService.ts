@@ -372,7 +372,8 @@ export async function handleChatRequest(
   
   if (lastUserMessage) {
     // GMAIL INTEGRATION: Detectar y manejar solicitudes de correo electrónico
-    if (!documentMode && !figmaMode && userId && detectEmailIntent(lastUserMessage.content)) {
+    // Skip Gmail detection when user has attached a document (attachmentContext contains the file)
+    if (!documentMode && !figmaMode && !attachmentContext && userId && detectEmailIntent(lastUserMessage.content)) {
       try {
         const emailResult = await handleEmailChatRequest(userId, lastUserMessage.content);
         if (emailResult.handled && emailResult.response) {
