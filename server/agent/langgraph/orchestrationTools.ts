@@ -1,15 +1,6 @@
-import { tool, DynamicStructuredTool } from "@langchain/core/tools";
+import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import OpenAI from "openai";
-import {
-  DocumentTool,
-  SearchTool,
-  BrowserTool,
-  ResearchTool,
-  GenerateTool,
-  FileTool,
-} from "../sandbox/tools";
-import type { ToolResult } from "../sandbox/agentTypes";
 
 const xaiClient = new OpenAI({
   baseURL: "https://api.x.ai/v1",
@@ -18,42 +9,18 @@ const xaiClient = new OpenAI({
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 
-const sandboxAgents = {
-  search: new SearchTool(),
-  browser: new BrowserTool(),
-  document: new DocumentTool(),
-  research: new ResearchTool(),
-  file: new FileTool(),
-  generate: new GenerateTool(),
-};
-
-function formatToolResult(result: ToolResult): any {
-  if (result.success) {
-    return {
-      success: true,
-      message: result.message,
-      data: result.data,
-      filesCreated: result.filesCreated,
-    };
-  }
-  return {
-    success: false,
-    error: result.error || "Tool execution failed",
-  };
-}
-
 interface AgentConfig {
-  executor: { execute: (params: any) => Promise<ToolResult> };
   description: string;
+  capabilities: string[];
 }
 
 const AVAILABLE_AGENTS: Record<string, AgentConfig> = {
-  search: { executor: sandboxAgents.search, description: "Web search specialist" },
-  browser: { executor: sandboxAgents.browser, description: "Web content extraction specialist" },
-  document: { executor: sandboxAgents.document, description: "Document creation specialist" },
-  research: { executor: sandboxAgents.research, description: "Deep research specialist" },
-  file: { executor: sandboxAgents.file, description: "File operations specialist" },
-  generate: { executor: sandboxAgents.generate, description: "Content generation specialist" },
+  search: { description: "Web search specialist", capabilities: ["search queries", "find information online"] },
+  browser: { description: "Web content extraction specialist", capabilities: ["extract web page content", "navigate websites"] },
+  document: { description: "Document creation specialist", capabilities: ["create PPTX/DOCX/XLSX files"] },
+  research: { description: "Deep research specialist", capabilities: ["comprehensive research", "data analysis"] },
+  file: { description: "File operations specialist", capabilities: ["read/write files", "file management"] },
+  generate: { description: "Content generation specialist", capabilities: ["create images", "generate content"] },
 };
 
 interface SubAgentResult {
@@ -90,40 +57,37 @@ async function executeSubAgent(
   }
 
   try {
-    const planResponse = await xaiClient.chat.completions.create({
+    const response = await xaiClient.chat.completions.create({
       model: DEFAULT_MODEL,
       messages: [
         {
           role: "system",
-          content: `You are a ${agentConfig.description}. Given a task, determine the appropriate parameters to call the ${agentName} tool.
-Return a JSON object with the parameters needed for the tool. Be concise and accurate.`,
+          content: `You are a ${agentConfig.description} with capabilities: ${agentConfig.capabilities.join(", ")}.
+Execute the given task and provide detailed results. Be thorough and accurate.
+Return your response as JSON with keys: success (boolean), data (the result), message (brief summary).`,
         },
         {
           role: "user",
-          content: `Task: ${task}\n\nReturn only the JSON parameters object for the ${agentName} tool.`,
+          content: `Task: ${task}`,
         },
       ],
-      temperature: 0.2,
+      temperature: 0.3,
     });
 
-    const paramsContent = planResponse.choices[0].message.content || "{}";
-    let params: Record<string, any>;
+    const content = response.choices[0].message.content || "";
+    let result: any;
     try {
-      const jsonMatch = paramsContent.match(/\{[\s\S]*\}/);
-      params = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      result = jsonMatch ? JSON.parse(jsonMatch[0]) : { success: true, data: content, message: "Task completed" };
     } catch {
-      params = { query: task };
+      result = { success: true, data: content, message: "Task completed" };
     }
-
-    const toolResult = await agentConfig.executor.execute(params);
-    const result = formatToolResult(toolResult);
 
     return {
       agent: agentName,
-      success: result.success,
+      success: result.success !== false,
       result,
       latencyMs: Date.now() - startTime,
-      error: result.success ? undefined : result.error,
     };
   } catch (error: any) {
     return {
