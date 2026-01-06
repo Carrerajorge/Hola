@@ -412,8 +412,6 @@ export async function handleChatRequest(
           return {
             content: response,
             role: "assistant",
-            wasAgentTask: true,
-            agentRunId: run.runId,
             artifact: artifactInfo,
           };
         } catch (error: any) {
