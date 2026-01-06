@@ -406,6 +406,7 @@ export async function handleChatRequest(
               mimeType: artifact.mimeType,
               sizeBytes: artifact.sizeBytes,
               downloadUrl: `/api/registry/artifacts/${artifact.artifactId}/download`,
+              previewUrl: artifact.previewUrl || `/api/registry/artifacts/${artifact.artifactId}/preview`,
             };
           }
           
@@ -413,6 +414,7 @@ export async function handleChatRequest(
             content: response,
             role: "assistant",
             artifact: artifactInfo,
+            agentRunId: run.runId,
           };
         } catch (error: any) {
           console.error(`[ChatService] ProductionWorkflowRunner error:`, error);

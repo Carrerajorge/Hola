@@ -198,12 +198,19 @@ function defaultRetryCondition(failureCount: number, error: unknown): boolean {
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      queryFn: getQueryFn({ on401: "throw" }),
+      queryFn: getQueryFn({ on401: "returnNull" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: Infinity,
       retry: defaultRetryCondition,
       retryDelay: (attemptIndex) => Math.min(1000 * Math.pow(2, attemptIndex), 30000),
+      throwOnError: (error) => {
+        if (error instanceof Error) {
+          const status = parseInt(error.message.split(':')[0]);
+          if (status === 401) return false;
+        }
+        return false;
+      },
     },
     mutations: {
       retry: defaultRetryCondition,
