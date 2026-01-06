@@ -2882,7 +2882,7 @@ export function ChatInterface({
     }
 
     // GENERATION INTENT DETECTION: Handle image, document, spreadsheet, presentation requests
-    // These are handled directly by /api/chat + ProductionWorkflowRunner - no agent mode needed
+    // These are handled directly by /api/chat + ProductionWorkflowRunner - no agent mode or SSE needed
     const generationPatterns = [
       /\b(crea|create|genera|generate|haz|make)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i,
       /\b(crea|create|genera|generate|haz|make)\b.*\b(documento|document|word|docx)\b/i,
@@ -2895,8 +2895,89 @@ export function ChatInterface({
     
     if (isGenerationRequest) {
       console.log("[handleSubmit] Generation intent detected - routing directly to /api/chat");
-      // Don't use agent mode - let /api/chat handle it with ProductionWorkflowRunner
-      // Fall through to normal chat processing below
+      
+      // Set thinking state
+      setAiState("thinking");
+      setAiProcessSteps([
+        { step: "Procesando tu solicitud", status: "active" },
+        { step: "Generando contenido", status: "pending" }
+      ]);
+      
+      const generationInput = input;
+      setInput("");
+      if (chatId) {
+        clearDraft(chatId);
+      }
+      
+      // Add user message to chat
+      const userMsgId = Date.now().toString();
+      const userMsg: Message = {
+        id: userMsgId,
+        role: "user",
+        content: generationInput,
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+      };
+      onSendMessage(userMsg);
+      
+      try {
+        // Direct call to /api/chat for generation - bypasses SSE/runs system
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
+            provider: selectedProvider,
+            model: selectedModel
+          })
+        });
+        
+        setAiProcessSteps(prev => prev.map((s, i) => 
+          i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
+        ));
+        
+        const data = await response.json();
+        
+        if (response.ok && data.content) {
+          setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
+          
+          const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: data.content,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+            artifact: data.artifact,
+          };
+          onSendMessage(aiMsg);
+        } else {
+          const errorMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: data.error || "Error al procesar la solicitud. Por favor, intenta de nuevo.",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          };
+          onSendMessage(errorMsg);
+        }
+      } catch (error) {
+        console.error("[Generation] Error:", error);
+        const errorMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: "Error de conexión. Por favor, intenta de nuevo.",
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: userMsgId,
+        };
+        onSendMessage(errorMsg);
+      }
+      
+      setAiState("idle");
+      setAiProcessSteps([]);
+      return;
     }
     
     // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
