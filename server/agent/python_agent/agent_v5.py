@@ -101,6 +101,12 @@ class DependencyInstaller:
     
     @classmethod
     def install(cls, pkg, retries=2):
+        # Validate package name to prevent command injection
+        # Allow: letters, numbers, hyphens, underscores, periods, brackets for extras
+        if not re.match(r'^[a-zA-Z0-9._\-\[\],<>=!]+$', pkg):
+            print(f"⚠️ Invalid package name: {pkg}")
+            return False
+        
         for i in range(retries):
             try:
                 subprocess.run([sys.executable, "-m", "pip", "install", pkg, "-q", "--disable-pip-version-check"],
