@@ -6,6 +6,7 @@ import { ALL_TOOLS, getToolByName } from "./tools";
 import { memoryStore } from "./memory";
 import type { AgentState } from "./index";
 import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 const xaiClient = new OpenAI({
   baseURL: "https://api.x.ai/v1",
@@ -78,14 +79,30 @@ interface ToolDef {
 }
 
 function getToolDefinitions(tools = ALL_TOOLS): ToolDef[] {
-  return tools.map((tool) => ({
-    type: "function" as const,
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.schema ? JSON.parse(JSON.stringify(tool.schema)) : { type: "object", properties: {} },
-    },
-  }));
+  return tools.map((tool) => {
+    let parameters: Record<string, any> = { type: "object", properties: {} };
+    
+    if (tool.schema) {
+      try {
+        const jsonSchema = zodToJsonSchema(tool.schema, { $refStrategy: "none" });
+        if (typeof jsonSchema === "object" && jsonSchema !== null) {
+          const { $schema, ...rest } = jsonSchema as Record<string, any>;
+          parameters = rest;
+        }
+      } catch (e) {
+        console.error(`[getToolDefinitions] Failed to convert schema for ${tool.name}:`, e);
+      }
+    }
+    
+    return {
+      type: "function" as const,
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters,
+      },
+    };
+  });
 }
 
 function messagesToOpenAI(messages: BaseMessage[]): OpenAI.ChatCompletionMessageParam[] {
