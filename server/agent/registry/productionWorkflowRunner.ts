@@ -773,19 +773,19 @@ export class ProductionWorkflowRunner extends EventEmitter {
     input: unknown,
     run: ProductionRun
   ): { success: boolean; data: unknown; error?: string; artifacts?: ArtifactInfo[] } | null {
-    const fallbacks: Record<string, () => { success: boolean; data: unknown; artifacts?: ArtifactInfo[] }> = {
+    const fallbacks: Record<string, () => { success: boolean; data: unknown; error?: string; artifacts?: ArtifactInfo[] }> = {
       "web_search": () => ({
-        success: true,
+        success: false,
         data: {
           query: (input as any).query,
           results: [],
           resultsCount: 0,
           source: "fallback_cached",
-          message: "Search service temporarily unavailable. Please try again later.",
         },
+        error: "Search service temporarily unavailable (circuit breaker open). Please try again later.",
       }),
       "data_analyze": () => ({
-        success: true,
+        success: false,
         data: {
           count: 0,
           sum: 0,
@@ -793,18 +793,23 @@ export class ProductionWorkflowRunner extends EventEmitter {
           stdDev: 0,
           min: 0,
           max: 0,
-          message: "Analysis service temporarily unavailable. Results are placeholder values.",
         },
+        error: "Analysis service temporarily unavailable (circuit breaker open). Results are placeholder values.",
       }),
       "browse_url": () => ({
         success: false,
         data: null,
-        error: "Browse service temporarily unavailable",
+        error: "Browse service temporarily unavailable (circuit breaker open).",
       }),
     };
 
     const fallback = fallbacks[toolName];
-    return fallback ? { ...fallback(), success: true } : null;
+    if (!fallback) return null;
+    const result = fallback();
+    return {
+      ...result,
+      error: result.success ? undefined : (result as any).error || `Fallback used for ${toolName}`,
+    };
   }
 
   private async executeToolInternal(

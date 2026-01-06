@@ -82,7 +82,7 @@ const EXTERNAL_DEPENDENCIES = [
 
 class HealthCheckService extends EventEmitter {
   private checks: Map<string, HealthCheckEntry> = new Map();
-  private alerts: HealthAlert[] = new Map() as unknown as HealthAlert[];
+  private alerts: HealthAlert[] = [];
   private alertHistory: HealthAlert[] = [];
   private monitoringInterval?: NodeJS.Timeout;
   private isMonitoring = false;
@@ -96,7 +96,6 @@ class HealthCheckService extends EventEmitter {
 
   constructor() {
     super();
-    this.alerts = [];
     this.initializeDefaultChecks();
   }
 

@@ -64,6 +64,13 @@ export class CircuitBreaker {
     return this.halfOpenCalls < this.config.halfOpenMaxCalls;
   }
 
+  recordExecutionStart(): void {
+    const currentState = this.getState();
+    if (currentState === "half_open") {
+      this.halfOpenCalls++;
+    }
+  }
+
   recordSuccess(): void {
     const currentState = this.getState();
     if (currentState === "half_open") {
@@ -180,7 +187,7 @@ export async function withResilience<T>(
     if (fallback) {
       try {
         const result = await fallback();
-        return { success: true, data: result as T, attempts: 0, circuitState: circuitBreaker.getState() };
+        return { success: false, data: result as T, error: "Circuit breaker open, fallback used", attempts: 0, circuitState: circuitBreaker.getState() };
       } catch (e) {
         return { success: false, error: "Circuit open and fallback failed", attempts: 0, circuitState: circuitBreaker.getState() };
       }
@@ -192,7 +199,21 @@ export async function withResilience<T>(
   let attempts = 0;
 
   while (true) {
+    if (circuitBreaker && !circuitBreaker.canExecute()) {
+      onCircuitOpen?.();
+      if (fallback) {
+        try {
+          const result = await fallback();
+          return { success: false, data: result as T, error: "Circuit opened during retries, fallback used", attempts, circuitState: circuitBreaker.getState() };
+        } catch (e) {
+          return { success: false, error: "Circuit opened during retries and fallback failed", attempts, circuitState: circuitBreaker.getState() };
+        }
+      }
+      return { success: false, error: "Circuit breaker opened during retries", attempts, circuitState: circuitBreaker.getState() };
+    }
+
     attempts++;
+    circuitBreaker?.recordExecutionStart();
     try {
       const result = await Promise.race([
         operation(),
@@ -220,7 +241,7 @@ export async function withResilience<T>(
   if (fallback) {
     try {
       const result = await fallback();
-      return { success: true, data: result as T, attempts, circuitState: circuitBreaker?.getState() };
+      return { success: false, data: result as T, error: `All retries exhausted, fallback used: ${lastError?.message}`, attempts, circuitState: circuitBreaker?.getState() };
     } catch (e) {
       return { success: false, error: `All retries failed: ${lastError?.message}. Fallback also failed.`, attempts, circuitState: circuitBreaker?.getState() };
     }
