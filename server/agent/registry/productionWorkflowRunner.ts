@@ -834,7 +834,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
-          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
+          previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -857,7 +857,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
-          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
+          previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -880,7 +880,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
-          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
+          previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -903,7 +903,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
-          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
+          previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -926,7 +926,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
-          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
+          previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -985,7 +985,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
             path: filePath,
             sizeBytes: stats.size,
             createdAt: new Date().toISOString(),
-            previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
+            previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
           };
 
           return {
@@ -1492,7 +1492,7 @@ ${420 + streamLength}
     if (run.status === "completed") {
       if (run.artifacts.length > 0) {
         const artifact = run.artifacts[0];
-        const downloadUrl = `/api/registry/artifacts/${artifact.artifactId}/download`;
+        const downloadUrl = `/api/artifacts/${artifact.artifactId}/download`;
         response = `He completado la tarea. ${this.formatArtifactDescription(run.intent, artifact)}
 
 Descargar: ${downloadUrl}`;

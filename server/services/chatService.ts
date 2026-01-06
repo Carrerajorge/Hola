@@ -405,8 +405,8 @@ export async function handleChatRequest(
               type: artifact.type,
               mimeType: artifact.mimeType,
               sizeBytes: artifact.sizeBytes,
-              downloadUrl: `/api/registry/artifacts/${artifact.artifactId}/download`,
-              previewUrl: artifact.previewUrl || `/api/registry/artifacts/${artifact.artifactId}/preview`,
+              downloadUrl: `/api/artifacts/${artifact.artifactId}/download`,
+              previewUrl: artifact.previewUrl?.replace('/api/registry/', '/api/') || `/api/artifacts/${artifact.artifactId}/preview`,
             };
           }
           

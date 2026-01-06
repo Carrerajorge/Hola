@@ -324,7 +324,7 @@ const InlineImageCard = memo(function InlineImageCard({
     const artifactPath = artifact.path || artifact.data?.filePath;
     if (artifactPath) {
       const filename = artifactPath.split('/').pop();
-      return `/api/registry/artifacts/${filename}/preview`;
+      return `/api/artifacts/${filename}/preview`;
     }
     return null;
   }, [artifact]);
