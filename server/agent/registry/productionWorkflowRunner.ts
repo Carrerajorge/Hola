@@ -834,7 +834,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
-          previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
+          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -857,6 +857,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
+          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -879,6 +880,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
+          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -901,6 +903,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
+          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -923,6 +926,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           path: filePath,
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
+          previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
         };
 
         return {
@@ -981,6 +985,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
             path: filePath,
             sizeBytes: stats.size,
             createdAt: new Date().toISOString(),
+            previewUrl: `/api/registry/artifacts/${path.basename(filePath)}/preview`,
           };
 
           return {

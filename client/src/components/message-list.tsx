@@ -1456,6 +1456,9 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
                     onArtifactPreview(artifact);
                   }
                 }}
+                onImageExpand={(imageUrl) => {
+                  onOpenLightbox(imageUrl);
+                }}
                 onDownload={(artifact) => {
                   if (artifact.data?.base64) {
                     const byteCharacters = atob(artifact.data.base64);

@@ -1,4 +1,4 @@
-import React, { useState, memo, useCallback } from "react";
+import React, { useState, memo, useCallback, useMemo } from "react";
 import { 
   ChevronDown, 
   ChevronRight, 
@@ -33,6 +33,8 @@ export interface AgentArtifact {
   type: string;
   name: string;
   url?: string;
+  previewUrl?: string;
+  path?: string;
   data?: any;
   mimeType?: string;
 }
@@ -44,7 +46,15 @@ interface AgentStepsDisplayProps {
   isRunning?: boolean;
   onDocumentClick?: (artifact: AgentArtifact) => void;
   onDownload?: (artifact: AgentArtifact) => void;
+  onImageExpand?: (imageUrl: string) => void;
   className?: string;
+}
+
+function isImageArtifact(artifact: AgentArtifact): boolean {
+  if (artifact.type === "image") return true;
+  if (artifact.mimeType?.startsWith("image/")) return true;
+  const name = artifact.name?.toLowerCase() || "";
+  return /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/.test(name);
 }
 
 interface StepGroupProps {
@@ -291,6 +301,164 @@ export const StepGroup = memo(function StepGroup({
   );
 });
 
+interface InlineImageCardProps {
+  artifact: AgentArtifact;
+  onExpand?: (imageUrl: string) => void;
+  onDownload?: () => void;
+}
+
+const InlineImageCard = memo(function InlineImageCard({
+  artifact,
+  onExpand,
+  onDownload
+}: InlineImageCardProps) {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+  
+  const imageUrl = useMemo(() => {
+    if (artifact.url) return artifact.url;
+    if (artifact.previewUrl) return artifact.previewUrl;
+    if (artifact.data?.previewUrl) return artifact.data.previewUrl;
+    if (artifact.data?.url) return artifact.data.url;
+    const artifactPath = artifact.path || artifact.data?.filePath;
+    if (artifactPath) {
+      const filename = artifactPath.split('/').pop();
+      return `/api/registry/artifacts/${filename}/preview`;
+    }
+    return null;
+  }, [artifact]);
+
+  const handleExpand = useCallback(() => {
+    if (imageUrl && onExpand) {
+      onExpand(imageUrl);
+    }
+  }, [imageUrl, onExpand]);
+
+  const handleDownload = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onDownload) {
+      onDownload();
+      return;
+    }
+    
+    if (!imageUrl) return;
+    
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = artifact.name || "imagen.png";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      const link = document.createElement("a");
+      link.href = imageUrl;
+      link.download = artifact.name || "imagen.png";
+      link.click();
+    }
+  }, [onDownload, imageUrl, artifact.name]);
+
+  const handleRetry = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setHasError(false);
+    setIsLoaded(false);
+    setRetryKey(prev => prev + 1);
+  }, []);
+
+  const handleOpenInNewTab = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (imageUrl) {
+      window.open(imageUrl, "_blank", "noopener,noreferrer");
+    }
+  }, [imageUrl]);
+
+  if (!imageUrl) {
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/50">
+        <ImageIcon className="h-8 w-8 text-muted-foreground" />
+        <span className="text-sm text-muted-foreground">Imagen no disponible</span>
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      className="relative group rounded-lg overflow-hidden border border-border bg-muted/30"
+      data-testid={`inline-image-${artifact.id}`}
+    >
+      {!isLoaded && !hasError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-muted animate-pulse">
+          <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
+        </div>
+      )}
+      
+      {hasError ? (
+        <div className="flex flex-col sm:flex-row items-center gap-3 p-4 text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <ImageIcon className="h-6 w-6" />
+            <span className="text-sm">No se pudo cargar la imagen</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleRetry} data-testid={`retry-image-${artifact.id}`}>
+              Reintentar
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleOpenInNewTab} data-testid={`open-new-tab-${artifact.id}`}>
+              Abrir en nueva pestaña
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleDownload}>
+              <Download className="h-4 w-4 mr-1" />
+              Descargar
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <img
+            key={retryKey}
+            src={imageUrl}
+            alt={artifact.name || "Imagen generada"}
+            className={cn(
+              "max-w-full h-auto cursor-pointer transition-opacity",
+              !isLoaded && "opacity-0"
+            )}
+            style={{ maxHeight: "400px" }}
+            onLoad={() => setIsLoaded(true)}
+            onError={() => setHasError(true)}
+            onClick={handleExpand}
+            data-testid={`generated-image-preview-${artifact.id}`}
+          />
+          
+          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              variant="secondary"
+              size="icon"
+              className="h-8 w-8 bg-black/50 hover:bg-black/70 text-white border-0"
+              onClick={handleExpand}
+              data-testid={`expand-image-${artifact.id}`}
+            >
+              <Eye className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              className="h-8 w-8 bg-black/50 hover:bg-black/70 text-white border-0"
+              onClick={handleDownload}
+              data-testid={`download-image-${artifact.id}`}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+});
+
 export const DocumentCard = memo(function DocumentCard({ 
   artifact, 
   onClick, 
@@ -376,11 +544,15 @@ export const AgentStepsDisplay = memo(function AgentStepsDisplay({
   isRunning = false,
   onDocumentClick,
   onDownload,
+  onImageExpand,
   className
 }: AgentStepsDisplayProps) {
   const hasSteps = steps.length > 0;
   const hasArtifacts = artifacts.length > 0;
   const hasSummary = summary && summary.trim().length > 0;
+
+  const imageArtifacts = useMemo(() => artifacts.filter(isImageArtifact), [artifacts]);
+  const documentArtifacts = useMemo(() => artifacts.filter(a => !isImageArtifact(a)), [artifacts]);
 
   const handleDocumentClick = useCallback((artifact: AgentArtifact) => {
     onDocumentClick?.(artifact);
@@ -396,6 +568,10 @@ export const AgentStepsDisplay = memo(function AgentStepsDisplay({
       link.click();
     }
   }, [onDownload]);
+
+  const handleImageExpand = useCallback((imageUrl: string) => {
+    onImageExpand?.(imageUrl);
+  }, [onImageExpand]);
 
   if (!hasSteps && !hasArtifacts && !hasSummary) {
     return null;
@@ -423,13 +599,28 @@ export const AgentStepsDisplay = memo(function AgentStepsDisplay({
         </div>
       )}
 
-      {hasArtifacts && !isRunning && (
-        <div className="space-y-2" data-testid="agent-artifacts">
+      {imageArtifacts.length > 0 && !isRunning && (
+        <div className="space-y-2" data-testid="agent-image-artifacts">
+          <div className="grid gap-3">
+            {imageArtifacts.map((artifact) => (
+              <InlineImageCard
+                key={artifact.id}
+                artifact={artifact}
+                onExpand={handleImageExpand}
+                onDownload={() => handleDownload(artifact)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {documentArtifacts.length > 0 && !isRunning && (
+        <div className="space-y-2" data-testid="agent-document-artifacts">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Documentos generados
           </p>
           <div className="grid gap-2">
-            {artifacts.map((artifact) => (
+            {documentArtifacts.map((artifact) => (
               <DocumentCard
                 key={artifact.id}
                 artifact={artifact}
