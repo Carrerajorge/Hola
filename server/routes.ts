@@ -34,6 +34,8 @@ import { createChatRoutes } from "./routes/chatRoutes";
 import { createAgentModeRouter } from "./routes/agentRoutes";
 import { createSandboxAgentRouter } from "./routes/sandboxAgentRouter";
 import { createLangGraphRouter } from "./routes/langGraphRouter";
+import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
+import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
@@ -85,6 +87,90 @@ export async function registerRoutes(
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api", createSandboxAgentRouter());
   app.use("/api", createLangGraphRouter());
+
+  // ===== Simple Tools & Agents Endpoints =====
+  
+  // GET /tools - Return all 100 tools
+  app.get("/tools", (_req: Request, res: Response) => {
+    try {
+      const tools = ALL_TOOLS.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+      }));
+      
+      res.json({
+        success: true,
+        count: tools.length,
+        tools,
+        categories: {
+          safe: SAFE_TOOLS.map(t => t.name),
+          system: SYSTEM_TOOLS.map(t => t.name),
+        },
+      });
+    } catch (error: any) {
+      console.error("[Tools] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to load tools",
+      });
+    }
+  });
+
+  // GET /agents - Return all 10 agents
+  app.get("/agents", (_req: Request, res: Response) => {
+    try {
+      const agents = SPECIALIZED_AGENTS.map(agent => ({
+        name: agent.name,
+        description: agent.description,
+        capabilities: agent.capabilities,
+        tools: agent.tools,
+      }));
+      
+      res.json({
+        success: true,
+        count: agents.length,
+        agents,
+      });
+    } catch (error: any) {
+      console.error("[Agents] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to load agents",
+      });
+    }
+  });
+
+  // GET /api/tools - Alias for /tools
+  app.get("/api/tools", (_req: Request, res: Response) => {
+    try {
+      const tools = ALL_TOOLS.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+      }));
+      
+      res.json({
+        success: true,
+        count: tools.length,
+        tools,
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // GET /api/agents - Alias for /agents
+  app.get("/api/agents", (_req: Request, res: Response) => {
+    try {
+      const agents = SPECIALIZED_AGENTS;
+      res.json({
+        success: true,
+        count: agents.length,
+        agents,
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
 
   // ===== Python Agent v5.0 Endpoints =====
   
