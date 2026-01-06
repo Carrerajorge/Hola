@@ -421,6 +421,62 @@ describe("Error Handling", () => {
       expect(result.trace.error?.message).toBeDefined();
     });
   });
+
+  describe("Guardrails", () => {
+    it("should enforce rate limiting - check mechanism exists", async () => {
+      const tool = toolRegistry.get("uuid_generate");
+      expect(tool).toBeDefined();
+      expect(tool!.config.rateLimitPerMinute).toBeGreaterThan(0);
+      expect(tool!.config.rateLimitPerHour).toBeGreaterThan(0);
+    });
+
+    it("should track retry count in trace", async () => {
+      const result = await toolRegistry.execute("uuid_generate", { 
+        count: 1 
+      }, { skipRateLimit: true });
+      
+      expect(result.trace.retryCount).toBeDefined();
+      expect(result.trace.retryCount).toBeGreaterThanOrEqual(0);
+    });
+
+    it("should record timestamps in trace", async () => {
+      const result = await toolRegistry.execute("uuid_generate", { count: 1 }, { skipRateLimit: true });
+      
+      expect(result.trace.startTime).toBeGreaterThan(0);
+      expect(result.trace.endTime).toBeGreaterThan(0);
+      expect(result.trace.endTime).toBeGreaterThanOrEqual(result.trace.startTime);
+    });
+
+    it("should generate unique requestId for each execution", async () => {
+      const results = await Promise.all([
+        toolRegistry.execute("uuid_generate", { count: 1 }, { skipRateLimit: true }),
+        toolRegistry.execute("uuid_generate", { count: 1 }, { skipRateLimit: true }),
+        toolRegistry.execute("uuid_generate", { count: 1 }, { skipRateLimit: true }),
+      ]);
+      
+      const requestIds = results.map(r => r.trace.requestId);
+      expect(new Set(requestIds).size).toBe(3);
+    });
+
+    it("should support skipRateLimit option", async () => {
+      const result = await toolRegistry.execute(
+        "uuid_generate",
+        { count: 1 },
+        { skipRateLimit: true }
+      );
+      
+      expect(result.success).toBe(true);
+    });
+
+    it("should have timeout and retry config for all tools", () => {
+      const tools = toolRegistry.getAll();
+      for (const tool of tools) {
+        expect(tool.config.timeout).toBeGreaterThan(0);
+        expect(tool.config.maxRetries).toBeGreaterThanOrEqual(0);
+        expect(tool.config.retryDelay).toBeGreaterThan(0);
+      }
+    });
+  });
 });
 
 describe("Integration Tests", () => {
@@ -445,9 +501,9 @@ describe("Integration Tests", () => {
 
     it("should handle parallel tool calls", async () => {
       const results = await Promise.all([
-        toolRegistry.execute("hash", { data: "test1", algorithm: "sha256" }),
-        toolRegistry.execute("hash", { data: "test2", algorithm: "sha256" }),
-        toolRegistry.execute("hash", { data: "test3", algorithm: "sha256" }),
+        toolRegistry.execute("hash", { data: "test1", algorithm: "sha256" }, { skipRateLimit: true }),
+        toolRegistry.execute("hash", { data: "test2", algorithm: "sha256" }, { skipRateLimit: true }),
+        toolRegistry.execute("hash", { data: "test3", algorithm: "sha256" }, { skipRateLimit: true }),
       ]);
       
       expect(results.every(r => r.success)).toBe(true);
@@ -504,13 +560,13 @@ describe("E2E Tests", () => {
       const result1 = await toolRegistry.execute("password_generate", {
         length: 24,
         includeSymbols: true,
-      });
+      }, { skipRateLimit: true });
       expect(result1.success).toBe(true);
       
       const result2 = await toolRegistry.execute("hash", {
         data: "test-password",
         algorithm: "sha256",
-      });
+      }, { skipRateLimit: true });
       expect(result2.success).toBe(true);
       expect(result2.data).toBeDefined();
     });
