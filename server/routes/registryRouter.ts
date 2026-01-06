@@ -297,11 +297,14 @@ export function createRegistryRouter(): Router {
 
   router.post("/registry/capabilities-report", async (req: Request, res: Response) => {
     try {
-      const { full = false } = req.body;
+      const { mode = "full", full = false, smoke = false, implementedOnly = false } = req.body;
       
-      const report = full
-        ? await capabilitiesReportRunner.runFullReport()
-        : await capabilitiesReportRunner.runQuickSmokeTest();
+      let reportMode: "full" | "smoke" | "implementedOnly" = mode;
+      if (full) reportMode = "full";
+      else if (smoke) reportMode = "smoke";
+      else if (implementedOnly) reportMode = "implementedOnly";
+      
+      const report = await capabilitiesReportRunner.runReport(reportMode);
       
       res.json({
         success: true,
@@ -328,6 +331,111 @@ export function createRegistryRouter(): Router {
       
       const junit = capabilitiesReportRunner.toJUnit();
       res.type("application/xml").send(junit);
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  router.post("/registry/execute-workflow", async (req: Request, res: Response) => {
+    try {
+      const { query, workflowId } = req.body;
+      
+      let workflow;
+      let evidence: Array<{
+        stepId: string;
+        toolName: string;
+        status: string;
+        durationMs: number;
+        output: any;
+        error?: string;
+        traceRequestId?: string;
+        replanEvent?: { cause: string; decision: string };
+      }> = [];
+      
+      if (workflowId) {
+        workflow = await orchestrator.executeWorkflow(workflowId);
+      } else if (query) {
+        const result = await orchestrator.executeTask(query);
+        
+        if (result.workflowResult) {
+          workflow = result.workflowResult;
+        } else if (result.toolResults) {
+          return res.json({
+            success: true,
+            type: "simple",
+            intent: result.intent,
+            evidence: result.toolResults.map((r, i) => ({
+              stepId: `step_${i + 1}`,
+              toolName: r.trace.toolName,
+              status: r.success ? "completed" : "failed",
+              durationMs: r.trace.durationMs || 0,
+              output: r.data,
+              error: r.error?.message,
+              traceRequestId: r.trace.requestId,
+            })),
+          });
+        } else if (result.agentResult) {
+          return res.json({
+            success: result.agentResult.success,
+            type: "agent",
+            intent: result.intent,
+            evidence: [{
+              stepId: "agent_execution",
+              toolName: result.intent.suggestedAgent,
+              status: result.agentResult.success ? "completed" : "failed",
+              durationMs: result.agentResult.trace?.durationMs || 0,
+              output: result.agentResult.output,
+              error: result.agentResult.error,
+              traceRequestId: result.agentResult.trace?.requestId,
+            }],
+          });
+        }
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: "Either 'query' or 'workflowId' is required",
+        });
+      }
+      
+      if (workflow) {
+        evidence = workflow.steps.map(step => ({
+          stepId: step.id,
+          toolName: step.name,
+          status: step.status,
+          durationMs: step.duration || 0,
+          output: step.result?.data || step.result?.output,
+          error: step.error,
+          traceRequestId: step.result?.trace?.requestId,
+          replanEvent: step.status === "failed" && step.result?.error?.retryable
+            ? { cause: step.error || "unknown", decision: "attempted_retry" }
+            : undefined,
+        }));
+      }
+      
+      res.json({
+        success: workflow?.status === "completed",
+        type: "workflow",
+        workflow: workflow ? {
+          id: workflow.id,
+          name: workflow.name,
+          status: workflow.status,
+          startedAt: workflow.startedAt,
+          completedAt: workflow.completedAt,
+          error: workflow.error,
+        } : null,
+        evidence,
+        summary: {
+          totalSteps: evidence.length,
+          completedSteps: evidence.filter(e => e.status === "completed").length,
+          failedSteps: evidence.filter(e => e.status === "failed").length,
+          skippedSteps: evidence.filter(e => e.status === "skipped").length,
+          totalDurationMs: evidence.reduce((sum, e) => sum + e.durationMs, 0),
+          replans: evidence.filter(e => e.replanEvent).length,
+        },
+      });
     } catch (error: any) {
       res.status(500).json({
         success: false,

@@ -32,6 +32,14 @@ export const ToolConfigSchema = z.object({
 
 export type ToolConfig = z.infer<typeof ToolConfigSchema>;
 
+export const ToolImplementationStatus = {
+  IMPLEMENTED: "implemented",
+  STUB: "stub", 
+  DISABLED: "disabled",
+} as const;
+
+export type ToolImplementationStatusType = typeof ToolImplementationStatus[keyof typeof ToolImplementationStatus];
+
 export const ToolMetadataSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().min(10).max(1000),
@@ -41,6 +49,8 @@ export const ToolMetadataSchema = z.object({
   tags: z.array(z.string()).default([]),
   deprecated: z.boolean().default(false),
   experimental: z.boolean().default(false),
+  implementationStatus: z.enum(["implemented", "stub", "disabled"]).default("implemented"),
+  requiresCredentials: z.array(z.string()).default([]),
 });
 
 export type ToolMetadata = z.infer<typeof ToolMetadataSchema>;

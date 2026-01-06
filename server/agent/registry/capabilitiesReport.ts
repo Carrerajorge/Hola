@@ -1,12 +1,13 @@
 import { z } from "zod";
-import { toolRegistry, ToolCategory, TOOL_CATEGORIES, ToolExecutionResult, RegisteredTool } from "./toolRegistry";
+import { toolRegistry, ToolCategory, TOOL_CATEGORIES, ToolExecutionResult, RegisteredTool, ToolImplementationStatus } from "./toolRegistry";
 import { agentRegistry, AgentRole, AGENT_ROLES, AgentResult } from "./agentRegistry";
 import { orchestrator } from "./orchestrator";
 
 export const TestResultSchema = z.object({
   name: z.string(),
   category: z.string(),
-  status: z.enum(["PASS", "FAIL", "SKIP", "ERROR"]),
+  status: z.enum(["PASS", "FAIL", "SKIP", "STUB", "DISABLED", "ERROR"]),
+  implementationStatus: z.enum(["implemented", "stub", "disabled"]).optional(),
   durationMs: z.number(),
   evidence: z.object({
     input: z.any().optional(),
@@ -22,6 +23,9 @@ export type TestResult = z.infer<typeof TestResultSchema>;
 export const CategoryReportSchema = z.object({
   category: z.string(),
   totalTools: z.number(),
+  implemented: z.number(),
+  stubs: z.number(),
+  disabled: z.number(),
   passed: z.number(),
   failed: z.number(),
   skipped: z.number(),
@@ -33,11 +37,16 @@ export type CategoryReport = z.infer<typeof CategoryReportSchema>;
 export const CapabilitiesReportSchema = z.object({
   timestamp: z.string(),
   version: z.string().default("1.0.0"),
+  mode: z.enum(["full", "smoke", "implementedOnly"]).default("full"),
   summary: z.object({
     totalTools: z.number(),
+    implementedTools: z.number(),
+    stubTools: z.number(),
+    disabledTools: z.number(),
     totalAgents: z.number(),
     toolsPassed: z.number(),
     toolsFailed: z.number(),
+    toolsSkipped: z.number(),
     agentsPassed: z.number(),
     agentsFailed: z.number(),
     overallStatus: z.enum(["PASS", "FAIL", "PARTIAL"]),
@@ -51,44 +60,134 @@ export const CapabilitiesReportSchema = z.object({
 
 export type CapabilitiesReport = z.infer<typeof CapabilitiesReportSchema>;
 
+export type ReportMode = "full" | "smoke" | "implementedOnly";
+
 const SMOKE_TEST_INPUTS: Record<string, Record<string, unknown>> = {
   web_search: { query: "test query", maxResults: 1 },
   browse_url: { url: "https://example.com", action: "extract" },
   extract_content: { url: "https://example.com" },
+  screenshot: { url: "https://example.com" },
+  form_fill: { url: "https://example.com", fields: { name: "test" } },
   summarize: { text: "This is a test text for summarization." },
   
   text_generate: { prompt: "Hello", maxTokens: 10 },
   image_generate: { prompt: "A simple test image", size: "256x256" },
   code_generate: { language: "javascript", description: "hello world function" },
+  audio_generate: { type: "speech", text: "Hello world" },
+  video_generate: { prompt: "test video", duration: 5 },
+  
+  text_summarize: { text: "This is a long text that needs to be summarized into shorter form." },
+  text_translate: { text: "Hello world", targetLanguage: "es" },
+  image_process: { imageUrl: "https://example.com/test.jpg", operations: ["resize"] },
+  audio_transcribe: { audioUrl: "https://example.com/test.mp3", language: "en" },
+  ocr_extract: { imageUrl: "https://example.com/test.jpg" },
+  sentiment_analyze: { text: "I love this product!" },
   
   data_transform: { data: [{ a: 1 }], operations: ["filter"] },
   data_visualize: { data: [{ x: 1, y: 2 }], chartType: "line" },
   json_parse: { input: '{"test": true}' },
   csv_parse: { input: "a,b\n1,2" },
+  statistics_compute: { data: [1, 2, 3, 4, 5], measures: ["mean", "median"] },
+  spreadsheet_analyze: { data: [[1, 2], [3, 4]], operations: ["sum"] },
   
   document_create: { type: "docx", title: "Test", content: "Test content" },
   pdf_generate: { title: "Test PDF", content: "Test content" },
   slides_create: { title: "Test", slides: [{ title: "Slide 1" }] },
+  spreadsheet_create: { title: "Test Sheet", sheets: [{ name: "Sheet1", headers: ["A", "B"], rows: [[1, 2], [3, 4]] }] },
+  template_fill: { templateId: "template123", data: { name: "test" } },
+  document_convert: { inputUrl: "https://example.com/doc.docx", outputFormat: "pdf" },
   
+  code_analyze: { code: "function test() { return 1; }", language: "javascript" },
+  git_operation: { operation: "status", repoPath: "/tmp/test" },
+  package_manage: { action: "list", packageManager: "npm" },
   shell_execute: { command: "echo test" },
   file_read: { path: "package.json" },
   file_write: { path: "/tmp/test.txt", content: "test" },
   
-  memory_store: { key: "test", value: "test_value" },
-  memory_retrieve: { key: "test" },
+  diagram_flowchart: { nodes: [{ id: "1", label: "Start" }], edges: [] },
+  diagram_sequence: { participants: ["A", "B"], messages: [{ from: "A", to: "B", message: "Hello" }] },
+  diagram_mindmap: { root: "Main Topic", branches: [{ label: "Child", children: [] }] },
+  diagram_class: { classes: [{ name: "Test", properties: [], methods: [] }] },
+  diagram_gantt: { title: "Test", tasks: [{ name: "Task 1", start: "2024-01-01", duration: 5 }] },
+  diagram_erd: { entities: [{ name: "User", attributes: ["id", "name"] }], relationships: [{ from: "User", to: "Post", type: "one-to-many" }] },
   
-  reason: { premise: "If A then B. A is true.", question: "Is B true?" },
-  reflect: { action: "test", outcome: "success" },
+  http_request: { url: "https://api.example.com/test", method: "GET" },
+  api_mock: { endpoint: "/test", method: "GET", response: { data: "test" } },
+  webhook_send: { url: "https://example.com/webhook", payload: { event: "test" } },
+  oauth_flow: { provider: "google", scopes: ["email"], redirectUri: "https://example.com/callback" },
+  graphql_query: { endpoint: "https://api.example.com/graphql", query: "{ test }" },
   
-  orchestrate: { task: "simple test task" },
-  workflow: { name: "test", steps: [] },
-  
-  decide: { options: ["A", "B"], criteria: "test" },
-  clarify: { statement: "Test statement" },
+  calendar_event: { title: "Test Event", startTime: "2024-01-01T10:00:00Z", endTime: "2024-01-01T11:00:00Z" },
+  task_create: { title: "Test Task", description: "A test task" },
+  notes_create: { title: "Test Note", content: "Test note content" },
+  reminder_set: { message: "Test", time: "2024-12-01T10:00:00Z" },
+  timer_start: { duration: 60 },
   
   security_scan: { target: "https://example.com" },
   encrypt: { data: "test", algorithm: "aes-256" },
+  decrypt: { data: "encrypted_data", algorithm: "aes-256", key: "testkey123456789" },
   hash: { data: "test", algorithm: "sha256" },
+  audit_log: { action: "login", resource: "user", actor: "user123", details: {} },
+  
+  workflow_create: { name: "test", trigger: { type: "manual", config: {} }, steps: [{ action: "notify", config: {} }] },
+  cron_schedule: { expression: "0 * * * *", command: "echo test" },
+  batch_process: { items: [1, 2, 3], operation: "process" },
+  retry_with_backoff: { operation: "api_call", maxRetries: 3, initialDelay: 1000 },
+  queue_message: { queueName: "test-queue", payload: { data: "test" } },
+  
+  db_query: { query: "SELECT 1", params: [] },
+  db_migrate: { direction: "up" },
+  db_backup: { database: "test", format: "sql" },
+  db_seed: { table: "users", data: [{ name: "test" }] },
+  cache_get: { key: "test" },
+  cache_set: { key: "test", value: "value" },
+  session_manage: { action: "get", sessionId: "test" },
+  
+  logs_search: { query: "error", level: "error" },
+  metrics_collect: { namespace: "app", metrics: ["cpu", "memory"] },
+  alert_create: { name: "test_alert", condition: "cpu > 80", threshold: 80, actions: ["email"] },
+  health_check: { targets: ["service1"] },
+  trace_request: { traceId: "test-trace-id" },
+  
+  uuid_generate: {},
+  date_format: { date: "2024-01-01", format: "YYYY-MM-DD" },
+  json_format: { input: { a: 1 }, indent: 2 },
+  regex_test: { pattern: "\\d+", text: "test123" },
+  base64_encode: { input: "test", operation: "encode" },
+  url_parse: { url: "https://example.com/path?q=test" },
+  qrcode_generate: { data: "https://example.com" },
+  
+  memory_store: { key: "test", value: "test_value" },
+  memory_retrieve: { key: "test" },
+  memory_search: { query: "test", limit: 10 },
+  context_manage: { operation: "get" },
+  session_state: { sessionId: "test-session", operation: "get" },
+  
+  reason: { premise: "If A then B. A is true.", question: "Is B true?" },
+  reflect: { action: "completed task", outcome: "success" },
+  verify: { claim: "The result is valid", evidence: ["test passed"] },
+  analyze_problem: { problem: "Application is slow", context: {} },
+  clarify: { statement: "Test statement" },
+  plan: { goal: "Complete test", constraints: [] },
+  decide: { options: ["A", "B"], criteria: "cost effectiveness" },
+  
+  orchestrate: { task: "simple test task" },
+  workflow: { name: "test", steps: [] },
+  delegate: { agentName: "ResearchAgent", task: "research topic" },
+  parallel_execute: { operations: [{ tool: "echo", input: { message: "test" } }], maxConcurrency: 2 },
+  strategic_plan: { objective: "Complete project", resources: [] },
+  
+  email_send: { to: ["test@example.com"], subject: "Test", body: "Test email" },
+  message_compose: { platform: "email", content: "Test message", format: "plain" },
+  notify: { channel: "slack", message: "Test notification" },
+  summarize: { content: "Long text to summarize", maxLength: 100 },
+  
+  code_execute: { code: "console.log('test')", language: "javascript" },
+  file_convert: { inputPath: "/tmp/test.txt", outputFormat: "pdf" },
+  environment_manage: { operation: "list" },
+  search_semantic: { query: "test search", collection: "documents" },
+  process_spawn: { command: "echo test", args: [] },
+  resource_monitor: { resources: ["cpu", "memory"] },
   
   default: { test: true },
 };
@@ -100,28 +199,44 @@ function getSmokeTestInput(toolName: string): Record<string, unknown> {
 class CapabilitiesReportRunner {
   private report: CapabilitiesReport | null = null;
 
-  async runFullReport(): Promise<CapabilitiesReport> {
+  private getToolStats() {
+    const tools = toolRegistry.getAll();
+    let implemented = 0, stubs = 0, disabled = 0;
+    for (const tool of tools) {
+      const status = (tool.metadata as any).implementationStatus || "implemented";
+      if (status === "implemented") implemented++;
+      else if (status === "stub") stubs++;
+      else if (status === "disabled") disabled++;
+    }
+    return { total: tools.length, implemented, stubs, disabled };
+  }
+
+  async runReport(mode: ReportMode = "full"): Promise<CapabilitiesReport> {
     const startTime = Date.now();
     console.log("\n" + "=".repeat(60));
-    console.log("CAPABILITIES REPORT - Starting Full System Validation");
+    console.log(`CAPABILITIES REPORT - Mode: ${mode.toUpperCase()}`);
     console.log("=".repeat(60) + "\n");
 
+    const toolStats = this.getToolStats();
     const toolCategories: CategoryReport[] = [];
-    let toolsPassed = 0;
-    let toolsFailed = 0;
+    let toolsPassed = 0, toolsFailed = 0, toolsSkipped = 0;
 
     for (const category of TOOL_CATEGORIES) {
-      const categoryReport = await this.testToolCategory(category);
+      const categoryReport = await this.testToolCategory(category, mode);
       toolCategories.push(categoryReport);
       toolsPassed += categoryReport.passed;
       toolsFailed += categoryReport.failed;
+      toolsSkipped += categoryReport.skipped;
     }
 
     const agentResults: TestResult[] = [];
-    let agentsPassed = 0;
-    let agentsFailed = 0;
+    let agentsPassed = 0, agentsFailed = 0;
 
-    for (const role of AGENT_ROLES) {
+    const agentsToTest = mode === "smoke" 
+      ? (["Orchestrator", "Research", "Code"] as AgentRole[])
+      : AGENT_ROLES;
+
+    for (const role of agentsToTest) {
       const agentResult = await this.testAgent(role);
       agentResults.push(agentResult);
       if (agentResult.status === "PASS") agentsPassed++;
@@ -130,30 +245,28 @@ class CapabilitiesReportRunner {
 
     const orchestratorResult = await this.testOrchestrator();
 
-    const totalTools = toolRegistry.getAll().length;
-    const totalAgents = agentRegistry.getAll().length;
-    
     const overallStatus = 
-      toolsFailed === 0 && agentsFailed === 0 && orchestratorResult.status === "PASS"
+      toolsFailed === 0 && agentsFailed === 0 && orchestratorResult.status === "PASS" && toolsSkipped === 0
         ? "PASS"
-        : toolsFailed > totalTools * 0.2 || agentsFailed > totalAgents * 0.2
+        : toolsFailed > 0 || agentsFailed > 0
           ? "FAIL"
           : "PARTIAL";
 
-    const recommendations = this.generateRecommendations(
-      toolCategories,
-      agentResults,
-      orchestratorResult
-    );
+    const recommendations = this.generateRecommendations(toolCategories, agentResults, orchestratorResult);
 
     this.report = {
       timestamp: new Date().toISOString(),
       version: "1.0.0",
+      mode,
       summary: {
-        totalTools,
-        totalAgents,
+        totalTools: toolStats.total,
+        implementedTools: toolStats.implemented,
+        stubTools: toolStats.stubs,
+        disabledTools: toolStats.disabled,
+        totalAgents: agentRegistry.getAll().length,
         toolsPassed,
         toolsFailed,
+        toolsSkipped,
         agentsPassed,
         agentsFailed,
         overallStatus,
@@ -169,94 +282,92 @@ class CapabilitiesReportRunner {
     return this.report;
   }
 
-  async runQuickSmokeTest(): Promise<CapabilitiesReport> {
-    const startTime = Date.now();
-    console.log("\n" + "=".repeat(60));
-    console.log("QUICK SMOKE TEST - Minimal System Validation");
-    console.log("=".repeat(60) + "\n");
-
-    const toolCategories: CategoryReport[] = [];
-    let toolsPassed = 0;
-    let toolsFailed = 0;
-
-    for (const category of TOOL_CATEGORIES) {
-      const tools = toolRegistry.getByCategory(category);
-      if (tools.length === 0) continue;
-
-      const sampleTool = tools[0];
-      const result = await this.testSingleTool(sampleTool);
-      
-      const categoryReport: CategoryReport = {
-        category,
-        totalTools: tools.length,
-        passed: result.status === "PASS" ? 1 : 0,
-        failed: result.status === "FAIL" || result.status === "ERROR" ? 1 : 0,
-        skipped: tools.length - 1,
-        results: [result],
-      };
-      
-      toolCategories.push(categoryReport);
-      if (result.status === "PASS") toolsPassed++;
-      else toolsFailed++;
-    }
-
-    const agentResults: TestResult[] = [];
-    let agentsPassed = 0;
-    let agentsFailed = 0;
-
-    const criticalAgents: AgentRole[] = ["Orchestrator", "Research", "Code"];
-    for (const role of criticalAgents) {
-      const agentResult = await this.testAgent(role);
-      agentResults.push(agentResult);
-      if (agentResult.status === "PASS") agentsPassed++;
-      else agentsFailed++;
-    }
-
-    const orchestratorResult = await this.testOrchestrator();
-
-    const totalTools = toolRegistry.getAll().length;
-    const totalAgents = agentRegistry.getAll().length;
-    
-    const overallStatus = 
-      toolsFailed === 0 && agentsFailed === 0 && orchestratorResult.status === "PASS"
-        ? "PASS"
-        : "PARTIAL";
-
-    this.report = {
-      timestamp: new Date().toISOString(),
-      version: "1.0.0",
-      summary: {
-        totalTools,
-        totalAgents,
-        toolsPassed,
-        toolsFailed,
-        agentsPassed,
-        agentsFailed,
-        overallStatus,
-        durationMs: Date.now() - startTime,
-      },
-      toolCategories,
-      agentResults,
-      orchestratorResult,
-      recommendations: [],
-    };
-
-    this.printReport(this.report);
-    return this.report;
+  async runFullReport(): Promise<CapabilitiesReport> {
+    return this.runReport("full");
   }
 
-  private async testToolCategory(category: ToolCategory): Promise<CategoryReport> {
-    console.log(`\nTesting category: ${category}`);
+  async runQuickSmokeTest(): Promise<CapabilitiesReport> {
+    return this.runReport("smoke");
+  }
+
+  async runImplementedOnlyReport(): Promise<CapabilitiesReport> {
+    return this.runReport("implementedOnly");
+  }
+
+  private async testToolCategory(category: ToolCategory, mode: ReportMode = "full"): Promise<CategoryReport> {
+    console.log(`\nTesting category: ${category} (mode: ${mode})`);
     console.log("-".repeat(40));
 
-    const tools = toolRegistry.getByCategory(category);
+    const allTools = toolRegistry.getByCategory(category);
     const results: TestResult[] = [];
-    let passed = 0;
-    let failed = 0;
-    let skipped = 0;
+    let passed = 0, failed = 0, skipped = 0;
+    let implemented = 0, stubs = 0, disabled = 0;
 
-    for (const tool of tools) {
+    const toolsToTest = mode === "smoke" 
+      ? allTools.slice(0, 1) 
+      : allTools;
+
+    for (const tool of allTools) {
+      const implStatus = (tool.metadata as any).implementationStatus || "implemented";
+      if (implStatus === "implemented") implemented++;
+      else if (implStatus === "stub") stubs++;
+      else if (implStatus === "disabled") disabled++;
+
+      if (mode === "implementedOnly" && implStatus !== "implemented") {
+        results.push({
+          name: tool.metadata.name,
+          category,
+          status: implStatus === "stub" ? "STUB" : "DISABLED",
+          implementationStatus: implStatus,
+          durationMs: 0,
+          evidence: {},
+          message: `Excluded from test: ${implStatus}`,
+        });
+        continue;
+      }
+
+      if (mode === "smoke" && !toolsToTest.includes(tool)) {
+        results.push({
+          name: tool.metadata.name,
+          category,
+          status: "SKIP",
+          implementationStatus: implStatus,
+          durationMs: 0,
+          evidence: {},
+          message: "Skipped in smoke test mode",
+        });
+        skipped++;
+        continue;
+      }
+
+      if (implStatus === "stub") {
+        results.push({
+          name: tool.metadata.name,
+          category,
+          status: "STUB",
+          implementationStatus: implStatus,
+          durationMs: 0,
+          evidence: {},
+          message: "Tool is marked as stub - not verified",
+        });
+        continue;
+      }
+
+      if (implStatus === "disabled") {
+        results.push({
+          name: tool.metadata.name,
+          category,
+          status: "DISABLED",
+          implementationStatus: implStatus,
+          durationMs: 0,
+          evidence: {},
+          message: "Tool is disabled - excluded from verification",
+        });
+        continue;
+      }
+
       const result = await this.testSingleTool(tool);
+      result.implementationStatus = implStatus;
       results.push(result);
       
       if (result.status === "PASS") passed++;
@@ -269,7 +380,10 @@ class CapabilitiesReportRunner {
 
     return {
       category,
-      totalTools: tools.length,
+      totalTools: allTools.length,
+      implemented,
+      stubs,
+      disabled,
       passed,
       failed,
       skipped,

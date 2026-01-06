@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { toolRegistry, RegisteredTool, ToolConfig, ToolMetadata, ToolCallTrace, ToolCategory } from "./toolRegistry";
+import crypto from "crypto";
+import { toolRegistry, RegisteredTool, ToolConfig, ToolMetadata, ToolCallTrace, ToolCategory, ToolImplementationStatusType } from "./toolRegistry";
 
 const DEFAULT_CONFIG: ToolConfig = {
   timeout: 30000,
@@ -28,14 +29,20 @@ const EXTERNAL_CONFIG: ToolConfig = {
   rateLimitPerMinute: 30,
 };
 
-function createSimpleTool<TInput extends Record<string, unknown>>(
+interface ToolOptions {
+  config?: Partial<ToolConfig>;
+  implementationStatus?: ToolImplementationStatusType;
+  requiresCredentials?: string[];
+}
+
+function createTool<TInput extends Record<string, unknown>>(
   name: string,
   description: string,
   category: ToolCategory,
   inputSchema: z.ZodSchema<TInput>,
   outputSchema: z.ZodSchema,
   executeFn: (input: TInput, trace: ToolCallTrace) => Promise<unknown>,
-  config: Partial<ToolConfig> = {}
+  options: ToolOptions = {}
 ): RegisteredTool<TInput, unknown> {
   return {
     metadata: {
@@ -45,13 +52,43 @@ function createSimpleTool<TInput extends Record<string, unknown>>(
       version: "1.0.0",
       author: "system",
       tags: [category.toLowerCase()],
+      implementationStatus: options.implementationStatus || "implemented",
+      requiresCredentials: options.requiresCredentials || [],
     },
-    config: { ...DEFAULT_CONFIG, ...config },
+    config: { ...DEFAULT_CONFIG, ...options.config },
     inputSchema,
     outputSchema,
     execute: executeFn,
     healthCheck: async () => true,
   };
+}
+
+function createSimpleTool<TInput extends Record<string, unknown>>(
+  name: string,
+  description: string,
+  category: ToolCategory,
+  inputSchema: z.ZodSchema<TInput>,
+  outputSchema: z.ZodSchema,
+  executeFn: (input: TInput, trace: ToolCallTrace) => Promise<unknown>,
+  config: Partial<ToolConfig> = {}
+): RegisteredTool<TInput, unknown> {
+  return createTool(name, description, category, inputSchema, outputSchema, executeFn, { config });
+}
+
+function createStubTool<TInput extends Record<string, unknown>>(
+  name: string,
+  description: string,
+  category: ToolCategory,
+  inputSchema: z.ZodSchema<TInput>,
+  outputSchema: z.ZodSchema,
+  config: Partial<ToolConfig> = {},
+  requiresCredentials: string[] = []
+): RegisteredTool<TInput, unknown> {
+  return createTool(
+    name, description, category, inputSchema, outputSchema,
+    async (input) => ({ success: true, data: { stub: true, toolName: name, input }, message: `Stub: ${name}` }),
+    { config, implementationStatus: "stub", requiresCredentials }
+  );
 }
 
 const ToolOutputSchema = z.object({
