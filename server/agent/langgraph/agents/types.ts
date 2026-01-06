@@ -1,4 +1,5 @@
 import { z } from "zod";
+import crypto from "crypto";
 
 export const AgentStateSchema = z.object({
   id: z.string(),
