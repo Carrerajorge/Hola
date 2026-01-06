@@ -16,7 +16,7 @@ const AGENT_PATTERNS: Array<{ pattern: RegExp; reason: string; confidence: 'high
   { pattern: /\b(gráfico|graph|chart|visualización|visualization)\b.*\b(datos|data|estadísticas|statistics)\b/i, reason: "Visualización de datos", confidence: 'high', category: "research" },
   
   // === DESARROLLO DE SOFTWARE ===
-  { pattern: /\b(desarrolla|develop|construye|build|programa|program|crea|create)\b.*\b(aplicación|application|app|sitio web|website|página web|web page)\b/i, reason: "Desarrollo web", confidence: 'high', category: "development" },
+  { pattern: /\b(desarrolla|develop|construye|build|programa|program)\b.*\b(aplicación|application|app|sitio web|website|página web|web page)\b/i, reason: "Desarrollo web", confidence: 'high', category: "development" },
   { pattern: /\b(landing page|página de aterrizaje|landing)\b/i, reason: "Creación de landing page", confidence: 'high', category: "development" },
   { pattern: /\b(aplicación móvil|mobile app|app móvil|react native|expo)\b/i, reason: "Desarrollo móvil", confidence: 'high', category: "development" },
   { pattern: /\b(scaffold|scaffolding|inicializa|initialize|configura|configure)\b.*\b(proyecto|project|entorno|environment)\b/i, reason: "Scaffolding de proyecto", confidence: 'high', category: "development" },
@@ -26,14 +26,11 @@ const AGENT_PATTERNS: Array<{ pattern: RegExp; reason: string; confidence: 'high
   { pattern: /\b(instala|install|configura|configure|setup)\b.*\b(paquete|package|librería|library|dependencia|dependency)\b/i, reason: "Instalación de dependencias", confidence: 'high', category: "development" },
   { pattern: /\b(api|endpoint|backend|servidor|server)\b.*\b(crea|create|desarrolla|develop|implementa|implement)\b/i, reason: "Desarrollo de API", confidence: 'high', category: "development" },
   
-  // === CREACIÓN DE CONTENIDO ===
-  { pattern: /\b(crea|create|genera|generate|haz|make|diseña|design)\b.*\b(documento|document|word|excel|pdf|csv|archivo|file)\b/i, reason: "Generación de documentos", confidence: 'high', category: "content" },
-  { pattern: /\b(presentación|presentation|ppt|powerpoint|slides|diapositivas)\b/i, reason: "Creación de presentación", confidence: 'high', category: "content" },
-  { pattern: /\b(genera|generate|crea|create)\b.*\b(imagen|image|foto|photo|ilustración|illustration)\b/i, reason: "Generación de imágenes", confidence: 'high', category: "content" },
-  { pattern: /\b(genera|generate|crea|create|produce)\b.*\b(video|vídeo|audio|sonido|sound|voz|voice)\b/i, reason: "Generación multimedia", confidence: 'high', category: "content" },
+  // === CREACIÓN DE CONTENIDO (Solo tareas complejas - generación simple se maneja directamente) ===
+  // NOTA: No incluir patrones de generación simple (imagen, documento, excel, ppt) porque el backend
+  // ya los maneja directamente a través de ProductionWorkflowRunner sin necesidad del modo agente
   { pattern: /\b(transcribe|transcripción|transcription|speech to text|voz a texto)\b/i, reason: "Transcripción de audio", confidence: 'high', category: "content" },
   { pattern: /\b(redacta|write|escribe|draft|artículo|article|blog|post)\b.*\b(completo|complete|secciones|sections)\b/i, reason: "Redacción de contenido", confidence: 'high', category: "content" },
-  { pattern: /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i, reason: "Documentos profesionales", confidence: 'high', category: "content" },
   { pattern: /\b(edita|edit|modifica|modify)\b.*\b(imagen|image|foto|photo|video|audio)\b/i, reason: "Edición multimedia", confidence: 'high', category: "content" },
   
   // === AUTOMATIZACIÓN Y PRODUCTIVIDAD ===
