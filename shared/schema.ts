@@ -2502,3 +2502,71 @@ export function createTraceEvent(
     ...options,
   });
 }
+
+// ==========================================
+// Agent Memory System - Vector-based Storage
+// ==========================================
+
+export const agentMemories = pgTable("agent_memories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  namespace: varchar("namespace").notNull().default("default"),
+  content: text("content").notNull(),
+  embedding: vector("embedding"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("agent_memories_namespace_idx").on(table.namespace),
+  index("agent_memories_created_at_idx").on(table.createdAt),
+]);
+
+export const insertAgentMemorySchema = createInsertSchema(agentMemories).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAgentMemory = z.infer<typeof insertAgentMemorySchema>;
+export type AgentMemory = typeof agentMemories.$inferSelect;
+
+export const agentContext = pgTable("agent_context", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  threadId: varchar("thread_id").notNull(),
+  contextWindow: jsonb("context_window").$type<Array<{ role: string; content: string; timestamp: number }>>().default([]),
+  tokenCount: integer("token_count").default(0),
+  maxTokens: integer("max_tokens").default(128000),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("agent_context_thread_id_idx").on(table.threadId),
+  uniqueIndex("agent_context_thread_unique").on(table.threadId),
+]);
+
+export const insertAgentContextSchema = createInsertSchema(agentContext).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAgentContext = z.infer<typeof insertAgentContextSchema>;
+export type AgentContext = typeof agentContext.$inferSelect;
+
+export const agentSessionState = pgTable("agent_session_state", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  sessionId: varchar("session_id").notNull(),
+  key: varchar("key").notNull(),
+  value: jsonb("value"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("agent_session_state_session_idx").on(table.sessionId),
+  uniqueIndex("agent_session_state_unique").on(table.sessionId, table.key),
+]);
+
+export const insertAgentSessionStateSchema = createInsertSchema(agentSessionState).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAgentSessionState = z.infer<typeof insertAgentSessionStateSchema>;
+export type AgentSessionState = typeof agentSessionState.$inferSelect;

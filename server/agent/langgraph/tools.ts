@@ -17,6 +17,9 @@ import {
   PythonTool,
 } from "../sandbox/tools";
 import type { ToolResult } from "../sandbox/agentTypes";
+import { MEMORY_TOOLS, memoryStoreTool, memoryRetrieveTool, contextManageTool, sessionStateTool } from "./memoryTools";
+import { REASONING_TOOLS, reasonTool, reflectTool, verifyTool } from "./reasoningTools";
+import { ORCHESTRATION_TOOLS, orchestrateTool, workflowTool } from "./orchestrationTools";
 
 const sandboxTools = {
   document: new DocumentTool(),
@@ -311,12 +314,21 @@ export const SYSTEM_TOOLS = [
   pythonTool,
 ];
 
-export const ALL_TOOLS = [...SAFE_TOOLS, ...SYSTEM_TOOLS];
+export { MEMORY_TOOLS, memoryStoreTool, memoryRetrieveTool, contextManageTool, sessionStateTool };
 
-export function getToolsByCategory(includeSafe = true, includeSystem = false) {
+export { REASONING_TOOLS, reasonTool, reflectTool, verifyTool };
+
+export { ORCHESTRATION_TOOLS, orchestrateTool, workflowTool };
+
+export const ALL_TOOLS = [...SAFE_TOOLS, ...SYSTEM_TOOLS, ...MEMORY_TOOLS, ...REASONING_TOOLS, ...ORCHESTRATION_TOOLS];
+
+export function getToolsByCategory(includeSafe = true, includeSystem = false, includeMemory = false, includeReasoning = false, includeOrchestration = false) {
   const tools = [];
   if (includeSafe) tools.push(...SAFE_TOOLS);
   if (includeSystem) tools.push(...SYSTEM_TOOLS);
+  if (includeMemory) tools.push(...MEMORY_TOOLS);
+  if (includeReasoning) tools.push(...REASONING_TOOLS);
+  if (includeOrchestration) tools.push(...ORCHESTRATION_TOOLS);
   return tools;
 }
 
