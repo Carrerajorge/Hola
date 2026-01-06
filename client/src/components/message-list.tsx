@@ -79,6 +79,7 @@ import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResul
 import { normalizeAgentEvent, hasPayloadDetails, type MappedAgentEvent } from "@/lib/agent-event-mapper";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { AgentStepsDisplay, type AgentArtifact } from "@/components/agent-steps-display";
+import { ArtifactViewer, type Artifact } from "@/components/artifact-viewer";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -1763,27 +1764,18 @@ const AssistantMessage = memo(function AssistantMessage({
       )}
 
       {imageData && (
-        <div className="mt-3 relative group inline-block">
-          <LazyImage
-            src={imageData}
-            alt="Imagen generada"
-            className="max-w-full h-auto rounded-lg shadow-md cursor-pointer hover:opacity-95 transition-opacity"
-            style={{ maxHeight: "400px" }}
-            onClick={() => onOpenLightbox(imageData)}
-            data-testid={`generated-image-${message.id}`}
-          />
-          <Button
-            variant="secondary"
-            size="icon"
-            className="absolute top-2 right-2 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 hover:bg-black/80 text-white"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDownloadImage(imageData);
+        <div className="mt-3">
+          <ArtifactViewer
+            artifact={{
+              id: `generated-${message.id}`,
+              type: "image",
+              name: "Imagen generada",
+              url: imageData,
+              mimeType: "image/png"
             }}
-            data-testid={`button-download-image-${message.id}`}
-          >
-            <Download className="h-4 w-4" />
-          </Button>
+            onExpand={onOpenLightbox}
+            onDownload={() => onDownloadImage(imageData)}
+          />
         </div>
       )}
 

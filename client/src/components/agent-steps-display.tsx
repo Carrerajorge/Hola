@@ -1,4 +1,5 @@
-import React, { useState, memo, useCallback, useMemo } from "react";
+import React, { useState, memo, useCallback, useMemo, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   ChevronDown, 
   ChevronRight, 
@@ -19,14 +20,22 @@ import {
   Eye,
   Wrench,
   Bot,
-  Presentation
+  Presentation,
+  Brain,
+  Play,
+  ShieldCheck,
+  PartyPopper,
+  RefreshCw,
+  AlertTriangle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import type { AgentStep, AgentEvent } from "@/stores/agent-store";
+import type { AgentStep, AgentEvent, AgentRunStatus } from "@/stores/agent-store";
 import { getFileTheme, getFileCategory, type FileCategory } from "@/lib/fileTypeTheme";
+import { ArtifactViewer, ArtifactGrid, type Artifact } from "@/components/artifact-viewer";
 
 export interface AgentArtifact {
   id: string;
@@ -39,11 +48,16 @@ export interface AgentArtifact {
   mimeType?: string;
 }
 
+type AgentPhase = 'planning' | 'executing' | 'verifying' | 'completed' | 'failed' | 'cancelled' | 'idle';
+
 interface AgentStepsDisplayProps {
   steps: AgentStep[];
   summary?: string | null;
   artifacts?: AgentArtifact[];
   isRunning?: boolean;
+  status?: AgentRunStatus;
+  eventStream?: AgentEvent[];
+  startTime?: number;
   onDocumentClick?: (artifact: AgentArtifact) => void;
   onDownload?: (artifact: AgentArtifact) => void;
   onImageExpand?: (imageUrl: string) => void;
@@ -61,6 +75,7 @@ interface StepGroupProps {
   steps: AgentStep[];
   isRunning?: boolean;
   defaultOpen?: boolean;
+  maxVisibleSteps?: number;
 }
 
 interface DocumentCardProps {
@@ -163,6 +178,335 @@ function getResultCount(step: AgentStep): number | null {
   return null;
 }
 
+interface PhaseIndicatorProps {
+  currentPhase: AgentPhase;
+  isAnimating?: boolean;
+}
+
+const PHASE_CONFIG: Record<AgentPhase, { icon: React.ElementType; label: string; color: string; bgColor: string }> = {
+  idle: { icon: Clock, label: "Iniciando", color: "text-muted-foreground", bgColor: "bg-muted" },
+  planning: { icon: Brain, label: "Planificando", color: "text-blue-600 dark:text-blue-400", bgColor: "bg-blue-100 dark:bg-blue-950/50" },
+  executing: { icon: Play, label: "Ejecutando", color: "text-amber-600 dark:text-amber-400", bgColor: "bg-amber-100 dark:bg-amber-950/50" },
+  verifying: { icon: ShieldCheck, label: "Verificando", color: "text-purple-600 dark:text-purple-400", bgColor: "bg-purple-100 dark:bg-purple-950/50" },
+  completed: { icon: PartyPopper, label: "Completado", color: "text-green-600 dark:text-green-400", bgColor: "bg-green-100 dark:bg-green-950/50" },
+  failed: { icon: XCircle, label: "Error", color: "text-red-600 dark:text-red-400", bgColor: "bg-red-100 dark:bg-red-950/50" },
+  cancelled: { icon: XCircle, label: "Cancelado", color: "text-gray-600 dark:text-gray-400", bgColor: "bg-gray-100 dark:bg-gray-950/50" },
+};
+
+const PHASE_ORDER: AgentPhase[] = ['planning', 'executing', 'verifying', 'completed'];
+
+const PhaseIndicator = memo(function PhaseIndicator({ currentPhase, isAnimating = false }: PhaseIndicatorProps) {
+  const config = PHASE_CONFIG[currentPhase];
+  const Icon = config.icon;
+  const currentIndex = PHASE_ORDER.indexOf(currentPhase);
+  const isTerminal = ['completed', 'failed', 'cancelled'].includes(currentPhase);
+  
+  return (
+    <div className="flex items-center gap-1.5" data-testid="phase-indicator">
+      {PHASE_ORDER.slice(0, -1).map((phase, index) => {
+        const phaseConfig = PHASE_CONFIG[phase];
+        const PhaseIcon = phaseConfig.icon;
+        const isActive = phase === currentPhase;
+        const isPast = currentIndex > index || isTerminal;
+        const isFuture = currentIndex < index && !isTerminal;
+        
+        return (
+          <React.Fragment key={phase}>
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0.5 }}
+              animate={{ 
+                scale: isActive ? 1.1 : 1, 
+                opacity: isFuture ? 0.4 : 1 
+              }}
+              transition={{ duration: 0.2 }}
+              className={cn(
+                "flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-all",
+                isActive && phaseConfig.bgColor,
+                isActive && phaseConfig.color,
+                isPast && !isActive && "text-green-600 dark:text-green-400",
+                isFuture && "text-muted-foreground"
+              )}
+              data-testid={`phase-${phase}`}
+            >
+              {isPast && !isActive ? (
+                <CheckCircle2 className="h-3 w-3" />
+              ) : isActive && isAnimating ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <PhaseIcon className="h-3 w-3" />
+              )}
+              <span className="hidden sm:inline">{phaseConfig.label}</span>
+            </motion.div>
+            {index < PHASE_ORDER.length - 2 && (
+              <div 
+                className={cn(
+                  "w-4 h-0.5 rounded-full transition-colors",
+                  isPast ? "bg-green-500" : "bg-muted"
+                )} 
+              />
+            )}
+          </React.Fragment>
+        );
+      })}
+      
+      {isTerminal && (
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className={cn(
+            "flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium",
+            config.bgColor,
+            config.color
+          )}
+        >
+          <Icon className="h-3 w-3" />
+          <span>{config.label}</span>
+        </motion.div>
+      )}
+    </div>
+  );
+});
+
+interface ProgressBarProps {
+  steps: AgentStep[];
+  isRunning: boolean;
+  status: AgentRunStatus;
+}
+
+const ProgressBar = memo(function ProgressBar({ steps, isRunning, status }: ProgressBarProps) {
+  const completedCount = steps.filter(s => s.status === 'succeeded').length;
+  const failedCount = steps.filter(s => s.status === 'failed').length;
+  const totalSteps = steps.length;
+  
+  const progress = useMemo(() => {
+    if (status === 'completed') return 100;
+    if (status === 'failed' || status === 'cancelled') return (completedCount / Math.max(totalSteps, 1)) * 100;
+    if (totalSteps === 0) return isRunning ? 10 : 0;
+    return Math.min(95, ((completedCount + 0.5) / totalSteps) * 100);
+  }, [status, completedCount, totalSteps, isRunning]);
+
+  const progressColor = useMemo(() => {
+    if (status === 'failed') return 'bg-red-500';
+    if (status === 'cancelled') return 'bg-gray-400';
+    if (status === 'completed') return 'bg-green-500';
+    return 'bg-amber-500';
+  }, [status]);
+
+  return (
+    <div className="space-y-1" data-testid="progress-bar-container">
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <motion.div
+          className={cn("h-full rounded-full", progressColor)}
+          initial={{ width: 0 }}
+          animate={{ width: `${progress}%` }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
+        />
+        {isRunning && (
+          <motion.div
+            className="absolute top-0 left-0 h-full w-20 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+            animate={{ x: ["-100%", "400%"] }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+          />
+        )}
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-foreground">
+        <span>{completedCount} de {totalSteps || "?"} pasos</span>
+        {failedCount > 0 && (
+          <span className="text-red-500">{failedCount} error{failedCount !== 1 ? 'es' : ''}</span>
+        )}
+      </div>
+    </div>
+  );
+});
+
+interface TimeEstimateProps {
+  steps: AgentStep[];
+  startTime?: number;
+  isRunning: boolean;
+}
+
+const TimeEstimate = memo(function TimeEstimate({ steps, startTime, isRunning }: TimeEstimateProps) {
+  const [elapsedTime, setElapsedTime] = useState(0);
+
+  useEffect(() => {
+    if (!isRunning || !startTime) return;
+    
+    const interval = setInterval(() => {
+      setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [isRunning, startTime]);
+
+  const formatTime = (seconds: number): string => {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
+
+  const estimatedRemaining = useMemo(() => {
+    const completedSteps = steps.filter(s => s.status === 'succeeded');
+    if (completedSteps.length < 2) return null;
+    
+    const times = completedSteps.map(s => {
+      if (s.startedAt && s.completedAt) {
+        return new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime();
+      }
+      return null;
+    }).filter((t): t is number => t !== null);
+    
+    if (times.length < 2) return null;
+    
+    const avgTime = times.reduce((a, b) => a + b, 0) / times.length;
+    const pendingSteps = steps.filter(s => s.status === 'pending' || s.status === 'running').length;
+    
+    return Math.ceil((avgTime * pendingSteps) / 1000);
+  }, [steps]);
+
+  if (!isRunning && !startTime) return null;
+
+  return (
+    <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="time-estimate">
+      <Clock className="h-3 w-3" />
+      <span>{formatTime(elapsedTime)}</span>
+      {isRunning && estimatedRemaining !== null && estimatedRemaining > 0 && (
+        <>
+          <span className="text-muted-foreground/50">•</span>
+          <span>~{formatTime(estimatedRemaining)} restante</span>
+        </>
+      )}
+    </div>
+  );
+});
+
+interface ReplanNotificationProps {
+  count: number;
+  lastReason?: string;
+}
+
+const ReplanNotification = memo(function ReplanNotification({ count, lastReason }: ReplanNotificationProps) {
+  if (count === 0) return null;
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn(
+        "flex items-center gap-2 px-3 py-2 rounded-lg text-xs",
+        "bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800",
+        "text-blue-700 dark:text-blue-300"
+      )}
+      data-testid="replan-notification"
+    >
+      <RefreshCw className="h-3.5 w-3.5" />
+      <span>
+        Estrategia ajustada {count} {count === 1 ? 'vez' : 'veces'}
+        {lastReason && <span className="text-muted-foreground ml-1">• {lastReason}</span>}
+      </span>
+    </motion.div>
+  );
+});
+
+interface CompletionSummaryProps {
+  summary: string;
+  steps: AgentStep[];
+  startTime?: number;
+  status: AgentRunStatus;
+}
+
+const CompletionSummary = memo(function CompletionSummary({ 
+  summary, 
+  steps, 
+  startTime,
+  status 
+}: CompletionSummaryProps) {
+  const completedSteps = steps.filter(s => s.status === 'succeeded').length;
+  const failedSteps = steps.filter(s => s.status === 'failed').length;
+  const totalTime = startTime ? Math.floor((Date.now() - startTime) / 1000) : null;
+
+  const formatDuration = (seconds: number): string => {
+    if (seconds < 60) return `${seconds} segundos`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
+
+  const isSuccess = status === 'completed' && failedSteps === 0;
+  const isPartialSuccess = status === 'completed' && failedSteps > 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.3 }}
+      className={cn(
+        "rounded-lg border p-4 space-y-3",
+        isSuccess && "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800",
+        isPartialSuccess && "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800",
+        status === 'failed' && "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800",
+        status === 'cancelled' && "bg-gray-50 dark:bg-gray-950/20 border-gray-200 dark:border-gray-800"
+      )}
+      data-testid="completion-summary"
+    >
+      <div className="flex items-start gap-3">
+        <div className={cn(
+          "flex items-center justify-center w-8 h-8 rounded-full shrink-0",
+          isSuccess && "bg-green-100 dark:bg-green-900/50",
+          isPartialSuccess && "bg-amber-100 dark:bg-amber-900/50",
+          status === 'failed' && "bg-red-100 dark:bg-red-900/50",
+          status === 'cancelled' && "bg-gray-100 dark:bg-gray-900/50"
+        )}>
+          {isSuccess && <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />}
+          {isPartialSuccess && <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />}
+          {status === 'failed' && <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />}
+          {status === 'cancelled' && <XCircle className="h-4 w-4 text-gray-600 dark:text-gray-400" />}
+        </div>
+        
+        <div className="flex-1 min-w-0">
+          <h4 className={cn(
+            "font-medium text-sm",
+            isSuccess && "text-green-800 dark:text-green-200",
+            isPartialSuccess && "text-amber-800 dark:text-amber-200",
+            status === 'failed' && "text-red-800 dark:text-red-200",
+            status === 'cancelled' && "text-gray-800 dark:text-gray-200"
+          )}>
+            {isSuccess && "Tarea completada"}
+            {isPartialSuccess && "Tarea completada con advertencias"}
+            {status === 'failed' && "Tarea fallida"}
+            {status === 'cancelled' && "Tarea cancelada"}
+          </h4>
+          
+          {summary && (
+            <p className="text-sm text-foreground mt-1 leading-relaxed">
+              {summary}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground pt-2 border-t border-inherit">
+        <div className="flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3 text-green-600" />
+          <span>{completedSteps} paso{completedSteps !== 1 ? 's' : ''} completado{completedSteps !== 1 ? 's' : ''}</span>
+        </div>
+        {failedSteps > 0 && (
+          <div className="flex items-center gap-1">
+            <XCircle className="h-3 w-3 text-red-600" />
+            <span>{failedSteps} error{failedSteps !== 1 ? 'es' : ''}</span>
+          </div>
+        )}
+        {totalTime !== null && (
+          <div className="flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            <span>{formatDuration(totalTime)}</span>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+});
+
 const StepItem = memo(function StepItem({ step }: { step: AgentStep }) {
   const [isOpen, setIsOpen] = useState(false);
   const IconComponent = getToolIcon(step.toolName);
@@ -170,7 +514,10 @@ const StepItem = memo(function StepItem({ step }: { step: AgentStep }) {
   const hasDetails = step.output || step.error;
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.2 }}
       className={cn(
         "flex items-start gap-2.5 py-2 px-1 rounded-md transition-colors",
         step.status === "running" && "bg-amber-50 dark:bg-amber-950/20"
@@ -223,21 +570,35 @@ const StepItem = memo(function StepItem({ step }: { step: AgentStep }) {
           </Collapsible>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 });
 
 export const StepGroup = memo(function StepGroup({ 
   steps, 
   isRunning = false,
-  defaultOpen = false 
+  defaultOpen = false,
+  maxVisibleSteps = 5
 }: StepGroupProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen || isRunning);
+  const [showAll, setShowAll] = useState(false);
   
   const completedCount = steps.filter(s => s.status === "succeeded").length;
   const failedCount = steps.filter(s => s.status === "failed").length;
   const runningCount = steps.filter(s => s.status === "running").length;
   const totalSteps = steps.length;
+  
+  const visibleSteps = useMemo(() => {
+    if (showAll || steps.length <= maxVisibleSteps) return steps;
+    const runningIndex = steps.findIndex(s => s.status === 'running');
+    if (runningIndex >= 0) {
+      const start = Math.max(0, runningIndex - 2);
+      return steps.slice(start, start + maxVisibleSteps);
+    }
+    return steps.slice(-maxVisibleSteps);
+  }, [steps, showAll, maxVisibleSteps]);
+
+  const hiddenCount = steps.length - visibleSteps.length;
 
   const getStatusLabel = () => {
     if (runningCount > 0) return "En progreso...";
@@ -283,7 +644,9 @@ export const StepGroup = memo(function StepGroup({
       </CollapsibleTrigger>
       
       <CollapsibleContent>
-        <div 
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           className={cn(
             "mt-1 px-3 py-2 rounded-lg",
             "bg-[#faf8f4] dark:bg-stone-950/30",
@@ -291,11 +654,33 @@ export const StepGroup = memo(function StepGroup({
           )}
         >
           <div className="space-y-0.5">
-            {steps.map((step, index) => (
-              <StepItem key={step.stepIndex ?? index} step={step} />
-            ))}
+            <AnimatePresence mode="popLayout">
+              {visibleSteps.map((step, index) => (
+                <StepItem key={step.stepIndex ?? index} step={step} />
+              ))}
+            </AnimatePresence>
           </div>
-        </div>
+          
+          {hiddenCount > 0 && !showAll && (
+            <button
+              onClick={() => setShowAll(true)}
+              className="w-full mt-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors border-t border-dashed border-border"
+              data-testid="show-all-steps"
+            >
+              Mostrar {hiddenCount} paso{hiddenCount !== 1 ? 's' : ''} más
+            </button>
+          )}
+          
+          {showAll && steps.length > maxVisibleSteps && (
+            <button
+              onClick={() => setShowAll(false)}
+              className="w-full mt-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors border-t border-dashed border-border"
+              data-testid="collapse-steps"
+            >
+              Mostrar menos
+            </button>
+          )}
+        </motion.div>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -418,7 +803,7 @@ const InlineImageCard = memo(function InlineImageCard({
         </div>
       ) : (
         <>
-          <img
+          <motion.img
             key={retryKey}
             src={imageUrl}
             alt={artifact.name || "Imagen generada"}
@@ -430,6 +815,8 @@ const InlineImageCard = memo(function InlineImageCard({
             onLoad={() => setIsLoaded(true)}
             onError={() => setHasError(true)}
             onClick={handleExpand}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: isLoaded ? 1 : 0 }}
             data-testid={`generated-image-preview-${artifact.id}`}
           />
           
@@ -479,7 +866,9 @@ export const DocumentCard = memo(function DocumentCard({
   }, [onDownload]);
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
       className={cn(
         "flex items-center gap-3 p-3 rounded-lg border transition-all cursor-pointer",
         "bg-card hover:bg-accent/50 border-border hover:border-border/80",
@@ -533,15 +922,44 @@ export const DocumentCard = memo(function DocumentCard({
           <Download className="h-4 w-4" />
         </Button>
       </div>
-    </div>
+    </motion.div>
   );
 });
+
+function mapStatusToPhase(status?: AgentRunStatus): AgentPhase {
+  if (!status) return 'idle';
+  switch (status) {
+    case 'idle':
+    case 'starting':
+    case 'queued':
+      return 'idle';
+    case 'planning':
+      return 'planning';
+    case 'running':
+    case 'paused':
+    case 'cancelling':
+      return 'executing';
+    case 'verifying':
+      return 'verifying';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return 'idle';
+  }
+}
 
 export const AgentStepsDisplay = memo(function AgentStepsDisplay({
   steps,
   summary,
   artifacts = [],
   isRunning = false,
+  status,
+  eventStream = [],
+  startTime,
   onDocumentClick,
   onDownload,
   onImageExpand,
@@ -550,88 +968,132 @@ export const AgentStepsDisplay = memo(function AgentStepsDisplay({
   const hasSteps = steps.length > 0;
   const hasArtifacts = artifacts.length > 0;
   const hasSummary = summary && summary.trim().length > 0;
+  
+  const phase = mapStatusToPhase(status);
+  const isTerminal = ['completed', 'failed', 'cancelled'].includes(phase);
+  
+  const replanInfo = useMemo(() => {
+    const replanEvents = eventStream.filter(e => 
+      e.content?.event_type === 'replan' || e.type === 'thinking'
+    );
+    const lastReplan = replanEvents[replanEvents.length - 1];
+    return {
+      count: replanEvents.filter(e => e.content?.event_type === 'replan').length,
+      lastReason: lastReplan?.content?.reason as string | undefined
+    };
+  }, [eventStream]);
 
-  const imageArtifacts = useMemo(() => artifacts.filter(isImageArtifact), [artifacts]);
-  const documentArtifacts = useMemo(() => artifacts.filter(a => !isImageArtifact(a)), [artifacts]);
+  const mappedArtifacts: Artifact[] = useMemo(() => {
+    return artifacts.map(a => ({
+      id: a.id,
+      type: (isImageArtifact(a) ? "image" : "unknown") as Artifact["type"],
+      name: a.name,
+      url: a.url,
+      previewUrl: a.previewUrl,
+      path: a.path,
+      data: a.data,
+      mimeType: a.mimeType,
+    }));
+  }, [artifacts]);
 
-  const handleDocumentClick = useCallback((artifact: AgentArtifact) => {
-    onDocumentClick?.(artifact);
-  }, [onDocumentClick]);
+  const handleArtifactClick = useCallback((artifact: Artifact) => {
+    const original = artifacts.find(a => a.id === artifact.id);
+    if (original) onDocumentClick?.(original);
+  }, [artifacts, onDocumentClick]);
 
-  const handleDownload = useCallback((artifact: AgentArtifact) => {
-    if (onDownload) {
-      onDownload(artifact);
-    } else if (artifact.url) {
-      const link = document.createElement("a");
-      link.href = artifact.url;
-      link.download = artifact.name;
-      link.click();
+  const handleArtifactDownload = useCallback((artifact: Artifact) => {
+    const original = artifacts.find(a => a.id === artifact.id);
+    if (original) {
+      if (onDownload) {
+        onDownload(original);
+      } else if (original.url) {
+        const link = document.createElement("a");
+        link.href = original.url;
+        link.download = original.name;
+        link.click();
+      }
     }
-  }, [onDownload]);
+  }, [artifacts, onDownload]);
 
   const handleImageExpand = useCallback((imageUrl: string) => {
     onImageExpand?.(imageUrl);
   }, [onImageExpand]);
 
-  if (!hasSteps && !hasArtifacts && !hasSummary) {
+  if (!hasSteps && !hasArtifacts && !hasSummary && !isRunning) {
     return null;
   }
 
   return (
-    <div 
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
       className={cn("space-y-3", className)} 
       data-testid="agent-steps-display"
     >
+      {(isRunning || isTerminal) && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <PhaseIndicator 
+              currentPhase={phase} 
+              isAnimating={isRunning} 
+            />
+            <TimeEstimate 
+              steps={steps} 
+              startTime={startTime} 
+              isRunning={isRunning} 
+            />
+          </div>
+          
+          {isRunning && hasSteps && (
+            <ProgressBar 
+              steps={steps} 
+              isRunning={isRunning} 
+              status={status || 'running'} 
+            />
+          )}
+        </div>
+      )}
+
+      {replanInfo.count > 0 && isRunning && (
+        <ReplanNotification 
+          count={replanInfo.count} 
+          lastReason={replanInfo.lastReason} 
+        />
+      )}
+
       {hasSteps && (
         <StepGroup 
           steps={steps} 
           isRunning={isRunning}
           defaultOpen={isRunning}
+          maxVisibleSteps={isRunning ? 5 : 10}
         />
       )}
 
-      {hasSummary && !isRunning && (
-        <div 
-          className="text-sm text-foreground leading-relaxed"
-          data-testid="agent-summary"
+      {hasSummary && isTerminal && (
+        <CompletionSummary
+          summary={summary!}
+          steps={steps}
+          startTime={startTime}
+          status={status || 'completed'}
+        />
+      )}
+
+      {hasArtifacts && !isRunning && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
         >
-          {summary}
-        </div>
+          <ArtifactGrid
+            artifacts={mappedArtifacts}
+            onExpand={handleImageExpand}
+            onDownload={handleArtifactDownload}
+            onClick={handleArtifactClick}
+          />
+        </motion.div>
       )}
-
-      {imageArtifacts.length > 0 && !isRunning && (
-        <div className="space-y-2" data-testid="agent-image-artifacts">
-          <div className="grid gap-3">
-            {imageArtifacts.map((artifact) => (
-              <InlineImageCard
-                key={artifact.id}
-                artifact={artifact}
-                onExpand={handleImageExpand}
-                onDownload={() => handleDownload(artifact)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {documentArtifacts.length > 0 && !isRunning && (
-        <div className="space-y-2" data-testid="agent-document-artifacts">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Documentos generados
-          </p>
-          <div className="grid gap-2">
-            {documentArtifacts.map((artifact) => (
-              <DocumentCard
-                key={artifact.id}
-                artifact={artifact}
-                onClick={() => handleDocumentClick(artifact)}
-                onDownload={() => handleDownload(artifact)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    </motion.div>
   );
 });
 

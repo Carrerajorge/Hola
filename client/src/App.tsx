@@ -10,6 +10,7 @@ import { ModelAvailabilityProvider } from "@/contexts/ModelAvailabilityContext";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useChats } from "@/hooks/use-chats";
 import { SearchModal } from "@/components/search-modal";
+import { ToolCatalog } from "@/components/tool-catalog";
 import Home from "@/pages/home";
 
 function ChatPageRedirect() {
@@ -65,6 +66,7 @@ function AuthCallbackHandler() {
 function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [toolCatalogOpen, setToolCatalogOpen] = useState(false);
   const { chats } = useChats();
 
   const handleNewChat = useCallback(() => {
@@ -76,8 +78,13 @@ function GlobalKeyboardShortcuts() {
     setSearchOpen(true);
   }, []);
 
+  const handleOpenToolCatalog = useCallback(() => {
+    setToolCatalogOpen(true);
+  }, []);
+
   const handleCloseDialogs = useCallback(() => {
     setSearchOpen(false);
+    setToolCatalogOpen(false);
     window.dispatchEvent(new CustomEvent("close-all-dialogs"));
   }, []);
 
@@ -90,20 +97,32 @@ function GlobalKeyboardShortcuts() {
     window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId } }));
   }, []);
 
+  const handleSelectTool = useCallback((tool: { name: string; description: string }) => {
+    window.dispatchEvent(new CustomEvent("tool-selected", { detail: { tool } }));
+  }, []);
+
   useKeyboardShortcuts([
     { key: "n", ctrl: true, action: handleNewChat, description: "Nuevo chat" },
     { key: "k", ctrl: true, action: handleOpenSearch, description: "Búsqueda rápida" },
+    { key: "k", ctrl: true, shift: true, action: handleOpenToolCatalog, description: "Tool Catalog" },
     { key: "Escape", action: handleCloseDialogs, description: "Cerrar diálogo" },
     { key: ",", ctrl: true, action: handleOpenSettings, description: "Configuración" },
   ]);
 
   return (
-    <SearchModal
-      open={searchOpen}
-      onOpenChange={setSearchOpen}
-      chats={chats}
-      onSelectChat={handleSelectChat}
-    />
+    <>
+      <SearchModal
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        chats={chats}
+        onSelectChat={handleSelectChat}
+      />
+      <ToolCatalog
+        open={toolCatalogOpen}
+        onOpenChange={setToolCatalogOpen}
+        onSelectTool={handleSelectTool}
+      />
+    </>
   );
 }
 

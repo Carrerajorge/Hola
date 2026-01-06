@@ -149,18 +149,82 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/tools - Alias for /tools
+  // GET /api/tools - Enhanced tool catalog with category metadata
   app.get("/api/tools", (_req: Request, res: Response) => {
     try {
-      const tools = ALL_TOOLS.map(tool => ({
-        name: tool.name,
-        description: tool.description,
-      }));
+      const categoryMap: Record<string, string[]> = {
+        "Core": SAFE_TOOLS.map(t => t.name),
+        "System": SYSTEM_TOOLS.map(t => t.name),
+        "Web": ["browserNavigate", "browserClick", "browserType", "browserExtract", "browserScreenshot", "browserScroll", "browserClose", "webSearch", "webFetch", "webCrawl"],
+        "Generation": ["imageGenerate", "codeGenerate", "textGenerate", "dataGenerate", "templateGenerate"],
+        "Processing": ["textProcess", "dataTransform", "fileConvert", "imageProcess", "batchProcess"],
+        "Data": ["dataAnalyze", "dataVisualize", "dataExport", "dataImport", "dataValidate"],
+        "Document": ["documentCreate", "documentEdit", "documentParse", "documentMerge", "documentTemplate"],
+        "Development": ["codeAnalyze", "codeFormat", "codeLint", "codeTest", "codeDebug"],
+        "Diagram": ["diagramCreate", "flowchartGenerate", "mindmapCreate", "orgchartCreate"],
+        "API": ["apiCall", "apiMock", "apiTest", "apiDocument"],
+        "Productivity": ["taskCreate", "reminderSet", "noteCreate", "calendarEvent"],
+        "Security": ["secretsManage", "accessControl", "auditLog", "encryptData"],
+        "Automation": ["workflowCreate", "triggerSet", "scheduleTask", "batchRun"],
+        "Database": ["queryExecute", "schemaManage", "dataBackup", "dataMigrate"],
+        "Monitoring": ["metricsCollect", "alertCreate", "logAnalyze", "healthCheck"],
+        "Memory": ["memoryStore", "memoryRetrieve", "contextManage", "sessionState"],
+        "Reasoning": ["reason", "reflect", "verify"],
+        "Orchestration": ["orchestrate", "workflow", "strategicPlan"],
+        "Communication": ["decide", "clarify", "summarize", "explain"],
+      };
+      
+      const categoryIcons: Record<string, string> = {
+        "Core": "zap",
+        "System": "terminal",
+        "Web": "globe",
+        "Generation": "sparkles",
+        "Processing": "cog",
+        "Data": "database",
+        "Document": "file-text",
+        "Development": "code",
+        "Diagram": "git-branch",
+        "API": "plug",
+        "Productivity": "calendar",
+        "Security": "shield",
+        "Automation": "repeat",
+        "Database": "hard-drive",
+        "Monitoring": "activity",
+        "Memory": "brain",
+        "Reasoning": "lightbulb",
+        "Orchestration": "layers",
+        "Communication": "message-circle",
+      };
+      
+      const tools = ALL_TOOLS.map(tool => {
+        let category = "Utility";
+        for (const [cat, toolNames] of Object.entries(categoryMap)) {
+          if (toolNames.includes(tool.name)) {
+            category = cat;
+            break;
+          }
+        }
+        return {
+          name: tool.name,
+          description: tool.description,
+          category,
+          icon: categoryIcons[category] || "wrench",
+        };
+      });
+      
+      const categories = Object.entries(categoryMap)
+        .filter(([_, toolNames]) => toolNames.some(name => ALL_TOOLS.find(t => t.name === name)))
+        .map(([name, _]) => ({
+          name,
+          icon: categoryIcons[name] || "folder",
+          count: tools.filter(t => t.category === name).length,
+        }));
       
       res.json({
         success: true,
         count: tools.length,
         tools,
+        categories,
       });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
