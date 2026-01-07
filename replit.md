@@ -9,7 +9,7 @@ Preferred communication style: Simple, everyday language.
 ## System Architecture
 ### UI/UX
 - **Frontend**: React with TypeScript and Vite, utilizing shadcn/ui (Radix UI) and Tailwind CSS for a modern, themable interface with light/dark mode.
-- **Features**: Chat folders, command history, draft auto-save, suggested replies, conversation export, message favorites, prompt templates, PWA support, keyboard shortcuts, offline mode, unified workspace, and an AI quality system.
+- **Features**: Chat folders, command history, draft auto-save, suggested replies, conversation export, message favorites, prompt templates, PWA support, keyboard shortcuts, offline mode, unified workspace, AI quality system, and **Sources/Fuentes citation system** (ChatGPT-style web source display with favicon logos and side panel citations).
 - **Content Support**: Markdown, code highlighting (Monaco Editor), and mathematical expressions.
 - **Data Visualization**: Recharts, ECharts, and TanStack Table.
 - **Graphics Rendering**: Multi-layer system supporting SVG (D3.js), Canvas 2D, and 3D (Three.js).
