@@ -291,6 +291,11 @@ class CommandExecutor:
             return ExecutionResult(cmd, ExecutionStatus.FAILED, error_message=str(e))
     
     async def run_script(self, code, interpreter="python3", timeout=None):
+        # Whitelist validation to prevent command injection
+        allowed_interpreters = {'python', 'python3', 'python3.8', 'python3.9', 'python3.10', 'python3.11', 'python3.12'}
+        if interpreter not in allowed_interpreters:
+            return ExecutionResult(f"{interpreter} (rejected)", ExecutionStatus.FAILED, 
+                error_message=f"Interpreter no permitido: {interpreter}")
         path = self.workdir / f"_script_{uuid.uuid4().hex[:6]}.py"
         try:
             async with aiofiles.open(path, 'w') as f: await f.write(code)
