@@ -272,11 +272,10 @@ class CommandExecutor:
                     proc = await asyncio.create_subprocess_exec(
                         *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                         cwd=str(self.workdir), env=os.environ.copy())
-                except ValueError:
-                    # Fall back to shell if parsing fails
-                    proc = await asyncio.create_subprocess_shell(
-                        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                        cwd=str(self.workdir), env=os.environ.copy())
+                except ValueError as e:
+                    # Reject malformed commands instead of falling back to shell
+                    return ExecutionResult(cmd, ExecutionStatus.FAILED, 
+                        error_message=f"Comando malformado: {str(e)}")
             else:
                 # Complex command with shell features - use shell but it's been security-analyzed
                 proc = await asyncio.create_subprocess_shell(
