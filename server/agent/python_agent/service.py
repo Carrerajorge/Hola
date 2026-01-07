@@ -28,11 +28,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Instalar dependencias del servidor
 import subprocess
-for pkg in ["fastapi", "uvicorn", "pydantic"]:
+import re as _re_pkg
+ALLOWED_SERVER_PACKAGES = frozenset(["fastapi", "uvicorn", "pydantic"])
+for pkg in ALLOWED_SERVER_PACKAGES:
     try:
         __import__(pkg)
     except ImportError:
-        subprocess.run([sys.executable, "-m", "pip", "install", pkg, "-q"], capture_output=True)
+        if _re_pkg.match(r'^[a-zA-Z0-9._-]+$', pkg):
+            subprocess.run([sys.executable, "-m", "pip", "install", pkg, "-q"], capture_output=True)
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware

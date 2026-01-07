@@ -46,7 +46,7 @@ INSTRUCCIONES PARA REPLIT:
 """
 
 from __future__ import annotations
-import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess
+import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess, shlex
 import mimetypes, time, logging, uuid, traceback, base64, io, threading
 import pickle, gzip, sqlite3, queue as queue_module, weakref, functools
 from pathlib import Path
@@ -1182,13 +1182,60 @@ browser = VirtualBrowser()
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CommandExecutor:
+    ALLOWED_INTERPRETERS: Dict[str, str] = {
+        'python3': sys.executable,
+        'python': sys.executable,
+        'node': 'node',
+        'bash': '/bin/bash',
+        'sh': '/bin/sh'
+    }
+    
+    SHELL_METACHARACTERS = frozenset('|><&;$`(){}[]\\!*?#~')
+    
+    SAFE_COMMANDS = frozenset([
+        'ls', 'pwd', 'cat', 'echo', 'date', 'whoami', 'head', 'tail',
+        'wc', 'grep', 'find', 'mkdir', 'touch', 'cp', 'mv', 'rm',
+        'python3', 'python', 'pip', 'node', 'npm', 'git'
+    ])
+    
     def __init__(self, security: SecurityGuard = None, timeout: int = 30):
         self.security = security or SecurityGuard()
         self.timeout = timeout
         self.workdir = self.security.sandbox_root
         self.history: deque = deque(maxlen=500)
     
-    async def execute(self, cmd: str, timeout: int = None) -> ExecutionResult:
+    def _contains_shell_metacharacters(self, cmd: str) -> bool:
+        """Check if command contains shell metacharacters (potential injection)."""
+        return any(c in cmd for c in self.SHELL_METACHARACTERS)
+    
+    def _validate_command_safety(self, cmd: str) -> Tuple[bool, str]:
+        """Validate command is safe to execute. Returns (is_safe, reason)."""
+        if not cmd or not cmd.strip():
+            return False, "Empty command"
+        
+        if self._contains_shell_metacharacters(cmd):
+            return False, f"Command contains shell metacharacters which could enable injection attacks. Use safe subprocess calls instead."
+        
+        try:
+            args = shlex.split(cmd)
+            if not args:
+                return False, "Could not parse command"
+            base_cmd = os.path.basename(args[0])
+            if base_cmd not in self.SAFE_COMMANDS and args[0] != sys.executable:
+                return False, f"Command '{base_cmd}' not in allowlist"
+        except ValueError as e:
+            return False, f"Invalid command syntax: {e}"
+        
+        return True, "OK"
+    
+    async def execute(self, cmd: str, timeout: int = None, _trusted: bool = False) -> ExecutionResult:
+        """Execute command securely using subprocess exec (no shell).
+        
+        Args:
+            cmd: Command string to execute
+            timeout: Timeout in seconds
+            _trusted: Internal flag - if True, bypasses metacharacter check (use only for internal calls)
+        """
         start = time.time()
         timeout = timeout or self.timeout
         
@@ -1196,9 +1243,15 @@ class CommandExecutor:
         if analysis.action == SecurityAction.LOG_AND_BLOCK:
             return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message="Bloqueado por seguridad")
         
+        if not _trusted:
+            is_safe, reason = self._validate_command_safety(cmd)
+            if not is_safe:
+                return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message=f"Command rejected: {reason}")
+        
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            args = shlex.split(cmd)
+            proc = await asyncio.create_subprocess_exec(
+                *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.workdir), env=os.environ.copy())
             
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
@@ -1215,15 +1268,45 @@ class CommandExecutor:
         return result
     
     async def run_script(self, code: str, interpreter: str = "python3", timeout: int = None) -> ExecutionResult:
-        ext = {'python3': '.py', 'python': '.py', 'bash': '.sh', 'node': '.js'}.get(interpreter, '.py')
-        path = self.workdir / f"_script_{uuid.uuid4().hex[:6]}{ext}"
+        """Run a script with validated interpreter using safe subprocess execution."""
+        interpreter_key = interpreter.lower().strip()
+        if interpreter_key not in self.ALLOWED_INTERPRETERS:
+            return ExecutionResult(
+                f"{interpreter} [script]", ExecutionStatus.BLOCKED,
+                error_message=f"Interpreter not allowed: {interpreter}. Allowed: {list(self.ALLOWED_INTERPRETERS.keys())}"
+            )
+        
+        interpreter_path = self.ALLOWED_INTERPRETERS[interpreter_key]
+        ext = {'python3': '.py', 'python': '.py', 'bash': '.sh', 'node': '.js', 'sh': '.sh'}.get(interpreter_key, '.py')
+        script_path = self.workdir / f"_script_{uuid.uuid4().hex[:6]}{ext}"
+        
         try:
-            async with aiofiles.open(path, 'w') as f:
+            async with aiofiles.open(script_path, 'w') as f:
                 await f.write(code)
-            os.chmod(path, 0o755)
-            return await self.execute(f"{interpreter} {path}", timeout)
+            os.chmod(script_path, 0o755)
+            
+            start = time.time()
+            timeout = timeout or self.timeout
+            
+            proc = await asyncio.create_subprocess_exec(
+                interpreter_path, str(script_path),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                cwd=str(self.workdir), env=os.environ.copy())
+            
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
+            result = ExecutionResult(
+                f"{interpreter} {script_path.name}", ExecutionStatus.COMPLETED, proc.returncode,
+                stdout.decode('utf-8', errors='replace'),
+                stderr.decode('utf-8', errors='replace'),
+                time.time() - start)
+            self.history.append(result)
+            return result
+        except asyncio.TimeoutError:
+            return ExecutionResult(f"{interpreter} [script]", ExecutionStatus.TIMEOUT, error_message=f"Timeout: {timeout}s")
+        except Exception as e:
+            return ExecutionResult(f"{interpreter} [script]", ExecutionStatus.FAILED, error_message=str(e))
         finally:
-            try: path.unlink()
+            try: script_path.unlink()
             except: pass
 
 

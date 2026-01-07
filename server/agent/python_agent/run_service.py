@@ -15,14 +15,16 @@ def main():
     
     print("🔧 Verificando dependencias...")
     
-    # Instalar dependencias necesarias
-    deps = ["fastapi", "uvicorn", "pydantic"]
-    for dep in deps:
+    # Instalar dependencias necesarias (allowlist validation)
+    import re as _re_pkg
+    ALLOWED_DEPS = frozenset(["fastapi", "uvicorn", "pydantic"])
+    for dep in ALLOWED_DEPS:
         try:
             __import__(dep.replace("-", "_"))
         except ImportError:
-            print(f"  📦 Instalando {dep}...")
-            subprocess.run([sys.executable, "-m", "pip", "install", dep, "-q"], check=True)
+            if _re_pkg.match(r'^[a-zA-Z0-9._-]+$', dep):
+                print(f"  📦 Instalando {dep}...")
+                subprocess.run([sys.executable, "-m", "pip", "install", dep, "-q"], check=True)
     
     print("✅ Dependencias OK")
     print()
