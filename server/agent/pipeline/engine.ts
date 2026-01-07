@@ -11,7 +11,8 @@ import {
   DEFAULT_PIPELINE_CONFIG,
   ProgressUpdate,
   StepResult,
-  Artifact
+  Artifact,
+  WebSource
 } from "./types";
 
 let initialized = false;
@@ -82,6 +83,14 @@ export async function runPipeline(options: PipelineRunOptions): Promise<Pipeline
 
     const { results, artifacts } = await pipelineExecutor.execute(plan, onProgress);
 
+    // Collect webSources from all completed steps
+    const allWebSources: WebSource[] = [];
+    for (const result of results) {
+      if (result.status === "completed" && result.output?.data?.webSources) {
+        allWebSources.push(...result.output.data.webSources);
+      }
+    }
+
     const successCount = results.filter(r => r.status === "completed").length;
     const failCount = results.filter(r => r.status === "failed").length;
     const success = failCount === 0 || successCount > 0;
@@ -95,28 +104,34 @@ export async function runPipeline(options: PipelineRunOptions): Promise<Pipeline
     const lastResult = results.filter(r => r.status === "completed").pop();
     let summary = "";
     
-    if (lastResult?.output?.data?.response) {
+    const textArtifactTypes = ["markdown", "text", "json", "html"];
+    
+    const findTextArtifact = (artifactList: Artifact[]): Artifact | undefined => {
+      return artifactList.find(
+        (a: Artifact) => 
+          a.content && 
+          typeof a.content === "string" && 
+          !a.metadata?.isBase64 &&
+          (textArtifactTypes.includes(a.type) || !a.type)
+      );
+    };
+    
+    const textArtifactFromLastResult = lastResult?.output?.artifacts?.length > 0 
+      ? findTextArtifact(lastResult.output.artifacts) 
+      : undefined;
+    
+    const textArtifactFromGlobal = artifacts.length > 0 
+      ? findTextArtifact(artifacts) 
+      : undefined;
+    
+    if (textArtifactFromLastResult?.content) {
+      summary = textArtifactFromLastResult.content.slice(0, 10000);
+    } else if (textArtifactFromGlobal?.content) {
+      summary = textArtifactFromGlobal.content.slice(0, 10000);
+    } else if (lastResult?.output?.data?.response) {
       summary = lastResult.output.data.response;
     } else if (lastResult?.output?.data?.textContent) {
       summary = lastResult.output.data.textContent.slice(0, 5000);
-    } else if (lastResult?.output?.artifacts?.length > 0) {
-      const textArtifact = lastResult.output.artifacts.find(
-        (a: Artifact) => a.content && !a.metadata?.isBase64 && typeof a.content === "string"
-      );
-      if (textArtifact?.content) {
-        summary = textArtifact.content.slice(0, 10000);
-      } else if (lastResult?.output?.data) {
-        summary = JSON.stringify(lastResult.output.data).slice(0, 5000);
-      }
-    } else if (artifacts.length > 0) {
-      const textArtifact = artifacts.find(
-        (a: Artifact) => a.content && !a.metadata?.isBase64 && typeof a.content === "string"
-      );
-      if (textArtifact?.content) {
-        summary = textArtifact.content.slice(0, 10000);
-      } else if (lastResult?.output?.data) {
-        summary = JSON.stringify(lastResult.output.data).slice(0, 5000);
-      }
     } else if (lastResult?.output?.data) {
       summary = JSON.stringify(lastResult.output.data).slice(0, 5000);
     }
@@ -138,6 +153,7 @@ export async function runPipeline(options: PipelineRunOptions): Promise<Pipeline
       summary,
       steps: results,
       artifacts,
+      webSources: allWebSources.length > 0 ? allWebSources : undefined,
       errors: results.filter(r => r.status === "failed").map(r => r.output?.error || "Unknown error"),
       totalDuration,
       metadata: {

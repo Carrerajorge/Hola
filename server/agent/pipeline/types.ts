@@ -140,6 +140,15 @@ export interface StepResult {
   validationErrors?: string[];
 }
 
+export interface WebSource {
+  url: string;
+  title: string;
+  domain: string;
+  favicon: string;
+  snippet?: string;
+  date?: string;
+}
+
 export interface PipelineResult {
   runId: string;
   planId: string;
@@ -147,6 +156,7 @@ export interface PipelineResult {
   summary: string;
   steps: StepResult[];
   artifacts: Artifact[];
+  webSources?: WebSource[];
   errors?: string[];
   totalDuration: number;
   metadata?: Record<string, any>;

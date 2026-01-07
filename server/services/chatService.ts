@@ -539,6 +539,7 @@ export async function handleChatRequest(
             .filter(a => a.type === "text" && a.name)
             .slice(0, 5)
             .map(a => ({ fileName: a.name!, content: a.content?.slice(0, 200) || "" })),
+          webSources: pipelineResult.webSources,
           agentRunId: pipelineResult.runId,
           wasAgentTask: true,
           pipelineSteps: pipelineResult.steps.length,

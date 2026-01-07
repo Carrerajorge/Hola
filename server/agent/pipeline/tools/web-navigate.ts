@@ -130,19 +130,31 @@ export const webNavigateTool: ToolDefinition = {
         });
       }
 
+      const finalUrl = result.data?.url || url;
+      const finalTitle = result.data?.title || pageState?.title;
+      const domain = new URL(finalUrl).hostname;
+      const webSources = [{
+        url: finalUrl,
+        title: finalTitle || domain,
+        domain: domain,
+        favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+        snippet: extractedContent?.textContent?.slice(0, 200) || ""
+      }];
+
       return {
         success: true,
         data: {
-          url: result.data?.url || url,
-          title: result.data?.title || pageState?.title,
+          url: finalUrl,
+          title: finalTitle,
           textContent: extractedContent?.textContent?.slice(0, 50000),
           links: extractedContent?.links?.slice(0, 50),
-          duration: result.duration
+          duration: result.duration,
+          webSources
         },
         artifacts,
         metadata: {
-          finalUrl: result.data?.url || url,
-          title: result.data?.title || pageState?.title,
+          finalUrl,
+          title: finalTitle,
           duration: result.duration
         }
       };

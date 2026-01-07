@@ -88,12 +88,24 @@ export const searchWebTool: ToolDefinition = {
         }
       }
 
+      const webSources = results.slice(0, maxResults).map(r => {
+        const domain = new URL(r.url).hostname;
+        return {
+          url: r.url,
+          title: r.title,
+          domain: domain,
+          favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+          snippet: r.snippet || ""
+        };
+      });
+
       return {
         success: true,
         data: {
           query,
           engine,
           results: results.slice(0, maxResults),
+          webSources,
           totalFound: results.length
         },
         metadata: {
