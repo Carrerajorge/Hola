@@ -49,6 +49,7 @@ const WEB_SEARCH_PATTERNS = [
   /cu[aá]ndo\s+/i,
   /d[oó]nde\s+/i,
   /c[oó]mo\s+\w+\s+(funciona|trabaja|opera|works)/i,
+  /dame\s+\d*\s*noticias/i,
   /noticias\s+(sobre|de)/i,
   /[uú]ltimas?\s+noticias/i,
   /precio\s+(de|del|actual)/i,

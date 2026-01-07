@@ -35,6 +35,27 @@ const CONTENT_CREATION_KEYWORDS = [
   "redacta", "compose", "haz", "make", "diseña", "design"
 ];
 
+// Simple web search queries that should use chat flow (NOT agent mode)
+// These are handled by chatService.ts with webSearchAuto
+const SIMPLE_SEARCH_PATTERNS = [
+  /dame\s+\d*\s*noticias/i,
+  /busca(me)?\s+(noticias|información|info)/i,
+  /noticias\s+(de|sobre|del)/i,
+  /últimas\s+noticias/i,
+  /qué\s+(está\s+pasando|pasa|hay\s+de\s+nuevo)/i,
+  /what('s|\s+is)\s+(happening|new|going\s+on)/i,
+  /news\s+(about|from|on)/i,
+  /search\s+for\s+news/i,
+  /find\s+news/i,
+  /precio\s+(de|del|actual)/i,
+  /clima\s+(en|de)/i,
+  /weather\s+(in|for)/i,
+];
+
+function isSimpleSearchQuery(text: string): boolean {
+  return SIMPLE_SEARCH_PATTERNS.some(pattern => pattern.test(text));
+}
+
 export function extractUrls(text: string): string[] {
   // Remove content inside [ARCHIVO ADJUNTO] blocks to avoid extracting URLs from attached files
   let textWithoutAttachments = text;
@@ -90,6 +111,17 @@ export async function routeMessage(message: string): Promise<RouteResult> {
       confidence: 0.95,
       urls: [],
       reasoning: "File attachments detected - processing with LLM"
+    };
+  }
+
+  // AGGRESSIVE FIX: Simple search queries (news, weather, prices) should use 
+  // chat flow with webSearchAuto, NOT the complex agent pipeline
+  if (isSimpleSearchQuery(userRequest)) {
+    return {
+      decision: "llm",
+      confidence: 0.95,
+      urls: [],
+      reasoning: "Simple search query - using chat flow with automatic web search"
     };
   }
 
