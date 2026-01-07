@@ -130,7 +130,8 @@ class DependencyInstaller:
                     [sys.executable, "-m", "pip", "install", pkg, "-q", "--disable-pip-version-check"],
                     capture_output=True, 
                     timeout=120,
-                    check=False
+                    check=False,
+                    shell=False  # Explicit: prevent command injection
                 )
                 if result.returncode == 0:
                     return True
@@ -178,7 +179,8 @@ class DependencyInstaller:
                 [sys.executable, "-m", "playwright", "install", "chromium"],
                 capture_output=True,
                 timeout=300,
-                check=False
+                check=False,
+                shell=False  # Explicit: prevent command injection
             )
             if result.returncode == 0:
                 print("✅")
