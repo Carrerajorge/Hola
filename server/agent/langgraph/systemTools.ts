@@ -12,23 +12,48 @@ const xaiClient = new OpenAI({
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 
-async function executeCommand(command: string, timeout: number = 30000): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+const ALLOWED_DIRS = ["/tmp", process.cwd()];
+
+function validatePath(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  const isAllowed = ALLOWED_DIRS.some(dir => resolved.startsWith(path.resolve(dir)));
+  if (!isAllowed) {
+    throw new Error(`Path not allowed: ${filePath}`);
+  }
+  if (/[;&|`$(){}[\]<>!#*?\\]/.test(resolved)) {
+    throw new Error(`Invalid characters in path: ${filePath}`);
+  }
+  return resolved;
+}
+
+async function executeSafeCommand(
+  program: string,
+  args: string[],
+  timeout: number = 30000
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
-    const child = spawn("bash", ["-c", command], {
+    const child = spawn(program, args, {
       timeout,
-      maxBuffer: 1024 * 1024,
     });
 
     let stdout = "";
     let stderr = "";
 
-    child.stdout?.on("data", (data) => {
-      stdout += data.toString();
-    });
+    if (child.stdout) {
+      child.stdout.on("data", (data) => {
+        if (stdout.length < 1024 * 1024) {
+          stdout += data.toString();
+        }
+      });
+    }
 
-    child.stderr?.on("data", (data) => {
-      stderr += data.toString();
-    });
+    if (child.stderr) {
+      child.stderr.on("data", (data) => {
+        if (stderr.length < 1024 * 1024) {
+          stderr += data.toString();
+        }
+      });
+    }
 
     child.on("close", (code) => {
       resolve({
@@ -53,12 +78,12 @@ export const codeExecuteTool = tool(
     const { code, language, timeout = 30000 } = input;
     const startTime = Date.now();
 
-    const languageConfigs: Record<string, { extension: string; command: (file: string) => string }> = {
-      python: { extension: ".py", command: (f) => `python3 ${f}` },
-      javascript: { extension: ".js", command: (f) => `node ${f}` },
-      typescript: { extension: ".ts", command: (f) => `npx tsx ${f}` },
-      bash: { extension: ".sh", command: (f) => `bash ${f}` },
-      sql: { extension: ".sql", command: (f) => `cat ${f}` },
+    const languageConfigs: Record<string, { extension: string; getArgs: (file: string) => { program: string; args: string[] } }> = {
+      python: { extension: ".py", getArgs: (f) => ({ program: "python3", args: [f] }) },
+      javascript: { extension: ".js", getArgs: (f) => ({ program: "node", args: [f] }) },
+      typescript: { extension: ".ts", getArgs: (f) => ({ program: "npx", args: ["tsx", f] }) },
+      bash: { extension: ".sh", getArgs: (f) => ({ program: "bash", args: [f] }) },
+      sql: { extension: ".sql", getArgs: (f) => ({ program: "cat", args: [f] }) },
     };
 
     const config = languageConfigs[language];
@@ -76,7 +101,9 @@ export const codeExecuteTool = tool(
       await fs.mkdir(tempDir, { recursive: true });
       await fs.writeFile(tempFile, code, "utf-8");
 
-      const result = await executeCommand(config.command(tempFile), timeout);
+      const validatedFile = validatePath(tempFile);
+      const { program, args } = config.getArgs(validatedFile);
+      const result = await executeSafeCommand(program, args, timeout);
 
       await fs.unlink(tempFile).catch(() => {});
 
@@ -112,37 +139,49 @@ export const fileConvertTool = tool(
     const { inputPath, outputFormat, options = {} } = input;
     const startTime = Date.now();
 
-    const inputExt = path.extname(inputPath).toLowerCase().slice(1);
-    const baseName = path.basename(inputPath, path.extname(inputPath));
-    const outputPath = `${path.dirname(inputPath)}/${baseName}.${outputFormat}`;
+    let validatedInputPath: string;
+    try {
+      validatedInputPath = validatePath(inputPath);
+    } catch (error: any) {
+      return JSON.stringify({
+        success: false,
+        error: `Path validation failed: ${error.message}`,
+      });
+    }
 
-    const conversions: Record<string, Record<string, string>> = {
+    const inputExt = path.extname(validatedInputPath).toLowerCase().slice(1);
+    const baseName = path.basename(validatedInputPath, path.extname(validatedInputPath));
+    const outputPath = path.join(path.dirname(validatedInputPath), `${baseName}.${outputFormat}`);
+
+    let validatedOutputPath: string;
+    try {
+      validatedOutputPath = validatePath(outputPath);
+    } catch (error: any) {
+      return JSON.stringify({
+        success: false,
+        error: `Output path validation failed: ${error.message}`,
+      });
+    }
+
+    const conversions: Record<string, Record<string, { program: string; getArgs: (input: string, output: string) => string[] }>> = {
       md: {
-        html: "pandoc {input} -o {output}",
-        pdf: "pandoc {input} -o {output}",
-        docx: "pandoc {input} -o {output}",
-      },
-      csv: {
-        json: "python3 -c \"import csv,json; print(json.dumps(list(csv.DictReader(open('{input}')))))\" > {output}",
-        xlsx: "python3 -c \"import pandas as pd; pd.read_csv('{input}').to_excel('{output}', index=False)\"",
-      },
-      json: {
-        csv: "python3 -c \"import pandas as pd,json; pd.DataFrame(json.load(open('{input}'))).to_csv('{output}', index=False)\"",
-        yaml: "python3 -c \"import json,yaml; yaml.dump(json.load(open('{input}')), open('{output}','w'))\"",
+        html: { program: "pandoc", getArgs: (i, o) => [i, "-o", o] },
+        pdf: { program: "pandoc", getArgs: (i, o) => [i, "-o", o] },
+        docx: { program: "pandoc", getArgs: (i, o) => [i, "-o", o] },
       },
       html: {
-        md: "pandoc -f html -t markdown {input} -o {output}",
-        pdf: "pandoc {input} -o {output}",
+        md: { program: "pandoc", getArgs: (i, o) => ["-f", "html", "-t", "markdown", i, "-o", o] },
+        pdf: { program: "pandoc", getArgs: (i, o) => [i, "-o", o] },
       },
       txt: {
-        md: "cp {input} {output}",
-        html: "pandoc -f plain -t html {input} -o {output}",
+        md: { program: "cp", getArgs: (i, o) => [i, o] },
+        html: { program: "pandoc", getArgs: (i, o) => ["-f", "plain", "-t", "html", i, "-o", o] },
       },
     };
 
-    const conversionCommand = conversions[inputExt]?.[outputFormat];
+    const conversionConfig = conversions[inputExt]?.[outputFormat];
 
-    if (!conversionCommand) {
+    if (!conversionConfig) {
       try {
         const response = await xaiClient.chat.completions.create({
           model: DEFAULT_MODEL,
@@ -154,19 +193,19 @@ Return only the converted content, no explanations.`,
             },
             {
               role: "user",
-              content: `Convert this ${inputExt} content to ${outputFormat}:\n\n${await fs.readFile(inputPath, "utf-8").catch(() => "File not found")}`,
+              content: `Convert this ${inputExt} content to ${outputFormat}:\n\n${await fs.readFile(validatedInputPath, "utf-8").catch(() => "File not found")}`,
             },
           ],
           temperature: 0.1,
         });
 
         const convertedContent = response.choices[0].message.content || "";
-        await fs.writeFile(outputPath, convertedContent, "utf-8");
+        await fs.writeFile(validatedOutputPath, convertedContent, "utf-8");
 
         return JSON.stringify({
           success: true,
-          inputPath,
-          outputPath,
+          inputPath: validatedInputPath,
+          outputPath: validatedOutputPath,
           inputFormat: inputExt,
           outputFormat,
           method: "ai_conversion",
@@ -181,26 +220,23 @@ Return only the converted content, no explanations.`,
     }
 
     try {
-      const command = conversionCommand
-        .replace(/{input}/g, inputPath)
-        .replace(/{output}/g, outputPath);
-
-      const result = await executeCommand(command);
+      const { program, getArgs } = conversionConfig;
+      const args = getArgs(validatedInputPath, validatedOutputPath);
+      const result = await executeSafeCommand(program, args);
 
       if (result.exitCode !== 0) {
         return JSON.stringify({
           success: false,
           error: result.stderr || "Conversion failed",
-          command,
         });
       }
 
-      const outputStats = await fs.stat(outputPath).catch(() => null);
+      const outputStats = await fs.stat(validatedOutputPath).catch(() => null);
 
       return JSON.stringify({
         success: true,
-        inputPath,
-        outputPath,
+        inputPath: validatedInputPath,
+        outputPath: validatedOutputPath,
         inputFormat: inputExt,
         outputFormat,
         outputSize: outputStats?.size || 0,

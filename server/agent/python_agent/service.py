@@ -26,16 +26,23 @@ from contextlib import asynccontextmanager
 # Añadir el directorio padre al path para importar el agente
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Instalar dependencias del servidor
+# Instalar dependencias del servidor con validación estricta
 import subprocess
 import re as _re_pkg
 ALLOWED_SERVER_PACKAGES = frozenset(["fastapi", "uvicorn", "pydantic"])
+_PKG_PATTERN = _re_pkg.compile(r'^[a-zA-Z][a-zA-Z0-9._-]*$')
+
 for pkg in ALLOWED_SERVER_PACKAGES:
     try:
         __import__(pkg)
     except ImportError:
-        if _re_pkg.match(r'^[a-zA-Z0-9._-]+$', pkg):
-            subprocess.run([sys.executable, "-m", "pip", "install", pkg, "-q"], capture_output=True)
+        if _PKG_PATTERN.match(pkg) and pkg in ALLOWED_SERVER_PACKAGES:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", pkg, "-q"],
+                capture_output=True,
+                timeout=120,
+                check=False
+            )
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware

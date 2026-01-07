@@ -99,20 +99,45 @@ class DependencyInstaller:
         ("numpy", "numpy"),
     ]
     
+    # Strict allowlist of permitted packages
+    ALLOWED_PACKAGES = frozenset([
+        "aiofiles", "rich", "httpx", "aiohttp", "beautifulsoup4", "lxml",
+        "python-pptx", "python-docx", "openpyxl", "Pillow", "fake-useragent",
+        "diskcache", "playwright", "selenium", "webdriver-manager",
+        "pandas", "matplotlib", "numpy"
+    ])
+    
     @classmethod
-    def install(cls, pkg, retries=2):
-        # Validate package name to prevent command injection
-        # Allow: letters, numbers, hyphens, underscores, periods, brackets for extras
-        if not re.match(r'^[a-zA-Z0-9._\-\[\],<>=!]+$', pkg):
-            print(f"⚠️ Invalid package name: {pkg}")
+    def _validate_package(cls, pkg: str) -> bool:
+        """Strict package validation with allowlist."""
+        if not pkg or len(pkg) > 100:
+            return False
+        if not re.match(r'^[a-zA-Z][a-zA-Z0-9._-]*$', pkg):
+            return False
+        base_name = pkg.split('[')[0].split('<')[0].split('>')[0].split('=')[0]
+        return base_name.lower() in {p.lower() for p in cls.ALLOWED_PACKAGES}
+    
+    @classmethod
+    def install(cls, pkg: str, retries: int = 2) -> bool:
+        """Secure package installation with strict validation."""
+        if not cls._validate_package(pkg):
+            print(f"⚠️ Package not allowed: {pkg}")
             return False
         
-        for i in range(retries):
+        for _ in range(retries):
             try:
-                subprocess.run([sys.executable, "-m", "pip", "install", pkg, "-q", "--disable-pip-version-check"],
-                              capture_output=True, timeout=120)
-                return True
-            except: pass
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", pkg, "-q", "--disable-pip-version-check"],
+                    capture_output=True, 
+                    timeout=120,
+                    check=False
+                )
+                if result.returncode == 0:
+                    return True
+            except subprocess.TimeoutExpired:
+                continue
+            except Exception:
+                continue
         return False
     
     @classmethod
@@ -145,14 +170,24 @@ class DependencyInstaller:
                     except: print("⚠️")
                 else: print("⚠️ (opcional)")
         
-        # Playwright browsers
+        # Playwright browsers - hardcoded safe command, no user input
         try:
             import playwright
             print("    📦 Instalando navegadores Playwright...", end=" ", flush=True)
-            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
-                          capture_output=True, timeout=300)
-            print("✅")
-        except: print("    ⚠️ Navegadores Playwright (se instalará al usar)")
+            result = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                capture_output=True,
+                timeout=300,
+                check=False
+            )
+            if result.returncode == 0:
+                print("✅")
+            else:
+                print("⚠️")
+        except subprocess.TimeoutExpired:
+            print("    ⚠️ Timeout instalando Playwright")
+        except Exception:
+            print("    ⚠️ Navegadores Playwright (se instalará al usar)")
         
         print("═" * 60)
         print("✨ Configuración completada\n")
