@@ -46,7 +46,7 @@ INSTRUCCIONES PARA REPLIT:
 """
 
 from __future__ import annotations
-import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess
+import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess, shlex
 import mimetypes, time, logging, uuid, traceback, base64, io, threading
 import pickle, gzip, sqlite3, queue as queue_module, weakref, functools
 from pathlib import Path
@@ -711,6 +711,17 @@ class SecurityGuard:
                 self.blocked_count += 1
                 return SecurityAnalysis(cmd, False, ThreatLevel.CRITICAL, 
                     SecurityAction.LOG_AND_BLOCK, ["🚨 COMANDO PELIGROSO BLOQUEADO"], 100.0)
+        
+        # Detectar shell metacharacters peligrosos que pueden permitir command injection
+        dangerous_chars = [';', '&&', '||', '`', '$(',  '\n', '|']
+        for char in dangerous_chars:
+            if char in cmd:
+                # Permitir pipes seguros para comandos específicos (grep, etc.)
+                if char == '|' and any(safe in cmd for safe in ['grep', 'sort', 'uniq', 'head', 'tail', 'wc']):
+                    continue
+                self.blocked_count += 1
+                return SecurityAnalysis(cmd, False, ThreatLevel.CRITICAL,
+                    SecurityAction.LOG_AND_BLOCK, [f"🚨 Shell metacharacter detectado: {char}"], 100.0)
         
         # Comando base
         base = cmd.split()[0].split('/')[-1] if cmd.split() else ""
