@@ -517,19 +517,29 @@ export async function handleChatRequest(
             ).join("\n")
           : "";
         
-        // Call LLM with search results
-        const systemPrompt = `Eres un asistente útil. Responde la pregunta del usuario basándote en la información de búsqueda proporcionada.
+        // Call LLM with search results - build source mapping for post-processing
+        const sourceMap = new Map<number, { name: string; url: string }>();
+        webSources.forEach((s, i) => {
+          sourceMap.set(i + 1, { name: s.siteName || s.domain, url: s.url });
+        });
+        
+        const systemPrompt = `Eres un asistente útil que presenta noticias con sus fuentes.
 
-INSTRUCCIONES CRÍTICAS PARA CITAR FUENTES:
-- AL FINAL de CADA noticia, dato o información que presentes, DEBES incluir la fuente usando EXACTAMENTE este formato: [[FUENTE:NombreDelSitio|URL]]
-- El formato es obligatorio: doble corchete, FUENTE:, nombre del sitio, barra vertical |, URL completa, doble corchete de cierre
-- NO uses otro formato. NO uses markdown de links. USA SOLO el formato [[FUENTE:Nombre|URL]]
-- Cada noticia DEBE terminar con su fuente correspondiente
-- Ejemplo correcto: "1. **Apple lanza nuevo iPhone** — La compañía presentó hoy su nuevo dispositivo con características innovadoras. [[FUENTE:TechCrunch|https://techcrunch.com/articulo]]"
-- Ejemplo correcto: "2. **Tesla aumenta producción** — La empresa incrementó un 20% su capacidad. [[FUENTE:Reuters|https://reuters.com/noticia]]"
+REGLA OBLIGATORIA - CITAR FUENTES:
+Al final de CADA noticia o dato, DEBES agregar el número de fuente entre corchetes.
+Formato: [Fuente: NÚMERO]
+Donde NÚMERO es el índice de la fuente (1, 2, 3, etc.)
+
+EJEMPLO DE RESPUESTA CORRECTA:
+1. **Apple lanza nuevo iPhone** — La compañía presentó su nuevo dispositivo con pantalla mejorada. [Fuente: 1]
+2. **Tesla aumenta producción** — La empresa incrementó un 20% su capacidad de fabricación. [Fuente: 3]
+3. **Microsoft adquiere empresa de IA** — El gigante tecnológico compró una startup por $2B. [Fuente: 2]
+
+FUENTES DISPONIBLES (usa estos números):
+${webSources.slice(0, 10).map((s, i) => `[${i + 1}] ${s.siteName || s.domain}: ${s.url}`).join('\n')}
 
 INFORMACIÓN DE BÚSQUEDA:
-${searchContext}${sourcesReference}`;
+${searchContext}`;
 
         const llmMessages = [
           { role: "system" as const, content: systemPrompt },

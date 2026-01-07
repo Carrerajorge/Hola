@@ -1741,6 +1741,7 @@ const AssistantMessage = memo(function AssistantMessage({
                     content={block.content}
                     customComponents={{ ...CleanDataTableComponents }}
                     onOpenDocument={onOpenDocumentPreview}
+                    webSources={message.webSources}
                   />
                 </MarkdownErrorBoundary>
               </div>

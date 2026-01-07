@@ -80,11 +80,30 @@ const InlineSourceBadge = memo(function InlineSourceBadge({ name, url }: { name:
   );
 });
 
-function preprocessSourceBadges(content: string): string {
-  return content.replace(
+function preprocessSourceBadges(content: string, webSources?: Array<{ url: string; siteName?: string; domain: string }>): string {
+  let processed = content;
+  
+  processed = processed.replace(
     /\[\[FUENTE:([^\|]+)\|([^\]]+)\]\]/g,
     (_, name, url) => `[__SOURCE__${name.trim()}__SOURCE__](${url.trim()})`
   );
+  
+  if (webSources && webSources.length > 0) {
+    processed = processed.replace(
+      /\[Fuente:\s*(\d+)\]/gi,
+      (match, numStr) => {
+        const num = parseInt(numStr, 10);
+        const source = webSources[num - 1];
+        if (source) {
+          const name = source.siteName || source.domain;
+          return `[__SOURCE__${name}__SOURCE__](${source.url})`;
+        }
+        return match;
+      }
+    );
+  }
+  
+  return processed;
 }
 
 const purifyConfig: DOMPurify.Config = {
@@ -796,6 +815,7 @@ export interface MarkdownRendererProps {
   onCodeEdit?: (code: string) => void;
   onOpenDocument?: (doc: { type: 'word' | 'excel' | 'ppt'; title: string; content: string }) => void;
   customComponents?: Record<string, React.ComponentType<any>>;
+  webSources?: Array<{ url: string; siteName?: string; domain: string }>;
 }
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({
@@ -811,14 +831,15 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   onCodeEdit,
   onOpenDocument,
   customComponents = {},
+  webSources,
 }: MarkdownRendererProps) {
   const processedContent = useMemo(() => {
     if (!content) return "";
     let processed = content;
-    processed = preprocessSourceBadges(processed);
+    processed = preprocessSourceBadges(processed, webSources);
     const sanitized = sanitize ? sanitizeContent(processed) : processed;
     return enableMath ? preprocessMathInMarkdown(sanitized) : sanitized;
-  }, [content, enableMath, sanitize]);
+  }, [content, enableMath, sanitize, webSources]);
 
   const remarkPlugins = useMemo(() => {
     const plugins: any[] = [];
