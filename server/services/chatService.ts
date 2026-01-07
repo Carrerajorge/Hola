@@ -476,7 +476,7 @@ export async function handleChatRequest(
     if (!documentMode && !figmaMode && !hasImages && lastUserMessage && isSimpleSearchQueryEarly(lastUserMessage.content)) {
       console.log("[ChatService] IMMEDIATE SEARCH EXECUTION: Bypassing all pipelines");
       
-      // Helper to extract domain and favicon
+      // Helper to extract domain and favicon with proper source object
       const extractWebSourceImmediate = (url: string, title: string, snippet?: string, imageUrl?: string, siteName?: string, canonicalUrl?: string): WebSource => {
         let domain = "";
         try {
@@ -485,15 +485,26 @@ export async function handleChatRequest(
         } catch {
           domain = url.split("/")[2]?.replace(/^www\./, "") || "unknown";
         }
+        
+        // Determine source name with fallback chain
+        const sourceName = siteName || domain || "Desconocida";
+        if (!siteName && !domain) {
+          console.warn(`[ChatService] missing_source_count: URL ${url} has no source info`);
+        }
+        
         return {
           url,
           title,
           domain,
           favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
-          snippet: snippet?.slice(0, 200),
+          snippet: snippet?.slice(0, 400),
           imageUrl,
-          siteName: siteName || domain,
-          canonicalUrl: canonicalUrl || url
+          siteName: sourceName,
+          canonicalUrl: canonicalUrl || url,
+          source: {
+            name: sourceName,
+            domain: domain || "unknown"
+          }
         };
       };
       

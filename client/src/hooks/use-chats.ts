@@ -41,6 +41,10 @@ export interface WebSource {
   imageUrl?: string;
   canonicalUrl?: string;
   siteName?: string;
+  source: {
+    name: string;
+    domain: string;
+  };
 }
 
 export interface AgentRunData {

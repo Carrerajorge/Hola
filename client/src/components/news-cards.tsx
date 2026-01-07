@@ -71,7 +71,7 @@ const NewsCard = memo(function NewsCard({ source, index }: { source: WebSource; 
             {source.favicon ? (
               <img
                 src={source.favicon}
-                alt={source.domain}
+                alt={source.source?.name || source.domain}
                 className="w-4 h-4 rounded-full object-contain"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
@@ -82,7 +82,7 @@ const NewsCard = memo(function NewsCard({ source, index }: { source: WebSource; 
               <Globe className="w-4 h-4 text-muted-foreground" />
             )}
             <span className="text-xs text-muted-foreground truncate">
-              {source.siteName || source.domain}
+              {source.source?.name || source.siteName || source.domain}
             </span>
           </div>
           
