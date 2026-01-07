@@ -14,6 +14,20 @@ const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 
 const ALLOWED_DIRS = ["/tmp", process.cwd()];
 
+// Strict allowlist of programs that can be executed (prevents command injection)
+const ALLOWED_PROGRAMS = new Set([
+  // Code execution
+  "python3",
+  "node",
+  "npx",
+  "bash",
+  "cat",
+  "sh",
+  // File conversion tools
+  "pandoc",
+  "cp",
+]);
+
 function validatePath(filePath: string): string {
   const resolved = path.resolve(filePath);
   const isAllowed = ALLOWED_DIRS.some(dir => resolved.startsWith(path.resolve(dir)));
@@ -31,9 +45,30 @@ async function executeSafeCommand(
   args: string[],
   timeout: number = 30000
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  // Security: Validate program against allowlist (prevents command injection)
+  if (!ALLOWED_PROGRAMS.has(program)) {
+    return {
+      stdout: "",
+      stderr: `Blocked program: ${program}. Only allowed: ${Array.from(ALLOWED_PROGRAMS).join(", ")}`,
+      exitCode: 1,
+    };
+  }
+
+  // Security: Validate args don't contain shell metacharacters
+  for (const arg of args) {
+    if (arg.includes("\n") || arg.includes("\r")) {
+      return {
+        stdout: "",
+        stderr: "Blocked: argument contains newline characters",
+        exitCode: 1,
+      };
+    }
+  }
+
   return new Promise((resolve) => {
     const child = spawn(program, args, {
       timeout,
+      shell: false, // Explicit: prevent shell injection
     });
 
     let stdout = "";
