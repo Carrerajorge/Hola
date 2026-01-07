@@ -398,6 +398,42 @@ export async function handleChatRequest(
       }
     }
 
+    // ========================================================================
+    // AGGRESSIVE FIX: Simple search queries should NEVER use any pipeline
+    // This MUST be checked FIRST before any routing/multi-intent/pipeline logic
+    // ========================================================================
+    const SIMPLE_SEARCH_PATTERNS_EARLY = [
+      /dame\s+\d*\s*(noticias|artículos?)/i,
+      /busca(me)?\s+(noticias|información|info|artículos?|tesis)/i,
+      /noticias\s+(de|sobre|del)/i,
+      /últimas\s+noticias/i,
+      /qué\s+(está\s+pasando|pasa|hay\s+de\s+nuevo)/i,
+      /what('s|\s+is)\s+(happening|new|going\s+on)/i,
+      /news\s+(about|from|on)/i,
+      /precio\s+(de|del|actual)/i,
+      /clima\s+(en|de)/i,
+      /weather\s+(in|for)/i,
+      /quisiera\s+(que\s+)?(me\s+)?ayud(es|a)\s+a\s+buscar/i,
+      /ayúdame\s+a\s+buscar/i,
+      /buscar\s+\d*\s*(artículos?|tesis)/i,
+      /dame\s+\d*\s*(artículos?|tesis)/i,
+      /encuentra(me)?\s+\d*\s*(artículos?|información|tesis)/i,
+      /investiga\s+(sobre|acerca)/i,
+      /información\s+(sobre|de|del|acerca)/i,
+      /búscame\s+\d*/i,
+      /search\s+for/i,
+      /find\s+(me\s+)?\d*/i,
+    ];
+    
+    const isSimpleSearchQueryEarly = (text: string) => 
+      SIMPLE_SEARCH_PATTERNS_EARLY.some(p => p.test(text));
+    
+    if (!documentMode && !figmaMode && !hasImages && lastUserMessage && isSimpleSearchQueryEarly(lastUserMessage.content)) {
+      console.log("[ChatService] EARLY BYPASS: Simple search detected, skipping ALL pipelines");
+      // Skip directly to web search flow - this is handled later in the code
+      // We just need to ensure we DON'T enter any of the pipeline blocks below
+    } else {
+    
     // PRODUCTION WORKFLOW: Route generation intents (image, slides, docs) through ProductionWorkflowRunner
     // This ensures real artifacts are generated with proper termination guarantees
     if (!documentMode && !figmaMode && !hasImages) {
@@ -549,6 +585,7 @@ export async function handleChatRequest(
       }
     }
   }
+  } // Close the early bypass else block
 
   let contextInfo = "";
   let sources: ChatSource[] = [];

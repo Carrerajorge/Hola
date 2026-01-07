@@ -194,7 +194,9 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
   
   const contents: { url: string; title: string; content: string }[] = [];
   
-  // Fetch content from more sources in parallel for richer citations
+  // Fetch content with aggressive timeout - max 4 seconds total for all fetches
+  const TOTAL_FETCH_TIMEOUT = 4000;
+  
   const fetchPromises = results.slice(0, LIMITS.MAX_CONTENT_FETCH).map(async (result) => {
     const content = await fetchPageContent(result.url);
     if (content) {
@@ -207,8 +209,17 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
     return null;
   });
   
-  const fetchedContents = await Promise.all(fetchPromises);
-  contents.push(...fetchedContents.filter((c): c is NonNullable<typeof c> => c !== null));
+  // Race against timeout to ensure fast response
+  const timeoutPromise = new Promise<null[]>((resolve) => 
+    setTimeout(() => resolve([]), TOTAL_FETCH_TIMEOUT)
+  );
+  
+  const fetchedContents = await Promise.race([
+    Promise.all(fetchPromises),
+    timeoutPromise
+  ]);
+  
+  contents.push(...(fetchedContents as any[]).filter((c): c is NonNullable<typeof c> => c !== null));
   
   console.log(`[WebSearch] Query: "${query}" - Found ${results.length} unique sources, fetched ${contents.length} pages`);
   

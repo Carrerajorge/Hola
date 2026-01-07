@@ -26,14 +26,14 @@ export const HTTP_HEADERS = {
 } as const;
 
 export const TIMEOUTS = {
-  PAGE_FETCH: 5000,  // Reduced from 8000 for faster searches
+  PAGE_FETCH: 3000,  // Aggressive: 3s max per page fetch
   SCREENSHOT_INTERVAL: 1500,
-  MAX_CONTENT_LENGTH: 1500  // Slightly reduced for faster processing
+  MAX_CONTENT_LENGTH: 1000  // Smaller content for faster processing
 } as const;
 
 export const LIMITS = {
-  MAX_SEARCH_RESULTS: 15,
-  MAX_CONTENT_FETCH: 6,  // Reduced from 10 for faster searches while keeping good content
+  MAX_SEARCH_RESULTS: 12,  // Reduced for faster response
+  MAX_CONTENT_FETCH: 4,  // Only fetch 4 pages for speed
   EMBEDDING_BATCH_SIZE: 20,
   MAX_EMBEDDING_INPUT: 8000,
   RAG_SIMILAR_CHUNKS: 3,
