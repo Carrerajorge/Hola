@@ -90,13 +90,14 @@ function preprocessSourceBadges(content: string, webSources?: Array<{ url: strin
   
   if (webSources && webSources.length > 0) {
     processed = processed.replace(
-      /\[Fuente:\s*(\d+)\]/gi,
-      (match, numStr) => {
+      /\[(?:Fuente|Source|Ref)[:.]?\s*(\d+)\]|\((?:Fuente|Source)\s*(\d+)\)|\[(\d+)\](?=\s|$|[.,])/gi,
+      (match, num1, num2, num3) => {
+        const numStr = num1 || num2 || num3;
         const num = parseInt(numStr, 10);
         const source = webSources[num - 1];
         if (source) {
           const name = source.siteName || source.domain;
-          return `[__SOURCE__${name}__SOURCE__](${source.url})`;
+          return ` [__SOURCE__${name}__SOURCE__](${source.url})`;
         }
         return match;
       }
