@@ -399,8 +399,8 @@ export async function handleChatRequest(
     }
 
     // ========================================================================
-    // AGGRESSIVE FIX: Simple search queries should NEVER use any pipeline
-    // This MUST be checked FIRST before any routing/multi-intent/pipeline logic
+    // AGGRESSIVE FIX: Simple search queries execute IMMEDIATELY and return
+    // This completely bypasses ALL pipeline/routing/multi-intent logic
     // ========================================================================
     const SIMPLE_SEARCH_PATTERNS_EARLY = [
       /dame\s+\d*\s*(noticias|artículos?)/i,
@@ -428,11 +428,95 @@ export async function handleChatRequest(
     const isSimpleSearchQueryEarly = (text: string) => 
       SIMPLE_SEARCH_PATTERNS_EARLY.some(p => p.test(text));
     
+    // IMMEDIATE EXECUTION: Simple searches bypass EVERYTHING and execute directly
     if (!documentMode && !figmaMode && !hasImages && lastUserMessage && isSimpleSearchQueryEarly(lastUserMessage.content)) {
-      console.log("[ChatService] EARLY BYPASS: Simple search detected, skipping ALL pipelines");
-      // Skip directly to web search flow - this is handled later in the code
-      // We just need to ensure we DON'T enter any of the pipeline blocks below
-    } else {
+      console.log("[ChatService] IMMEDIATE SEARCH EXECUTION: Bypassing all pipelines");
+      
+      // Helper to extract domain and favicon
+      const extractWebSourceImmediate = (url: string, title: string, snippet?: string): WebSource => {
+        let domain = "";
+        try {
+          const urlObj = new URL(url);
+          domain = urlObj.hostname.replace(/^www\./, "");
+        } catch {
+          domain = url.split("/")[2]?.replace(/^www\./, "") || "unknown";
+        }
+        return {
+          url,
+          title,
+          domain,
+          favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+          snippet: snippet?.slice(0, 200)
+        };
+      };
+      
+      try {
+        // Check if academic search is needed
+        const isAcademic = needsAcademicSearch(lastUserMessage.content);
+        let webSearchInfo = "";
+        let webSources: WebSource[] = [];
+        
+        if (isAcademic) {
+          const scholarResults = await searchScholar(lastUserMessage.content, 8);
+          if (scholarResults.length > 0) {
+            webSearchInfo = "\n\n**Artículos académicos encontrados:**\n" +
+              scholarResults.map((r, i) => 
+                `[${i + 1}] ${r.authors ? `Autores: ${r.authors}\n` : ""}${r.year ? `Año: ${r.year}\n` : ""}Título: ${r.title}\nURL: ${r.url}\n${r.snippet ? `Resumen: ${r.snippet}` : ""}`
+              ).join("\n\n");
+            webSources = scholarResults.filter(r => r.url).map(r => 
+              extractWebSourceImmediate(r.url, r.title, r.snippet)
+            );
+          }
+        }
+        
+        // Always do web search for general results
+        const searchResults = await searchWeb(lastUserMessage.content);
+        if (searchResults.results.length > 0) {
+          webSearchInfo += "\n\n**Fuentes web encontradas:**\n" +
+            searchResults.results.slice(0, 10).map((r, i) => 
+              `[${i + 1}] ${r.title}\nURL: ${r.url}\n${r.snippet || ""}`
+            ).join("\n\n");
+          
+          webSources = [
+            ...webSources,
+            ...searchResults.results.slice(0, 10).map(r => 
+              extractWebSourceImmediate(r.url, r.title, r.snippet)
+            )
+          ];
+        }
+        
+        // Build context for LLM
+        const searchContext = webSearchInfo || "No se encontraron resultados relevantes.";
+        
+        // Call LLM with search results
+        const systemPrompt = `Eres un asistente útil. Responde la pregunta del usuario basándote en la información de búsqueda proporcionada. Cita las fuentes cuando sea relevante.
+
+INFORMACIÓN DE BÚSQUEDA:
+${searchContext}`;
+
+        const llmMessages = [
+          { role: "system" as const, content: systemPrompt },
+          { role: "user" as const, content: lastUserMessage.content }
+        ];
+        
+        const llmResponse = await llmGateway.chat({
+          messages: llmMessages,
+          temperature: 0.7,
+          maxTokens: 2000
+        });
+        
+        console.log(`[ChatService] IMMEDIATE SEARCH: Returning ${webSources.length} sources`);
+        
+        return {
+          content: llmResponse.content,
+          role: "assistant",
+          webSources: webSources.slice(0, 8)
+        };
+      } catch (error) {
+        console.error("[ChatService] IMMEDIATE SEARCH ERROR:", error);
+        // Fall through to normal flow on error
+      }
+    }
     
     // PRODUCTION WORKFLOW: Route generation intents (image, slides, docs) through ProductionWorkflowRunner
     // This ensures real artifacts are generated with proper termination guarantees
@@ -585,7 +669,6 @@ export async function handleChatRequest(
       }
     }
   }
-  } // Close the early bypass else block
 
   let contextInfo = "";
   let sources: ChatSource[] = [];
