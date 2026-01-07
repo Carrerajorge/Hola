@@ -773,8 +773,9 @@ async def test_performance_concurrent_commands():
     
     executor = CommandExecutor(SecurityGuard())
     
-    async def run_command(i):
-        return await executor.execute(f"echo 'concurrent_{i}'")
+    async def run_command(i: int):
+        command = "echo 'concurrent_{}'".format(i)
+        return await executor.execute(command)
     
     start = time.time()
     tasks = [run_command(i) for i in range(10)]
