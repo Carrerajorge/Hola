@@ -1,31 +1,25 @@
 import { ToolDefinition, ExecutionContext, ToolResult } from "../types";
-import { browserSessionManager } from "../../browser";
-import { extractWithReadability } from "../../extractor";
+import { searchWeb as simpleSearchWeb } from "../../../services/webSearch";
 
 export const searchWebTool: ToolDefinition = {
   id: "search_web",
   name: "Search Web",
   description: "Search the web using a search engine and return results",
   category: "web",
-  capabilities: ["search", "find", "lookup", "query", "google", "web search"],
+  capabilities: ["search", "find", "lookup", "query", "google", "web search", "noticias", "news"],
   inputSchema: {
     query: { type: "string", description: "The search query", required: true },
-    engine: { 
-      type: "string", 
-      description: "Search engine to use",
-      enum: ["google", "duckduckgo", "bing"],
-      default: "duckduckgo"
-    },
     maxResults: { type: "number", description: "Maximum results to return", default: 5 }
   },
   outputSchema: {
     results: { type: "array", description: "Search results with title, url, snippet" },
-    query: { type: "string", description: "The executed query" }
+    query: { type: "string", description: "The executed query" },
+    webSources: { type: "array", description: "Web sources for citations" }
   },
-  timeout: 60000,
+  timeout: 30000,
   
   async execute(context: ExecutionContext, params: Record<string, any>): Promise<ToolResult> {
-    const { query, engine = "duckduckgo", maxResults = 5 } = params;
+    const { query, maxResults = 5 } = params;
     
     if (!query) {
       return {
@@ -34,84 +28,64 @@ export const searchWebTool: ToolDefinition = {
       };
     }
 
-    let sessionId: string | null = null;
-    
     try {
-      sessionId = await browserSessionManager.createSession(
-        `Search: ${query}`,
-        { timeout: 30000 },
-        undefined
-      );
-      
-      browserSessionManager.startScreenshotStreaming(sessionId, 1500);
-      
-      const searchUrls: Record<string, string> = {
-        google: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
-        duckduckgo: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-        bing: `https://www.bing.com/search?q=${encodeURIComponent(query)}`
-      };
-      
-      const searchUrl = searchUrls[engine] || searchUrls.duckduckgo;
-      
       context.onProgress({
         runId: context.runId,
         stepId: `search_${context.stepIndex}`,
         status: "progress",
         message: `Searching for: ${query}`,
-        progress: 30,
-        detail: { browserSessionId: sessionId, query }
+        progress: 30
       });
 
-      const navResult = await browserSessionManager.navigate(sessionId, searchUrl);
+      const searchResponse = await simpleSearchWeb(query, maxResults);
       
-      if (!navResult.success) {
-        return {
-          success: false,
-          error: navResult.error || "Failed to load search results"
-        };
-      }
+      const results = searchResponse.results.slice(0, maxResults).map(r => ({
+        title: r.title,
+        url: r.url,
+        snippet: r.snippet || ""
+      }));
 
-      const pageState = await browserSessionManager.getPageState(sessionId);
-      
-      const results: { title: string; url: string; snippet: string }[] = [];
-      
-      if (pageState?.links) {
-        for (const link of pageState.links) {
-          if (link.href && !link.href.includes("duckduckgo") && !link.href.includes("google.com") && !link.href.includes("bing.com")) {
-            if (results.length >= maxResults) break;
-            results.push({
-              title: link.text || link.href,
-              url: link.href,
-              snippet: ""
-            });
-          }
+      const webSources = results.map(r => {
+        let domain = "";
+        try {
+          domain = new URL(r.url).hostname.replace(/^www\./, "");
+        } catch {
+          domain = r.url.split("/")[2]?.replace(/^www\./, "") || "unknown";
         }
-      }
-
-      const webSources = results.slice(0, maxResults).map(r => {
-        const domain = new URL(r.url).hostname;
         return {
           url: r.url,
           title: r.title,
-          domain: domain,
+          domain,
           favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
           snippet: r.snippet || ""
         };
+      });
+
+      const textContent = searchResponse.contents.length > 0
+        ? searchResponse.contents.map(c => `## ${c.title}\n\n${c.content}`).join("\n\n---\n\n")
+        : results.map(r => `**${r.title}**\n${r.snippet}\nURL: ${r.url}`).join("\n\n");
+
+      context.onProgress({
+        runId: context.runId,
+        stepId: `search_${context.stepIndex}`,
+        status: "completed",
+        message: `Found ${results.length} results`,
+        progress: 100
       });
 
       return {
         success: true,
         data: {
           query,
-          engine,
-          results: results.slice(0, maxResults),
+          results,
           webSources,
+          textContent,
           totalFound: results.length
         },
         metadata: {
           query,
-          engine,
-          resultsCount: results.length
+          resultsCount: results.length,
+          contentsExtracted: searchResponse.contents.length
         }
       };
     } catch (error: any) {
@@ -119,14 +93,6 @@ export const searchWebTool: ToolDefinition = {
         success: false,
         error: error.message
       };
-    } finally {
-      if (sessionId) {
-        browserSessionManager.stopScreenshotStreaming(sessionId);
-        // Delay closing to allow frontend to receive final screenshot
-        setTimeout(async () => {
-          await browserSessionManager.closeSession(sessionId!).catch(() => {});
-        }, 5000);
-      }
     }
   }
 };

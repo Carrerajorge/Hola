@@ -101,6 +101,8 @@ function hasSearchIntent(text: string): boolean {
   const searchPatterns = [
     /\b(busca|buscar|búsqueda|search|find|look up|lookup|google|investigar|investiga)\b/i,
     /\b(qué es|what is|quién es|who is|dónde|where|cómo|how to)\b/i,
+    /\b(noticias|news|headlines|últimas|actualidad|novedades)\b/i,
+    /\b(dame|dime|muéstrame|show me|give me|tell me)\b.*\b(de|about|on|del|sobre)\b/i,
     /\?$/  // Questions often indicate search intent
   ];
   return searchPatterns.some(p => p.test(text));
@@ -134,23 +136,37 @@ export async function createPlan(
     };
   }
   
-  // Check for search intent - force search_web
+  // Check for search intent - force search_web + respond
   const searchIntent = hasSearchIntent(objective);
   
   if (searchIntent) {
+    const searchStepId = `step_0_${crypto.randomUUID().slice(0, 8)}`;
     return {
       id: `plan_${crypto.randomUUID()}`,
       runId,
       objective,
       interpretedIntent: intent,
-      steps: [{
-        id: `step_0_${crypto.randomUUID().slice(0, 8)}`,
-        toolId: "search_web",
-        description: `Search the web for: ${objective}`,
-        params: { query: objective, engine: "duckduckgo", maxResults: 5 }
-      }],
+      steps: [
+        {
+          id: searchStepId,
+          toolId: "search_web",
+          description: `Search the web for: ${objective}`,
+          params: { query: objective, maxResults: 5 }
+        },
+        {
+          id: `step_1_${crypto.randomUUID().slice(0, 8)}`,
+          toolId: "respond",
+          description: "Generate response based on search results",
+          params: { 
+            objective: objective,
+            tone: "professional",
+            language: "auto"
+          },
+          dependsOn: [searchStepId]
+        }
+      ],
       createdAt: new Date(),
-      estimatedDuration: 30000
+      estimatedDuration: 45000
     };
   }
   
