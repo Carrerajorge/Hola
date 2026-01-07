@@ -472,8 +472,71 @@ export async function handleChatRequest(
       return SIMPLE_SEARCH_PATTERNS_EARLY.some(p => p.test(text) || p.test(normalized));
     };
     
+    // DOCUMENT PRIORITY: If user has uploaded documents, ALWAYS use them for analysis
+    // This ensures documents are never ignored when user asks for summaries/analysis
+    const hasActiveDocuments = persistentDocumentContext.length > 0 || attachmentContext.length > 0;
+    
+    if (hasActiveDocuments && lastUserMessage) {
+      // Check if user is asking about the document (summary, analysis, questions)
+      const DOCUMENT_ANALYSIS_PATTERNS = [
+        /resumen|resumir|resume|summarize|summary/i,
+        /analiza|análisis|analyze|analysis/i,
+        /explica|explicar|explain/i,
+        /qué\s+(dice|contiene|trata|hay)/i,
+        /de\s+qué\s+(trata|habla|es)/i,
+        /puntos\s+(clave|principales|importantes)/i,
+        /información\s+(principal|importante|relevante)/i,
+        /extrae|extraer|extract/i,
+        /dame|dime|muéstrame/i,
+        /qué\s+puedo\s+aprender/i,
+        /cuál\s+es\s+el\s+(tema|contenido)/i,
+      ];
+      
+      const isDocumentQuery = DOCUMENT_ANALYSIS_PATTERNS.some(p => p.test(lastUserMessage.content));
+      
+      if (isDocumentQuery) {
+        console.log("[ChatService] DOCUMENT ANALYSIS MODE: User has documents and asking about them");
+        
+        // Build document-focused prompt
+        const fullDocContext = persistentDocumentContext + attachmentContext;
+        const documentSystemPrompt = `Eres un asistente de análisis de documentos. El usuario ha subido uno o más documentos y te está preguntando sobre ellos.
+
+REGLAS OBLIGATORIAS:
+1. DEBES responder usando ÚNICAMENTE el contenido de los documentos proporcionados
+2. NUNCA digas "sube un documento" - ya tienes los documentos
+3. Si el documento está vacío o no se pudo extraer contenido, dilo explícitamente
+4. Responde de forma completa y útil basándote en el contenido real
+
+${fullDocContext}`;
+
+        const llmMessages = [
+          { role: "system" as const, content: documentSystemPrompt },
+          { role: "user" as const, content: lastUserMessage.content }
+        ];
+        
+        try {
+          const llmResponse = await llmGateway.chat(llmMessages, {
+            temperature: 0.5,
+            maxTokens: 2000,
+            model: "gemini-2.5-flash"
+          });
+          
+          console.log(`[ChatService] DOCUMENT ANALYSIS: Responded using ${persistentDocumentContext ? 'persistent' : 'current'} document context`);
+          
+          return {
+            content: llmResponse.content,
+            role: "assistant"
+          };
+        } catch (docError) {
+          console.error("[ChatService] Document analysis error:", docError);
+          // Fall through to normal flow on error
+        }
+      }
+    }
+    
     // IMMEDIATE EXECUTION: Simple searches bypass EVERYTHING and execute directly
-    if (!documentMode && !figmaMode && !hasImages && lastUserMessage && isSimpleSearchQueryEarly(lastUserMessage.content)) {
+    // Only activate if NO documents are present (documents take priority)
+    if (!documentMode && !figmaMode && !hasImages && !hasActiveDocuments && lastUserMessage && isSimpleSearchQueryEarly(lastUserMessage.content)) {
       console.log("[ChatService] IMMEDIATE SEARCH EXECUTION: Bypassing all pipelines");
       
       // Helper to extract domain and favicon with proper source object
