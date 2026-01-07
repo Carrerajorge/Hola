@@ -40,7 +40,8 @@ def safe_pip_install(pkg: str, quiet: bool = True, timeout: int = 120) -> bool:
             args,
             capture_output=True,
             timeout=timeout,
-            check=False  # Don't raise on non-zero exit
+            check=False,  # Don't raise on non-zero exit
+            shell=False   # Explicit: no shell invocation (prevents command injection)
         )
         return result.returncode == 0
     except subprocess.TimeoutExpired:
