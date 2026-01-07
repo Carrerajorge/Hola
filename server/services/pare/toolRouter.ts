@@ -7,61 +7,118 @@ interface ToolCapability {
   outputTypes: string[];
   intentAffinity: Partial<Record<IntentCategory, number>>;
   keywords: string[];
-  embedding?: number[];
+  embedding: number[] | null;
 }
+
+type ToolCategory =
+  | "Orchestration"
+  | "Memory"
+  | "Reasoning"
+  | "Communication"
+  | "Development"
+  | "Document"
+  | "Web"
+  | "Generation"
+  | "Data"
+  | "Automation"
+  | "Processing"
+  | "API"
+  | "Productivity"
+  | "Security"
+  | "Database"
+  | "Monitoring"
+  | "Utility"
+  | "Diagram"
+  | "AdvancedSystem";
 
 const INTENT_TO_TOOLS: Record<IntentCategory, string[]> = {
   query: [
-    "search_web", "search_semantic", "memory_retrieve",
-    "fetch_url", "file_read"
+    "search_web", "web_search", "search_semantic", "memory_retrieve",
+    "fetch_url", "browse_url", "file_read"
   ],
   command: [
-    "shell", "code_execute", "file_manage", "email_manage",
-    "calendar_manage", "api_call"
+    "shell", "shell_execute", "code_execute", "file_manage", "email_manage",
+    "email_send", "calendar_manage", "calendar_event", "api_call", "http_request"
   ],
   creation: [
-    "file_write", "doc_create", "slides_create", "spreadsheet_create",
-    "generate_text", "generate_image", "code_generate"
+    "file_write", "doc_create", "document_create", "slides_create", "spreadsheet_create",
+    "generate_text", "text_generate", "generate_image", "image_generate", "code_generate"
   ],
   analysis: [
-    "data_analyze", "data_visualize", "summarize", "reason",
-    "vision_analyze", "verify"
+    "data_analyze", "data_visualize", "summarize", "text_summarize", "reason",
+    "vision_analyze", "verify", "analyze_problem"
   ],
   code: [
-    "code_generate", "code_execute", "code_review", "code_debug",
-    "code_test", "code_refactor", "shell", "git_manage"
+    "code_generate", "code_execute", "code_review", "code_analyze", "code_debug",
+    "code_test", "code_refactor", "shell", "shell_execute", "git_manage", "git_operation"
   ],
   research: [
-    "search_web", "fetch_url", "research_deep", "summarize",
-    "memory_store", "verify"
+    "search_web", "web_search", "fetch_url", "browse_url", "research_deep",
+    "summarize", "text_summarize", "memory_store", "verify"
   ],
   automation: [
-    "schedule_cron", "schedule_once", "trigger_event",
-    "workflow", "queue_manage", "webhook_send"
+    "schedule_cron", "cron_schedule", "schedule_once", "trigger_event",
+    "workflow", "workflow_create", "queue_manage", "queue_message", "webhook_send"
   ],
-  conversation: ["message", "clarify", "summarize", "explain"],
-  clarification: ["clarify", "context_manage"],
+  conversation: [
+    "message", "message_compose", "clarify", "summarize", "text_summarize", "explain"
+  ],
+  clarification: [
+    "clarify", "context_manage"
+  ],
 };
 
 const ENTITY_TO_TOOLS: Record<EntityType, string[]> = {
-  file_path: ["file_read", "file_write", "file_manage", "file_convert"],
-  url: ["fetch_url", "browser_navigate", "search_web"],
-  code_snippet: ["code_execute", "code_review", "code_debug"],
-  date_time: ["schedule_cron", "schedule_once", "calendar_manage"],
-  number: ["data_analyze", "spreadsheet_create"],
-  person: ["email_manage", "calendar_manage"],
-  organization: ["search_web", "research_deep"],
+  file_path: ["file_read", "file_write", "file_manage", "file_convert", "document_convert"],
+  url: ["fetch_url", "browse_url", "browser_navigate", "search_web", "web_search", "extract_content"],
+  code_snippet: ["code_execute", "code_review", "code_analyze", "code_debug"],
+  date_time: ["schedule_cron", "cron_schedule", "schedule_once", "calendar_manage", "calendar_event"],
+  number: ["data_analyze", "statistics_compute", "spreadsheet_create"],
+  person: ["email_manage", "email_send", "calendar_manage", "calendar_event"],
+  organization: ["search_web", "web_search", "research_deep"],
   tool_reference: [],
-  data_format: ["file_convert", "data_transform", "file_read"],
-  programming_language: ["code_generate", "code_execute", "code_review"],
+  data_format: ["file_convert", "document_convert", "data_transform", "file_read", "json_parse", "csv_parse"],
+  programming_language: ["code_generate", "code_execute", "code_review", "code_analyze"],
   action_verb: [],
-  domain_term: ["search_web", "research_deep"],
+  domain_term: ["search_web", "web_search", "research_deep", "search_semantic"],
+};
+
+const CATEGORY_TO_INTENTS: Record<ToolCategory, IntentCategory[]> = {
+  Orchestration: ["command"],
+  Memory: ["query", "research"],
+  Reasoning: ["analysis", "query"],
+  Communication: ["conversation"],
+  Development: ["command", "code"],
+  Document: ["creation", "command"],
+  Web: ["research", "query"],
+  Generation: ["creation"],
+  Data: ["analysis"],
+  Automation: ["automation"],
+  Processing: ["analysis"],
+  API: ["command", "automation"],
+  Productivity: ["command", "creation"],
+  Security: ["command", "analysis"],
+  Database: ["command", "query"],
+  Monitoring: ["analysis", "query"],
+  Utility: ["command"],
+  Diagram: ["creation"],
+  AdvancedSystem: ["command", "code"],
 };
 
 const STOPWORDS = new Set([
-  "de", "la", "el", "en", "y", "a", "para", "con", "que", "del",
-  "the", "a", "an", "and", "or", "for", "with", "to", "of", "in"
+  "de", "la", "el", "en", "y", "a", "para", "con", "que", "del", "los", "las", "un", "una",
+  "the", "a", "an", "and", "or", "for", "with", "to", "of", "in", "is", "are", "be", "has"
 ]);
+
+const TOOL_DEPENDENCIES: Record<string, string[]> = {
+  code_execute: ["code_generate"],
+  data_visualize: ["data_analyze"],
+  email_send: ["text_generate"],
+  slides_create: ["text_generate"],
+  research_deep: ["web_search", "search_web"],
+  verify: ["web_search", "search_web"],
+  document_create: ["text_generate"],
+};
 
 export class ToolRouter {
   private similarityThreshold: number;
@@ -86,8 +143,9 @@ export class ToolRouter {
           description: tool.description,
           inputTypes: [],
           outputTypes: [],
-          intentAffinity: this.computeIntentAffinity(tool.name, tool.category),
+          intentAffinity: this.computeIntentAffinity(tool.name, tool.category as ToolCategory),
           keywords: this.extractKeywords(tool.description),
+          embedding: null,
         };
 
         this.toolCapabilities.set(tool.name, capability);
@@ -96,7 +154,7 @@ export class ToolRouter {
       this.initialized = true;
       console.log(`[ToolRouter] Initialized ${this.toolCapabilities.size} tool capabilities`);
     } catch (error) {
-      console.warn("[ToolRouter] Failed to initialize from registry, using defaults:", error);
+      console.warn("[ToolRouter] Failed to initialize from registry:", error);
       this.initialized = true;
     }
   }
@@ -109,7 +167,7 @@ export class ToolRouter {
   ): Promise<ToolCandidate[]> {
     await this.initialize();
 
-    const candidates = new Map<string, ToolCandidate>();
+    const candidates: Map<string, ToolCandidate> = new Map();
 
     const intentScores = this.scoreByIntent(intents);
     const entityScores = this.scoreByEntities(entities);
@@ -130,16 +188,16 @@ export class ToolRouter {
 
     for (const toolName of allTools) {
       const combinedScore =
-        (intentScores[toolName] || 0) * intentWeight +
-        (entityScores[toolName] || 0) * entityWeight +
-        (semanticScores[toolName] || 0) * semanticWeight +
-        (keywordScores[toolName] || 0) * keywordWeight;
+        (intentScores[toolName] ?? 0) * intentWeight +
+        (entityScores[toolName] ?? 0) * entityWeight +
+        (semanticScores[toolName] ?? 0) * semanticWeight +
+        (keywordScores[toolName] ?? 0) * keywordWeight;
 
-      if (combinedScore >= this.similarityThreshold) {
+      if (combinedScore > 0.1) {
         candidates.set(toolName, {
           toolName,
           relevanceScore: combinedScore,
-          capabilityMatch: semanticScores[toolName] || keywordScores[toolName] || 0,
+          capabilityMatch: semanticScores[toolName] ?? 0,
           requiredParams: {},
           optionalParams: {},
           dependencies: this.getDependencies(toolName),
@@ -158,7 +216,7 @@ export class ToolRouter {
     const scores: Record<string, number> = {};
 
     for (const intent of intents) {
-      const tools = INTENT_TO_TOOLS[intent.category] || [];
+      const tools = INTENT_TO_TOOLS[intent.category] ?? [];
       for (const tool of tools) {
         if (scores[tool] === undefined) {
           scores[tool] = 0;
@@ -171,7 +229,7 @@ export class ToolRouter {
       const maxScore = Math.max(...Object.values(scores));
       if (maxScore > 0) {
         for (const tool of Object.keys(scores)) {
-          scores[tool] /= maxScore;
+          scores[tool] = scores[tool] / maxScore;
         }
       }
     }
@@ -183,7 +241,7 @@ export class ToolRouter {
     const scores: Record<string, number> = {};
 
     for (const entity of entities) {
-      const tools = ENTITY_TO_TOOLS[entity.type] || [];
+      const tools = ENTITY_TO_TOOLS[entity.type] ?? [];
       for (const tool of tools) {
         if (scores[tool] === undefined) {
           scores[tool] = 0;
@@ -196,7 +254,7 @@ export class ToolRouter {
       const maxScore = Math.max(...Object.values(scores));
       if (maxScore > 0) {
         for (const tool of Object.keys(scores)) {
-          scores[tool] /= maxScore;
+          scores[tool] = scores[tool] / maxScore;
         }
       }
     }
@@ -208,7 +266,7 @@ export class ToolRouter {
     const scores: Record<string, number> = {};
 
     if (this.toolEmbeddings.size === 0) {
-      return this.scoreByKeywords(prompt);
+      return scores;
     }
 
     try {
@@ -223,9 +281,8 @@ export class ToolRouter {
           scores[toolName] = normalizedSim;
         }
       }
-    } catch (error) {
-      console.warn("[ToolRouter] Semantic scoring failed, using keyword fallback");
-      return this.scoreByKeywords(prompt);
+    } catch {
+      return scores;
     }
 
     return scores;
@@ -238,38 +295,15 @@ export class ToolRouter {
     for (const [toolName, capability] of this.toolCapabilities) {
       if (capability.keywords.length === 0) continue;
 
-      const matches = capability.keywords.filter(
-        (keyword) => promptLower.includes(keyword.toLowerCase())
-      ).length;
+      let matches = 0;
+      for (const keyword of capability.keywords) {
+        if (promptLower.includes(keyword.toLowerCase())) {
+          matches++;
+        }
+      }
 
       if (matches > 0) {
         scores[toolName] = Math.min(matches / capability.keywords.length, 1.0);
-      }
-    }
-
-    if (this.toolCapabilities.size === 0) {
-      const defaultKeywords: Record<string, string[]> = {
-        search_web: ["buscar", "search", "find", "investigar", "noticias", "news"],
-        fetch_url: ["url", "página", "sitio", "website", "enlace", "link"],
-        file_read: ["leer", "read", "archivo", "file", "documento"],
-        file_write: ["escribir", "write", "guardar", "save", "crear archivo"],
-        code_execute: ["ejecutar", "run", "correr", "código", "script"],
-        code_generate: ["código", "code", "programar", "function", "clase"],
-        generate_text: ["texto", "escribir", "redactar", "contenido"],
-        generate_image: ["imagen", "image", "foto", "picture"],
-        doc_create: ["documento", "word", "docx", "informe", "report"],
-        slides_create: ["presentación", "slides", "powerpoint", "ppt"],
-        spreadsheet_create: ["excel", "spreadsheet", "tabla", "hoja de cálculo"],
-        data_analyze: ["analizar", "analyze", "datos", "data", "estadísticas"],
-        summarize: ["resumir", "summarize", "resumen", "summary"],
-        email_manage: ["email", "correo", "enviar mensaje"],
-      };
-
-      for (const [toolName, keywords] of Object.entries(defaultKeywords)) {
-        const matches = keywords.filter((k) => promptLower.includes(k)).length;
-        if (matches > 0) {
-          scores[toolName] = Math.min(matches / keywords.length, 1.0);
-        }
       }
     }
 
@@ -278,7 +312,7 @@ export class ToolRouter {
 
   private computeIntentAffinity(
     toolName: string,
-    category?: string
+    category?: ToolCategory
   ): Partial<Record<IntentCategory, number>> {
     const affinity: Partial<Record<IntentCategory, number>> = {};
 
@@ -286,20 +320,7 @@ export class ToolRouter {
       if (tools.includes(toolName)) {
         affinity[intentCat as IntentCategory] = 1.0;
       } else if (category) {
-        const categoryMapping: Record<string, IntentCategory[]> = {
-          Orchestration: ["command"],
-          Memory: ["query", "research"],
-          Reasoning: ["analysis", "query"],
-          Communication: ["conversation"],
-          Development: ["command", "code"],
-          Document: ["creation", "command"],
-          Web: ["research", "query"],
-          Generation: ["creation"],
-          Data: ["analysis"],
-          Automation: ["automation"],
-        };
-
-        const relatedIntents = categoryMapping[category] || [];
+        const relatedIntents = CATEGORY_TO_INTENTS[category] ?? [];
         if (relatedIntents.includes(intentCat as IntentCategory)) {
           affinity[intentCat as IntentCategory] = 0.5;
         }
@@ -311,27 +332,24 @@ export class ToolRouter {
 
   private extractKeywords(description: string): string[] {
     const words = description.toLowerCase().split(/\s+/);
-    const keywords = words.filter(
-      (w) => w.length > 3 && !STOPWORDS.has(w)
-    );
+    const keywords: string[] = [];
+
+    for (const word of words) {
+      const cleaned = word.replace(/[^a-záéíóúñü]/gi, "");
+      if (cleaned.length > 3 && !STOPWORDS.has(cleaned)) {
+        keywords.push(cleaned);
+      }
+    }
+
     return [...new Set(keywords)];
   }
 
   private getDependencies(toolName: string): string[] {
-    const dependencies: Record<string, string[]> = {
-      code_execute: ["code_generate"],
-      data_visualize: ["data_analyze"],
-      email_manage: ["generate_text"],
-      slides_create: ["generate_text"],
-      research_deep: ["search_web"],
-      verify: ["search_web"],
-    };
-
-    return dependencies[toolName] || [];
+    return TOOL_DEPENDENCIES[toolName] ?? [];
   }
 
   private cosineSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) return 0;
+    if (a.length !== b.length || a.length === 0) return 0;
 
     let dotProduct = 0;
     let normA = 0;
@@ -344,6 +362,8 @@ export class ToolRouter {
     }
 
     const denominator = Math.sqrt(normA) * Math.sqrt(normB);
-    return denominator === 0 ? 0 : dotProduct / denominator;
+    if (denominator === 0) return 0;
+
+    return dotProduct / denominator;
   }
 }
