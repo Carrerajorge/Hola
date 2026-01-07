@@ -9,7 +9,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
-import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess
+import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess, shlex
 import mimetypes, time, logging, uuid, traceback
 from pathlib import Path
 from datetime import datetime
@@ -263,9 +263,25 @@ class CommandExecutor:
         if analysis.action == SecurityAction.LOG_AND_BLOCK:
             return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message="Bloqueado")
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.workdir), env=os.environ.copy())
+            # For simple commands without shell features, use safer exec mode
+            # For complex commands with pipes/redirects, continue using shell but with awareness
+            if not any(char in cmd for char in ['|', '>', '<', '&', ';', '$', '`', '(', ')']):
+                # Simple command - parse safely
+                try:
+                    args = shlex.split(cmd)
+                    proc = await asyncio.create_subprocess_exec(
+                        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                        cwd=str(self.workdir), env=os.environ.copy())
+                except ValueError:
+                    # Fall back to shell if parsing fails
+                    proc = await asyncio.create_subprocess_shell(
+                        cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                        cwd=str(self.workdir), env=os.environ.copy())
+            else:
+                # Complex command with shell features - use shell but it's been security-analyzed
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    cwd=str(self.workdir), env=os.environ.copy())
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout or self.timeout)
             return ExecutionResult(cmd, ExecutionStatus.COMPLETED, proc.returncode,
                 stdout.decode('utf-8', errors='replace'), stderr.decode('utf-8', errors='replace'),
