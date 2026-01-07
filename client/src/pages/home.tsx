@@ -78,6 +78,7 @@ export default function Home() {
   const { 
     chats, 
     hiddenChats,
+    pinnedChats,
     activeChat, 
     setActiveChatId, 
     createChat, 
@@ -86,6 +87,8 @@ export default function Home() {
     editChatTitle,
     archiveChat,
     hideChat,
+    pinChat,
+    downloadChat,
     updateMessageAttachments,
     editMessageAndTruncate,
     truncateAndReplaceMessage,
@@ -374,6 +377,7 @@ export default function Home() {
         <Sidebar 
           chats={chats} 
           hiddenChats={hiddenChats}
+          pinnedChats={pinnedChats}
           activeChatId={activeChat?.id || null} 
           onSelectChat={handleSelectChatWithClear} 
           onNewChat={handleNewChat} 
@@ -382,6 +386,8 @@ export default function Home() {
           onEditChat={editChatTitle}
           onArchiveChat={archiveChat}
           onHideChat={hideChat}
+          onPinChat={pinChat}
+          onDownloadChat={downloadChat}
           onOpenGpts={handleOpenGpts}
           onOpenApps={handleOpenApps}
           onOpenSkills={handleOpenSkills}
@@ -415,6 +421,7 @@ export default function Home() {
             <Sidebar 
               chats={chats} 
               hiddenChats={hiddenChats}
+              pinnedChats={pinnedChats}
               activeChatId={activeChat?.id || null} 
               onSelectChat={handleSelectChatWithClear} 
               onNewChat={handleNewChat} 
@@ -423,6 +430,8 @@ export default function Home() {
               onEditChat={editChatTitle}
               onArchiveChat={archiveChat}
               onHideChat={hideChat}
+              onPinChat={pinChat}
+              onDownloadChat={downloadChat}
               onOpenGpts={handleOpenGpts}
               onOpenApps={handleOpenApps}
               onOpenSkills={handleOpenSkills}

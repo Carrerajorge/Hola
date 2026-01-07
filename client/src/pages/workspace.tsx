@@ -106,6 +106,7 @@ function WorkspaceContent() {
   const {
     chats,
     hiddenChats,
+    pinnedChats,
     activeChat,
     setActiveChatId,
     createChat,
@@ -114,6 +115,8 @@ function WorkspaceContent() {
     editChatTitle,
     archiveChat,
     hideChat,
+    pinChat,
+    downloadChat,
   } = useChats();
 
   const {
@@ -223,6 +226,7 @@ function WorkspaceContent() {
     <Sidebar
       chats={chats}
       hiddenChats={hiddenChats}
+      pinnedChats={pinnedChats}
       activeChatId={activeChat?.id || null}
       onSelectChat={handleSelectChatWithClear}
       onNewChat={handleNewChat}
@@ -239,6 +243,14 @@ function WorkspaceContent() {
       onHideChat={(id, e) => {
         e.stopPropagation();
         hideChat(id);
+      }}
+      onPinChat={(id, e) => {
+        e.stopPropagation();
+        pinChat(id);
+      }}
+      onDownloadChat={(id, e) => {
+        e.stopPropagation();
+        downloadChat(id);
       }}
       processingChatIds={processingChatIds}
       pendingResponseCounts={pendingResponseCounts}

@@ -106,6 +106,8 @@ export interface Chat {
   messages: Message[];
   archived?: boolean;
   hidden?: boolean;
+  pinned?: boolean;
+  pinnedAt?: string;
 }
 
 const STORAGE_KEY = "sira-gpt-chats";
@@ -332,6 +334,8 @@ export function useChats() {
             timestamp: new Date(chat.updatedAt).getTime(),
             archived: chat.archived === "true",
             hidden: chat.hidden === "true",
+            pinned: chat.pinned === "true",
+            pinnedAt: chat.pinnedAt,
             messages: (fullChat.messages || []).map((msg: any) => {
               // Hydrate savedRequestIds from server data
               if (msg.requestId) {
@@ -772,6 +776,56 @@ export function useChats() {
     }
   }, [chats]);
 
+  const pinChat = useCallback(async (chatId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    
+    const chat = chats.find(c => c.id === chatId);
+    const newPinned = !chat?.pinned;
+    const pinnedAt = newPinned ? new Date().toISOString() : undefined;
+    
+    setChats(prev => prev.map(c => 
+      c.id === chatId ? { ...c, pinned: newPinned, pinnedAt } : c
+    ));
+
+    try {
+      await fetch(`/api/chats/${chatId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinned: newPinned, pinnedAt })
+      });
+    } catch (error) {
+      console.error("Error pinning chat:", error);
+    }
+  }, [chats]);
+
+  const downloadChat = useCallback(async (chatId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    
+    const chat = chats.find(c => c.id === chatId);
+    if (!chat) return;
+
+    // Export chat with all messages in a readable format
+    const exportData = {
+      title: chat.title,
+      exportedAt: new Date().toISOString(),
+      messageCount: chat.messages.length,
+      messages: chat.messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp,
+        attachments: msg.attachments?.map(a => ({ name: a.name, type: a.type }))
+      }))
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${chat.title.replace(/[^a-z0-9]/gi, '_')}_chat.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [chats]);
+
   const updateMessageAttachments = useCallback((chatId: string, messageId: string, attachments: Message['attachments'], newMessage?: Message) => {
     setChats(prev => prev.map(chat => {
       if (chat.id === chatId) {
@@ -841,6 +895,12 @@ export function useChats() {
   const visibleChats = sortedChats.filter(c => !c.hidden);
   const archivedChats = sortedChats.filter(c => c.archived && !c.hidden);
   const hiddenChats = sortedChats.filter(c => c.hidden);
+  const pinnedChats = sortedChats.filter(c => c.pinned && !c.hidden).sort((a, b) => {
+    // Sort pinned chats by pinnedAt date (newest first)
+    const aDate = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
+    const bDate = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
+    return bDate - aDate;
+  });
 
   const getChatDateLabel = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -856,6 +916,7 @@ export function useChats() {
     allChats: sortedChats,
     archivedChats,
     hiddenChats,
+    pinnedChats,
     activeChatId,
     activeChat,
     isLoading,
@@ -866,6 +927,8 @@ export function useChats() {
     editChatTitle,
     archiveChat,
     hideChat,
+    pinChat,
+    downloadChat,
     updateMessageAttachments,
     editMessageAndTruncate,
     truncateAndReplaceMessage,

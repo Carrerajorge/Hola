@@ -500,6 +500,8 @@ export const chats = pgTable("chats", {
   gptId: varchar("gpt_id"),
   archived: text("archived").default("false"),
   hidden: text("hidden").default("false"),
+  pinned: text("pinned").default("false"),
+  pinnedAt: timestamp("pinned_at"),
   deletedAt: timestamp("deleted_at"),
   lastMessageAt: timestamp("last_message_at"),
   messageCount: integer("message_count").default(0),

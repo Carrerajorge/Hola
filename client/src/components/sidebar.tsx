@@ -59,6 +59,7 @@ interface SidebarProps {
   className?: string;
   chats: Chat[];
   hiddenChats?: Chat[];
+  pinnedChats?: Chat[];
   activeChatId: string | null;
   onSelectChat: (id: string) => void;
   onNewChat?: () => void;
@@ -67,6 +68,8 @@ interface SidebarProps {
   onEditChat?: (id: string, newTitle: string) => void;
   onArchiveChat?: (id: string, e: React.MouseEvent) => void;
   onHideChat?: (id: string, e: React.MouseEvent) => void;
+  onPinChat?: (id: string, e: React.MouseEvent) => void;
+  onDownloadChat?: (id: string, e: React.MouseEvent) => void;
   onOpenGpts?: () => void;
   onOpenApps?: () => void;
   onOpenSkills?: () => void;
@@ -133,6 +136,7 @@ export function Sidebar({
   className, 
   chats, 
   hiddenChats = [],
+  pinnedChats = [],
   activeChatId, 
   onSelectChat, 
   onNewChat, 
@@ -141,6 +145,8 @@ export function Sidebar({
   onEditChat,
   onArchiveChat,
   onHideChat,
+  onPinChat,
+  onDownloadChat,
   onOpenGpts,
   onOpenApps,
   onOpenSkills,
@@ -301,15 +307,11 @@ export function Sidebar({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
               <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Toggle pin chat (placeholder - needs implementation)
-                  console.log("Pin chat:", chat.id);
-                }}
+                onClick={(e) => onPinChat?.(chat.id, e as unknown as React.MouseEvent)}
                 data-testid={`menu-pin-${chat.id}`}
               >
                 <Pin className="h-4 w-4 mr-2" />
-                Fijar chat
+                {chat.pinned ? "Desfijar" : "Fijar chat"}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => handleStartEdit(chat, e as unknown as React.MouseEvent)}
@@ -366,18 +368,7 @@ export function Sidebar({
                 </DropdownMenuPortal>
               </DropdownMenuSub>
               <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Download chat as JSON
-                  const chatData = JSON.stringify(chat, null, 2);
-                  const blob = new Blob([chatData], { type: 'application/json' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `${chat.title.replace(/[^a-z0-9]/gi, '_')}.json`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                }}
+                onClick={(e) => onDownloadChat?.(chat.id, e as unknown as React.MouseEvent)}
                 data-testid={`menu-download-${chat.id}`}
               >
                 <Download className="h-4 w-4 mr-2" />
@@ -637,6 +628,19 @@ export function Sidebar({
                   </Button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Pinned Chats Section */}
+          {pinnedChats.length > 0 && (
+            <div className="flex flex-col gap-0.5">
+              <div className="px-2 py-1.5">
+                <h3 className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                  <Pin className="h-3 w-3" />
+                  Fijados
+                </h3>
+              </div>
+              {pinnedChats.map((chat) => renderChatItem(chat))}
             </div>
           )}
 
