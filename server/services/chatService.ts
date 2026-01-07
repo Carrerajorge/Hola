@@ -476,7 +476,12 @@ export async function handleChatRequest(
     // This prevents context contamination from previous sessions/templates
     const hasActiveDocuments = persistentDocumentContext.length > 0 || attachmentContext.length > 0;
     
-    if (lastUserMessage) {
+    console.log(`[IntentGuard] PRE-CHECK: persistentDocLen=${persistentDocumentContext.length}, attachmentLen=${attachmentContext.length}, hasActiveDocuments=${hasActiveDocuments}`);
+    
+    // AGGRESSIVE DOCUMENT PRIORITY: If there's any document content, handle it FIRST before any search logic
+    if (hasActiveDocuments && lastUserMessage) {
+      console.log(`[IntentGuard] DOCUMENT DETECTED - Entering document analysis flow`);
+      
       const { detectIntent, validateResponse, buildDocumentPrompt, createAuditLog } = await import("./intentGuard");
       
       const intentContract = detectIntent(

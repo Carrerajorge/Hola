@@ -105,29 +105,27 @@ const WEB_SEARCH_PATTERNS = [
   /news\s+(about|on|from)/i,
 ];
 
+const COMMON_NEWS_CONTAMINATION_PATTERNS = [
+  /aqu[ií]\s+tienes?\s+\d+\s+noticias/i,
+  /\d+\s+noticias\s+(de|sobre)/i,
+  /asistente\s+de\s+noticias/i,
+  /como\s+asistente\s+de\s+noticias/i,
+  /fuentes?\s+encontradas?/i,
+  /resultados?\s+de\s+b[uú]squeda/i,
+  /seg[uú]n\s+(google|bing|duckduckgo)/i,
+  /en\s+internet\s+encontr[eé]/i,
+  /he\s+procesado\s+la\s+[uú]nica\s+fuente/i,
+  /basándome\s+en\s+las\s+fuentes/i,
+  /\[Fuente:\s*\d+\]/i,
+];
+
 const PROHIBITED_PATTERNS_BY_TASK: Record<TaskType, RegExp[]> = {
-  document_overview: [
-    /aqu[ií]\s+tienes?\s+\d+\s+noticias/i,
-    /\d+\s+noticias\s+(de|sobre)/i,
-    /fuentes?\s+encontradas?/i,
-    /resultados?\s+de\s+b[uú]squeda/i,
-    /seg[uú]n\s+(google|bing|duckduckgo)/i,
-    /en\s+internet\s+encontr[eé]/i,
-  ],
-  document_summary: [
-    /aqu[ií]\s+tienes?\s+\d+\s+noticias/i,
-    /\d+\s+noticias\s+(de|sobre)/i,
-    /resultados?\s+de\s+b[uú]squeda/i,
-  ],
-  document_analysis: [
-    /aqu[ií]\s+tienes?\s+\d+\s+noticias/i,
-    /\d+\s+noticias\s+(de|sobre)/i,
-  ],
-  document_extraction: [
-    /aqu[ií]\s+tienes?\s+\d+\s+noticias/i,
-  ],
+  document_overview: [...COMMON_NEWS_CONTAMINATION_PATTERNS],
+  document_summary: [...COMMON_NEWS_CONTAMINATION_PATTERNS],
+  document_analysis: [...COMMON_NEWS_CONTAMINATION_PATTERNS],
+  document_extraction: [...COMMON_NEWS_CONTAMINATION_PATTERNS],
   document_qa: [
-    /aqu[ií]\s+tienes?\s+\d+\s+noticias/i,
+    ...COMMON_NEWS_CONTAMINATION_PATTERNS,
     /no\s+tengo\s+(acceso|el)\s+documento/i,
     /sube\s+(el|un)\s+documento/i,
     /no\s+has\s+subido/i,
@@ -147,12 +145,23 @@ export function detectIntent(
   const message = userMessage.toLowerCase().trim();
   const documentPresent = hasDocument || hasAttachment;
   
+  console.log(`[IntentGuard.detectIntent] message="${message.slice(0, 50)}...", hasDocument=${hasDocument}, hasAttachment=${hasAttachment}, documentPresent=${documentPresent}`);
+  
   let taskType: TaskType = "unknown";
   let outputFormat: OutputFormat = "free_form";
   let userGoal = "";
   
   if (documentPresent) {
-    if (DOCUMENT_OVERVIEW_PATTERNS.some(p => p.test(message))) {
+    // AGGRESSIVE DOCUMENT DETECTION: When document is present, 
+    // check if user explicitly wants web search, otherwise default to document analysis
+    const isExplicitWebSearch = WEB_SEARCH_PATTERNS.some(p => p.test(message));
+    
+    if (isExplicitWebSearch) {
+      console.log(`[IntentGuard.detectIntent] User explicitly requested web search despite having document`);
+      taskType = "web_search";
+      outputFormat = "search_results";
+      userGoal = "Search the web for information";
+    } else if (DOCUMENT_OVERVIEW_PATTERNS.some(p => p.test(message))) {
       taskType = "document_overview";
       outputFormat = "overview";
       userGoal = "Understand what the document is about";
