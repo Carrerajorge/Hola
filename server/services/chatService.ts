@@ -556,8 +556,7 @@ ${minimalContext}`;
         
         // Use faster model with aggressive timeout
         const llmResponse = await Promise.race([
-          llmGateway.chat({
-            messages: llmMessages,
+          llmGateway.chat(llmMessages, {
             temperature: 0.5,
             maxTokens: 800,
             model: "gemini-2.5-flash"
