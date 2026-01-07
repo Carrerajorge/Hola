@@ -38,6 +38,9 @@ export interface WebSource {
   favicon?: string;
   snippet?: string;
   date?: string;
+  imageUrl?: string;
+  canonicalUrl?: string;
+  siteName?: string;
 }
 
 export interface AgentRunData {

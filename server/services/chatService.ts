@@ -240,6 +240,9 @@ interface WebSource {
   favicon?: string;
   snippet?: string;
   date?: string;
+  imageUrl?: string;
+  canonicalUrl?: string;
+  siteName?: string;
 }
 
 interface ChatResponse {
@@ -449,7 +452,7 @@ export async function handleChatRequest(
       console.log("[ChatService] IMMEDIATE SEARCH EXECUTION: Bypassing all pipelines");
       
       // Helper to extract domain and favicon
-      const extractWebSourceImmediate = (url: string, title: string, snippet?: string): WebSource => {
+      const extractWebSourceImmediate = (url: string, title: string, snippet?: string, imageUrl?: string, siteName?: string, canonicalUrl?: string): WebSource => {
         let domain = "";
         try {
           const urlObj = new URL(url);
@@ -462,7 +465,10 @@ export async function handleChatRequest(
           title,
           domain,
           favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
-          snippet: snippet?.slice(0, 200)
+          snippet: snippet?.slice(0, 200),
+          imageUrl,
+          siteName: siteName || domain,
+          canonicalUrl: canonicalUrl || url
         };
       };
       
@@ -480,7 +486,7 @@ export async function handleChatRequest(
                 `[${i + 1}] ${r.authors ? `Autores: ${r.authors}\n` : ""}${r.year ? `Año: ${r.year}\n` : ""}Título: ${r.title}\nURL: ${r.url}\n${r.snippet ? `Resumen: ${r.snippet}` : ""}`
               ).join("\n\n");
             webSources = scholarResults.filter(r => r.url).map(r => 
-              extractWebSourceImmediate(r.url, r.title, r.snippet)
+              extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
             );
           }
         }
@@ -496,7 +502,7 @@ export async function handleChatRequest(
           webSources = [
             ...webSources,
             ...searchResults.results.slice(0, 10).map(r => 
-              extractWebSourceImmediate(r.url, r.title, r.snippet)
+              extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
             )
           ];
         }
@@ -504,11 +510,24 @@ export async function handleChatRequest(
         // Build context for LLM
         const searchContext = webSearchInfo || "No se encontraron resultados relevantes.";
         
+        // Build sources reference for the LLM
+        const sourcesReference = webSources.length > 0 
+          ? "\n\nFUENTES DISPONIBLES:\n" + webSources.map((s, i) => 
+              `[${i + 1}] ${s.siteName || s.domain}: ${s.url}`
+            ).join("\n")
+          : "";
+        
         // Call LLM with search results
-        const systemPrompt = `Eres un asistente útil. Responde la pregunta del usuario basándote en la información de búsqueda proporcionada. Cita las fuentes cuando sea relevante.
+        const systemPrompt = `Eres un asistente útil. Responde la pregunta del usuario basándote en la información de búsqueda proporcionada.
+
+INSTRUCCIONES IMPORTANTES PARA NOTICIAS:
+- Cuando presentes noticias o información de múltiples fuentes, incluye al final de CADA noticia/punto la fuente en formato: "**Fuente:** [Nombre](URL)"
+- Usa el nombre del sitio y la URL completa de la fuente correspondiente
+- Si una noticia combina información de varias fuentes, lista todas las fuentes relevantes
+- Ejemplo: "1. **Título de la noticia:** Descripción... **Fuente:** [RPP Noticias](https://rpp.pe/articulo)"
 
 INFORMACIÓN DE BÚSQUEDA:
-${searchContext}`;
+${searchContext}${sourcesReference}`;
 
         const llmMessages = [
           { role: "system" as const, content: systemPrompt },
@@ -692,7 +711,7 @@ ${searchContext}`;
   let webSources: WebSource[] = [];
 
   // Helper function to extract domain and create favicon URL
-  const extractWebSource = (url: string, title: string, snippet?: string, year?: string): WebSource => {
+  const extractWebSource = (url: string, title: string, snippet?: string, year?: string, imageUrl?: string, siteName?: string, canonicalUrl?: string): WebSource => {
     let domain = "";
     try {
       const urlObj = new URL(url);
@@ -706,7 +725,10 @@ ${searchContext}`;
       domain,
       favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
       snippet: snippet?.slice(0, 200),
-      date: year
+      date: year,
+      imageUrl,
+      siteName: siteName || domain,
+      canonicalUrl: canonicalUrl || url
     };
   };
 
@@ -747,7 +769,7 @@ ${searchContext}`;
         // Capture web sources for citations
         webSources = scholarResults
           .filter(r => r.url)
-          .map(r => extractWebSource(r.url, r.title, r.snippet, r.year));
+          .map(r => extractWebSource(r.url, r.title, r.snippet, r.year, r.imageUrl, r.siteName, r.canonicalUrl));
       }
     } catch (error) {
       console.error("Academic search error:", error);
@@ -759,7 +781,7 @@ ${searchContext}`;
       
       // Include ALL sources found for citations (not just those with extracted content)
       if (searchResults.results.length > 0) {
-        webSources = searchResults.results.map(r => extractWebSource(r.url, r.title, r.snippet));
+        webSources = searchResults.results.map(r => extractWebSource(r.url, r.title, r.snippet, undefined, r.imageUrl, r.siteName, r.canonicalUrl));
       }
       
       if (searchResults.contents.length > 0) {

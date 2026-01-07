@@ -28,9 +28,12 @@ const getGradientForDomain = (domain: string): string => {
 };
 
 const NewsCard = memo(function NewsCard({ source, index }: { source: WebSource; index: number }) {
+  const [imageError, setImageError] = useState(false);
+  const hasImage = source.imageUrl && !imageError;
+
   return (
     <a
-      href={source.url}
+      href={source.canonicalUrl || source.url}
       target="_blank"
       rel="noopener noreferrer"
       className="flex-shrink-0 w-[200px] group cursor-pointer"
@@ -38,15 +41,28 @@ const NewsCard = memo(function NewsCard({ source, index }: { source: WebSource; 
     >
       <div className="rounded-xl overflow-hidden border border-border bg-card hover:border-primary/50 transition-all duration-200 hover:shadow-lg">
         <div className={cn(
-          "h-28 bg-gradient-to-br flex items-center justify-center relative overflow-hidden",
-          getGradientForDomain(source.domain)
+          "h-28 flex items-center justify-center relative overflow-hidden",
+          !hasImage && "bg-gradient-to-br",
+          !hasImage && getGradientForDomain(source.domain)
         )}>
-          <div className="absolute inset-0 bg-black/10" />
-          <span className="text-white/80 text-3xl font-bold uppercase">
-            {source.domain.slice(0, 2)}
-          </span>
+          {hasImage ? (
+            <img
+              src={source.imageUrl}
+              alt={source.title || source.domain}
+              className="w-full h-full object-cover"
+              onError={() => setImageError(true)}
+              loading="lazy"
+            />
+          ) : (
+            <>
+              <div className="absolute inset-0 bg-black/10" />
+              <span className="text-white/80 text-3xl font-bold uppercase">
+                {source.domain.slice(0, 2)}
+              </span>
+            </>
+          )}
           <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <ExternalLink className="w-4 h-4 text-white" />
+            <ExternalLink className="w-4 h-4 text-white drop-shadow-md" />
           </div>
         </div>
         
@@ -66,7 +82,7 @@ const NewsCard = memo(function NewsCard({ source, index }: { source: WebSource; 
               <Globe className="w-4 h-4 text-muted-foreground" />
             )}
             <span className="text-xs text-muted-foreground truncate">
-              {source.domain}
+              {source.siteName || source.domain}
             </span>
           </div>
           
