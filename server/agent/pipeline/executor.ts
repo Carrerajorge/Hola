@@ -274,11 +274,21 @@ export class PipelineExecutor {
     
     for (const [key, value] of Object.entries(params)) {
       if (typeof value === "string") {
-        resolved[key] = this.interpolateString(value, context);
+        if (value.startsWith("dynamic_from_")) {
+          resolved[key] = this.resolveDynamicParam(value, context);
+        } else {
+          resolved[key] = this.interpolateString(value, context);
+        }
       } else if (Array.isArray(value)) {
-        resolved[key] = value.map(v => 
-          typeof v === "string" ? this.interpolateString(v, context) : v
-        );
+        resolved[key] = value.map(v => {
+          if (typeof v === "string") {
+            if (v.startsWith("dynamic_from_")) {
+              return this.resolveDynamicParam(v, context);
+            }
+            return this.interpolateString(v, context);
+          }
+          return v;
+        });
       } else if (typeof value === "object" && value !== null) {
         resolved[key] = this.resolveParams(value, context);
       } else {
@@ -287,6 +297,89 @@ export class PipelineExecutor {
     }
     
     return resolved;
+  }
+
+  private resolveDynamicParam(placeholder: string, context: ExecutionContext): string {
+    if (placeholder === "dynamic_from_search_results" || placeholder === "dynamic_from_search") {
+      const searchResult = context.previousResults
+        .filter(r => r.toolId === "search_web" && r.status === "completed")
+        .pop();
+      
+      if (searchResult?.output?.data?.results?.[0]?.url) {
+        return searchResult.output.data.results[0].url;
+      }
+      if (searchResult?.output?.data?.results?.[0]?.link) {
+        return searchResult.output.data.results[0].link;
+      }
+    }
+    
+    if (placeholder === "dynamic_from_response" || placeholder === "dynamic_from_text") {
+      const lastResult = context.previousResults
+        .filter(r => r.status === "completed")
+        .pop();
+      
+      if (lastResult?.output?.data?.response) {
+        return lastResult.output.data.response;
+      }
+      if (lastResult?.output?.data?.textContent) {
+        return lastResult.output.data.textContent;
+      }
+      if (lastResult?.output?.data?.content) {
+        return lastResult.output.data.content;
+      }
+    }
+    
+    if (placeholder === "dynamic_from_url" || placeholder === "dynamic_from_navigate") {
+      const navResult = context.previousResults
+        .filter(r => r.toolId === "web_navigate" && r.status === "completed")
+        .pop();
+      
+      if (navResult?.output?.data?.url) {
+        return navResult.output.data.url;
+      }
+    }
+    
+    if (placeholder === "dynamic_from_content" || placeholder === "dynamic_from_page") {
+      const navResult = context.previousResults
+        .filter(r => r.toolId === "web_navigate" && r.status === "completed")
+        .pop();
+      
+      if (navResult?.output?.data?.textContent) {
+        return navResult.output.data.textContent;
+      }
+    }
+    
+    if (placeholder.startsWith("dynamic_from_step_")) {
+      const stepMatch = placeholder.match(/dynamic_from_step_(\d+)_(.+)/);
+      if (stepMatch) {
+        const stepIndex = parseInt(stepMatch[1], 10);
+        const field = stepMatch[2];
+        const result = context.previousResults[stepIndex];
+        if (result?.status === "completed" && result?.output?.data) {
+          const value = this.getNestedValue(result.output.data, field);
+          if (value !== undefined) {
+            return typeof value === "string" ? value : JSON.stringify(value);
+          }
+        }
+      }
+    }
+    
+    return placeholder;
+  }
+
+  private getNestedValue(obj: any, path: string): any {
+    const parts = path.split(".");
+    let current = obj;
+    for (const part of parts) {
+      if (current === null || current === undefined) return undefined;
+      const arrayMatch = part.match(/^(.+)\[(\d+)\]$/);
+      if (arrayMatch) {
+        current = current[arrayMatch[1]]?.[parseInt(arrayMatch[2], 10)];
+      } else {
+        current = current[part];
+      }
+    }
+    return current;
   }
 
   private interpolateString(str: string, context: ExecutionContext): string {
