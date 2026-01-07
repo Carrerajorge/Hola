@@ -46,7 +46,7 @@ INSTRUCCIONES PARA REPLIT:
 """
 
 from __future__ import annotations
-import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess
+import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess, shlex
 import mimetypes, time, logging, uuid, traceback, base64, io, threading
 import pickle, gzip, sqlite3, queue as queue_module, weakref, functools
 from pathlib import Path
@@ -1173,8 +1173,11 @@ class CommandExecutor:
             return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message="Bloqueado por seguridad")
         
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            # Use shlex.split to safely parse command into arguments and use exec instead of shell
+            # This prevents command injection attacks while maintaining functionality
+            cmd_args = shlex.split(cmd)
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.workdir), env=os.environ.copy())
             
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
@@ -1197,7 +1200,8 @@ class CommandExecutor:
             async with aiofiles.open(path, 'w') as f:
                 await f.write(code)
             os.chmod(path, 0o755)
-            return await self.execute(f"{interpreter} {path}", timeout)
+            # Use shlex.quote to safely escape the path argument
+            return await self.execute(f"{interpreter} {shlex.quote(str(path))}", timeout)
         finally:
             try: path.unlink()
             except: pass
