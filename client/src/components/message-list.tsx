@@ -82,6 +82,7 @@ import { normalizeAgentEvent, hasPayloadDetails, type MappedAgentEvent } from "@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { AgentStepsDisplay, type AgentArtifact } from "@/components/agent-steps-display";
 import { ArtifactViewer, type Artifact } from "@/components/artifact-viewer";
+import { NewsCards, SourcesList } from "@/components/news-cards";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -1714,6 +1715,10 @@ const AssistantMessage = memo(function AssistantMessage({
             </div>
           ))}
         </div>
+      )}
+
+      {message.webSources && message.webSources.length > 0 && !message.isThinking && (
+        <NewsCards sources={message.webSources} maxDisplay={5} />
       )}
 
       {message.content && !message.isThinking && !message.agentRun && (
