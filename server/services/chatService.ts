@@ -611,24 +611,24 @@ export async function handleChatRequest(
     }
   } else if (lastUserMessage && needsWebSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
     try {
-      const searchResults = await searchWeb(lastUserMessage.content, 5);
+      // Request more sources (15) for richer citations
+      const searchResults = await searchWeb(lastUserMessage.content, 15);
+      
+      // Include ALL sources found for citations (not just those with extracted content)
+      if (searchResults.results.length > 0) {
+        webSources = searchResults.results.map(r => extractWebSource(r.url, r.title, r.snippet));
+      }
       
       if (searchResults.contents.length > 0) {
         webSearchInfo = "\n\n**Información de Internet (actualizada):**\n" +
           searchResults.contents.map((content, i) => 
             `[${i + 1}] ${content.title} (${content.url}):\n${content.content}`
           ).join("\n\n");
-        
-        // Capture web sources for citations
-        webSources = searchResults.contents.map(c => extractWebSource(c.url, c.title, c.content?.slice(0, 200)));
       } else if (searchResults.results.length > 0) {
         webSearchInfo = "\n\n**Resultados de búsqueda web:**\n" +
           searchResults.results.map((r, i) => 
             `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
           ).join("\n");
-        
-        // Capture web sources for citations
-        webSources = searchResults.results.map(r => extractWebSource(r.url, r.title, r.snippet));
       }
     } catch (error) {
       console.error("Web search error:", error);

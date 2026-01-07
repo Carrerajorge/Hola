@@ -127,8 +127,20 @@ async function fetchPageContent(url: string): Promise<{ title: string; text: str
 
 export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RESULTS): Promise<WebSearchResponse> {
   const results: SearchResult[] = [];
+  const seenDomains = new Set<string>();
+  
+  // Helper to extract domain from URL
+  const extractDomain = (url: string): string => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return url.split("/")[2]?.replace(/^www\./, "") || "";
+    }
+  };
   
   try {
+    // Request more results than needed to ensure diversity after deduplication
+    const requestCount = Math.min(maxResults * 2, 30);
     const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     const response = await fetch(searchUrl, { headers: getHeaders() });
     
@@ -140,7 +152,9 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
     const dom = new JSDOM(html);
     const doc = dom.window.document;
     
-    for (const result of Array.from(doc.querySelectorAll(".result")).slice(0, maxResults)) {
+    for (const result of Array.from(doc.querySelectorAll(".result")).slice(0, requestCount)) {
+      if (results.length >= maxResults) break;
+      
       const titleEl = result.querySelector(".result__title a");
       const snippetEl = result.querySelector(".result__snippet");
       
@@ -154,6 +168,12 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
         }
         
         if (url && !url.includes("duckduckgo.com")) {
+          const domain = extractDomain(url);
+          
+          // Skip duplicate domains to ensure source diversity
+          if (seenDomains.has(domain)) continue;
+          seenDomains.add(domain);
+          
           results.push({
             title: titleEl.textContent?.trim() || "",
             url,
@@ -168,13 +188,14 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
   
   const contents: { url: string; title: string; content: string }[] = [];
   
+  // Fetch content from more sources in parallel for richer citations
   const fetchPromises = results.slice(0, LIMITS.MAX_CONTENT_FETCH).map(async (result) => {
     const content = await fetchPageContent(result.url);
     if (content) {
       return {
         url: result.url,
         title: content.title || result.title,
-        content: content.text.slice(0, TIMEOUTS.MAX_CONTENT_LENGTH)
+        content: content.text.slice(0, TIMEOUTS.MAX_CONTENT_LENGTH * 2) // Double content length for better context
       };
     }
     return null;
@@ -182,6 +203,8 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
   
   const fetchedContents = await Promise.all(fetchPromises);
   contents.push(...fetchedContents.filter((c): c is NonNullable<typeof c> => c !== null));
+  
+  console.log(`[WebSearch] Query: "${query}" - Found ${results.length} unique sources, fetched ${contents.length} pages`);
   
   return { query, results, contents };
 }
