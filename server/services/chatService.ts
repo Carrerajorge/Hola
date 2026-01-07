@@ -574,9 +574,24 @@ export async function handleChatRequest(
     };
   };
 
-  // Web search is gated by the webSearchAuto feature flag
-  // If webSearchAuto is false, skip automatic web search detection
-  if (featureFlags.webSearchAuto && lastUserMessage && needsAcademicSearch(lastUserMessage.content)) {
+  // Simple search patterns that should ALWAYS trigger web search regardless of feature flag
+  const SIMPLE_SEARCH_PATTERNS = [
+    /dame\s+\d*\s*noticias/i,
+    /busca(me)?\s+(noticias|información|info)/i,
+    /noticias\s+(de|sobre|del)/i,
+    /últimas\s+noticias/i,
+    /qué\s+(está\s+pasando|pasa|hay\s+de\s+nuevo)/i,
+    /what('s|\s+is)\s+(happening|new|going\s+on)/i,
+    /news\s+(about|from|on)/i,
+    /precio\s+(de|del|actual)/i,
+    /clima\s+(en|de)/i,
+    /weather\s+(in|for)/i,
+  ];
+  const isSimpleSearchQuery = (text: string) => SIMPLE_SEARCH_PATTERNS.some(p => p.test(text));
+  const forceWebSearch = lastUserMessage && isSimpleSearchQuery(lastUserMessage.content);
+
+  // Web search: either forced by simple query OR gated by webSearchAuto feature flag
+  if (lastUserMessage && needsAcademicSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
     try {
       const scholarResults = await searchScholar(lastUserMessage.content, 5);
       
@@ -594,7 +609,7 @@ export async function handleChatRequest(
     } catch (error) {
       console.error("Academic search error:", error);
     }
-  } else if (featureFlags.webSearchAuto && lastUserMessage && needsWebSearch(lastUserMessage.content)) {
+  } else if (lastUserMessage && needsWebSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
     try {
       const searchResults = await searchWeb(lastUserMessage.content, 5);
       
