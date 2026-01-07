@@ -156,6 +156,7 @@ async function runPythonCode(code: string): Promise<ExecutionResult> {
         MPLBACKEND: "Agg",
       },
       timeout: EXECUTION_TIMEOUT_MS,
+      shell: false, // Explicit: prevent command injection
     });
 
     const timeoutHandle = setTimeout(() => {

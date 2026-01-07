@@ -210,6 +210,7 @@ async function executePythonProcess(
         PYTHONHASHSEED: "0",
       },
       stdio: ["pipe", "pipe", "pipe"],
+      shell: false, // Explicit: prevent command injection
     });
 
     const timeout = setTimeout(() => {
