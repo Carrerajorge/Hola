@@ -25,6 +25,9 @@ import inspect
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _install(pkg):
+    # Validate package name to ensure it only contains safe characters
+    if not re.match(r'^[a-zA-Z0-9._-]+$', pkg):
+        raise ValueError(f"Invalid package name: {pkg}")
     subprocess.run([sys.executable, "-m", "pip", "install", pkg, "-q"], capture_output=True)
 
 PKGS = [("aiofiles","aiofiles"),("rich","rich"),("httpx","httpx"),("beautifulsoup4","bs4"),
