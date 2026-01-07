@@ -534,35 +534,49 @@ export async function handleChatRequest(
           }
         }
         
-        // ULTRA-FAST: Minimal context for rapid LLM response
+        // Build rich context for LLM with full snippets
         const topSources = webSources.slice(0, 5);
-        const minimalContext = topSources.map((s, i) => 
-          `[${i + 1}] ${s.title} - ${s.snippet?.slice(0, 100) || ""}`
-        ).join("\n");
+        console.log(`[ChatService] Building response with ${topSources.length} sources`);
         
-        // Compact system prompt for speed
-        const systemPrompt = `Presenta las noticias de forma concisa. Al final de cada noticia agrega [${1}], [${2}], etc. según la fuente.
+        const richContext = topSources.map((s, i) => 
+          `[${i + 1}] ${s.title}\nFuente: ${s.siteName || s.domain}\nURL: ${s.url}\nResumen: ${s.snippet || "Sin resumen disponible"}`
+        ).join("\n\n");
+        
+        // Comprehensive system prompt for complete news response
+        const systemPrompt = `Eres un asistente de noticias. DEBES presentar EXACTAMENTE 5 noticias basándote en las fuentes proporcionadas.
 
-FUENTES:
-${topSources.map((s, i) => `[${i + 1}] ${s.siteName || s.domain}`).join('\n')}
+REGLAS OBLIGATORIAS:
+1. Presenta EXACTAMENTE 5 noticias numeradas (1. 2. 3. 4. 5.)
+2. Cada noticia debe tener:
+   - Título en negrita
+   - Contexto de 2-4 líneas explicando los puntos clave
+   - Al final: [Fuente: N] donde N es el número de la fuente
+3. Si hay menos de 5 fuentes, usa las disponibles y menciona que solo hay N noticias disponibles.
 
-DATOS:
-${minimalContext}`;
+FUENTES DISPONIBLES:
+${richContext}
+
+FORMATO DE RESPUESTA:
+1. **Título de la noticia** — Contexto explicativo de 2-4 líneas con los puntos clave de la noticia. [Fuente: 1]
+
+2. **Título de la noticia** — Contexto explicativo de 2-4 líneas con los puntos clave de la noticia. [Fuente: 2]
+
+(continuar hasta 5 noticias)`;
 
         const llmMessages = [
           { role: "system" as const, content: systemPrompt },
           { role: "user" as const, content: lastUserMessage.content }
         ];
         
-        // Use faster model with aggressive timeout
+        // Use faster model with enough tokens for complete response
         const llmResponse = await Promise.race([
           llmGateway.chat(llmMessages, {
-            temperature: 0.5,
-            maxTokens: 800,
+            temperature: 0.7,
+            maxTokens: 1500,
             model: "gemini-2.5-flash"
           }),
           new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error("LLM timeout")), 8000)
+            setTimeout(() => reject(new Error("LLM timeout")), 12000)
           )
         ]);
         

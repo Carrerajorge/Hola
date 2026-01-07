@@ -26,15 +26,15 @@ export const HTTP_HEADERS = {
 } as const;
 
 export const TIMEOUTS = {
-  PAGE_FETCH: 1500,  // Ultra-aggressive: 1.5s max per page fetch
+  PAGE_FETCH: 2000,  // 2s max per page fetch
   SCREENSHOT_INTERVAL: 1500,
-  MAX_CONTENT_LENGTH: 500,  // Minimal content for fastest processing
-  SEARCH_LLM_TIMEOUT: 8000  // 8s max for search LLM response
+  MAX_CONTENT_LENGTH: 800,  // Enough content for meaningful context
+  SEARCH_LLM_TIMEOUT: 12000  // 12s max for search LLM response
 } as const;
 
 export const LIMITS = {
-  MAX_SEARCH_RESULTS: 8,  // Minimal for fast response
-  MAX_CONTENT_FETCH: 3,  // Only fetch 3 pages max
+  MAX_SEARCH_RESULTS: 10,  // Enough results to get 5 good ones
+  MAX_CONTENT_FETCH: 5,  // Fetch 5 pages for metadata
   EMBEDDING_BATCH_SIZE: 20,
   MAX_EMBEDDING_INPUT: 8000,
   RAG_SIMILAR_CHUNKS: 3,
