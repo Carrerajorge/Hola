@@ -79,7 +79,7 @@ export class ToolRouter {
         (entityScores[toolName] || 0) * entityWeight +
         (keywordScores[toolName] || 0) * keywordWeight;
 
-      if (combinedScore > 0.1) {
+      if (combinedScore >= this.similarityThreshold) {
         candidates.set(toolName, {
           toolName,
           relevanceScore: combinedScore,
