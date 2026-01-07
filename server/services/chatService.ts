@@ -520,11 +520,13 @@ export async function handleChatRequest(
         // Call LLM with search results
         const systemPrompt = `Eres un asistente útil. Responde la pregunta del usuario basándote en la información de búsqueda proporcionada.
 
-INSTRUCCIONES IMPORTANTES PARA NOTICIAS:
-- Cuando presentes noticias o información de múltiples fuentes, incluye al final de CADA noticia/punto la fuente en formato: "**Fuente:** [Nombre](URL)"
-- Usa el nombre del sitio y la URL completa de la fuente correspondiente
-- Si una noticia combina información de varias fuentes, lista todas las fuentes relevantes
-- Ejemplo: "1. **Título de la noticia:** Descripción... **Fuente:** [RPP Noticias](https://rpp.pe/articulo)"
+INSTRUCCIONES CRÍTICAS PARA CITAR FUENTES:
+- AL FINAL de CADA noticia, dato o información que presentes, DEBES incluir la fuente usando EXACTAMENTE este formato: [[FUENTE:NombreDelSitio|URL]]
+- El formato es obligatorio: doble corchete, FUENTE:, nombre del sitio, barra vertical |, URL completa, doble corchete de cierre
+- NO uses otro formato. NO uses markdown de links. USA SOLO el formato [[FUENTE:Nombre|URL]]
+- Cada noticia DEBE terminar con su fuente correspondiente
+- Ejemplo correcto: "1. **Apple lanza nuevo iPhone** — La compañía presentó hoy su nuevo dispositivo con características innovadoras. [[FUENTE:TechCrunch|https://techcrunch.com/articulo]]"
+- Ejemplo correcto: "2. **Tesla aumenta producción** — La empresa incrementó un 20% su capacidad. [[FUENTE:Reuters|https://reuters.com/noticia]]"
 
 INFORMACIÓN DE BÚSQUEDA:
 ${searchContext}${sourcesReference}`;

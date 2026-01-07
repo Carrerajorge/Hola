@@ -7,11 +7,85 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
-import { Check, Copy, Loader2, Download, Maximize2, Minimize2, FileText, FileSpreadsheet, Presentation, ChevronRight, AlertTriangle, RefreshCw } from "lucide-react";
+import { Check, Copy, Loader2, Download, Maximize2, Minimize2, FileText, FileSpreadsheet, Presentation, ChevronRight, AlertTriangle, RefreshCw, Globe, ExternalLink } from "lucide-react";
 import { preprocessMathInMarkdown } from "@/lib/mathParser";
 import { CodeBlockShell } from "./code-block-shell";
 import { isLanguageRunnable } from "@/lib/sandboxApi";
 import { useSandboxExecution } from "@/hooks/useSandboxExecution";
+
+const InlineSourceBadge = memo(function InlineSourceBadge({ name, url }: { name: string; url: string }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  
+  let domain = "";
+  try {
+    const urlObj = new URL(url);
+    domain = urlObj.hostname.replace(/^www\./, "");
+  } catch {
+    domain = name.toLowerCase().replace(/\s+/g, "");
+  }
+  
+  const faviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
+  
+  return (
+    <span className="relative inline-block align-baseline">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(
+          "inline-flex items-center gap-1 px-2 py-0.5 ml-1",
+          "text-xs font-medium rounded-full",
+          "bg-muted/80 hover:bg-accent",
+          "border border-border/50 hover:border-primary/40",
+          "text-muted-foreground hover:text-foreground",
+          "transition-all duration-200 cursor-pointer",
+          "no-underline hover:no-underline"
+        )}
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        data-testid={`source-badge-${name.toLowerCase().replace(/\s+/g, '-')}`}
+      >
+        {!imageError ? (
+          <img
+            src={faviconUrl}
+            alt=""
+            className="w-3 h-3 rounded-full object-contain"
+            onError={() => setImageError(true)}
+          />
+        ) : (
+          <Globe className="w-3 h-3" />
+        )}
+        <span className="max-w-[100px] truncate">{name}</span>
+      </a>
+      
+      {showTooltip && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
+          <div className="bg-popover border border-border rounded-lg shadow-lg p-2 min-w-[160px] max-w-[240px]">
+            <div className="flex items-center gap-2">
+              {!imageError ? (
+                <img src={faviconUrl} alt="" className="w-4 h-4 rounded-full object-contain" />
+              ) : (
+                <Globe className="w-4 h-4 text-muted-foreground" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-xs text-foreground truncate">{name}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{domain}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+});
+
+function preprocessSourceBadges(content: string): string {
+  return content.replace(
+    /\[\[FUENTE:([^\|]+)\|([^\]]+)\]\]/g,
+    (_, name, url) => `[__SOURCE__${name.trim()}__SOURCE__](${url.trim()})`
+  );
+}
 
 const purifyConfig: DOMPurify.Config = {
   ALLOWED_TAGS: [
@@ -740,7 +814,9 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 }: MarkdownRendererProps) {
   const processedContent = useMemo(() => {
     if (!content) return "";
-    const sanitized = sanitize ? sanitizeContent(content) : content;
+    let processed = content;
+    processed = preprocessSourceBadges(processed);
+    const sanitized = sanitize ? sanitizeContent(processed) : processed;
     return enableMath ? preprocessMathInMarkdown(sanitized) : sanitized;
   }, [content, enableMath, sanitize]);
 
@@ -778,17 +854,27 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     code: CodeComponent,
     img: (props: any) => <LazyImage {...props} maxHeight={imageMaxHeight} />,
     p: ({ children }: { children?: React.ReactNode }) => <p className="mb-3 leading-relaxed">{children}</p>,
-    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-primary hover:underline"
-        data-testid="link-markdown"
-      >
-        {children}
-      </a>
-    ),
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+      const childText = typeof children === 'string' ? children : 
+        (Array.isArray(children) && typeof children[0] === 'string' ? children[0] : '');
+      
+      const sourceMatch = childText.match(/^__SOURCE__(.+)__SOURCE__$/);
+      if (sourceMatch && href) {
+        return <InlineSourceBadge name={sourceMatch[1]} url={href} />;
+      }
+      
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary hover:underline"
+          data-testid="link-markdown"
+        >
+          {children}
+        </a>
+      );
+    },
     ul: ({ children }: { children?: React.ReactNode }) => (
       <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>
     ),
