@@ -99,6 +99,24 @@ export async function runPipeline(options: PipelineRunOptions): Promise<Pipeline
       summary = lastResult.output.data.response;
     } else if (lastResult?.output?.data?.textContent) {
       summary = lastResult.output.data.textContent.slice(0, 5000);
+    } else if (lastResult?.output?.artifacts?.length > 0) {
+      const textArtifact = lastResult.output.artifacts.find(
+        (a: Artifact) => a.content && !a.metadata?.isBase64 && typeof a.content === "string"
+      );
+      if (textArtifact?.content) {
+        summary = textArtifact.content.slice(0, 10000);
+      } else if (lastResult?.output?.data) {
+        summary = JSON.stringify(lastResult.output.data).slice(0, 5000);
+      }
+    } else if (artifacts.length > 0) {
+      const textArtifact = artifacts.find(
+        (a: Artifact) => a.content && !a.metadata?.isBase64 && typeof a.content === "string"
+      );
+      if (textArtifact?.content) {
+        summary = textArtifact.content.slice(0, 10000);
+      } else if (lastResult?.output?.data) {
+        summary = JSON.stringify(lastResult.output.data).slice(0, 5000);
+      }
     } else if (lastResult?.output?.data) {
       summary = JSON.stringify(lastResult.output.data).slice(0, 5000);
     }
