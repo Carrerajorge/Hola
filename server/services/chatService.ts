@@ -401,32 +401,48 @@ export async function handleChatRequest(
     // ========================================================================
     // AGGRESSIVE FIX: Simple search queries execute IMMEDIATELY and return
     // This completely bypasses ALL pipeline/routing/multi-intent logic
+    // ULTRA-INCLUSIVE patterns to catch ALL search variations
     // ========================================================================
     const SIMPLE_SEARCH_PATTERNS_EARLY = [
-      /dame\s+\d*\s*(noticias|artículos?)/i,
-      /busca(me)?\s+(noticias|información|info|artículos?|tesis)/i,
+      // Spanish patterns - with and without accents
+      /dame\s+\d*\s*(noticias|art[ií]culos?|tesis|informaci[oó]n)/i,
+      /busca(me)?\s+\d*\s*(noticias|informaci[oó]n|info|art[ií]culos?|tesis)/i,
+      /b[uú]sca(me)?\s+\d*/i,  // Catch all "buscame X" variations
       /noticias\s+(de|sobre|del)/i,
-      /últimas\s+noticias/i,
-      /qué\s+(está\s+pasando|pasa|hay\s+de\s+nuevo)/i,
-      /what('s|\s+is)\s+(happening|new|going\s+on)/i,
-      /news\s+(about|from|on)/i,
+      /[uú]ltimas?\s+noticias/i,
+      /qu[eé]\s+(est[aá]\s+pasando|pasa|hay\s+de\s+nuevo)/i,
       /precio\s+(de|del|actual)/i,
       /clima\s+(en|de)/i,
-      /weather\s+(in|for)/i,
       /quisiera\s+(que\s+)?(me\s+)?ayud(es|a)\s+a\s+buscar/i,
-      /ayúdame\s+a\s+buscar/i,
-      /buscar\s+\d*\s*(artículos?|tesis)/i,
-      /dame\s+\d*\s*(artículos?|tesis)/i,
-      /encuentra(me)?\s+\d*\s*(artículos?|información|tesis)/i,
-      /investiga\s+(sobre|acerca)/i,
-      /información\s+(sobre|de|del|acerca)/i,
-      /búscame\s+\d*/i,
+      /ay[uú]dame\s+a\s+buscar/i,
+      /buscar\s+\d*\s*(art[ií]culos?|tesis|informaci[oó]n|noticias)/i,
+      /dame\s+\d*\s*(art[ií]culos?|tesis)/i,
+      /encuentra(me)?\s+\d*\s*(art[ií]culos?|informaci[oó]n|tesis)/i,
+      /investiga\s+(sobre|acerca|de)/i,
+      /informaci[oó]n\s+(sobre|de|del|acerca)/i,
+      // English patterns
+      /what('s|\s+is)\s+(happening|new|going\s+on)/i,
+      /news\s+(about|from|on)/i,
+      /weather\s+(in|for)/i,
       /search\s+for/i,
       /find\s+(me\s+)?\d*/i,
+      /look\s+for/i,
+      /get\s+me\s+\d*/i,
+      // Generic patterns - ANY request with numbers + content types
+      /\d+\s*(noticias|art[ií]culos?|tesis|papers?|resultados?)/i,
+      // Fallback: starts with search-like verbs
+      /^(busca|encuentra|investiga|dame|dime|muestrame|search|find|look)/i,
     ];
     
-    const isSimpleSearchQueryEarly = (text: string) => 
-      SIMPLE_SEARCH_PATTERNS_EARLY.some(p => p.test(text));
+    // Ultra-aggressive: normalize text by removing accents for matching
+    const normalizeText = (text: string) => 
+      text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    
+    const isSimpleSearchQueryEarly = (text: string) => {
+      const normalized = normalizeText(text);
+      // Check patterns against both original and normalized
+      return SIMPLE_SEARCH_PATTERNS_EARLY.some(p => p.test(text) || p.test(normalized));
+    };
     
     // IMMEDIATE EXECUTION: Simple searches bypass EVERYTHING and execute directly
     if (!documentMode && !figmaMode && !hasImages && lastUserMessage && isSimpleSearchQueryEarly(lastUserMessage.content)) {
