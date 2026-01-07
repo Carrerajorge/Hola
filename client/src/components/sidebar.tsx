@@ -32,7 +32,9 @@ import {
   FolderOpen,
   Zap,
   SquarePen,
-  Pin
+  Pin,
+  Download,
+  MoveRight
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
@@ -290,14 +292,25 @@ export function Sidebar({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <div
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-accent rounded"
+                className="flex-shrink-0 p-1 hover:bg-accent rounded cursor-pointer"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button-chat-menu-${chat.id}`}
               >
-                <MoreHorizontal className="h-4 w-4 text-foreground" />
+                <MoreHorizontal className="h-4 w-4 text-muted-foreground hover:text-foreground" />
               </div>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Toggle pin chat (placeholder - needs implementation)
+                  console.log("Pin chat:", chat.id);
+                }}
+                data-testid={`menu-pin-${chat.id}`}
+              >
+                <Pin className="h-4 w-4 mr-2" />
+                Fijar chat
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => handleStartEdit(chat, e as unknown as React.MouseEvent)}
                 data-testid={`menu-edit-${chat.id}`}
@@ -305,43 +318,72 @@ export function Sidebar({
                 <Pencil className="h-4 w-4 mr-2" />
                 Editar
               </DropdownMenuItem>
-              {folders.length > 0 && (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger data-testid={`menu-move-folder-${chat.id}`}>
-                    <Folder className="h-4 w-4 mr-2" />
-                    Mover a carpeta
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuPortal>
-                    <DropdownMenuSubContent>
-                      {folders.map((folder) => (
-                        <DropdownMenuItem
-                          key={folder.id}
-                          onClick={() => onMoveToFolder?.(chat.id, folder.id)}
-                          data-testid={`menu-folder-${folder.id}-${chat.id}`}
-                        >
-                          <span 
-                            className="h-3 w-3 rounded-full mr-2 flex-shrink-0" 
-                            style={{ backgroundColor: folder.color }}
-                          />
-                          {folder.name}
-                        </DropdownMenuItem>
-                      ))}
-                      {allFolderChatIds.has(chat.id) && (
-                        <>
-                          <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger data-testid={`menu-move-folder-${chat.id}`}>
+                  <Folder className="h-4 w-4 mr-2" />
+                  Mover a carpeta
+                </DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent>
+                    {folders.length > 0 ? (
+                      <>
+                        {folders.map((folder) => (
                           <DropdownMenuItem
-                            onClick={() => onMoveToFolder?.(chat.id, null)}
-                            data-testid={`menu-remove-folder-${chat.id}`}
+                            key={folder.id}
+                            onClick={() => onMoveToFolder?.(chat.id, folder.id)}
+                            data-testid={`menu-folder-${folder.id}-${chat.id}`}
                           >
-                            <X className="h-4 w-4 mr-2" />
-                            Quitar de carpeta
+                            <span 
+                              className="h-3 w-3 rounded-full mr-2 flex-shrink-0" 
+                              style={{ backgroundColor: folder.color }}
+                            />
+                            {folder.name}
                           </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuPortal>
-                </DropdownMenuSub>
-              )}
+                        ))}
+                        {allFolderChatIds.has(chat.id) && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => onMoveToFolder?.(chat.id, null)}
+                              data-testid={`menu-remove-folder-${chat.id}`}
+                            >
+                              <X className="h-4 w-4 mr-2" />
+                              Quitar de carpeta
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <DropdownMenuItem
+                        onClick={() => setIsCreatingFolder(true)}
+                        data-testid={`menu-create-folder-${chat.id}`}
+                      >
+                        <FolderPlus className="h-4 w-4 mr-2" />
+                        Crear carpeta
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Download chat as JSON
+                  const chatData = JSON.stringify(chat, null, 2);
+                  const blob = new Blob([chatData], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${chat.title.replace(/[^a-z0-9]/gi, '_')}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                data-testid={`menu-download-${chat.id}`}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Descargar
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={(e) => onArchiveChat?.(chat.id, e as unknown as React.MouseEvent)}
                 data-testid={`menu-archive-${chat.id}`}
