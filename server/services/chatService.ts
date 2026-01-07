@@ -11,6 +11,31 @@ import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
 import { detectEmailIntent, handleEmailChatRequest } from "./gmailChatIntegration";
 import { productionWorkflowRunner, classifyIntent, isGenerationIntent } from "../agent/registry/productionWorkflowRunner";
 
+// Simple in-memory cache for search results (5 minute TTL)
+const searchCache = new Map<string, { results: any; timestamp: number }>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function getCachedSearch(query: string): any | null {
+  const normalizedQuery = query.toLowerCase().trim();
+  const cached = searchCache.get(normalizedQuery);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    console.log(`[ChatService] CACHE HIT for: ${normalizedQuery.slice(0, 30)}...`);
+    return cached.results;
+  }
+  return null;
+}
+
+function setCachedSearch(query: string, results: any): void {
+  const normalizedQuery = query.toLowerCase().trim();
+  searchCache.set(normalizedQuery, { results, timestamp: Date.now() });
+  // Clean old entries if cache gets too big
+  if (searchCache.size > 100) {
+    const oldest = Array.from(searchCache.entries())
+      .sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
+    if (oldest) searchCache.delete(oldest[0]);
+  }
+}
+
 export type LLMProvider = "xai" | "gemini";
 
 export const AVAILABLE_MODELS = {
@@ -473,86 +498,76 @@ export async function handleChatRequest(
       };
       
       try {
-        // Check if academic search is needed
-        const isAcademic = needsAcademicSearch(lastUserMessage.content);
-        let webSearchInfo = "";
+        // Check cache first for ultra-fast response
+        const cached = getCachedSearch(lastUserMessage.content);
         let webSources: WebSource[] = [];
         
-        if (isAcademic) {
-          const scholarResults = await searchScholar(lastUserMessage.content, 8);
-          if (scholarResults.length > 0) {
-            webSearchInfo = "\n\n**Artículos académicos encontrados:**\n" +
-              scholarResults.map((r, i) => 
-                `[${i + 1}] ${r.authors ? `Autores: ${r.authors}\n` : ""}${r.year ? `Año: ${r.year}\n` : ""}Título: ${r.title}\nURL: ${r.url}\n${r.snippet ? `Resumen: ${r.snippet}` : ""}`
-              ).join("\n\n");
-            webSources = scholarResults.filter(r => r.url).map(r => 
-              extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
-            );
+        if (cached) {
+          webSources = cached;
+        } else {
+          // Check if academic search is needed
+          const isAcademic = needsAcademicSearch(lastUserMessage.content);
+          
+          if (isAcademic) {
+            const scholarResults = await searchScholar(lastUserMessage.content, 5);
+            if (scholarResults.length > 0) {
+              webSources = scholarResults.filter(r => r.url).map(r => 
+                extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
+              );
+            }
+          }
+          
+          // Always do web search for general results
+          const searchResults = await searchWeb(lastUserMessage.content);
+          if (searchResults.results.length > 0) {
+            webSources = [
+              ...webSources,
+              ...searchResults.results.slice(0, 8).map(r => 
+                extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
+              )
+            ];
+          }
+          
+          // Cache results for repeated queries
+          if (webSources.length > 0) {
+            setCachedSearch(lastUserMessage.content, webSources);
           }
         }
         
-        // Always do web search for general results
-        const searchResults = await searchWeb(lastUserMessage.content);
-        if (searchResults.results.length > 0) {
-          webSearchInfo += "\n\n**Fuentes web encontradas:**\n" +
-            searchResults.results.slice(0, 10).map((r, i) => 
-              `[${i + 1}] ${r.title}\nURL: ${r.url}\n${r.snippet || ""}`
-            ).join("\n\n");
-          
-          webSources = [
-            ...webSources,
-            ...searchResults.results.slice(0, 10).map(r => 
-              extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
-            )
-          ];
-        }
+        // ULTRA-FAST: Minimal context for rapid LLM response
+        const topSources = webSources.slice(0, 5);
+        const minimalContext = topSources.map((s, i) => 
+          `[${i + 1}] ${s.title} - ${s.snippet?.slice(0, 100) || ""}`
+        ).join("\n");
         
-        // Build context for LLM
-        const searchContext = webSearchInfo || "No se encontraron resultados relevantes.";
-        
-        // Build sources reference for the LLM
-        const sourcesReference = webSources.length > 0 
-          ? "\n\nFUENTES DISPONIBLES:\n" + webSources.map((s, i) => 
-              `[${i + 1}] ${s.siteName || s.domain}: ${s.url}`
-            ).join("\n")
-          : "";
-        
-        // Call LLM with search results - build source mapping for post-processing
-        const sourceMap = new Map<number, { name: string; url: string }>();
-        webSources.forEach((s, i) => {
-          sourceMap.set(i + 1, { name: s.siteName || s.domain, url: s.url });
-        });
-        
-        const systemPrompt = `Eres un asistente útil que presenta noticias con sus fuentes.
+        // Compact system prompt for speed
+        const systemPrompt = `Presenta las noticias de forma concisa. Al final de cada noticia agrega [${1}], [${2}], etc. según la fuente.
 
-REGLA OBLIGATORIA - CITAR FUENTES:
-Al final de CADA noticia o dato, DEBES agregar el número de fuente entre corchetes.
-Formato: [Fuente: NÚMERO]
-Donde NÚMERO es el índice de la fuente (1, 2, 3, etc.)
+FUENTES:
+${topSources.map((s, i) => `[${i + 1}] ${s.siteName || s.domain}`).join('\n')}
 
-EJEMPLO DE RESPUESTA CORRECTA:
-1. **Apple lanza nuevo iPhone** — La compañía presentó su nuevo dispositivo con pantalla mejorada. [Fuente: 1]
-2. **Tesla aumenta producción** — La empresa incrementó un 20% su capacidad de fabricación. [Fuente: 3]
-3. **Microsoft adquiere empresa de IA** — El gigante tecnológico compró una startup por $2B. [Fuente: 2]
-
-FUENTES DISPONIBLES (usa estos números):
-${webSources.slice(0, 10).map((s, i) => `[${i + 1}] ${s.siteName || s.domain}: ${s.url}`).join('\n')}
-
-INFORMACIÓN DE BÚSQUEDA:
-${searchContext}`;
+DATOS:
+${minimalContext}`;
 
         const llmMessages = [
           { role: "system" as const, content: systemPrompt },
           { role: "user" as const, content: lastUserMessage.content }
         ];
         
-        const llmResponse = await llmGateway.chat({
-          messages: llmMessages,
-          temperature: 0.7,
-          maxTokens: 2000
-        });
+        // Use faster model with aggressive timeout
+        const llmResponse = await Promise.race([
+          llmGateway.chat({
+            messages: llmMessages,
+            temperature: 0.5,
+            maxTokens: 800,
+            model: "gemini-2.5-flash"
+          }),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error("LLM timeout")), 8000)
+          )
+        ]);
         
-        console.log(`[ChatService] IMMEDIATE SEARCH: Returning ${webSources.length} sources`);
+        console.log(`[ChatService] FAST SEARCH: Returning ${webSources.length} sources in <10s`);
         
         return {
           content: llmResponse.content,

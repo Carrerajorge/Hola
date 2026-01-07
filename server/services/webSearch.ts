@@ -304,71 +304,40 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
   
   const contents: { url: string; title: string; content: string; imageUrl?: string; siteName?: string; publishedDate?: string }[] = [];
   
-  // Fetch content with aggressive timeout - max 4 seconds total for all fetches
-  const TOTAL_FETCH_TIMEOUT = 4000;
+  // ULTRA-FAST: Only fetch metadata (no full page content) with 2s total timeout
+  const TOTAL_FETCH_TIMEOUT = 2000;
   
   // Create metadata map to enrich results (include canonicalUrl)
   const metadataMap = new Map<string, { imageUrl?: string; siteName?: string; publishedDate?: string; canonicalUrl?: string }>();
   
-  const fetchPromises = results.slice(0, LIMITS.MAX_CONTENT_FETCH).map(async (result) => {
-    const content = await fetchPageContent(result.url);
-    if (content) {
-      // Store metadata for enriching results
-      metadataMap.set(result.url, {
-        imageUrl: content.imageUrl,
-        siteName: content.siteName,
-        publishedDate: content.publishedDate,
-        canonicalUrl: content.canonicalUrl
-      });
-      
-      return {
-        url: result.url,
-        title: content.title || result.title,
-        content: content.text.slice(0, TIMEOUTS.MAX_CONTENT_LENGTH),
-        imageUrl: content.imageUrl,
-        siteName: content.siteName,
-        publishedDate: content.publishedDate
-      };
-    }
-    return null;
+  // Only fetch metadata (fast) not full content (slow) for top results
+  const metadataPromises = results.slice(0, LIMITS.MAX_CONTENT_FETCH).map(async (result) => {
+    try {
+      const metadata = await fetchPageMetadata(result.url);
+      if (metadata) {
+        metadataMap.set(result.url, {
+          imageUrl: metadata.imageUrl,
+          siteName: metadata.siteName,
+          publishedDate: metadata.publishedDate,
+          canonicalUrl: metadata.canonicalUrl
+        });
+        contents.push({
+          url: result.url,
+          title: metadata.title || result.title,
+          content: result.snippet?.slice(0, TIMEOUTS.MAX_CONTENT_LENGTH) || "",
+          imageUrl: metadata.imageUrl,
+          siteName: metadata.siteName,
+          publishedDate: metadata.publishedDate
+        });
+      }
+    } catch {}
   });
   
-  // Race against timeout to ensure fast response
-  const timeoutPromise = new Promise<null[]>((resolve) => 
-    setTimeout(() => resolve([]), TOTAL_FETCH_TIMEOUT)
-  );
-  
-  const fetchedContents = await Promise.race([
-    Promise.all(fetchPromises),
-    timeoutPromise
+  // Race against aggressive timeout
+  await Promise.race([
+    Promise.allSettled(metadataPromises),
+    new Promise<void>(resolve => setTimeout(resolve, TOTAL_FETCH_TIMEOUT))
   ]);
-  
-  contents.push(...(fetchedContents as any[]).filter((c): c is NonNullable<typeof c> => c !== null));
-  
-  // For results that weren't fetched (due to timeout or being beyond MAX_CONTENT_FETCH),
-  // try quick metadata-only fetch in parallel
-  const unfetchedResults = results.filter(r => !metadataMap.has(r.url));
-  if (unfetchedResults.length > 0) {
-    const metadataPromises = unfetchedResults.slice(0, 10).map(async (result) => {
-      try {
-        const metadata = await fetchPageMetadata(result.url);
-        if (metadata) {
-          metadataMap.set(result.url, {
-            imageUrl: metadata.imageUrl,
-            siteName: metadata.siteName,
-            publishedDate: metadata.publishedDate,
-            canonicalUrl: metadata.canonicalUrl
-          });
-        }
-      } catch {}
-    });
-    
-    // Quick timeout for metadata fetches (2s total)
-    await Promise.race([
-      Promise.allSettled(metadataPromises),
-      new Promise<void>(resolve => setTimeout(resolve, 2000))
-    ]);
-  }
   
   // Enrich results with metadata from fetched pages
   const enrichedResults = results.map(r => {
