@@ -577,7 +577,7 @@ export async function handleChatRequest(
   // Simple search patterns that should ALWAYS trigger web search regardless of feature flag
   const SIMPLE_SEARCH_PATTERNS = [
     /dame\s+\d*\s*noticias/i,
-    /busca(me)?\s+(noticias|información|info)/i,
+    /busca(me)?\s+(noticias|información|info|artículos?)/i,
     /noticias\s+(de|sobre|del)/i,
     /últimas\s+noticias/i,
     /qué\s+(está\s+pasando|pasa|hay\s+de\s+nuevo)/i,
@@ -586,6 +586,13 @@ export async function handleChatRequest(
     /precio\s+(de|del|actual)/i,
     /clima\s+(en|de)/i,
     /weather\s+(in|for)/i,
+    /quisiera\s+(que\s+)?(me\s+)?ayud(es|a)\s+a\s+buscar/i,
+    /ayúdame\s+a\s+buscar/i,
+    /buscar\s+\d*\s*artículos?/i,
+    /dame\s+\d*\s*artículos?/i,
+    /encuentra(me)?\s+\d*\s*(artículos?|información)/i,
+    /investiga\s+(sobre|acerca)/i,
+    /información\s+(sobre|de|del|acerca)/i,
   ];
   const isSimpleSearchQuery = (text: string) => SIMPLE_SEARCH_PATTERNS.some(p => p.test(text));
   const forceWebSearch = lastUserMessage && isSimpleSearchQuery(lastUserMessage.content);

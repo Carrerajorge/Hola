@@ -49,9 +49,15 @@ const WEB_SEARCH_PATTERNS = [
   /cu[aá]ndo\s+/i,
   /d[oó]nde\s+/i,
   /c[oó]mo\s+\w+\s+(funciona|trabaja|opera|works)/i,
-  /dame\s+\d*\s*noticias/i,
+  /dame\s+\d*\s*(noticias|artículos?)/i,
   /noticias\s+(sobre|de)/i,
   /[uú]ltimas?\s+noticias/i,
+  /quisiera\s+(que\s+)?(me\s+)?ayud(es|a)\s+a\s+buscar/i,
+  /ayúdame\s+a\s+buscar/i,
+  /buscar\s+\d*\s*artículos?/i,
+  /encuentra(me)?\s+\d*\s*(artículos?|información)/i,
+  /investiga\s+(sobre|acerca)/i,
+  /información\s+(sobre|de|del|acerca)/i,
   /precio\s+(de|del|actual)/i,
   /busca\s+(en\s+)?(internet|web|online)?/i,
   /buscar\s+/i,
@@ -195,7 +201,7 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
       return {
         url: result.url,
         title: content.title || result.title,
-        content: content.text.slice(0, TIMEOUTS.MAX_CONTENT_LENGTH * 2) // Double content length for better context
+        content: content.text.slice(0, TIMEOUTS.MAX_CONTENT_LENGTH)
       };
     }
     return null;
