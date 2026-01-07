@@ -30,7 +30,8 @@ def main():
                     [sys.executable, "-m", "pip", "install", dep, "-q"],
                     capture_output=True,
                     timeout=120,
-                    check=False
+                    check=False,
+                    shell=False  # Explicit: prevent command injection
                 )
     
     print("✅ Dependencias OK")

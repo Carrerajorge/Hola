@@ -1,7 +1,0 @@
-{
-  "defaultShell": "/bin/bash",
-  "defaultTimeout": 30000,
-  "maxFileSize": 104857600,
-  "enableHistory": true,
-  "enableSecurity": true
-}

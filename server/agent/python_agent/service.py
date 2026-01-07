@@ -41,7 +41,8 @@ for pkg in ALLOWED_SERVER_PACKAGES:
                 [sys.executable, "-m", "pip", "install", pkg, "-q"],
                 capture_output=True,
                 timeout=120,
-                check=False
+                check=False,
+                shell=False  # Explicit: prevent command injection
             )
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
