@@ -31,6 +31,15 @@ export interface GmailPreview {
   filters?: string[];
 }
 
+export interface WebSource {
+  url: string;
+  title: string;
+  domain: string;
+  favicon?: string;
+  snippet?: string;
+  date?: string;
+}
+
 export interface AgentRunData {
   runId: string | null;
   status: "starting" | "running" | "completed" | "failed" | "cancelled";
@@ -79,6 +88,7 @@ export interface Message {
   gmailPreview?: GmailPreview;
   agentRun?: AgentRunData;
   artifact?: MessageArtifact; // Generated artifact from ProductionWorkflowRunner
+  webSources?: WebSource[]; // Web search sources for citations
 }
 
 export interface Chat {
@@ -333,6 +343,7 @@ export function useChats() {
                 googleFormPreview: msg.googleFormPreview,
                 gmailPreview: msg.gmailPreview,
                 generatedImage: msg.generatedImage,
+                webSources: msg.webSources,
               };
             }),
           };

@@ -2166,6 +2166,7 @@ export function ChatInterface({
             role: "assistant",
             content: fullContent,
             timestamp: new Date(),
+            webSources: data.webSources,
           };
           onSendMessage(aiMsg);
           streamingContentRef.current = "";
@@ -2318,6 +2319,7 @@ export function ChatInterface({
           content: data.content,
           timestamp: new Date(),
           requestId: generateRequestId(),
+          webSources: data.webSources,
         };
         onSendMessage(aiMsg);
       }
@@ -2949,6 +2951,7 @@ export function ChatInterface({
             requestId: generateRequestId(),
             userMessageId: userMsgId,
             artifact: data.artifact,
+            webSources: data.webSources,
           };
           onSendMessage(aiMsg);
         } else {
@@ -3197,7 +3200,8 @@ export function ChatInterface({
             content: data.content || "No se pudo obtener una respuesta.",
             timestamp: new Date(),
             requestId: generateRequestId(),
-            userMessageId: userMsgId
+            userMessageId: userMsgId,
+            webSources: data.webSources,
           };
           onSendMessage(gmailResponseMsg);
         } else {
@@ -3784,6 +3788,7 @@ IMPORTANTE:
         const responseSources = data.sources || [];
         const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
         const responseArtifact = data.artifact;
+        const responseWebSources = data.webSources;
         
         // If Figma diagram was generated, add it to chat with simulated streaming
         if (figmaDiagram) {
@@ -3810,6 +3815,7 @@ IMPORTANTE:
                 requestId: generateRequestId(),
                 userMessageId: userMsgId,
                 figmaDiagram,
+                webSources: responseWebSources,
               };
               onSendMessage(aiMsg);
               
@@ -3931,6 +3937,7 @@ IMPORTANTE:
                 userMessageId: userMsgId,
                 sources: responseSources.length > 0 ? responseSources : undefined,
                 artifact: responseArtifact,
+                webSources: responseWebSources,
               };
               onSendMessage(aiMsg);
             }

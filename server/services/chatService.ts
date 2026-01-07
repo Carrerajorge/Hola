@@ -233,10 +233,20 @@ interface ChatSource {
   content: string;
 }
 
+interface WebSource {
+  url: string;
+  title: string;
+  domain: string;
+  favicon?: string;
+  snippet?: string;
+  date?: string;
+}
+
 interface ChatResponse {
   content: string;
   role: string;
   sources?: ChatSource[];
+  webSources?: WebSource[];
   agentRunId?: string;
   wasAgentTask?: boolean;
   pipelineSteps?: number;
@@ -542,6 +552,26 @@ export async function handleChatRequest(
   let contextInfo = "";
   let sources: ChatSource[] = [];
   let webSearchInfo = "";
+  let webSources: WebSource[] = [];
+
+  // Helper function to extract domain and create favicon URL
+  const extractWebSource = (url: string, title: string, snippet?: string, year?: string): WebSource => {
+    let domain = "";
+    try {
+      const urlObj = new URL(url);
+      domain = urlObj.hostname.replace(/^www\./, "");
+    } catch {
+      domain = url.split("/")[2]?.replace(/^www\./, "") || "unknown";
+    }
+    return {
+      url,
+      title,
+      domain,
+      favicon: `https://www.google.com/s2/favicons?domain=${domain}&sz=32`,
+      snippet: snippet?.slice(0, 200),
+      date: year
+    };
+  };
 
   // Web search is gated by the webSearchAuto feature flag
   // If webSearchAuto is false, skip automatic web search detection
@@ -554,6 +584,11 @@ export async function handleChatRequest(
           scholarResults.map((r, i) => 
             `[${i + 1}] Autores: ${r.authors || "No disponible"}\nAño: ${r.year || "No disponible"}\nTítulo: ${r.title}\nURL: ${r.url}\nResumen: ${r.snippet}\nCita sugerida: ${r.citation}`
           ).join("\n\n");
+        
+        // Capture web sources for citations
+        webSources = scholarResults
+          .filter(r => r.url)
+          .map(r => extractWebSource(r.url, r.title, r.snippet, r.year));
       }
     } catch (error) {
       console.error("Academic search error:", error);
@@ -567,11 +602,17 @@ export async function handleChatRequest(
           searchResults.contents.map((content, i) => 
             `[${i + 1}] ${content.title} (${content.url}):\n${content.content}`
           ).join("\n\n");
+        
+        // Capture web sources for citations
+        webSources = searchResults.contents.map(c => extractWebSource(c.url, c.title, c.content?.slice(0, 200)));
       } else if (searchResults.results.length > 0) {
         webSearchInfo = "\n\n**Resultados de búsqueda web:**\n" +
           searchResults.results.map((r, i) => 
             `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
           ).join("\n");
+        
+        // Capture web sources for citations
+        webSources = searchResults.results.map(r => extractWebSource(r.url, r.title, r.snippet));
       }
     } catch (error) {
       console.error("Web search error:", error);
@@ -1053,7 +1094,9 @@ REGLAS OBLIGATORIAS:
     
     return { 
       content: geminiResponse.content,
-      role: "assistant"
+      role: "assistant",
+      sources,
+      webSources: webSources.length > 0 ? webSources : undefined
     };
   } else if (hasImages) {
     const imageContents = images!.map((img: string) => ({
@@ -1087,7 +1130,9 @@ REGLAS OBLIGATORIAS:
     
     return { 
       content,
-      role: "assistant"
+      role: "assistant",
+      sources,
+      webSources: webSources.length > 0 ? webSources : undefined
     };
   } else {
     const gatewayResponse = await llmGateway.chat(
@@ -1105,7 +1150,9 @@ REGLAS OBLIGATORIAS:
     
     return { 
       content: gatewayResponse.content,
-      role: "assistant"
+      role: "assistant",
+      sources,
+      webSources: webSources.length > 0 ? webSources : undefined
     };
   }
 }

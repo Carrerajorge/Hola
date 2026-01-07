@@ -66,8 +66,10 @@ import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
 import { z } from "zod";
 
-import { Message, storeGeneratedImage, getGeneratedImage } from "@/hooks/use-chats";
+import { Message, storeGeneratedImage, getGeneratedImage, WebSource } from "@/hooks/use-chats";
 import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
+import { SourcesIndicator } from "@/components/sources-indicator";
+import { SourcesPanel } from "@/components/sources-panel";
 import { FigmaBlock } from "@/components/figma-block";
 import { CodeExecutionBlock } from "@/components/code-execution-block";
 import { InlineGoogleFormPreview } from "@/components/inline-google-form-preview";
@@ -592,11 +594,13 @@ interface ActionToolbarProps {
   aiState: "idle" | "thinking" | "responding";
   isRegenerating: boolean;
   variant: "compact" | "default";
+  webSources?: WebSource[];
   onCopy: (content: string, id: string) => void;
   onFeedback: (id: string, type: "up" | "down") => void;
   onRegenerate: (index: number, instruction?: string) => void;
   onShare: (content: string) => void;
   onReadAloud: (id: string, content: string) => void;
+  onViewSources?: () => void;
 }
 
 const ActionToolbar = memo(function ActionToolbar({
@@ -609,11 +613,13 @@ const ActionToolbar = memo(function ActionToolbar({
   aiState,
   isRegenerating,
   variant,
+  webSources,
   onCopy,
   onFeedback,
   onRegenerate,
   onShare,
-  onReadAloud
+  onReadAloud,
+  onViewSources
 }: ActionToolbarProps) {
   const testIdSuffix = variant === "compact" ? messageId : `main-${messageId}`;
   const [regenerateOpen, setRegenerateOpen] = useState(false);
@@ -839,6 +845,13 @@ const ActionToolbar = memo(function ActionToolbar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {webSources && webSources.length > 0 && onViewSources && (
+          <SourcesIndicator 
+            sources={webSources} 
+            onViewSources={onViewSources}
+          />
+        )}
       </div>
     </TooltipProvider>
   );
@@ -852,7 +865,8 @@ const ActionToolbar = memo(function ActionToolbar({
     prevProps.speakingMessageId === nextProps.speakingMessageId &&
     prevProps.aiState === nextProps.aiState &&
     prevProps.isRegenerating === nextProps.isRegenerating &&
-    prevProps.variant === nextProps.variant
+    prevProps.variant === nextProps.variant &&
+    prevProps.webSources === nextProps.webSources
   );
 });
 
@@ -1609,6 +1623,8 @@ const AssistantMessage = memo(function AssistantMessage({
   onAgentRetry,
   onAgentArtifactPreview
 }: AssistantMessageProps) {
+  const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
+
   const parsedContent = useMemo(() => {
     if (!message.content || message.isThinking) {
       return { text: "", documents: [] };
@@ -1822,11 +1838,13 @@ const AssistantMessage = memo(function AssistantMessage({
             aiState={aiState}
             isRegenerating={isRegenerating}
             variant={variant}
+            webSources={message.webSources}
             onCopy={onCopyMessage}
             onFeedback={onFeedback}
             onRegenerate={onRegenerate}
             onShare={onShare}
             onReadAloud={onReadAloud}
+            onViewSources={() => setSourcesPanelOpen(true)}
           />
         </div>
       )}
@@ -1936,6 +1954,14 @@ const AssistantMessage = memo(function AssistantMessage({
           />
         </div>
       )}
+
+      {message.webSources && message.webSources.length > 0 && (
+        <SourcesPanel
+          open={sourcesPanelOpen}
+          onOpenChange={setSourcesPanelOpen}
+          sources={message.webSources}
+        />
+      )}
     </div>
   );
 }, (prevProps, nextProps) => {
@@ -1943,6 +1969,7 @@ const AssistantMessage = memo(function AssistantMessage({
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
     prevProps.message.isThinking === nextProps.message.isThinking &&
+    prevProps.message.webSources === nextProps.message.webSources &&
     prevProps.msgIndex === nextProps.msgIndex &&
     prevProps.totalMessages === nextProps.totalMessages &&
     prevProps.variant === nextProps.variant &&
