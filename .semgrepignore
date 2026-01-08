@@ -1,0 +1,22 @@
+# Estado/artefactos del IDE o sandbox (NO deben escanearse)
+sandbox_workspace/
+**/.state/
+attached_assets/
+
+# caches comunes
+**/__pycache__/
+**/*.pyc
+node_modules/
+dist/
+build/
+
+# Test files and mocks
+**/test_*.py
+**/*_test.py
+**/tests/
+**/*.test.ts
+**/*.test.js
+
+# Generated files
+*.min.js
+*.bundle.js
