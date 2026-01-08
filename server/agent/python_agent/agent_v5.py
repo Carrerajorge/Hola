@@ -1494,45 +1494,57 @@ class CommandExecutor:
                 raise PermissionError(f"Argument too long: {len(arg)} chars")
         return list(args)
 
+    @staticmethod
+    def _child_limits() -> None:
+        """Apply aggressive resource limits to child process (Linux rlimits)."""
+        try:
+            import resource
+            resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
+            resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+            resource.setrlimit(resource.RLIMIT_FSIZE, (50 * 1024 * 1024, 50 * 1024 * 1024))
+            resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+            os.umask(0o077)
+        except Exception:
+            pass
+
     async def _exec_with_literal_interpreter(self, interpreter_key: str, script_path_str: str, cwd: str, env: dict):
-        """Execute script using literal interpreter paths to satisfy static analysis."""
+        """Execute script using literal interpreter paths with hardened subprocess options."""
+        common_kwargs = dict(
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
+            cwd=cwd,
+            env=env,
+            close_fds=True,
+            start_new_session=True,
+            preexec_fn=self._child_limits,
+        )
+        
         if interpreter_key in ('python3', 'python'):
             if Path(sys.executable).exists():
                 return await asyncio.create_subprocess_exec(
-                    sys.executable, script_path_str,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd, env=env)
+                    sys.executable, script_path_str, **common_kwargs)
             elif Path("/usr/bin/python3").exists():
                 return await asyncio.create_subprocess_exec(
-                    "/usr/bin/python3", script_path_str,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd, env=env)
+                    "/usr/bin/python3", script_path_str, **common_kwargs)
             raise FileNotFoundError("python3 not found in allowed paths")
         elif interpreter_key == 'node':
             if Path("/usr/bin/node").exists():
                 return await asyncio.create_subprocess_exec(
-                    "/usr/bin/node", script_path_str,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd, env=env)
+                    "/usr/bin/node", script_path_str, **common_kwargs)
             elif Path("/usr/local/bin/node").exists():
                 return await asyncio.create_subprocess_exec(
-                    "/usr/local/bin/node", script_path_str,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd, env=env)
+                    "/usr/local/bin/node", script_path_str, **common_kwargs)
             raise FileNotFoundError("node not found in allowed paths")
         elif interpreter_key == 'bash':
             if Path("/bin/bash").exists():
                 return await asyncio.create_subprocess_exec(
-                    "/bin/bash", script_path_str,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd, env=env)
+                    "/bin/bash", script_path_str, **common_kwargs)
             raise FileNotFoundError("bash not found in allowed paths")
         elif interpreter_key == 'sh':
             if Path("/bin/sh").exists():
                 return await asyncio.create_subprocess_exec(
-                    "/bin/sh", script_path_str,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd, env=env)
+                    "/bin/sh", script_path_str, **common_kwargs)
             raise FileNotFoundError("sh not found in allowed paths")
         raise ValueError(f"Unsupported interpreter: {interpreter_key}")
 
