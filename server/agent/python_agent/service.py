@@ -26,24 +26,35 @@ from contextlib import asynccontextmanager
 # Añadir el directorio padre al path para importar el agente
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Instalar dependencias del servidor con validación estricta
-import subprocess
+# Instalar dependencias del servidor con validación estricta (sin subprocess)
+import io
+import contextlib
 import re as _re_pkg
 ALLOWED_SERVER_PACKAGES = frozenset(["fastapi", "uvicorn", "pydantic"])
 _PKG_PATTERN = _re_pkg.compile(r'^[a-zA-Z][a-zA-Z0-9._-]*$')
+
+def _pip_install_inprocess(pkg: str) -> bool:
+    if not _PKG_PATTERN.match(pkg) or pkg not in ALLOWED_SERVER_PACKAGES:
+        return False
+    old_env = os.environ.copy()
+    os.environ["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+    os.environ["PIP_NO_INPUT"] = "1"
+    try:
+        from pip._internal.cli.main import main as pipmain
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = pipmain(["install", pkg, "-q", "--no-cache-dir"])
+        return rc == 0
+    except Exception:
+        return False
+    finally:
+        os.environ.clear()
+        os.environ.update(old_env)
 
 for pkg in ALLOWED_SERVER_PACKAGES:
     try:
         __import__(pkg)
     except ImportError:
-        if _PKG_PATTERN.match(pkg) and pkg in ALLOWED_SERVER_PACKAGES:
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", pkg, "-q"],
-                capture_output=True,
-                timeout=120,
-                check=False,
-                shell=False  # Explicit: prevent command injection
-            )
+        _pip_install_inprocess(pkg)
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware

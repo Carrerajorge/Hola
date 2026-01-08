@@ -119,26 +119,30 @@ class DependencyInstaller:
     
     @classmethod
     def install(cls, pkg: str, retries: int = 2) -> bool:
-        """Secure package installation with strict validation."""
+        """Secure package installation with strict validation (no subprocess)."""
         if not cls._validate_package(pkg):
             print(f"⚠️ Package not allowed: {pkg}")
             return False
         
+        import io
+        import contextlib
+        old_env = os.environ.copy()
+        os.environ["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+        os.environ["PIP_NO_INPUT"] = "1"
+        
         for _ in range(retries):
             try:
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", pkg, "-q", "--disable-pip-version-check"],
-                    capture_output=True, 
-                    timeout=120,
-                    check=False,
-                    shell=False  # Explicit: prevent command injection
-                )
-                if result.returncode == 0:
+                from pip._internal.cli.main import main as pipmain
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    rc = pipmain(["install", pkg, "-q", "--no-cache-dir"])
+                if rc == 0:
+                    os.environ.clear()
+                    os.environ.update(old_env)
                     return True
-            except subprocess.TimeoutExpired:
-                continue
             except Exception:
                 continue
+        os.environ.clear()
+        os.environ.update(old_env)
         return False
     
     @classmethod
@@ -175,19 +179,17 @@ class DependencyInstaller:
         try:
             import playwright
             print("    📦 Instalando navegadores Playwright...", end=" ", flush=True)
-            result = subprocess.run(
-                [sys.executable, "-m", "playwright", "install", "chromium"],
-                capture_output=True,
-                timeout=300,
-                check=False,
-                shell=False  # Explicit: prevent command injection
-            )
-            if result.returncode == 0:
+            import io
+            import contextlib
+            from playwright._impl._driver import compute_driver_executable
+            try:
+                driver_executable = compute_driver_executable()
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    from playwright._impl._driver import main as pw_main
+                    pw_main(["install", "chromium"])
                 print("✅")
-            else:
+            except Exception:
                 print("⚠️")
-        except subprocess.TimeoutExpired:
-            print("    ⚠️ Timeout instalando Playwright")
         except Exception:
             print("    ⚠️ Navegadores Playwright (se instalará al usar)")
         
