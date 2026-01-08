@@ -258,29 +258,46 @@ class CommandExecutor:
         self.timeout = timeout
         self.workdir = self.security.sandbox_root
     
+    def _sanitize_args(self, args):
+        if not args:
+            return None, "Comando vacío"
+        sanitized = []
+        for i, arg in enumerate(args):
+            if '\x00' in arg or '\n' in arg or '\r' in arg:
+                return None, f"Argumento {i} contiene caracteres inválidos"
+            if i == 0:
+                executable = os.path.basename(arg)
+                if executable not in self.security.SAFE_CMDS and not arg.startswith(str(self.workdir)):
+                    if not any(arg.startswith(p) for p in ['/usr/bin/', '/bin/', '/usr/local/bin/']):
+                        return None, f"Ejecutable no permitido: {executable}"
+            sanitized.append(shlex.quote(arg) if i > 0 else arg)
+        return sanitized, None
+
     async def execute(self, cmd, timeout=None):
         start = time.time()
         analysis = self.security.analyze(cmd)
         if analysis.action == SecurityAction.LOG_AND_BLOCK:
             return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message="Bloqueado")
         try:
-            # For simple commands without shell features, use safer exec mode
-            # For complex commands with pipes/redirects, continue using shell but with awareness
             if not any(char in cmd for char in ['|', '>', '<', '&', ';', '$', '`', '(', ')']):
-                # Simple command - parse safely
                 try:
                     args = shlex.split(cmd)
+                    sanitized_args, error = self._sanitize_args(args)
+                    if error:
+                        return ExecutionResult(cmd, ExecutionStatus.FAILED, error_message=error)
+                    clean_env = {k: v for k, v in os.environ.items() 
+                                 if not any(c in k for c in ['\x00', '=', '\n'])}
                     proc = await asyncio.create_subprocess_exec(
-                        *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                        cwd=str(self.workdir), env=os.environ.copy())
+                        args[0], *[shlex.quote(a) for a in args[1:]],
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                        cwd=str(self.workdir), env=clean_env)
                 except ValueError as e:
-                    # Reject malformed commands instead of falling back to shell
                     return ExecutionResult(cmd, ExecutionStatus.FAILED, 
                         error_message=f"Comando malformado: {str(e)}")
             else:
-                # Complex command with shell features - use shell but it's been security-analyzed
+                escaped_cmd = ' '.join([shlex.quote(p) for p in shlex.split(cmd)])
                 proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    escaped_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     cwd=str(self.workdir), env=os.environ.copy())
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout or self.timeout)
             return ExecutionResult(cmd, ExecutionStatus.COMPLETED, proc.returncode,
