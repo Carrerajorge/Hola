@@ -619,11 +619,16 @@ class SafeExecutor:
         """
         Dispatcher que ejecuta procesos con rutas LITERALES estáticas.
         
-        SECURITY: El primer argumento es siempre una ruta literal estática
-        definida al cargar el módulo. Esto satisface SAST.
+        SECURITY JUSTIFICATION:
+        - _*_PATH provienen de allowlist de rutas estáticas verificadas (exists+executable)
+        - args están validados con allowlists de subcomandos y blocklists de flags
+        - cwd está confinado a WORKSPACE_ROOT via _validate_cwd()
+        - env está sanitizado via _clean_env() (sin PATH heredado)
+        - shell=False previene shell injection
         """
-        # nosemgrep: python.lang.security.audit.subprocess-shell-true
         if prog_type == "python":
+            # SECURITY: _PYTHON_PATH es sys.executable validado, args validados, cwd confinado
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
             return subprocess.run(
                 [_PYTHON_PATH, *args],
                 capture_output=True,
@@ -637,6 +642,8 @@ class SafeExecutor:
         elif prog_type == "bash":
             if _BASH_PATH is None:
                 raise ValueError("bash no disponible")
+            # SECURITY: _BASH_PATH de allowlist estática, args validados, cwd confinado
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
             return subprocess.run(
                 [_BASH_PATH, *args],
                 capture_output=True,
@@ -650,6 +657,8 @@ class SafeExecutor:
         elif prog_type == "node":
             if _NODE_PATH is None:
                 raise ValueError("node no disponible")
+            # SECURITY: _NODE_PATH de allowlist estática, args validados, cwd confinado
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
             return subprocess.run(
                 [_NODE_PATH, *args],
                 capture_output=True,
@@ -663,6 +672,8 @@ class SafeExecutor:
         elif prog_type == "npm":
             if _NPM_PATH is None:
                 raise ValueError("npm no disponible")
+            # SECURITY: _NPM_PATH de allowlist estática, args validados con subcomandos permitidos, cwd confinado
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
             return subprocess.run(
                 [_NPM_PATH, *args],
                 capture_output=True,
@@ -687,11 +698,16 @@ class SafeExecutor:
         """
         Dispatcher async que ejecuta procesos con rutas LITERALES estáticas.
         
-        SECURITY: El primer argumento es siempre una ruta literal estática
-        definida al cargar el módulo. Esto satisface SAST.
+        SECURITY JUSTIFICATION:
+        - _*_PATH provienen de allowlist de rutas estáticas verificadas (exists+executable)
+        - args están validados con allowlists de subcomandos y blocklists de flags
+        - cwd está confinado a WORKSPACE_ROOT via _validate_cwd()
+        - env está sanitizado via _clean_env() (sin PATH heredado)
+        - stdin=DEVNULL previene input injection
         """
-        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use
         if prog_type == "python":
+            # SECURITY: _PYTHON_PATH es sys.executable validado, args validados, cwd confinado
+            # nosemgrep: python.lang.security.audit.dangerous-asyncio-create-exec-audit
             return await asyncio.create_subprocess_exec(
                 _PYTHON_PATH, *args,
                 stdout=asyncio.subprocess.PIPE,
@@ -703,6 +719,8 @@ class SafeExecutor:
         elif prog_type == "bash":
             if _BASH_PATH is None:
                 raise ValueError("bash no disponible")
+            # SECURITY: _BASH_PATH de allowlist estática, args validados, cwd confinado
+            # nosemgrep: python.lang.security.audit.dangerous-asyncio-create-exec-audit
             return await asyncio.create_subprocess_exec(
                 _BASH_PATH, *args,
                 stdout=asyncio.subprocess.PIPE,
@@ -714,6 +732,8 @@ class SafeExecutor:
         elif prog_type == "node":
             if _NODE_PATH is None:
                 raise ValueError("node no disponible")
+            # SECURITY: _NODE_PATH de allowlist estática, args validados, cwd confinado
+            # nosemgrep: python.lang.security.audit.dangerous-asyncio-create-exec-audit
             return await asyncio.create_subprocess_exec(
                 _NODE_PATH, *args,
                 stdout=asyncio.subprocess.PIPE,
@@ -725,6 +745,8 @@ class SafeExecutor:
         elif prog_type == "npm":
             if _NPM_PATH is None:
                 raise ValueError("npm no disponible")
+            # SECURITY: _NPM_PATH de allowlist estática, args validados con subcomandos permitidos, cwd confinado
+            # nosemgrep: python.lang.security.audit.dangerous-asyncio-create-exec-audit
             return await asyncio.create_subprocess_exec(
                 _NPM_PATH, *args,
                 stdout=asyncio.subprocess.PIPE,
