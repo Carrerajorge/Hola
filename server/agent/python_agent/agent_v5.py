@@ -1220,11 +1220,42 @@ browser = VirtualBrowser()
 # COMMAND EXECUTOR Y FILE MANAGER v5.0
 # ═══════════════════════════════════════════════════════════════════════════════
 
+WORKSPACE_ROOT = Path(os.getenv("REPL_HOME") or os.getenv("HOME") or Path.cwd()).resolve()
+
+CONTROL_CHARS_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
+
 class CommandExecutor:
+    ALLOWED_TOOLS: Dict[str, str] = {
+        'python3': sys.executable,
+        'python': sys.executable,
+        'node': '/usr/bin/node',
+        'bash': '/bin/bash',
+        'sh': '/bin/sh',
+        'ls': '/bin/ls',
+        'pwd': '/bin/pwd',
+        'cat': '/bin/cat',
+        'echo': '/bin/echo',
+        'date': '/bin/date',
+        'whoami': '/usr/bin/whoami',
+        'head': '/usr/bin/head',
+        'tail': '/usr/bin/tail',
+        'wc': '/usr/bin/wc',
+        'grep': '/bin/grep',
+        'find': '/usr/bin/find',
+        'mkdir': '/bin/mkdir',
+        'touch': '/usr/bin/touch',
+        'cp': '/bin/cp',
+        'mv': '/bin/mv',
+        'rm': '/bin/rm',
+        'pip': '/usr/bin/pip',
+        'npm': '/usr/bin/npm',
+        'git': '/usr/bin/git',
+    }
+    
     ALLOWED_INTERPRETERS: Dict[str, str] = {
         'python3': sys.executable,
         'python': sys.executable,
-        'node': 'node',
+        'node': '/usr/bin/node',
         'bash': '/bin/bash',
         'sh': '/bin/sh'
     }
@@ -1237,11 +1268,51 @@ class CommandExecutor:
         'python3', 'python', 'pip', 'node', 'npm', 'git'
     ])
     
+    ALLOWED_NPM_SUBCOMMANDS = frozenset({'ci', 'install', 'run', 'test', 'start', 'build', 'list', 'ls'})
+    BLOCKED_NPM_FLAGS = frozenset({'-g', '--global', '--prefix', '--unsafe-perm', '--userconfig'})
+    
     def __init__(self, security: SecurityGuard = None, timeout: int = 30):
         self.security = security or SecurityGuard()
         self.timeout = timeout
         self.workdir = self.security.sandbox_root
         self.history: deque = deque(maxlen=500)
+    
+    def _validate_cwd(self, workdir: Path) -> str:
+        """Validate workdir is within WORKSPACE_ROOT."""
+        wd = Path(workdir).resolve()
+        if wd != WORKSPACE_ROOT and WORKSPACE_ROOT not in wd.parents:
+            raise PermissionError(f"workdir '{wd}' outside WORKSPACE_ROOT")
+        return str(wd)
+    
+    def _clean_env(self) -> Dict[str, str]:
+        """Return minimal environment for subprocess execution."""
+        allow_prefixes = ("LC_",)
+        allow_keys = {"LANG", "TERM", "TMPDIR", "NODE_ENV", "PYTHONPATH"}
+        env: Dict[str, str] = {}
+        for k, v in os.environ.items():
+            if k in allow_keys or any(k.startswith(p) for p in allow_prefixes):
+                env[k] = v
+        env["PATH"] = "/usr/bin:/bin:/usr/local/bin"
+        env["HOME"] = str(WORKSPACE_ROOT)
+        return env
+    
+    def _resolve_tool(self, tool_name: str) -> str:
+        """Resolve tool name to absolute path via allowlist."""
+        if tool_name not in self.ALLOWED_TOOLS:
+            raise PermissionError(f"Tool not allowed: {tool_name!r}")
+        return self.ALLOWED_TOOLS[tool_name]
+    
+    def _apply_extra_policy(self, tool_name: str, args: List[str]) -> None:
+        """Apply extra policy checks for specific tools."""
+        if tool_name == 'npm':
+            if not args:
+                raise ValueError("npm requires subcommand")
+            subcmd = args[0]
+            if subcmd not in self.ALLOWED_NPM_SUBCOMMANDS:
+                raise PermissionError(f"npm subcommand not allowed: {subcmd!r}")
+            for a in args:
+                if a in self.BLOCKED_NPM_FLAGS:
+                    raise PermissionError(f"npm flag blocked: {a!r}")
     
     def _contains_shell_metacharacters(self, cmd: str) -> bool:
         """Check if command contains shell metacharacters (potential injection)."""
@@ -1320,13 +1391,18 @@ class CommandExecutor:
             if not is_valid:
                 return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message=f"Argument validation failed: {sanitize_error}")
             
-            executable = validated_args[0]
+            tool_name = os.path.basename(validated_args[0])
             exec_args = validated_args[1:] if len(validated_args) > 1 else []
             
+            executable_path = self._resolve_tool(tool_name)
+            self._apply_extra_policy(tool_name, exec_args)
+            cwd = self._validate_cwd(self.workdir)
+            env = self._clean_env()
+            
             proc = await asyncio.create_subprocess_exec(
-                executable, *exec_args,
+                executable_path, *exec_args,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.workdir), env=os.environ.copy())
+                cwd=cwd, env=env)
             
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
             result = ExecutionResult(cmd, ExecutionStatus.COMPLETED, proc.returncode,
@@ -1335,6 +1411,8 @@ class CommandExecutor:
                 time.time() - start)
         except asyncio.TimeoutError:
             return ExecutionResult(cmd, ExecutionStatus.TIMEOUT, error_message=f"Timeout: {timeout}s")
+        except (PermissionError, ValueError) as e:
+            return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message=str(e))
         except Exception as e:
             result = ExecutionResult(cmd, ExecutionStatus.FAILED, error_message=str(e))
         
@@ -1355,6 +1433,9 @@ class CommandExecutor:
         script_path = self.workdir / f"_script_{uuid.uuid4().hex[:6]}{ext}"
         
         try:
+            cwd = self._validate_cwd(self.workdir)
+            env = self._clean_env()
+            
             async with aiofiles.open(script_path, 'w') as f:
                 await f.write(code)
             os.chmod(script_path, 0o755)
@@ -1365,7 +1446,7 @@ class CommandExecutor:
             proc = await asyncio.create_subprocess_exec(
                 interpreter_path, str(script_path),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.workdir), env=os.environ.copy())
+                cwd=cwd, env=env)
             
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
             result = ExecutionResult(
@@ -1377,6 +1458,8 @@ class CommandExecutor:
             return result
         except asyncio.TimeoutError:
             return ExecutionResult(f"{interpreter} [script]", ExecutionStatus.TIMEOUT, error_message=f"Timeout: {timeout}s")
+        except PermissionError as e:
+            return ExecutionResult(f"{interpreter} [script]", ExecutionStatus.BLOCKED, error_message=str(e))
         except Exception as e:
             return ExecutionResult(f"{interpreter} [script]", ExecutionStatus.FAILED, error_message=str(e))
         finally:
