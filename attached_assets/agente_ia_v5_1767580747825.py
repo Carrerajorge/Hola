@@ -46,7 +46,7 @@ INSTRUCCIONES PARA REPLIT:
 """
 
 from __future__ import annotations
-import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess
+import os, sys, re, json, shutil, hashlib, asyncio, tempfile, subprocess, shlex
 import mimetypes, time, logging, uuid, traceback, base64, io, threading
 import pickle, gzip, sqlite3, queue as queue_module, weakref, functools
 from pathlib import Path
@@ -1190,16 +1190,30 @@ class CommandExecutor:
         self.history.append(result)
         return result
     
+    ALLOWED_INTERPRETERS = {
+        'python3': ('/usr/bin/python3', '.py'),
+        'python': ('/usr/bin/python', '.py'),
+        'bash': ('/bin/bash', '.sh'),
+        'node': ('/usr/bin/node', '.js'),
+    }
+
     async def run_script(self, code: str, interpreter: str = "python3", timeout: int = None) -> ExecutionResult:
-        ext = {'python3': '.py', 'python': '.py', 'bash': '.sh', 'node': '.js'}.get(interpreter, '.py')
-        path = self.workdir / f"_script_{uuid.uuid4().hex[:6]}{ext}"
+        if interpreter not in self.ALLOWED_INTERPRETERS:
+            return ExecutionResult(
+                f"run_script:{interpreter}", 
+                ExecutionStatus.BLOCKED, 
+                error_message=f"Intérprete no permitido: {interpreter}. Permitidos: {list(self.ALLOWED_INTERPRETERS.keys())}"
+            )
+        interp_path, ext = self.ALLOWED_INTERPRETERS[interpreter]
+        script_path = self.workdir / f"_script_{uuid.uuid4().hex[:6]}{ext}"
         try:
-            async with aiofiles.open(path, 'w') as f:
+            async with aiofiles.open(script_path, 'w') as f:
                 await f.write(code)
-            os.chmod(path, 0o755)
-            return await self.execute(f"{interpreter} {path}", timeout)
+            os.chmod(script_path, 0o755)
+            safe_cmd = f"{shlex.quote(interp_path)} {shlex.quote(str(script_path))}"
+            return await self.execute(safe_cmd, timeout)
         finally:
-            try: path.unlink()
+            try: script_path.unlink()
             except: pass
 
 
