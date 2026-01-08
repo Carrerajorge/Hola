@@ -71,6 +71,13 @@ _DANGEROUS_ARG_PATTERNS: list[re.Pattern] = [
     re.compile(r"\x00"),     # Null bytes
 ]
 
+# Flags que permiten ejecución de código inline (RCE via -c/-e)
+_BLOCKED_INLINE_CODE_FLAGS: set[str] = {
+    "-c", "--command",       # python -c, bash -c
+    "-e", "--eval",          # node -e, perl -e
+    "--exec",                # algunas herramientas
+}
+
 _PIP_SPEC_RE = re.compile(r"^[A-Za-z0-9_.-]+(==[A-Za-z0-9_.-]+)?$")
 
 
@@ -134,6 +141,13 @@ def _validate_pip_args(args: Sequence[str]) -> None:
     for a in args:
         if a in _BLOCKED_PIP_FLAGS:
             raise ValueError(f"Blocked pip flag: {a}")
+
+
+def _validate_no_inline_code_flags(args: Sequence[str]) -> None:
+    """Bloquea flags que permiten ejecución de código inline (-c, -e, etc.)."""
+    for a in args:
+        if a in _BLOCKED_INLINE_CODE_FLAGS:
+            raise ValueError(f"Blocked inline code execution flag: {a}")
 
 
 def _resolve_program(program: str) -> str:
@@ -253,6 +267,7 @@ class SafeExecutor:
             raise ValueError(f"Blocked program: {cmd.program}")
 
         _validate_args(cmd.args)
+        _validate_no_inline_code_flags(cmd.args)
         if _is_pip(cmd.program, cmd.args):
             _validate_pip_args(cmd.args)
 
@@ -298,6 +313,7 @@ class SafeExecutor:
             raise ValueError(f"Blocked program: {cmd.program}")
 
         _validate_args(cmd.args)
+        _validate_no_inline_code_flags(cmd.args)
         if _is_pip(cmd.program, cmd.args):
             _validate_pip_args(cmd.args)
 
