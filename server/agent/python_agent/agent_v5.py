@@ -1419,13 +1419,35 @@ class CommandExecutor:
         self.history.append(result)
         return result
     
-    def _validate_script_in_workspace(self, script_path: Path) -> str:
-        """Validate script path is within workspace, resolving symlinks."""
+    ALLOWED_SCRIPT_EXTENSIONS = frozenset({'.py', '.js', '.sh'})
+
+    def _validate_script_in_workspace(self, script_path: Path, expected_ext: str = None) -> str:
+        """Validate script path is within workspace with security checks.
+        
+        Validates:
+        - Path resolves within workspace (prevents traversal)
+        - No control characters in path string
+        - Extension is in allowlist
+        - File exists
+        """
         resolved = script_path.resolve()
         workspace = self.workdir.resolve()
         if resolved != workspace and workspace not in resolved.parents:
             raise PermissionError(f"Script path outside workspace: {resolved}")
-        return str(resolved)
+        
+        path_str = str(resolved)
+        if CONTROL_CHARS_PATTERN.search(path_str):
+            raise PermissionError("Script path contains control characters")
+        
+        if expected_ext and resolved.suffix != expected_ext:
+            raise PermissionError(f"Script extension mismatch: expected {expected_ext}, got {resolved.suffix}")
+        if resolved.suffix not in self.ALLOWED_SCRIPT_EXTENSIONS:
+            raise PermissionError(f"Script extension not allowed: {resolved.suffix}")
+        
+        if not resolved.is_file():
+            raise FileNotFoundError(f"Script does not exist: {resolved}")
+        
+        return path_str
 
     async def _exec_with_literal_interpreter(self, interpreter_key: str, script_path_str: str, cwd: str, env: dict):
         """Execute script using literal interpreter paths to satisfy static analysis."""
@@ -1489,7 +1511,7 @@ class CommandExecutor:
                 await f.write(code)
             os.chmod(script_path, 0o755)
             
-            safe_script_path = self._validate_script_in_workspace(script_path)
+            safe_script_path = self._validate_script_in_workspace(script_path, expected_ext=ext)
             
             start = time.time()
             timeout = timeout or self.timeout
