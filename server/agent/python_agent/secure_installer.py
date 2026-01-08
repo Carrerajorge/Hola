@@ -4,14 +4,17 @@ from __future__ import annotations
 import io
 import os
 import re
+import logging
 import contextlib
 from pathlib import Path
-from typing import FrozenSet
+from typing import FrozenSet, Optional
 
 try:
     from packaging.requirements import Requirement
 except ImportError:
     Requirement = None  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_ROOT", Path.cwd())).resolve()
 
@@ -25,6 +28,23 @@ ALLOWED_PACKAGES: FrozenSet[str] = frozenset([
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _PIN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9][A-Za-z0-9.*+!-]*$")
+
+
+class InstallError(RuntimeError):
+    """Secure error (no sensitive data) for dependency installation failures."""
+
+
+def _pkg_name_for_log(req: str) -> str:
+    """Return minimal identifier for logs (name only, no version/URLs/tokens)."""
+    if Requirement is not None:
+        try:
+            return Requirement(req).name
+        except Exception:
+            pass
+    for sep in ("==", ">=", "<=", "~=", ">", "<", "@"):
+        if sep in req:
+            return req.split(sep, 1)[0].strip()
+    return req.strip()
 
 
 def _validate_requirement(req: str, require_pin: bool = False) -> str:
@@ -45,7 +65,7 @@ def _validate_requirement(req: str, require_pin: bool = False) -> str:
         try:
             r = Requirement(req)
         except Exception as e:
-            raise ValueError(f"Invalid package specification: {e}")
+            raise ValueError(f"Invalid package specification: {type(e).__name__}")
         if r.url is not None or r.marker is not None or r.extras:
             raise ValueError("pkg invalid (extras/marker/url not allowed)")
         if not _NAME_RE.match(r.name):
@@ -79,11 +99,19 @@ def validate_package_name(pkg: str) -> bool:
         return False
 
 
-def safe_pip_install(pkg: str, quiet: bool = True, timeout: int = 120) -> bool:
+def safe_pip_install(pkg: str, quiet: bool = True, timeout: int = 120, context: Optional[str] = None) -> bool:
+    """
+    Install a validated dependency.
+    IMPORTANT: Never print or log the full requirement string.
+    """
+    pkg_for_log = _pkg_name_for_log(pkg)
+    
     try:
         safe_req = _validate_requirement(pkg, require_pin=False)
     except (ValueError, TypeError, PermissionError) as e:
-        print(f"⚠️ Package validation failed: {e}")
+        msg_ctx = f" ({context})" if context else ""
+        logger.warning("Package validation failed%s: package=%s error_type=%s",
+                      msg_ctx, pkg_for_log, type(e).__name__)
         return False
 
     old_env = os.environ.copy()
@@ -106,7 +134,25 @@ def safe_pip_install(pkg: str, quiet: bool = True, timeout: int = 120) -> bool:
 
         return rc == 0
     except Exception as e:
+        msg_ctx = f" ({context})" if context else ""
+        logger.error("Dependency install failed%s: package=%s error_type=%s",
+                    msg_ctx, pkg_for_log, type(e).__name__)
         return False
     finally:
         os.environ.clear()
         os.environ.update(old_env)
+
+
+def install_requirement(safe_req: str, *, context: Optional[str] = None) -> None:
+    """
+    Install a pre-validated dependency.
+    IMPORTANT: Never print or log the full requirement string.
+    Raises InstallError on failure (without sensitive data).
+    """
+    pkg_for_log = _pkg_name_for_log(safe_req)
+    
+    if not safe_pip_install(safe_req, quiet=True, context=context):
+        msg_ctx = f" ({context})" if context else ""
+        logger.error("Dependency install failed%s: package=%s",
+                    msg_ctx, pkg_for_log)
+        raise InstallError(f"Failed to install dependency: {pkg_for_log}")
