@@ -99,7 +99,8 @@ export default function Home() {
     folders,
     createFolder,
     moveChatToFolder,
-    removeChatFromFolder
+    removeChatFromFolder,
+    getFolderForChat
   } = useChatFolders();
 
   const handleMoveToFolder = useCallback((chatId: string, folderId: string | null) => {
@@ -482,6 +483,18 @@ export default function Home() {
             onPinGptToSidebar={handlePinGptToSidebar}
             isGptPinned={isPinned}
             onAboutGpt={handleAboutGptFromChat}
+            onPinChat={pinChat}
+            onArchiveChat={archiveChat}
+            onHideChat={hideChat}
+            onDeleteChat={deleteChat}
+            onDownloadChat={downloadChat}
+            onEditChatTitle={editChatTitle}
+            isPinned={activeChat?.pinned === true || activeChat?.pinned === "true"}
+            isArchived={activeChat?.archived === true || activeChat?.archived === "true"}
+            folders={folders}
+            onMoveToFolder={handleMoveToFolder}
+            onCreateFolder={createFolder}
+            currentFolderId={activeChat?.id ? getFolderForChat(activeChat.id)?.id || null : null}
           />
         )}
       </main>

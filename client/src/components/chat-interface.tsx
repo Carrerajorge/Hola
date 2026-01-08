@@ -45,7 +45,10 @@ import {
   Pin,
   Link,
   Star,
-  Settings
+  Settings,
+  Archive,
+  Folder,
+  FolderPlus
 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
@@ -815,6 +818,18 @@ interface ChatInterfaceProps {
   onPinGptToSidebar?: (gptId: string) => void;
   isGptPinned?: (gptId: string) => boolean;
   onAboutGpt?: (gpt: ActiveGpt) => void;
+  onPinChat?: (id: string, e: React.MouseEvent) => void;
+  onArchiveChat?: (id: string, e: React.MouseEvent) => void;
+  onHideChat?: (id: string, e: React.MouseEvent) => void;
+  onDeleteChat?: (id: string, e: React.MouseEvent) => void;
+  onDownloadChat?: (id: string, e: React.MouseEvent) => void;
+  onEditChatTitle?: (id: string, newTitle: string) => void;
+  isPinned?: boolean;
+  isArchived?: boolean;
+  folders?: Array<{ id: string; name: string; color: string; chatIds: string[] }>;
+  onMoveToFolder?: (chatId: string, folderId: string | null) => void;
+  onCreateFolder?: (name: string) => void;
+  currentFolderId?: string | null;
 }
 
 interface UploadedFile {
@@ -888,7 +903,19 @@ export function ChatInterface({
   onHideGptFromSidebar,
   onPinGptToSidebar,
   isGptPinned,
-  onAboutGpt
+  onAboutGpt,
+  onPinChat,
+  onArchiveChat,
+  onHideChat,
+  onDeleteChat,
+  onDownloadChat,
+  onEditChatTitle,
+  isPinned = false,
+  isArchived = false,
+  folders = [],
+  onMoveToFolder,
+  onCreateFolder,
+  currentFolderId
 }: ChatInterfaceProps) {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -4171,9 +4198,128 @@ IMPORTANTE:
               <ShareIcon size={20} />
             </Button>
           )}
-          <Button variant="ghost" size="icon">
-            <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" data-testid="button-chat-options">
+                <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
+              <DropdownMenuItem
+                onClick={(e) => chatId && onPinChat?.(chatId, e as unknown as React.MouseEvent)}
+                disabled={!chatId || chatId.startsWith("pending-")}
+                data-testid="menu-pin-chat"
+              >
+                <Pin className="h-4 w-4 mr-2" />
+                {isPinned ? "Desfijar" : "Fijar chat"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  if (chatId && onEditChatTitle) {
+                    const newTitle = prompt("Nuevo título del chat:", messages[0]?.content?.slice(0, 50) || "Chat");
+                    if (newTitle && newTitle.trim()) {
+                      onEditChatTitle(chatId, newTitle.trim());
+                    }
+                  }
+                }}
+                disabled={!chatId || chatId.startsWith("pending-")}
+                data-testid="menu-edit-chat"
+              >
+                <Pencil className="h-4 w-4 mr-2" />
+                Editar
+              </DropdownMenuItem>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger 
+                  disabled={!chatId || chatId.startsWith("pending-")}
+                  data-testid="menu-move-folder"
+                >
+                  <Folder className="h-4 w-4 mr-2" />
+                  Mover a carpeta
+                </DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent>
+                    {folders.length > 0 ? (
+                      <>
+                        {folders.map((folder) => (
+                          <DropdownMenuItem
+                            key={folder.id}
+                            onClick={() => chatId && onMoveToFolder?.(chatId, folder.id)}
+                            data-testid={`menu-folder-${folder.id}`}
+                          >
+                            <span 
+                              className="h-3 w-3 rounded-full mr-2 flex-shrink-0" 
+                              style={{ backgroundColor: folder.color }}
+                            />
+                            {folder.name}
+                          </DropdownMenuItem>
+                        ))}
+                        {currentFolderId && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => chatId && onMoveToFolder?.(chatId, null)}
+                              data-testid="menu-remove-folder"
+                            >
+                              <X className="h-4 w-4 mr-2" />
+                              Quitar de carpeta
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <DropdownMenuItem
+                        onClick={() => {
+                          const folderName = prompt("Nombre de la carpeta:");
+                          if (folderName && folderName.trim()) {
+                            onCreateFolder?.(folderName.trim());
+                          }
+                        }}
+                        data-testid="menu-create-folder"
+                      >
+                        <FolderPlus className="h-4 w-4 mr-2" />
+                        Crear carpeta
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
+              <DropdownMenuItem
+                onClick={(e) => chatId && onDownloadChat?.(chatId, e as unknown as React.MouseEvent)}
+                disabled={!chatId || chatId.startsWith("pending-")}
+                data-testid="menu-download-chat"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Descargar
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={(e) => chatId && onArchiveChat?.(chatId, e as unknown as React.MouseEvent)}
+                disabled={!chatId || chatId.startsWith("pending-")}
+                data-testid="menu-archive-chat"
+              >
+                <Archive className="h-4 w-4 mr-2" />
+                {isArchived ? "Desarchivar" : "Archivar"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={(e) => chatId && onHideChat?.(chatId, e as unknown as React.MouseEvent)}
+                disabled={!chatId || chatId.startsWith("pending-")}
+                data-testid="menu-hide-chat"
+              >
+                <EyeOff className="h-4 w-4 mr-2" />
+                Ocultar
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={(e) => chatId && onDeleteChat?.(chatId, e as unknown as React.MouseEvent)}
+                disabled={!chatId || chatId.startsWith("pending-")}
+                className="text-red-500 focus:text-red-500"
+                data-testid="menu-delete-chat"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Eliminar
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
       {/* Main Content Area with Side Panel */}
