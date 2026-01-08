@@ -106,7 +106,6 @@ def safe_pip_install(pkg: str, quiet: bool = True, timeout: int = 120) -> bool:
 
         return rc == 0
     except Exception as e:
-        print(f"⚠️ Error installing {safe_req}: {e}")
         return False
     finally:
         os.environ.clear()
