@@ -1260,6 +1260,22 @@ class CommandExecutor:
         'sh': '/bin/sh'
     }
     
+    BLOCKED_INTERPRETER_FLAGS: Dict[str, frozenset] = {
+        'python3': frozenset({'-c', '--command'}),
+        'python': frozenset({'-c', '--command'}),
+        'node': frozenset({'-e', '--eval', '-p', '--print'}),
+        'bash': frozenset({'-c', '-i'}),
+        'sh': frozenset({'-c', '-i'}),
+    }
+    
+    INTERPRETER_EXT_POLICY: Dict[str, str] = {
+        'python3': '.py',
+        'python': '.py',
+        'node': '.js',
+        'bash': '.sh',
+        'sh': '.sh',
+    }
+    
     SHELL_METACHARACTERS = frozenset('|><&;$`(){}[]\\!*?#~')
     
     SAFE_COMMANDS = frozenset([
@@ -1421,15 +1437,26 @@ class CommandExecutor:
     
     ALLOWED_SCRIPT_EXTENSIONS = frozenset({'.py', '.js', '.sh'})
 
-    def _validate_script_in_workspace(self, script_path: Path, expected_ext: str = None) -> str:
+    def _validate_script_in_workspace(self, script_path: Path, interpreter_key: str = None, expected_ext: str = None) -> str:
         """Validate script path is within workspace with security checks.
         
         Validates:
         - Path resolves within workspace (prevents traversal)
+        - Symlinks resolve within workspace
         - No control characters in path string
-        - Extension is in allowlist
-        - File exists
+        - Extension matches interpreter policy
+        - File exists and is regular file
         """
+        path_str_raw = str(script_path)
+        if CONTROL_CHARS_PATTERN.search(path_str_raw):
+            raise PermissionError("Script path contains control characters")
+        
+        if script_path.is_symlink():
+            resolved = script_path.resolve()
+            workspace = self.workdir.resolve()
+            if resolved != workspace and workspace not in resolved.parents:
+                raise PermissionError(f"Symlink target outside workspace: {resolved}")
+        
         resolved = script_path.resolve()
         workspace = self.workdir.resolve()
         if resolved != workspace and workspace not in resolved.parents:
@@ -1437,17 +1464,35 @@ class CommandExecutor:
         
         path_str = str(resolved)
         if CONTROL_CHARS_PATTERN.search(path_str):
-            raise PermissionError("Script path contains control characters")
+            raise PermissionError("Resolved path contains control characters")
         
-        if expected_ext and resolved.suffix != expected_ext:
+        if interpreter_key and interpreter_key in self.INTERPRETER_EXT_POLICY:
+            required_ext = self.INTERPRETER_EXT_POLICY[interpreter_key]
+            if resolved.suffix != required_ext:
+                raise PermissionError(f"Extension {resolved.suffix} not allowed for {interpreter_key} (requires {required_ext})")
+        elif expected_ext and resolved.suffix != expected_ext:
             raise PermissionError(f"Script extension mismatch: expected {expected_ext}, got {resolved.suffix}")
-        if resolved.suffix not in self.ALLOWED_SCRIPT_EXTENSIONS:
+        elif resolved.suffix not in self.ALLOWED_SCRIPT_EXTENSIONS:
             raise PermissionError(f"Script extension not allowed: {resolved.suffix}")
         
-        if not resolved.is_file():
+        if not resolved.exists():
             raise FileNotFoundError(f"Script does not exist: {resolved}")
+        if not resolved.is_file():
+            raise PermissionError(f"Script is not a regular file: {resolved}")
         
         return path_str
+
+    def _validate_script_args(self, interpreter_key: str, args: List[str]) -> List[str]:
+        """Validate script arguments don't contain blocked flags."""
+        blocked = self.BLOCKED_INTERPRETER_FLAGS.get(interpreter_key, frozenset())
+        for arg in args:
+            if arg in blocked:
+                raise PermissionError(f"Blocked flag for {interpreter_key}: {arg}")
+            if CONTROL_CHARS_PATTERN.search(arg):
+                raise PermissionError(f"Argument contains control characters: {arg!r}")
+            if len(arg) > 4096:
+                raise PermissionError(f"Argument too long: {len(arg)} chars")
+        return list(args)
 
     async def _exec_with_literal_interpreter(self, interpreter_key: str, script_path_str: str, cwd: str, env: dict):
         """Execute script using literal interpreter paths to satisfy static analysis."""
@@ -1511,7 +1556,7 @@ class CommandExecutor:
                 await f.write(code)
             os.chmod(script_path, 0o755)
             
-            safe_script_path = self._validate_script_in_workspace(script_path, expected_ext=ext)
+            safe_script_path = self._validate_script_in_workspace(script_path, interpreter_key=interpreter_key)
             
             start = time.time()
             timeout = timeout or self.timeout
