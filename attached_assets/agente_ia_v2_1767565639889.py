@@ -24,11 +24,12 @@ import inspect
 # INSTALACIÓN DE DEPENDENCIAS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _install(pkg):
-    # Validate package name to ensure it only contains safe characters
-    if not re.match(r'^[a-zA-Z0-9._-]+$', pkg):
-        raise ValueError(f"Invalid package name: {pkg}")
-    subprocess.run([sys.executable, "-m", "pip", "install", pkg, "-q"], capture_output=True)
+_ALLOWED_PACKAGES = frozenset(["aiofiles", "rich", "httpx", "beautifulsoup4", "python-pptx", "python-docx", "openpyxl"])
+
+def _install(pkg: str) -> None:
+    if pkg not in _ALLOWED_PACKAGES:
+        raise ValueError(f"Package not in whitelist: {pkg}")
+    subprocess.run([sys.executable, "-m", "pip", "install", "--", pkg, "-q"], capture_output=True, check=False)
 
 PKGS = [("aiofiles","aiofiles"),("rich","rich"),("httpx","httpx"),("beautifulsoup4","bs4"),
         ("python-pptx","pptx"),("python-docx","docx"),("openpyxl","openpyxl")]
