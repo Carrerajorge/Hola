@@ -1173,8 +1173,20 @@ class CommandExecutor:
             return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message="Bloqueado por seguridad")
         
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            # Use shlex.split to safely parse the command and prevent shell injection
+            # This replaces create_subprocess_shell with create_subprocess_exec
+            try:
+                cmd_args = shlex.split(cmd)
+            except ValueError as e:
+                return ExecutionResult(cmd, ExecutionStatus.FAILED, 
+                    error_message=f"Error al parsear comando: {e}")
+            
+            if not cmd_args:
+                return ExecutionResult(cmd, ExecutionStatus.FAILED, 
+                    error_message="Comando vacío")
+            
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.workdir), env=os.environ.copy())
             
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
