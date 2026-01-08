@@ -9,7 +9,9 @@ vite.config.ts.*
 # SECURITY: Aggressive patterns to prevent secret leaks
 # =============================================================================
 
-# Replit / sandbox state (may contain environment dumps)
+# Replit / sandbox / estado (may contain environment dumps)
+sandbox_workspace/
+attached_assets/
 **/.state/
 sandbox_workspace/.state/
 **/session*.json
@@ -34,3 +36,12 @@ sandbox_workspace/.state/
 **/service-account*.json
 **/*secret*.json
 **/*token*.json
+
+# Dumps de sesión/secretos
+**/*session*.json
+**/*secrets*.json
+
+# Compiled Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
