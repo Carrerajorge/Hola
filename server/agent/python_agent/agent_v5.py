@@ -1248,14 +1248,16 @@ class CommandExecutor:
         return any(c in cmd for c in self.SHELL_METACHARACTERS)
     
     def _sanitize_args(self, args: List[str]) -> Tuple[bool, List[str], str]:
-        """Aggressively sanitize and validate command arguments.
+        """Validate command arguments for security.
         
-        Returns: (is_valid, sanitized_args, error_message)
+        Note: No quoting is applied since we use create_subprocess_exec (not shell).
+        Arguments are passed directly to the program without shell interpretation.
+        
+        Returns: (is_valid, validated_args, error_message)
         """
         if not args:
             return False, [], "Empty argument list"
         
-        sanitized = []
         for i, arg in enumerate(args):
             if '\x00' in arg:
                 return False, [], f"Null byte detected in argument {i}"
@@ -1263,7 +1265,6 @@ class CommandExecutor:
                 return False, [], f"Control character detected in argument {i}"
             if len(arg) > 4096:
                 return False, [], f"Argument {i} exceeds maximum length (4096)"
-            sanitized.append(shlex.quote(arg) if i > 0 else arg)
         
         executable = args[0]
         base_cmd = os.path.basename(executable)
