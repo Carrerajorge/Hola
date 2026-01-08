@@ -75,13 +75,32 @@ _PIP_SPEC_RE = re.compile(r"^[A-Za-z0-9_.-]+(==[A-Za-z0-9_.-]+)?$")
 
 
 def _clean_env(env: Mapping[str, str] | None) -> dict[str, str]:
-    """Limpia variables de entorno, removiendo secretos."""
-    base = dict(env or os.environ)
-    sensitive_patterns = ("SECRET", "API_KEY", "TOKEN", "PASSWORD", "PRIVATE", "CREDENTIAL")
-    for k in list(base.keys()):
-        if any(p in k.upper() for p in sensitive_patterns):
-            base.pop(k, None)
-    return base
+    """Creates a minimal, safe environment for child processes.
+    
+    Instead of inheriting the entire environment and removing secrets,
+    we explicitly allowlist only the necessary environment variables.
+    This prevents leaking any secrets that might be in the parent environment.
+    """
+    ALLOWED_ENV_VARS = {
+        "PATH",
+        "HOME",
+        "USER",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "SHELL",
+        "PYTHONPATH",
+        "PYTHONIOENCODING",
+        "NODE_PATH",
+        "NODE_ENV",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+    }
+    
+    source = env if env is not None else os.environ
+    return {k: v for k, v in source.items() if k in ALLOWED_ENV_VARS}
 
 
 def _deny_dangerous_chars(s: str) -> None:

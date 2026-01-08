@@ -1,7 +1,12 @@
 # Estado/artefactos del IDE o sandbox (NO deben escanearse)
 sandbox_workspace/
 **/.state/
-attached_assets/
+
+# Attached assets - only exclude non-code files, keep .py and .ts for scanning
+attached_assets/*.json
+attached_assets/*.md
+attached_assets/*.txt
+attached_assets/*.log
 
 # caches comunes
 **/__pycache__/

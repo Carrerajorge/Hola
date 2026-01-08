@@ -1,7 +1,7 @@
 import * as path from "path";
 import * as fs from "fs";
 import * as fsp from "fs/promises";
-import { exec } from "child_process";
+import { exec, execFile } from "child_process";
 import { promisify } from "util";
 import {
   EnvironmentConfig,
@@ -18,6 +18,7 @@ import { FileManager } from "./fileManager";
 import { StateManager } from "./stateManager";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export class SandboxEnvironment implements ISandboxService {
   private config: EnvironmentConfig;
@@ -292,12 +293,24 @@ export class SandboxEnvironment implements ISandboxService {
     return SandboxEnvironment.VERSION_PATTERN.test(version);
   }
 
+  private getSafeEnv(): Record<string, string> {
+    return {
+      PATH: process.env.PATH || "/usr/bin:/bin",
+      HOME: process.env.HOME || "/tmp",
+      TMPDIR: this.tempDir,
+      LANG: "en_US.UTF-8",
+    };
+  }
+
   async installPipPackage(packageName: string, version?: string): Promise<ExecutionResult> {
     this.ensureInitialized();
     
+    const pkgSpec = packageName + (version ? `==${version}` : "");
+    const commandDesc = `pip3 install ${pkgSpec}`;
+    
     if (!this.validatePackageName(packageName)) {
       return {
-        command: `pip3 install ${packageName}`,
+        command: commandDesc,
         status: "blocked",
         returnCode: 1,
         stdout: "",
@@ -309,7 +322,7 @@ export class SandboxEnvironment implements ISandboxService {
     
     if (version && !this.validateVersion(version)) {
       return {
-        command: `pip3 install ${packageName}==${version}`,
+        command: commandDesc,
         status: "blocked",
         returnCode: 1,
         stdout: "",
@@ -319,20 +332,53 @@ export class SandboxEnvironment implements ISandboxService {
       };
     }
 
-    const args = ["install", packageName + (version ? `==${version}` : ""), "--break-system-packages", "-q"];
-    const result = await this.execute(`pip3 ${args.join(" ")}`, { timeout: 120000 });
-    if (result.status === "completed" && result.returnCode === 0) {
+    const args = ["install", pkgSpec, "--break-system-packages", "-q"];
+    const startTime = Date.now();
+    
+    try {
+      const { stdout, stderr } = await execFileAsync("pip3", args, {
+        cwd: this.workspace,
+        env: this.getSafeEnv(),
+        timeout: 120000,
+      });
+      
+      const duration = Date.now() - startTime;
       await this.state!.registerPackage(packageName, version || "latest", "pip");
+      
+      return {
+        command: commandDesc,
+        status: "completed",
+        returnCode: 0,
+        stdout: stdout || "",
+        stderr: stderr || "",
+        executionTime: duration,
+        errorMessage: "",
+      };
+    } catch (error: unknown) {
+      const duration = Date.now() - startTime;
+      const execError = error as { code?: number; stdout?: string; stderr?: string; killed?: boolean; message?: string };
+      
+      return {
+        command: commandDesc,
+        status: execError.killed ? "timeout" : "failed",
+        returnCode: typeof execError.code === "number" ? execError.code : 1,
+        stdout: execError.stdout || "",
+        stderr: execError.stderr || "",
+        executionTime: duration,
+        errorMessage: execError.message || "Package installation failed",
+      };
     }
-    return result;
   }
 
   async installNpmPackage(packageName: string, version?: string, global: boolean = false): Promise<ExecutionResult> {
     this.ensureInitialized();
     
+    const pkgSpec = packageName + (version ? `@${version}` : "");
+    const commandDesc = `npm install ${global ? "-g " : ""}${pkgSpec}`;
+    
     if (!this.validatePackageName(packageName)) {
       return {
-        command: `npm install ${packageName}`,
+        command: commandDesc,
         status: "blocked",
         returnCode: 1,
         stdout: "",
@@ -344,7 +390,7 @@ export class SandboxEnvironment implements ISandboxService {
     
     if (version && !this.validateVersion(version)) {
       return {
-        command: `npm install ${packageName}@${version}`,
+        command: commandDesc,
         status: "blocked",
         returnCode: 1,
         stdout: "",
@@ -354,13 +400,42 @@ export class SandboxEnvironment implements ISandboxService {
       };
     }
 
-    const pkgSpec = packageName + (version ? `@${version}` : "");
     const args = ["install", ...(global ? ["-g"] : []), pkgSpec];
-    const result = await this.execute(`npm ${args.join(" ")}`, { timeout: 120000 });
-    if (result.status === "completed" && result.returnCode === 0) {
+    const startTime = Date.now();
+    
+    try {
+      const { stdout, stderr } = await execFileAsync("npm", args, {
+        cwd: this.workspace,
+        env: this.getSafeEnv(),
+        timeout: 120000,
+      });
+      
+      const duration = Date.now() - startTime;
       await this.state!.registerPackage(packageName, version || "latest", "npm");
+      
+      return {
+        command: commandDesc,
+        status: "completed",
+        returnCode: 0,
+        stdout: stdout || "",
+        stderr: stderr || "",
+        executionTime: duration,
+        errorMessage: "",
+      };
+    } catch (error: unknown) {
+      const duration = Date.now() - startTime;
+      const execError = error as { code?: number; stdout?: string; stderr?: string; killed?: boolean; message?: string };
+      
+      return {
+        command: commandDesc,
+        status: execError.killed ? "timeout" : "failed",
+        returnCode: typeof execError.code === "number" ? execError.code : 1,
+        stdout: execError.stdout || "",
+        stderr: execError.stderr || "",
+        executionTime: duration,
+        errorMessage: execError.message || "Package installation failed",
+      };
     }
-    return result;
   }
 
   async getInstalledPackages(): Promise<Record<string, unknown>> {
