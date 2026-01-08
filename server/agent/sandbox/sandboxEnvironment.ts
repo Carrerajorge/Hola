@@ -279,10 +279,48 @@ export class SandboxEnvironment implements ISandboxService {
     return this.files!.search(pattern, dirPath, contentSearch);
   }
 
+  private static readonly PACKAGE_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9._-]*$/;
+  private static readonly VERSION_PATTERN = /^[a-zA-Z0-9._-]+$/;
+
+  private validatePackageName(name: string): boolean {
+    if (!name || name.length > 100) return false;
+    return SandboxEnvironment.PACKAGE_NAME_PATTERN.test(name);
+  }
+
+  private validateVersion(version: string): boolean {
+    if (!version || version.length > 50) return false;
+    return SandboxEnvironment.VERSION_PATTERN.test(version);
+  }
+
   async installPipPackage(packageName: string, version?: string): Promise<ExecutionResult> {
     this.ensureInitialized();
-    const pkgSpec = version ? `${packageName}==${version}` : packageName;
-    const result = await this.execute(`pip3 install ${pkgSpec} --break-system-packages -q`, { timeout: 120000 });
+    
+    if (!this.validatePackageName(packageName)) {
+      return {
+        command: `pip3 install ${packageName}`,
+        status: "blocked",
+        returnCode: 1,
+        stdout: "",
+        stderr: "",
+        executionTime: 0,
+        errorMessage: `Invalid package name: ${packageName}. Only alphanumeric, dots, hyphens, and underscores allowed.`,
+      };
+    }
+    
+    if (version && !this.validateVersion(version)) {
+      return {
+        command: `pip3 install ${packageName}==${version}`,
+        status: "blocked",
+        returnCode: 1,
+        stdout: "",
+        stderr: "",
+        executionTime: 0,
+        errorMessage: `Invalid version format: ${version}`,
+      };
+    }
+
+    const args = ["install", packageName + (version ? `==${version}` : ""), "--break-system-packages", "-q"];
+    const result = await this.execute(`pip3 ${args.join(" ")}`, { timeout: 120000 });
     if (result.status === "completed" && result.returnCode === 0) {
       await this.state!.registerPackage(packageName, version || "latest", "pip");
     }
@@ -291,9 +329,34 @@ export class SandboxEnvironment implements ISandboxService {
 
   async installNpmPackage(packageName: string, version?: string, global: boolean = false): Promise<ExecutionResult> {
     this.ensureInitialized();
-    const pkgSpec = version ? `${packageName}@${version}` : packageName;
-    const globalFlag = global ? "-g" : "";
-    const result = await this.execute(`npm install ${globalFlag} ${pkgSpec}`, { timeout: 120000 });
+    
+    if (!this.validatePackageName(packageName)) {
+      return {
+        command: `npm install ${packageName}`,
+        status: "blocked",
+        returnCode: 1,
+        stdout: "",
+        stderr: "",
+        executionTime: 0,
+        errorMessage: `Invalid package name: ${packageName}. Only alphanumeric, dots, hyphens, and underscores allowed.`,
+      };
+    }
+    
+    if (version && !this.validateVersion(version)) {
+      return {
+        command: `npm install ${packageName}@${version}`,
+        status: "blocked",
+        returnCode: 1,
+        stdout: "",
+        stderr: "",
+        executionTime: 0,
+        errorMessage: `Invalid version format: ${version}`,
+      };
+    }
+
+    const pkgSpec = packageName + (version ? `@${version}` : "");
+    const args = ["install", ...(global ? ["-g"] : []), pkgSpec];
+    const result = await this.execute(`npm ${args.join(" ")}`, { timeout: 120000 });
     if (result.status === "completed" && result.returnCode === 0) {
       await this.state!.registerPackage(packageName, version || "latest", "npm");
     }

@@ -174,6 +174,14 @@ export class CommandExecutor {
     });
   }
 
+  private static readonly ALLOWED_INTERPRETERS: Record<string, string> = {
+    bash: "/bin/bash",
+    sh: "/bin/sh",
+    python: "python3",
+    python3: "python3",
+    node: "node",
+  };
+
   async executeScript(
     scriptContent: string,
     interpreter: string = "bash",
@@ -186,23 +194,129 @@ export class CommandExecutor {
       python3: ".py",
       node: ".js",
     };
-    const ext = extMap[interpreter] ?? ".txt";
+
+    const interpreterKey = interpreter.toLowerCase().trim();
+    if (!(interpreterKey in CommandExecutor.ALLOWED_INTERPRETERS)) {
+      return {
+        command: `${interpreter} [script]`,
+        status: "blocked",
+        returnCode: 1,
+        stdout: "",
+        stderr: "",
+        executionTime: 0,
+        errorMessage: `Interpreter not allowed: ${interpreter}. Allowed: ${Object.keys(CommandExecutor.ALLOWED_INTERPRETERS).join(", ")}`,
+      };
+    }
+
+    const interpreterPath = CommandExecutor.ALLOWED_INTERPRETERS[interpreterKey];
+    const ext = extMap[interpreterKey] ?? ".txt";
 
     const tempDir = this.workingDir;
-    const scriptPath = path.join(tempDir, `script_${Date.now()}${ext}`);
+    const scriptPath = path.join(tempDir, `script_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
+
+    const startTime = Date.now();
 
     try {
       fs.writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
-      const command = `${interpreter} "${scriptPath}"`;
-      const result = await this.execute(command, { timeout });
-      return result;
-    } finally {
-      try {
-        if (fs.existsSync(scriptPath)) {
-          fs.unlinkSync(scriptPath);
+      
+      return new Promise((resolve) => {
+        let stdout = "";
+        let stderr = "";
+        let killed = false;
+        const effectiveTimeout = Math.min(timeout ?? this.config.defaultTimeout, this.config.maxTimeout);
+
+        const childProcess = execFile(interpreterPath, [scriptPath], {
+          cwd: this.workingDir,
+          env: { ...process.env, ...this.config.environment },
+          maxBuffer: this.config.maxOutputSize,
+        });
+
+        const timeoutId = setTimeout(() => {
+          killed = true;
+          childProcess.kill("SIGKILL");
+        }, effectiveTimeout);
+
+        if (childProcess.stdout) {
+          childProcess.stdout.on("data", (data) => {
+            stdout += data.toString();
+          });
         }
-      } catch {
+
+        if (childProcess.stderr) {
+          childProcess.stderr.on("data", (data) => {
+            stderr += data.toString();
+          });
+        }
+
+        childProcess.on("close", (code) => {
+          clearTimeout(timeoutId);
+          this.cleanupScript(scriptPath);
+
+          let status: ExecutionStatus;
+          let errorMessage = "";
+
+          if (killed) {
+            status = "timeout";
+            errorMessage = `Script exceeded timeout of ${effectiveTimeout}ms`;
+          } else if (code === 0) {
+            status = "completed";
+          } else {
+            status = "failed";
+            errorMessage = stderr || `Exit code: ${code}`;
+          }
+
+          const result: ExecutionResult = {
+            command: `${interpreterPath} ${path.basename(scriptPath)}`,
+            status,
+            returnCode: code,
+            stdout,
+            stderr,
+            executionTime: Date.now() - startTime,
+            errorMessage,
+          };
+
+          this.addToHistory(result);
+          resolve(result);
+        });
+
+        childProcess.on("error", (error) => {
+          clearTimeout(timeoutId);
+          this.cleanupScript(scriptPath);
+
+          const result: ExecutionResult = {
+            command: `${interpreterPath} [script]`,
+            status: "failed",
+            returnCode: null,
+            stdout,
+            stderr,
+            executionTime: Date.now() - startTime,
+            errorMessage: error.message,
+          };
+
+          this.addToHistory(result);
+          resolve(result);
+        });
+      });
+    } catch (error) {
+      this.cleanupScript(scriptPath);
+      return {
+        command: `${interpreterPath} [script]`,
+        status: "failed",
+        returnCode: null,
+        stdout: "",
+        stderr: "",
+        executionTime: Date.now() - startTime,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private cleanupScript(scriptPath: string): void {
+    try {
+      if (fs.existsSync(scriptPath)) {
+        fs.unlinkSync(scriptPath);
       }
+    } catch {
     }
   }
 
