@@ -1158,27 +1158,89 @@ browser = VirtualBrowser()
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CommandExecutor:
+    # Whitelist of allowed executables for defense-in-depth
+    ALLOWED_COMMANDS = frozenset({
+        'python', 'python3', 'python3.11', 'python3.12',
+        'node', 'npm', 'npx', 'bash', 'sh',
+        'ls', 'cat', 'head', 'tail', 'grep', 'find', 'wc',
+        'mkdir', 'cp', 'mv', 'rm', 'touch', 'chmod',
+        'echo', 'printf', 'date', 'env', 'which', 'whereis',
+        'git', 'curl', 'wget', 'pip', 'pip3',
+    })
+    
+    # Dangerous patterns that should never appear in arguments
+    DANGEROUS_PATTERNS = re.compile(
+        r'[`$]|\$\(|&&|\|\||;|>\s*>|<\s*<|eval|exec|\bsh\s+-c|\bbash\s+-c',
+        re.IGNORECASE
+    )
+    
     def __init__(self, security: SecurityGuard = None, timeout: int = 30):
         self.security = security or SecurityGuard()
         self.timeout = timeout
         self.workdir = self.security.sandbox_root
         self.history: deque = deque(maxlen=500)
     
+    def _sanitize_args(self, args: list) -> list:
+        """Sanitize command arguments by escaping special characters."""
+        sanitized = []
+        for arg in args:
+            # Remove null bytes and other control characters
+            clean_arg = ''.join(c for c in arg if c.isprintable() or c in '\t\n')
+            sanitized.append(clean_arg)
+        return sanitized
+    
+    def _validate_command(self, cmd_args: list) -> tuple:
+        """Validate command against security rules. Returns (is_valid, error_message)."""
+        if not cmd_args:
+            return False, "Comando vacío"
+        
+        executable = os.path.basename(cmd_args[0])
+        
+        # Check against whitelist
+        if executable not in self.ALLOWED_COMMANDS:
+            # Allow full paths to whitelisted commands
+            if not any(cmd_args[0].endswith(f'/{allowed}') for allowed in self.ALLOWED_COMMANDS):
+                return False, f"Comando no permitido: {executable}"
+        
+        # Check all arguments for dangerous patterns
+        full_cmd = ' '.join(cmd_args)
+        if self.DANGEROUS_PATTERNS.search(full_cmd):
+            return False, "Patrón peligroso detectado en argumentos"
+        
+        return True, None
+    
     async def execute(self, cmd: str, timeout: int = None) -> ExecutionResult:
         start = time.time()
         timeout = timeout or self.timeout
         
+        # Layer 1: SecurityGuard analysis
         analysis = self.security.analyze_command(cmd)
         if analysis.action == SecurityAction.LOG_AND_BLOCK:
             return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message="Bloqueado por seguridad")
         
         try:
-            # Use shlex.split to safely parse command into arguments and use exec instead of shell
-            # This prevents command injection attacks while maintaining functionality
-            cmd_args = shlex.split(cmd)
+            # Layer 2: Safe parsing with shlex.split (prevents shell injection)
+            try:
+                cmd_args = shlex.split(cmd)
+            except ValueError as e:
+                return ExecutionResult(cmd, ExecutionStatus.FAILED, error_message=f"Error parsing comando: {e}")
+            
+            # Layer 3: Whitelist and pattern validation
+            is_valid, error_msg = self._validate_command(cmd_args)
+            if not is_valid:
+                return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message=error_msg)
+            
+            # Layer 4: Sanitize arguments
+            cmd_args = self._sanitize_args(cmd_args)
+            
+            # Layer 5: Restricted environment
+            safe_env = {k: v for k, v in os.environ.items() 
+                       if not k.startswith(('SECRET', 'API_KEY', 'PASSWORD', 'TOKEN', 'PRIVATE'))}
+            
+            # Execute with create_subprocess_exec (no shell = no injection)
             proc = await asyncio.create_subprocess_exec(
                 *cmd_args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.workdir), env=os.environ.copy())
+                cwd=str(self.workdir), env=safe_env)
             
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
             result = ExecutionResult(cmd, ExecutionStatus.COMPLETED, proc.returncode,
