@@ -40,6 +40,9 @@ Preferred communication style: Simple, everyday language.
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt, multi-tenant validation, authentication middleware, max iterations/timeout for agent runs.
+- **Safe Process Execution**: Centralized secure execution modules (`safe_exec.py` for Python, `safeSpawn.ts` for TypeScript) with program allowlists, argument validation, and environment sanitization to prevent command injection and secret leakage.
+- **Package Installation Security**: Pip and npm package installations use `execFile` with argument arrays and minimal environments (no shell execution, no secret leakage).
+- **SQL Security**: Admin query explorer uses strict SELECT-only validation with dangerous pattern blocking and comprehensive audit logging.
 - **Modular Repositories**: Generic base repository with ownership validation and transaction helpers.
 - **Error Handling**: Custom error classes and global Express error handler.
 - **API Validation**: Zod validation middleware for requests.
