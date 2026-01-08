@@ -3,6 +3,7 @@ import { z } from "zod";
 import OpenAI from "openai";
 import { spawn } from "child_process";
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import * as path from "path";
 
 const xaiClient = new OpenAI({
@@ -12,21 +13,74 @@ const xaiClient = new OpenAI({
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 
+// Workspace root for cwd restriction
+const WORKSPACE_ROOT = path.resolve(process.env.WORKSPACE_ROOT ?? process.cwd());
+
 const ALLOWED_DIRS = ["/tmp", process.cwd()];
 
-// Strict allowlist of programs that can be executed (prevents command injection)
-const ALLOWED_PROGRAMS = new Set([
-  // Code execution
-  "python3",
-  "node",
-  "npx",
-  "bash",
-  "cat",
-  "sh",
-  // File conversion tools
-  "pandoc",
-  "cp",
-]);
+// Strict allowlist with ABSOLUTE PATHS to prevent PATH hijacking
+const ALLOWED_PROGRAMS: Record<string, string> = {
+  python3: "/usr/bin/python3",
+  python: "/usr/bin/python3",
+  node: "/usr/bin/node",
+  npx: "/usr/bin/npx",
+  bash: "/usr/bin/bash",
+  sh: "/usr/bin/sh",
+  cat: "/usr/bin/cat",
+  pandoc: "/usr/bin/pandoc",
+  cp: "/usr/bin/cp",
+};
+
+// Control characters regex (NUL and other control chars)
+const CONTROL_CHARS_PATTERN = /[\u0000-\u001F\u007F]/;
+const MAX_ARG_LENGTH = 4096;
+
+function resolveProgram(program: string): string {
+  const key = (program ?? "").trim();
+  const resolved = ALLOWED_PROGRAMS[key];
+  if (!resolved) {
+    throw new Error(`Program not allowed: ${JSON.stringify(program)}. Allowed: ${Object.keys(ALLOWED_PROGRAMS).join(", ")}`);
+  }
+  if (!fsSync.existsSync(resolved)) {
+    throw new Error(`Executable not found: ${resolved}`);
+  }
+  return resolved;
+}
+
+function validateArgs(args: string[]): string[] {
+  if (!Array.isArray(args)) {
+    throw new Error("args must be an array");
+  }
+  return args.map((arg, i) => {
+    if (typeof arg !== "string") {
+      throw new Error(`arg[${i}] must be a string`);
+    }
+    if (arg.length > MAX_ARG_LENGTH) {
+      throw new Error(`arg[${i}] exceeds max length of ${MAX_ARG_LENGTH}`);
+    }
+    if (CONTROL_CHARS_PATTERN.test(arg)) {
+      throw new Error(`arg[${i}] contains control characters`);
+    }
+    return arg;
+  });
+}
+
+function resolveCwd(cwd?: string): string {
+  const target = cwd ? path.resolve(WORKSPACE_ROOT, cwd) : WORKSPACE_ROOT;
+  const rel = path.relative(WORKSPACE_ROOT, target);
+  if (rel.startsWith("..") || (path.isAbsolute(rel) === false && rel.includes(".."))) {
+    throw new Error("cwd outside WORKSPACE_ROOT not allowed");
+  }
+  return target;
+}
+
+function cleanEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
 
 function validatePath(filePath: string): string {
   const resolved = path.resolve(filePath);
@@ -43,32 +97,32 @@ function validatePath(filePath: string): string {
 async function executeSafeCommand(
   program: string,
   args: string[],
-  timeout: number = 30000
+  timeout: number = 30000,
+  cwd?: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  // Security: Validate program against allowlist (prevents command injection)
-  if (!ALLOWED_PROGRAMS.has(program)) {
+  let resolvedProgram: string;
+  let safeArgs: string[];
+  let safeCwd: string;
+
+  try {
+    resolvedProgram = resolveProgram(program);
+    safeArgs = validateArgs(args);
+    safeCwd = resolveCwd(cwd);
+  } catch (err: any) {
     return {
       stdout: "",
-      stderr: `Blocked program: ${program}. Only allowed: ${Array.from(ALLOWED_PROGRAMS).join(", ")}`,
+      stderr: `Security validation failed: ${err.message}`,
       exitCode: 1,
     };
   }
 
-  // Security: Validate args don't contain shell metacharacters
-  for (const arg of args) {
-    if (arg.includes("\n") || arg.includes("\r")) {
-      return {
-        stdout: "",
-        stderr: "Blocked: argument contains newline characters",
-        exitCode: 1,
-      };
-    }
-  }
-
   return new Promise((resolve) => {
-    const child = spawn(program, args, {
+    const child = spawn(resolvedProgram, safeArgs, {
+      cwd: safeCwd,
+      env: cleanEnv(process.env),
       timeout,
-      shell: false, // Explicit: prevent shell injection
+      shell: false,
+      windowsHide: true,
     });
 
     let stdout = "";
