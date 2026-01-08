@@ -1245,6 +1245,31 @@ class CommandExecutor:
         """Check if command contains shell metacharacters (potential injection)."""
         return any(c in cmd for c in self.SHELL_METACHARACTERS)
     
+    def _sanitize_args(self, args: List[str]) -> Tuple[bool, List[str], str]:
+        """Aggressively sanitize and validate command arguments.
+        
+        Returns: (is_valid, sanitized_args, error_message)
+        """
+        if not args:
+            return False, [], "Empty argument list"
+        
+        sanitized = []
+        for i, arg in enumerate(args):
+            if '\x00' in arg:
+                return False, [], f"Null byte detected in argument {i}"
+            if any(ord(c) < 32 and c not in '\t\n\r' for c in arg):
+                return False, [], f"Control character detected in argument {i}"
+            if len(arg) > 4096:
+                return False, [], f"Argument {i} exceeds maximum length (4096)"
+            sanitized.append(shlex.quote(arg) if i > 0 else arg)
+        
+        executable = args[0]
+        base_cmd = os.path.basename(executable)
+        if base_cmd in self.SAFE_COMMANDS or executable == sys.executable:
+            return True, args, "OK"
+        
+        return False, [], f"Executable '{base_cmd}' not in allowlist"
+    
     def _validate_command_safety(self, cmd: str) -> Tuple[bool, str]:
         """Validate command is safe to execute. Returns (is_safe, reason)."""
         if not cmd or not cmd.strip():
@@ -1287,8 +1312,17 @@ class CommandExecutor:
         
         try:
             args = shlex.split(cmd)
+            
+            is_valid, validated_args, sanitize_error = self._sanitize_args(args)
+            if not is_valid:
+                return ExecutionResult(cmd, ExecutionStatus.BLOCKED, error_message=f"Argument validation failed: {sanitize_error}")
+            
+            executable = validated_args[0]
+            exec_args = validated_args[1:] if len(validated_args) > 1 else []
+            
             proc = await asyncio.create_subprocess_exec(
-                *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                executable, *exec_args,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.workdir), env=os.environ.copy())
             
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
