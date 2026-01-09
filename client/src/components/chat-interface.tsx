@@ -1255,12 +1255,21 @@ export function ChatInterface({
         console.debug('[ChatInterface] Aborted pending request due to chat switch');
       }
       
+      // IMPORTANT: Reset ALL streaming state for clean UI
       setStreamingContent("");
       streamingContentRef.current = "";
       
+      // Reset aiState to idle - the new chat should start clean
+      // If this chat was streaming, the aiStateChatId check will prevent indicator bleed-through
+      // But we also explicitly reset to ensure clean UI
+      if (aiState !== "idle") {
+        setAiState("idle");
+        console.debug('[ChatInterface] Reset aiState to idle due to chat switch');
+      }
+      
       prevChatIdRef.current = chatId;
     }
-  }, [chatId]);
+  }, [chatId, aiState, setAiState]);
   
   const validateStreamingChatId = useCallback(() => {
     return streamingChatIdRef.current === null || streamingChatIdRef.current === chatId;

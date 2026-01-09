@@ -148,13 +148,16 @@ export default function Home() {
     // Keep processing state for background chats - don't clear processingChatIds
     // This allows multiple chats to process simultaneously
     handleClearPendingCount(id);
+    
+    // Reset AI state for clean UI when switching chats
+    // Background streaming is tracked via processingChatIds
+    setAiStateRaw("idle");
+    setAiStateChatId(null);
+    setAiProcessSteps([]);
+    
     setIsNewChatMode(false);
     setNewChatStableKey(null);
     setActiveChatId(id);
-    // DON'T clear processingChatIdRef or call setAiState("idle") here
-    // Let the background streaming complete naturally and trigger badge notification
-    // Only reset the process steps for UI (not aiState - that's per-chat streaming)
-    setAiProcessSteps([]);
   }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
 
   // Listen for select-chat custom event (used by Agent Mode navigation)
@@ -184,17 +187,22 @@ export default function Home() {
   }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
 
   const handleNewChat = () => {
-    // Keep processing state for background chats - don't clear processingChatIds
-    // The previous chat will continue streaming in the background
+    // Create completely clean state for new chat
     const newKey = `new-chat-${Date.now()}`;
+    
+    // IMPORTANT: Reset AI state BEFORE changing chat to ensure clean UI
+    // Background streaming is tracked via processingChatIds in streaming store
+    // The aiState should represent the CURRENT chat's state, not global state
+    setAiStateRaw("idle");
+    setAiStateChatId(null);
+    setAiProcessSteps([]);
+    
+    // Clear chat references
     setActiveChatId(null);
     setIsNewChatMode(true);
     setNewChatStableKey(newKey);
     pendingChatIdRef.current = null;
-    // DON'T clear processingChatIdRef or call setAiState("idle") here
-    // Let the background streaming complete naturally and trigger badge notification
-    // Only reset the process steps for UI
-    setAiProcessSteps([]);
+    
     // Close any open dialogs
     setIsAppsDialogOpen(false);
     
