@@ -149,10 +149,9 @@ export default function Home() {
     // This allows multiple chats to process simultaneously
     handleClearPendingCount(id);
     
-    // Reset AI state for clean UI when switching chats
-    // Background streaming is tracked via processingChatIds
-    setAiStateRaw("idle");
-    setAiStateChatId(null);
+    // DO NOT reset aiState - let background streaming complete naturally
+    // The aiStateChatId check prevents the indicator from showing on wrong chat
+    // Only reset process steps for UI display
     setAiProcessSteps([]);
     
     setIsNewChatMode(false);
@@ -187,14 +186,12 @@ export default function Home() {
   }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
 
   const handleNewChat = () => {
-    // Create completely clean state for new chat
+    // Create a new chat with fresh state
     const newKey = `new-chat-${Date.now()}`;
     
-    // IMPORTANT: Reset AI state BEFORE changing chat to ensure clean UI
-    // Background streaming is tracked via processingChatIds in streaming store
-    // The aiState should represent the CURRENT chat's state, not global state
-    setAiStateRaw("idle");
-    setAiStateChatId(null);
+    // DO NOT reset aiState - let background streaming complete naturally
+    // The aiStateChatId check prevents the indicator from showing on the new chat
+    // Only reset process steps for UI display
     setAiProcessSteps([]);
     
     // Clear chat references

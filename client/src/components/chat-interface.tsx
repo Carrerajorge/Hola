@@ -1238,6 +1238,8 @@ export function ChatInterface({
   
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat
+  // NOTE: We do NOT reset aiState here - let it complete naturally for background streaming
+  // The aiStateChatId check in the indicator condition prevents bleed-through
   const prevChatIdRef = useRef<string | null | undefined>(chatId);
   useEffect(() => {
     if (prevChatIdRef.current !== chatId) {
@@ -1255,21 +1257,13 @@ export function ChatInterface({
         console.debug('[ChatInterface] Aborted pending request due to chat switch');
       }
       
-      // IMPORTANT: Reset ALL streaming state for clean UI
+      // Clear streaming content - the content was for the previous chat
       setStreamingContent("");
       streamingContentRef.current = "";
       
-      // Reset aiState to idle - the new chat should start clean
-      // If this chat was streaming, the aiStateChatId check will prevent indicator bleed-through
-      // But we also explicitly reset to ensure clean UI
-      if (aiState !== "idle") {
-        setAiState("idle");
-        console.debug('[ChatInterface] Reset aiState to idle due to chat switch');
-      }
-      
       prevChatIdRef.current = chatId;
     }
-  }, [chatId, aiState, setAiState]);
+  }, [chatId]);
   
   const validateStreamingChatId = useCallback(() => {
     return streamingChatIdRef.current === null || streamingChatIdRef.current === chatId;
