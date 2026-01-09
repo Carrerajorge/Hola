@@ -455,7 +455,16 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
       
       if (hasAttachments) {
-        console.log(`[Stream] Processing ${attachments.length} attachment(s)`);
+        console.log(`[Stream] Processing ${attachments.length} attachment(s):`, 
+          attachments.map((a: any) => ({ 
+            name: a.name, 
+            type: a.type, 
+            hasContent: !!a.content, 
+            contentLength: a.content?.length || 0,
+            storagePath: a.storagePath,
+            fileId: a.fileId
+          }))
+        );
         try {
           const extractedContents: { fileName: string; content: string; mimeType: string }[] = [];
           
