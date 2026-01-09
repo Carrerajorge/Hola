@@ -34,6 +34,7 @@ interface LLMRequestOptions {
   provider?: "xai" | "gemini" | "auto";
   enableFallback?: boolean;
   skipCache?: boolean;
+  disableImageGeneration?: boolean;
 }
 
 interface LLMResponse {
@@ -1031,6 +1032,7 @@ class LLMGateway {
       temperature: options.temperature ?? 0.7,
       topP: options.topP ?? 1,
       maxOutputTokens: options.maxTokens,
+      responseModalities: options.disableImageGeneration ? ["text"] : undefined,
     });
 
     for await (const chunk of stream) {

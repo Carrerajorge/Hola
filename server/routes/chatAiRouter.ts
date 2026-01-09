@@ -641,6 +641,7 @@ ${systemContent}`;
         {
           userId: userId || conversationId || "anonymous",
           requestId,
+          disableImageGeneration: hasAttachments,
         }
       );
 

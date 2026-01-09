@@ -21,6 +21,7 @@ export interface GeminiChatOptions {
   temperature?: number;
   topP?: number;
   maxOutputTokens?: number;
+  responseModalities?: ("text" | "image")[];
 }
 
 export interface GeminiResponse {
@@ -48,6 +49,7 @@ export async function geminiChat(
         temperature: options.temperature,
         topP: options.topP,
         maxOutputTokens: options.maxOutputTokens,
+        responseModalities: options.responseModalities,
       },
     });
 
@@ -83,6 +85,7 @@ export async function* geminiStreamChat(
         temperature: options.temperature,
         topP: options.topP,
         maxOutputTokens: options.maxOutputTokens,
+        responseModalities: options.responseModalities,
       },
     });
 
