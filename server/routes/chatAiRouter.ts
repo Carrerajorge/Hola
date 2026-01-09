@@ -108,6 +108,43 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
     res.json(AVAILABLE_MODELS);
   });
 
+  // Helper function to detect if a file is a document (not an image)
+  // Uses mimeType AND file extension for reliable detection
+  const isDocumentAttachment = (mimeType: string, fileName: string, type?: string): boolean => {
+    const lowerMime = (mimeType || "").toLowerCase();
+    const lowerName = (fileName || "").toLowerCase();
+    const lowerType = (type || "").toLowerCase();
+    
+    // Check for explicit image type/MIME first
+    if (lowerType === "image" || lowerMime.startsWith("image/")) return false;
+    
+    // Document MIME patterns
+    const docMimePatterns = [
+      "pdf", "word", "document", "sheet", "excel", 
+      "spreadsheet", "presentation", "powerpoint", "csv",
+      "text/plain", "text/csv", "application/json"
+    ];
+    if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
+    
+    // Document file extensions
+    const docExtensions = [
+      ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+      ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"
+    ];
+    if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
+    
+    // If type is explicitly a document type
+    if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType)) return true;
+    
+    // If mimeType is empty/unknown, check extension before treating as document
+    if (!lowerMime || lowerMime === "application/octet-stream") {
+      const hasImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"].some(ext => lowerName.endsWith(ext));
+      return !hasImageExt; // If not an image extension, treat as document
+    }
+    
+    return false;
+  };
+
   router.post("/chat", async (req, res) => {
     try {
       const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments } = req.body;
@@ -118,6 +155,18 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       const user = (req as any).user;
       const userId = user?.claims?.sub;
+
+      // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
+      const hasDocumentAttachments = attachments && Array.isArray(attachments) && 
+        attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
+      
+      if (hasDocumentAttachments) {
+        console.log(`[Chat API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
+        return res.status(400).json({ 
+          error: "Document attachments must be processed via /api/analyze endpoint for proper analysis",
+          code: "USE_ANALYZE_ENDPOINT"
+        });
+      }
 
       let attachmentContext = "";
       const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
@@ -372,6 +421,18 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
+      }
+
+      // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
+      const hasDocumentAttachments = attachments && Array.isArray(attachments) && 
+        attachments.some((a: any) => isDocumentAttachment(a.mimeType || a.type, a.name, a.type));
+      
+      if (hasDocumentAttachments) {
+        console.log(`[Stream API] DATA_MODE: Rejecting document attachments - must use /analyze endpoint`);
+        return res.status(400).json({ 
+          error: "Document attachments must be processed via /api/analyze endpoint for proper analysis",
+          code: "USE_ANALYZE_ENDPOINT"
+        });
       }
 
       const user = (req as any).user;
@@ -763,6 +824,235 @@ ${systemContent}`;
       if (!isConnectionClosed) {
         res.end();
       }
+    }
+  });
+
+  // ============================================================================================
+  // UNIVERSAL DOCUMENT ANALYZER - POST /analyze
+  // DATA_MODE enforced: NO image generation, NO artifact creation, NO web search
+  // Only deterministic text extraction and LLM analysis with per-document citations
+  // ============================================================================================
+  router.post("/analyze", async (req, res) => {
+    const requestId = `analyze_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log(`[Analyze] Request ${requestId} started`);
+    
+    try {
+      const { messages, attachments, conversationId } = req.body;
+      
+      // GUARD: attachments are REQUIRED for /analyze endpoint
+      if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
+        return res.status(400).json({
+          error: "ATTACHMENTS_REQUIRED",
+          message: "El endpoint /analyze requiere al menos un documento adjunto.",
+          requestId
+        });
+      }
+      
+      const attachmentsCount = attachments.length;
+      console.log(`[Analyze] DATA_MODE ACTIVATED - ${attachmentsCount} attachments, image generation BLOCKED`);
+      
+      // Get user message
+      const lastUserMessage = messages && Array.isArray(messages) 
+        ? [...messages].reverse().find((m: any) => m.role === 'user')
+        : null;
+      const userQuery = lastUserMessage?.content || "Analiza el contenido de los documentos.";
+      
+      // Detect coverage requirement
+      const requiresFullCoverage = /\b(todos|all|completo|complete|cada|every|analiza\s+todos)\b/i.test(userQuery);
+      
+      // Resolve storagePaths for all attachments
+      const resolvedAttachments: any[] = [];
+      for (const att of attachments) {
+        const resolved = { ...att };
+        if (!resolved.storagePath && resolved.fileId) {
+          const fileRecord = await storage.getFile(resolved.fileId);
+          if (fileRecord && fileRecord.storagePath) {
+            resolved.storagePath = fileRecord.storagePath;
+          }
+        }
+        resolvedAttachments.push(resolved);
+      }
+      
+      // Initialize batch processor
+      const batchProcessor = new DocumentBatchProcessor();
+      
+      // Convert to batch format
+      const batchAttachments: BatchAttachment[] = resolvedAttachments
+        .filter((att: any) => att.storagePath || att.content)
+        .map((att: any) => ({
+          name: att.name || 'document',
+          mimeType: att.mimeType || att.type || 'application/octet-stream',
+          storagePath: att.storagePath || '',
+          content: att.content
+        }));
+      
+      // Process documents atomically
+      const batchResult = await batchProcessor.processBatch(batchAttachments);
+      
+      // Build progress report (per-file metrics)
+      const progressReport = {
+        attachmentsCount: batchResult.attachmentsCount,
+        processedFiles: batchResult.processedFiles,
+        failedFiles: batchResult.failedFiles.length,
+        totalTokens: batchResult.totalTokens,
+        totalChunks: batchResult.chunks.length,
+        perFileStats: batchResult.stats.map(stat => ({
+          filename: stat.filename,
+          status: stat.status,
+          bytesRead: stat.bytesRead,
+          pagesProcessed: stat.pagesProcessed,
+          tokensExtracted: stat.tokensExtracted,
+          parseTimeMs: stat.parseTimeMs,
+          chunkCount: stat.chunkCount,
+          error: stat.error || null
+        })),
+        coverageCheck: {
+          required: requiresFullCoverage,
+          passed: !requiresFullCoverage || (batchResult.processedFiles === batchResult.attachmentsCount)
+        }
+      };
+      
+      console.log(`[Analyze] Batch complete:`, progressReport);
+      
+      // COVERAGE CHECK: If user asked to analyze "all", verify complete coverage
+      if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
+        const failedList = batchResult.failedFiles.map(f => `${f.filename}: ${f.error}`).join('; ');
+        return res.status(422).json({
+          error: "COVERAGE_CHECK_FAILED",
+          message: `No se pudieron procesar todos los archivos. Procesados: ${batchResult.processedFiles}/${batchResult.attachmentsCount}`,
+          failedFiles: failedList,
+          progressReport,
+          requestId
+        });
+      }
+      
+      // TOKENS CHECK: Ensure we extracted something
+      if (batchResult.totalTokens === 0) {
+        return res.status(422).json({
+          error: "PARSE_FAILED",
+          message: "No se pudo extraer texto de los documentos adjuntos.",
+          progressReport,
+          requestId
+        });
+      }
+      
+      // Build document context with citation format instructions
+      const citationFormats = batchResult.stats
+        .filter(s => s.status === 'success')
+        .map(s => {
+          const ext = s.filename.split('.').pop()?.toLowerCase();
+          switch(ext) {
+            case 'pdf': return `[doc:${s.filename} p:#]`;
+            case 'xlsx': case 'xls': return `[doc:${s.filename} sheet:NombreHoja cell:A1]`;
+            case 'docx': case 'doc': return `[doc:${s.filename} p:#]`;
+            case 'pptx': case 'ppt': return `[doc:${s.filename} slide:#]`;
+            case 'csv': return `[doc:${s.filename} row:#]`;
+            default: return `[doc:${s.filename}]`;
+          }
+        });
+      
+      // Build the combined document text
+      const documentText = batchResult.chunks.map(chunk => {
+        const locator = chunk.metadata?.page ? `p:${chunk.metadata.page}` :
+                       chunk.metadata?.sheet ? `sheet:${chunk.metadata.sheet}` :
+                       chunk.metadata?.slide ? `slide:${chunk.metadata.slide}` :
+                       '';
+        return `--- ${chunk.docId}${locator ? ` (${locator})` : ''} ---\n${chunk.content}`;
+      }).join('\n\n');
+      
+      // Build system prompt for document analysis (NO image generation instructions)
+      const systemPrompt = `Eres un asistente experto en análisis de documentos. 
+
+MODO: DATA_MODE (análisis de documentos)
+PROHIBIDO: Generar imágenes, crear artefactos, inventar datos, usar fuentes externas
+
+INSTRUCCIONES CRÍTICAS:
+1. ANALIZA exclusivamente el contenido de los documentos adjuntos
+2. Responde basándote SOLO en el contenido real extraído
+3. Para cada afirmación, INCLUYE la cita del documento fuente
+4. Si algo no está en los documentos, indica que "no se encontró en los documentos"
+
+FORMATOS DE CITAS (usa estos exactamente):
+${citationFormats.join('\n')}
+
+DOCUMENTOS PROCESADOS: ${batchResult.processedFiles}/${batchResult.attachmentsCount}
+${batchResult.stats.map(s => `- ${s.filename}: ${s.status === 'success' ? `${s.tokensExtracted} tokens` : `ERROR: ${s.error}`}`).join('\n')}
+
+CONTENIDO DE LOS DOCUMENTOS:
+${documentText}`;
+
+      // Build messages for LLM
+      const llmMessages = [
+        { role: "system" as const, content: systemPrompt },
+        { role: "user" as const, content: userQuery }
+      ];
+      
+      // Call LLM with strict DATA_MODE (no tools, no image generation)
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+      
+      const streamGenerator = llmGateway.streamChat(llmMessages, {
+        userId: userId || conversationId || "anonymous",
+        requestId,
+        disableImageGeneration: true,  // HARD BLOCK
+      });
+      
+      let answerText = "";
+      for await (const chunk of streamGenerator) {
+        answerText += chunk.content;
+      }
+      
+      // Parse response for per-doc findings and citations
+      const citations: string[] = [];
+      const citationRegex = /\[doc:([^\]]+)\]/g;
+      let match;
+      while ((match = citationRegex.exec(answerText)) !== null) {
+        if (!citations.includes(match[0])) {
+          citations.push(match[0]);
+        }
+      }
+      
+      // Build per-doc findings (basic extraction)
+      const perDocFindings: Record<string, string[]> = {};
+      for (const stat of batchResult.stats.filter(s => s.status === 'success')) {
+        const docName = stat.filename;
+        const findings: string[] = [];
+        // Find sentences that reference this document
+        const sentences = answerText.split(/[.!?]\s+/);
+        for (const sentence of sentences) {
+          if (sentence.toLowerCase().includes(docName.toLowerCase()) || 
+              sentence.includes(`[doc:${docName}`)) {
+            findings.push(sentence.trim());
+          }
+        }
+        if (findings.length > 0) {
+          perDocFindings[docName] = findings;
+        }
+      }
+      
+      // Return structured response
+      res.json({
+        success: true,
+        requestId,
+        mode: "DATA_MODE",
+        answer_text: answerText,
+        per_doc_findings: perDocFindings,
+        citations,
+        progress_report: progressReport,
+        metadata: {
+          totalTokensExtracted: batchResult.totalTokens,
+          totalChunks: batchResult.chunks.length,
+          processingTimeMs: Date.now() - parseInt(requestId.split('_')[1])
+        }
+      });
+      
+    } catch (error: any) {
+      console.error(`[Analyze] Error ${requestId}:`, error);
+      res.status(500).json({
+        error: "ANALYSIS_FAILED",
+        message: error.message || "Error durante el análisis de documentos",
+        requestId
+      });
     }
   });
 

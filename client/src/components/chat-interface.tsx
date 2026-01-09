@@ -3542,6 +3542,36 @@ IMPORTANTE:
         let sseError: Error | null = null;
 
         try {
+          // Helper function to robustly detect if a file is a document (not an image)
+          // Uses mimeType AND file extension for reliable detection
+          const isDocumentFile = (mimeType: string, fileName: string): boolean => {
+            const lowerMime = (mimeType || "").toLowerCase();
+            const lowerName = (fileName || "").toLowerCase();
+            
+            // Check for explicit image MIME types first
+            if (lowerMime.startsWith("image/")) return false;
+            
+            // Document MIME types
+            const docMimePatterns = [
+              "pdf", "word", "document", "sheet", "excel", 
+              "spreadsheet", "presentation", "powerpoint", "csv",
+              "text/plain", "text/csv", "application/json"
+            ];
+            if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
+            
+            // Document file extensions
+            const docExtensions = [
+              ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+              ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"
+            ];
+            if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
+            
+            // If mimeType is empty/unknown and has no extension, treat as document (safer)
+            if (!lowerMime || lowerMime === "application/octet-stream") return true;
+            
+            return false;
+          };
+
           // Build attachments array for streaming endpoint
           const streamAttachments = currentFiles
             .filter(f => f.status === "ready" || f.status === "processing")
@@ -3558,6 +3588,49 @@ IMPORTANTE:
               fileId: f.id,
               content: f.content,
             }));
+          
+          // Robust document detection using both mimeType AND file extension
+          const hasDocumentAttachments = currentFiles
+            .filter(f => f.status === "ready" || f.status === "processing")
+            .some(f => isDocumentFile(f.type, f.name));
+          
+          // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
+          if (hasDocumentAttachments) {
+            console.log("[handleSubmit] DATA_MODE: Using /analyze endpoint for document analysis");
+            const analyzeResponse = await fetch("/api/analyze", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messages: finalChatHistory,
+                attachments: streamAttachments,
+                conversationId: chatId
+              }),
+              signal: abortControllerRef.current?.signal
+            });
+            
+            if (!analyzeResponse.ok) {
+              const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+              throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
+            }
+            
+            const analyzeResult = await analyzeResponse.json();
+            
+            // Create assistant message with analysis results
+            const analysisMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: analyzeResult.answer_text || "No se pudo analizar el documento.",
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
+            };
+            onSendMessage(analysisMsg);
+            
+            setAiState("idle");
+            setAiProcessSteps([]);
+            abortControllerRef.current = null;
+            return;
+          }
           
           const response = await fetch("/api/chat/stream", {
             method: "POST",
@@ -3798,6 +3871,68 @@ IMPORTANTE:
         abortControllerRef.current = null;
       } else {
         // Legacy mode - fall back to non-streaming /api/chat for Figma diagrams or when no run info
+        // DATA_MODE: Robust detection using mimeType and file extension (reuse same logic)
+        const isDocumentFileLegacy = (mimeType: string, fileName: string, type?: string): boolean => {
+          const lowerMime = (mimeType || "").toLowerCase();
+          const lowerName = (fileName || "").toLowerCase();
+          const lowerType = (type || "").toLowerCase();
+          
+          if (lowerType === "image" || lowerMime.startsWith("image/")) return false;
+          
+          const docMimePatterns = ["pdf", "word", "document", "sheet", "excel", "spreadsheet", "presentation", "powerpoint", "csv", "text/plain", "text/csv", "application/json"];
+          if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
+          
+          const docExtensions = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"];
+          if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
+          
+          if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType)) return true;
+          
+          if (!lowerMime || lowerMime === "application/octet-stream") {
+            const hasImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"].some(ext => lowerName.endsWith(ext));
+            return !hasImageExt;
+          }
+          
+          return false;
+        };
+        
+        const hasDocumentAttachments = attachments.some(a => isDocumentFileLegacy(a.mimeType || a.type, a.name, a.type));
+        
+        if (hasDocumentAttachments) {
+          console.log("[handleSubmit] DATA_MODE (Legacy): Using /analyze endpoint for document analysis");
+          const analyzeResponse = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: finalChatHistory,
+              attachments: attachments,
+              conversationId: chatId
+            }),
+            signal: abortControllerRef.current?.signal
+          });
+          
+          if (!analyzeResponse.ok) {
+            const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+            throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
+          }
+          
+          const analyzeResult = await analyzeResponse.json();
+          
+          const analysisMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: analyzeResult.answer_text || "No se pudo analizar el documento.",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          };
+          onSendMessage(analysisMsg);
+          
+          setAiState("idle");
+          setAiProcessSteps([]);
+          abortControllerRef.current = null;
+          return;
+        }
+        
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
