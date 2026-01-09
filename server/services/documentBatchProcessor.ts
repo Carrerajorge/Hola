@@ -4,6 +4,7 @@ import { DocxParser } from "../parsers/docxParser";
 import { XlsxParser } from "../parsers/xlsxParser";
 import { PptxParser } from "../parsers/pptxParser";
 import { TextParser } from "../parsers/textParser";
+import { CsvParser } from "../parsers/csvParser";
 import type { DetectedFileType, FileParser, ParsedResult } from "../parsers/base";
 
 export interface SimpleAttachment {
@@ -66,6 +67,7 @@ export class DocumentBatchProcessor {
   private xlsxParser: XlsxParser;
   private pptxParser: PptxParser;
   private textParser: TextParser;
+  private csvParser: CsvParser;
   private mimeTypeMap: Record<string, ParserConfig>;
   private chunkIndex: Map<string, DocumentChunk>;
 
@@ -76,6 +78,7 @@ export class DocumentBatchProcessor {
     this.xlsxParser = new XlsxParser();
     this.pptxParser = new PptxParser();
     this.textParser = new TextParser();
+    this.csvParser = new CsvParser();
     this.chunkIndex = new Map();
 
     this.mimeTypeMap = {
@@ -89,7 +92,8 @@ export class DocumentBatchProcessor {
       "text/plain": { parser: this.textParser, docType: "Text", ext: "txt" },
       "text/markdown": { parser: this.textParser, docType: "Markdown", ext: "md" },
       "text/md": { parser: this.textParser, docType: "Markdown", ext: "md" },
-      "text/csv": { parser: this.textParser, docType: "CSV", ext: "csv" },
+      "text/csv": { parser: this.csvParser, docType: "CSV", ext: "csv" },
+      "application/csv": { parser: this.csvParser, docType: "CSV", ext: "csv" },
       "text/html": { parser: this.textParser, docType: "HTML", ext: "html" },
       "application/json": { parser: this.textParser, docType: "JSON", ext: "json" },
     };
@@ -145,11 +149,19 @@ export class DocumentBatchProcessor {
           parsed = await this.extractContent(buffer, parserConfig, attachment.name);
           normalized = this.normalizeContent(parsed.text);
         } else {
-          // Use pre-extracted content only for text-based formats
-          normalized = this.normalizeContent(attachment.content);
+          // For text-based formats with pre-extracted content
           bytesRead = Buffer.byteLength(attachment.content, 'utf8');
           buffer = Buffer.from(attachment.content, 'utf8');
-          parsed = { text: normalized, metadata: {} };
+          
+          // For CSV files, use CsvParser to get row/col citations
+          if (ext === 'csv' && this.csvParser) {
+            parsed = await this.csvParser.parse(buffer, attachment.name);
+            normalized = this.normalizeContent(parsed.text);
+          } else {
+            // Plain text files - use direct content
+            normalized = this.normalizeContent(attachment.content);
+            parsed = { text: normalized, metadata: { parser_used: parserConfig.parser.name } };
+          }
         }
         
         const chunks = this.chunkDocument(normalized, docId, attachment.name, parserConfig.docType, parsed.metadata);

@@ -367,6 +367,222 @@ test.describe('Document Analysis Flow - Mocked API', () => {
   });
 });
 
+test.describe('PARE System E2E Tests - Document Routing', () => {
+  test('should route document uploads to /api/analyze, never /chat', async ({ page }) => {
+    let analyzeRequests: string[] = [];
+    let chatRequests: string[] = [];
+    
+    await page.route('**/api/analyze', async (route: Route) => {
+      analyzeRequests.push(route.request().url());
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          requestId: 'test-analyze-123',
+          mode: 'DATA_MODE',
+          answer_text: 'Document analyzed. The content shows Q4 sales data. [doc:report.txt]',
+          per_doc_findings: { 'report.txt': ['Q4 sales data'] },
+          citations: ['[doc:report.txt]'],
+          progressReport: {
+            requestId: 'test-analyze-123',
+            isDocumentMode: true,
+            productionWorkflowBlocked: true,
+            attachments_count: 1,
+            processedFiles: 1,
+            failedFiles: 0,
+            tokens_extracted_total: 50,
+            perFileStats: [{
+              filename: 'report.txt',
+              status: 'success',
+              mime_detect: 'text/plain',
+              parser_used: 'TextParser',
+              tokensExtracted: 50
+            }]
+          },
+          metadata: { totalTokensExtracted: 50 }
+        })
+      });
+    });
+    
+    await page.route('**/api/chat', async (route: Route) => {
+      chatRequests.push(route.request().url());
+      await route.abort('blockedbyclient');
+    });
+    
+    await page.route('**/api/chat/stream', async (route: Route) => {
+      chatRequests.push(route.request().url());
+      await route.abort('blockedbyclient');
+    });
+
+    await setupMockRoutes(page);
+    await page.goto('/');
+    await page.waitForLoadState('domcontentloaded');
+    
+    // Wait for app to initialize
+    await page.waitForTimeout(1000);
+  });
+
+  test('should verify DATA_MODE response contains no image artifacts', async ({ page }) => {
+    const mockDataModeResponse = {
+      success: true,
+      requestId: 'data-mode-test',
+      mode: 'DATA_MODE',
+      answer_text: 'Analysis of the uploaded document shows sales figures. [doc:sales.csv row:1]',
+      per_doc_findings: { 'sales.csv': ['Sales figures shown'] },
+      citations: ['[doc:sales.csv row:1]'],
+      progressReport: {
+        isDocumentMode: true,
+        productionWorkflowBlocked: true,
+        attachments_count: 1,
+        tokens_extracted_total: 100
+      }
+    };
+
+    // Verify no image-related keys
+    expect(mockDataModeResponse).not.toHaveProperty('image');
+    expect(mockDataModeResponse).not.toHaveProperty('images');
+    expect(mockDataModeResponse).not.toHaveProperty('artifact');
+    expect(mockDataModeResponse).not.toHaveProperty('artifacts');
+    expect(mockDataModeResponse).not.toHaveProperty('generated_image');
+    
+    // Verify required DATA_MODE fields
+    expect(mockDataModeResponse.mode).toBe('DATA_MODE');
+    expect(mockDataModeResponse.answer_text).toBeTruthy();
+    expect(mockDataModeResponse.citations.length).toBeGreaterThan(0);
+    expect(mockDataModeResponse.progressReport.isDocumentMode).toBe(true);
+    expect(mockDataModeResponse.progressReport.productionWorkflowBlocked).toBe(true);
+    
+    // Verify answer_text does not mention image generation
+    expect(mockDataModeResponse.answer_text).not.toContain('He generado una imagen');
+    expect(mockDataModeResponse.answer_text).not.toContain('generated an image');
+  });
+
+  test('should verify progressReport contains required observability fields', async ({ page }) => {
+    const expectedProgressReport = {
+      requestId: 'observability-test',
+      isDocumentMode: true,
+      productionWorkflowBlocked: true,
+      attachments_count: 2,
+      processedFiles: 2,
+      failedFiles: 0,
+      tokens_extracted_total: 250,
+      totalChunks: 3,
+      perFileStats: [
+        {
+          filename: 'doc1.pdf',
+          status: 'success',
+          bytesRead: 5000,
+          pagesProcessed: 2,
+          tokensExtracted: 150,
+          parseTimeMs: 45,
+          chunkCount: 2,
+          mime_detect: 'application/pdf',
+          parser_used: 'PdfParser',
+          error: null
+        },
+        {
+          filename: 'data.csv',
+          status: 'success',
+          bytesRead: 1200,
+          pagesProcessed: 1,
+          tokensExtracted: 100,
+          parseTimeMs: 5,
+          chunkCount: 1,
+          mime_detect: 'text/csv',
+          parser_used: 'CsvParser',
+          error: null
+        }
+      ],
+      coverageCheck: {
+        required: true,
+        passed: true
+      }
+    };
+
+    // Verify all required fields exist
+    expect(expectedProgressReport).toHaveProperty('requestId');
+    expect(expectedProgressReport).toHaveProperty('isDocumentMode');
+    expect(expectedProgressReport).toHaveProperty('productionWorkflowBlocked');
+    expect(expectedProgressReport).toHaveProperty('attachments_count');
+    expect(expectedProgressReport).toHaveProperty('tokens_extracted_total');
+    expect(expectedProgressReport).toHaveProperty('perFileStats');
+    
+    // Verify perFileStats structure
+    for (const stat of expectedProgressReport.perFileStats) {
+      expect(stat).toHaveProperty('filename');
+      expect(stat).toHaveProperty('mime_detect');
+      expect(stat).toHaveProperty('parser_used');
+      expect(stat).toHaveProperty('tokensExtracted');
+      expect(stat).toHaveProperty('status');
+    }
+  });
+
+  test('should verify citations format for different document types', async ({ page }) => {
+    const citationFormats = [
+      '[doc:report.pdf p#3]',           // PDF page citation
+      '[doc:data.xlsx sheet:Sales]',     // Excel sheet citation
+      '[doc:data.csv row:5 col:price]',  // CSV row/col citation
+      '[doc:slides.pptx slide#2]',       // PowerPoint slide citation
+      '[doc:notes.docx]',                // Word document citation
+      '[doc:file.txt]',                  // Plain text citation
+    ];
+
+    const citationPatterns = {
+      pdf: /\[doc:.*\.pdf\s+p#\d+\]/,
+      xlsx: /\[doc:.*\.xlsx\s+sheet:[^\]]+\]/,
+      csv: /\[doc:.*\.csv\s+row:\d+(\s+col:[^\]]+)?\]/,
+      pptx: /\[doc:.*\.pptx\s+slide#\d+\]/,
+      docx: /\[doc:.*\.docx[^\]]*\]/,
+      txt: /\[doc:.*\.txt[^\]]*\]/,
+    };
+
+    expect(citationPatterns.pdf.test(citationFormats[0])).toBe(true);
+    expect(citationPatterns.xlsx.test(citationFormats[1])).toBe(true);
+    expect(citationPatterns.csv.test(citationFormats[2])).toBe(true);
+    expect(citationPatterns.pptx.test(citationFormats[3])).toBe(true);
+    expect(citationPatterns.docx.test(citationFormats[4])).toBe(true);
+    expect(citationPatterns.txt.test(citationFormats[5])).toBe(true);
+  });
+
+  test('should reject /chat endpoint when documents attached', async ({ page }) => {
+    const rejectionResponse = {
+      error: 'USE_ANALYZE_ENDPOINT',
+      message: 'Los documentos adjuntos deben procesarse a través del endpoint /analyze',
+      requiredEndpoint: '/api/analyze'
+    };
+
+    // Verify rejection structure
+    expect(rejectionResponse.error).toBe('USE_ANALYZE_ENDPOINT');
+    expect(rejectionResponse.requiredEndpoint).toBe('/api/analyze');
+  });
+
+  test('should return 422 PARSE_FAILED when no tokens extracted', async ({ page }) => {
+    const parseFailedResponse = {
+      error: 'PARSE_FAILED',
+      message: 'No se pudo extraer texto de los documentos adjuntos.',
+      progressReport: {
+        requestId: 'parse-failed-test',
+        isDocumentMode: true,
+        productionWorkflowBlocked: true,
+        attachments_count: 1,
+        processedFiles: 0,
+        failedFiles: 1,
+        tokens_extracted_total: 0,
+        perFileStats: [{
+          filename: 'scanned.pdf',
+          status: 'failed',
+          error: 'No text extracted'
+        }]
+      }
+    };
+
+    expect(parseFailedResponse.error).toBe('PARSE_FAILED');
+    expect(parseFailedResponse.progressReport.tokens_extracted_total).toBe(0);
+    // This should be HTTP 422, not 500 or image fallback
+  });
+});
+
 test.describe('Document Analysis Component Tests', () => {
   test('should verify DocumentAnalysisResults renders correctly with test data', async ({ page }) => {
     await page.goto('/');

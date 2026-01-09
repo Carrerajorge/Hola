@@ -88,7 +88,7 @@ describe('PARE Document Analysis System', () => {
       { ext: 'docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', expectedParser: 'DocxParser' },
       { ext: 'xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', expectedParser: 'XlsxParser' },
       { ext: 'pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', expectedParser: 'PptxParser' },
-      { ext: 'csv', mimeType: 'text/csv', expectedParser: 'TextParser' },
+      { ext: 'csv', mimeType: 'text/csv', expectedParser: 'CsvParser' },
     ];
 
     documentTypes.forEach(({ ext, mimeType, expectedParser }) => {

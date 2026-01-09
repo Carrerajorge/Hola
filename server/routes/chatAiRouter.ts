@@ -925,7 +925,7 @@ ${systemContent}`;
         if (mime.includes('word') || mime.includes('document') || ext === 'docx' || ext === 'doc') return { mime_detect: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', parser_used: 'DocxParser' };
         if (mime.includes('sheet') || mime.includes('excel') || ext === 'xlsx' || ext === 'xls') return { mime_detect: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', parser_used: 'XlsxParser' };
         if (mime.includes('presentation') || mime.includes('powerpoint') || ext === 'pptx' || ext === 'ppt') return { mime_detect: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', parser_used: 'PptxParser' };
-        if (mime.includes('csv') || ext === 'csv') return { mime_detect: 'text/csv', parser_used: 'TextParser' };
+        if (mime.includes('csv') || ext === 'csv') return { mime_detect: 'text/csv', parser_used: 'CsvParser' };
         if (mime.includes('text') || ext === 'txt') return { mime_detect: 'text/plain', parser_used: 'TextParser' };
         return { mime_detect: mimeType || 'application/octet-stream', parser_used: 'TextParser' };
       };
@@ -1089,11 +1089,8 @@ ${documentText}`;
         }
       }
       
-      // Return structured response (progressReport key matches test expectations)
-      console.log(`[Analyze] ========== SUCCESS ${requestId} ==========`);
-      console.log(`[Analyze] Response includes isDocumentMode: ${progressReport.isDocumentMode}, productionWorkflowBlocked: ${progressReport.productionWorkflowBlocked}`);
-      
-      res.json({
+      // Build response payload
+      const responsePayload = {
         success: true,
         requestId,
         mode: "DATA_MODE",
@@ -1106,10 +1103,45 @@ ${documentText}`;
           totalChunks: batchResult.chunks.length,
           processingTimeMs: Date.now() - parseInt(requestId.split('_')[1])
         }
-      });
+      };
+      
+      // KILL-SWITCH: Validate DATA_MODE response before sending
+      const { validateDataModeResponse, DataModeOutputViolationError } = await import('../lib/dataModeValidator');
+      const validationResult = validateDataModeResponse(responsePayload, requestId);
+      
+      if (!validationResult.valid) {
+        console.error(`[Analyze] ========== DATA_MODE_OUTPUT_VIOLATION ${requestId} ==========`);
+        console.error(`[Analyze] Violations: ${validationResult.violations.join('; ')}`);
+        console.error(`[Analyze] Stack: ${validationResult.stack}`);
+        return res.status(500).json({
+          error: "DATA_MODE_OUTPUT_VIOLATION",
+          message: "La respuesta contiene elementos prohibidos en DATA_MODE (imágenes/artefactos)",
+          violations: validationResult.violations,
+          requestId,
+          progressReport
+        });
+      }
+      
+      // Return structured response (progressReport key matches test expectations)
+      console.log(`[Analyze] ========== SUCCESS ${requestId} ==========`);
+      console.log(`[Analyze] Response includes isDocumentMode: ${progressReport.isDocumentMode}, productionWorkflowBlocked: ${progressReport.productionWorkflowBlocked}`);
+      console.log(`[Analyze] KILL-SWITCH: Payload validated, no image/artifact violations`);
+      
+      res.json(responsePayload);
       
     } catch (error: any) {
       console.error(`[Analyze] Error ${requestId}:`, error);
+      
+      // Check if it's a DATA_MODE violation error
+      if (error.name === 'DataModeOutputViolationError') {
+        return res.status(500).json({
+          error: "DATA_MODE_OUTPUT_VIOLATION",
+          message: error.message,
+          violations: error.violations,
+          requestId
+        });
+      }
+      
       res.status(500).json({
         error: "ANALYSIS_FAILED",
         message: error.message || "Error durante el análisis de documentos",
