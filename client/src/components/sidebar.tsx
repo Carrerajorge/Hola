@@ -299,7 +299,7 @@ export function Sidebar({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-md bg-muted/50 hover:bg-muted border border-border/50 shadow-sm"
+                className="flex-shrink-0 h-8 w-8 mr-3 flex items-center justify-center rounded-md bg-muted/50 hover:bg-muted border border-border/50 shadow-sm"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button-chat-menu-${chat.id}`}
               >
