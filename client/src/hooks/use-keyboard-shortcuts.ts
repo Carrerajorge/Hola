@@ -23,6 +23,8 @@ export function useKeyboardShortcuts(
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       if (!enabled) return;
+      
+      if (!event.key) return;
 
       const target = event.target as HTMLElement;
       const isInput = target.tagName === "INPUT" || 
