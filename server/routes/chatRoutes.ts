@@ -9,7 +9,8 @@ import {
 } from "../services/analysisOrchestrator";
 import { analysisLogger } from "../lib/analysisLogger";
 import { complexityAnalyzer } from "../services/complexityAnalyzer";
-import { decideRoute, checkDynamicEscalation, type RouterDecision } from "../services/router";
+import { checkDynamicEscalation } from "../services/router";
+import { pareOrchestrator, type RoutingDecision } from "../services/pare";
 import { runAgent, type AgentState } from "../services/agentRunner";
 
 const analyzeRequestSchema = z.object({
@@ -36,6 +37,7 @@ const complexityRequestSchema = z.object({
 const routerRequestSchema = z.object({
   message: z.string().min(1, "Message cannot be empty"),
   hasAttachments: z.boolean().optional().default(false),
+  attachmentTypes: z.array(z.string()).optional().default([]),
 });
 
 const agentRunRequestSchema = z.object({
@@ -80,27 +82,50 @@ export function createChatRoutes(): Router {
         });
       }
 
-      const { message, hasAttachments } = validation.data;
-      const decision = await decideRoute(message, hasAttachments);
+      const { message, hasAttachments, attachmentTypes } = validation.data;
+      
+      const attachments = hasAttachments 
+        ? attachmentTypes.length > 0
+          ? attachmentTypes.map((type, idx) => ({ type, name: `attachment_${idx}` }))
+          : [{ type: 'file', name: 'attached' }]
+        : undefined;
+
+      const decision = await pareOrchestrator.route(message, hasAttachments, {
+        attachments,
+        attachmentTypes,
+      });
+
+      console.log(`[PARE] Route decision: ${decision.route}, confidence: ${decision.confidence}, reasons: ${decision.reasons.join(', ')}`);
 
       console.log(JSON.stringify({
         timestamp: new Date().toISOString(),
         level: "info",
-        component: "Router",
+        component: "PARE",
         event: "route_decision",
         route: decision.route,
         confidence: decision.confidence,
         reasons: decision.reasons,
+        toolNeeds: decision.toolNeeds,
       }));
 
-      res.json(decision);
+      res.json({
+        route: decision.route,
+        confidence: decision.confidence,
+        reasons: decision.reasons,
+        toolNeeds: decision.toolNeeds,
+        planHint: decision.planHint,
+        tool_needs: decision.toolNeeds,
+        plan_hint: decision.planHint,
+      });
     } catch (error: any) {
       const errorMsg = error.message || "Failed to route message";
-      console.error("[ChatRoutes] Router error:", JSON.stringify({ error: errorMsg }));
+      console.error("[ChatRoutes] PARE Router error:", JSON.stringify({ error: errorMsg }));
       res.json({
         route: "chat",
         confidence: 0.5,
         reasons: ["Router fallback due to error: " + errorMsg],
+        toolNeeds: [],
+        planHint: [],
         tool_needs: [],
         plan_hint: [],
       });
