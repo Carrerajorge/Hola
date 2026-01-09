@@ -136,7 +136,7 @@ export class ToolRouter {
 
     try {
       const { toolRegistry } = await import("../toolRegistry");
-      const tools = toolRegistry.listTools();
+      const tools = toolRegistry.getTools();
 
       for (const tool of tools) {
         const capability: ToolCapability = {

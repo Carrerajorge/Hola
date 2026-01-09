@@ -148,11 +148,23 @@ export class PAREOrchestrator {
       }
 
       const primaryIntent = analysis.intents[0];
+      
+      // Tools that require agent mode
+      const agentRequiredTools = [
+        "web_search", "fetch_url", "code_execute", "file_write", "doc_create",
+        "file_read", "document_analyze", "read_file", "analyze_document",
+        "summarize", "text_summarize", "data_analyze", "data_visualize"
+      ];
+      
       const hasExternalToolNeeds = analysis.toolCandidates.some((t) =>
-        ["web_search", "fetch_url", "code_execute", "file_write", "doc_create"].includes(t.toolName)
+        agentRequiredTools.includes(t.toolName)
       );
+      
+      // Force agent mode when attachments are present and intent is analysis/creation
+      const hasAttachmentsForAnalysis = hasAttachments && 
+        ["analysis", "creation", "query"].includes(primaryIntent?.category || "");
 
-      if (primaryIntent?.category === "conversation" && !hasExternalToolNeeds) {
+      if (primaryIntent?.category === "conversation" && !hasExternalToolNeeds && !hasAttachments) {
         return {
           route: "chat",
           confidence: primaryIntent.confidence,
@@ -163,11 +175,17 @@ export class PAREOrchestrator {
         };
       }
 
-      if (hasExternalToolNeeds || ["command", "creation", "automation", "research"].includes(primaryIntent?.category || "")) {
+      // Route to agent for: external tools, attachments with analysis intent, or specific intents
+      if (hasExternalToolNeeds || hasAttachmentsForAnalysis || 
+          ["command", "creation", "automation", "research", "analysis", "code"].includes(primaryIntent?.category || "")) {
+        const reasons = [];
+        if (hasAttachmentsForAnalysis) reasons.push("Archivo adjunto requiere procesamiento");
+        reasons.push(...analysis.toolCandidates.slice(0, 3).map((t) => `Requiere: ${t.toolName}`));
+        
         return {
           route: "agent",
           confidence: primaryIntent?.confidence || 0.7,
-          reasons: analysis.toolCandidates.map((t) => `Requiere: ${t.toolName}`),
+          reasons,
           toolNeeds: analysis.toolCandidates.map((t) => t.toolName),
           planHint: analysis.executionPlan.nodes.map((n) => `${n.tool}: ${JSON.stringify(n.inputs).slice(0, 50)}`),
           analysisResult: analysis,
