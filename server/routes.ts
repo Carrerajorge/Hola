@@ -28,6 +28,9 @@ import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
 import aiExcelRouter from "./routes/aiExcelRouter";
+import { metricsHandler, getMetricsJson } from "./lib/parePrometheusMetrics";
+import { createHealthRouter as createPareHealthRouter, getHealthSummary as getPareHealthSummary } from "./lib/pareHealthChecks";
+import { getMetricsSummary as getPareMetricsSummary } from "./lib/pareMetrics";
 import errorRouter from "./routes/errorRouter";
 import { createSpreadsheetRouter } from "./routes/spreadsheetRoutes";
 import { createChatRoutes } from "./routes/chatRoutes";
@@ -82,6 +85,15 @@ export async function registerRoutes(
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
   app.use("/health", healthRouter);
+  app.use("/health/pare", createPareHealthRouter());
+  app.get("/metrics", metricsHandler);
+  app.get("/api/pare/metrics", (_req: Request, res: Response) => {
+    res.json({
+      prometheus: getMetricsJson(),
+      internal: getPareMetricsSummary(),
+      health: getPareHealthSummary()
+    });
+  });
   app.use("/api/ai", aiExcelRouter);
   app.use("/api/errors", errorRouter);
   app.use("/api/spreadsheet", createSpreadsheetRouter());
