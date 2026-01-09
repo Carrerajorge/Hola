@@ -297,15 +297,14 @@ export function Sidebar({
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="flex-shrink-0 h-7 w-7 opacity-40 group-hover:opacity-100 hover:bg-accent transition-opacity"
+              <button
+                type="button"
+                className="flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-md bg-muted/50 hover:bg-muted border border-border/50 shadow-sm"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button-chat-menu-${chat.id}`}
               >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
+                <MoreHorizontal className="h-5 w-5 text-foreground" />
+              </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
               <DropdownMenuItem
