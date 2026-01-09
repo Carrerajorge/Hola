@@ -21,7 +21,14 @@ Preferred communication style: Simple, everyday language.
 - **LLM Gateway**: Manages AI model interactions with multi-provider fallback, request deduplication, streaming recovery, token usage tracking, circuit breakers, rate limiting, and response caching.
 - **ETL Agent**: Automates economic data processing and generates ZIP bundles with Excel workbooks and audit reports.
 - **Multi-Intent Pipeline**: Processes complex user prompts through defined stages (Plan, Decompose, Execute, Aggregate).
-- **PARE System (Prompt Analysis & Routing Engine)**: Deterministic document processing with atomic batch handling. Pipeline: fetch → mime_detect → parser_select → extract → normalize → chunk → index. Supports PDF, DOCX, XLSX, PPTX, CSV, TXT with per-document citations `[doc:File.ext p#|sheet:X|slide:#|row:#]`. Includes guards (blocks image generation when attachments present), coverage verification (fails if "analiza todos" but incomplete), and observability (bytes_read, pages_processed, tokens_extracted, parse_time_ms per file).
+- **PARE System (Prompt Analysis & Routing Engine)**: Production-grade document processing with defense-in-depth architecture:
+  - **Pipeline**: fetch → mime_detect → parser_select → extract → normalize → chunk → index
+  - **Formats**: PDF, DOCX, XLSX, PPTX, CSV, TXT with per-document citations `[doc:File.ext p#|sheet:X|slide:#|row:#]`
+  - **Phase 1**: Request contract with idempotency keys, DATA_MODE detection, rate limiting (60/min IP, 30/min user), resource quotas (50MB/file, 100MB total, 20 files, 500 pages)
+  - **Phase 2**: PostgreSQL-backed idempotency with 24h TTL, Zod schema validation, parser sandboxing with worker pool (3 workers, 30s timeout, 512MB limit), circuit breaker (CLOSED/OPEN/HALF_OPEN), zip-bomb guard, path traversal detection, MIME allowlist/denylist, response contract validation
+  - **Phase 3 (Observability)**: OpenTelemetry tracing with W3C TraceContext, Prometheus metrics (`/metrics` endpoint with histograms p50/p95/p99, counters, gauges), Kubernetes health probes (`/health/pare/live`, `/health/pare/ready`), structured JSON logging with PII redaction, internal metrics dashboard (`/api/pare/metrics`)
+  - **Guards**: Blocks image/artifact generation when attachments present, coverage verification
+  - **Tests**: 359 tests covering all PARE functionality
 - **Document Generation System**: Generates Excel and Word files using LLM orchestration with repair loops, including professional CV/Resume generation.
 - **Spreadsheet Analyzer Module**: AI-powered analysis, LLM agent for Python code generation (with AST-based security validation), and a secure Python sandbox for execution.
 - **Agent Infrastructure**: Modular plugin architecture with a StateMachine, Typed Contracts (Zod schemas), Event Sourcing, a PolicyEngine for RBAC, and an ExecutionEngine with circuit breakers and exponential backoff.
