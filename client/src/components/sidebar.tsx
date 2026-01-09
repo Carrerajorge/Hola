@@ -298,7 +298,7 @@ export function Sidebar({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <div
-                className="flex-shrink-0 p-1 hover:bg-accent rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                className="flex-shrink-0 p-1 mr-2 hover:bg-accent rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button-chat-menu-${chat.id}`}
               >
