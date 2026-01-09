@@ -141,6 +141,8 @@ export interface SessionContext {
   userId?: string;
   previousMessages?: Array<{ role: string; content: string }>;
   attachments?: Array<{ type: string; name: string; content?: string }>;
+  hasAttachments?: boolean;
+  attachmentTypes?: string[];
   userPreferences?: Record<string, unknown>;
   relevantMemories?: Array<{ content: string; type: string }>;
 }

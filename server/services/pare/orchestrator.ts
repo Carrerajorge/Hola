@@ -23,7 +23,7 @@ export class PAREOrchestrator {
 
   constructor(config: Partial<PAREConfig> = {}) {
     this.config = { ...DEFAULT_PARE_CONFIG, ...config };
-    this.enabled = process.env.PARE_ENABLED === "true";
+    this.enabled = process.env.PARE_ENABLED !== "false";
 
     this.intentClassifier = new IntentClassifier({
       confidenceThreshold: this.config.intentConfidenceThreshold,
@@ -129,7 +129,12 @@ export class PAREOrchestrator {
     }
 
     try {
-      const analysis = await this.analyze(prompt, context);
+      const enrichedContext: SessionContext = {
+        ...context,
+        hasAttachments,
+        attachmentTypes: context?.attachments?.map(a => a.type) || [],
+      };
+      const analysis = await this.analyze(prompt, enrichedContext);
 
       if (analysis.requiresClarification) {
         return {

@@ -46,7 +46,8 @@ const INTENT_TO_TOOLS: Record<IntentCategory, string[]> = {
   ],
   analysis: [
     "data_analyze", "data_visualize", "summarize", "text_summarize", "reason",
-    "vision_analyze", "verify", "analyze_problem"
+    "vision_analyze", "verify", "analyze_problem", "file_read", "document_analyze",
+    "read_file", "analyze_document"
   ],
   code: [
     "code_generate", "code_execute", "code_review", "code_analyze", "code_debug",
@@ -69,7 +70,7 @@ const INTENT_TO_TOOLS: Record<IntentCategory, string[]> = {
 };
 
 const ENTITY_TO_TOOLS: Record<EntityType, string[]> = {
-  file_path: ["file_read", "file_write", "file_manage", "file_convert", "document_convert"],
+  file_path: ["file_read", "file_write", "file_manage", "file_convert", "document_convert", "summarize", "text_summarize", "data_analyze"],
   url: ["fetch_url", "browse_url", "browser_navigate", "search_web", "web_search", "extract_content"],
   code_snippet: ["code_execute", "code_review", "code_analyze", "code_debug"],
   date_time: ["schedule_cron", "cron_schedule", "schedule_once", "calendar_manage", "calendar_event"],
