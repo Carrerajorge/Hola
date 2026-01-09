@@ -3314,8 +3314,10 @@ export function ChatInterface({
       const isImageTool = selectedTool === "image";
       let shouldGenerateImage = isImageTool;
       
-      // Auto-detect image requests if no tool is selected (also skip if doc tool like Figma is selected)
-      if (!isImageTool && !selectedTool && !selectedDocTool) {
+      // CRITICAL FIX: When files are attached, NEVER auto-detect image generation
+      // Files indicate document analysis intent, not image generation
+      // Auto-detect image requests ONLY if no tool is selected AND no files attached
+      if (!isImageTool && !selectedTool && !selectedDocTool && !hasAttachedFiles) {
         try {
           const detectRes = await fetch("/api/image/detect", {
             method: "POST",
@@ -3327,6 +3329,11 @@ export function ChatInterface({
         } catch (e) {
           console.error("Image detection error:", e);
         }
+      }
+      
+      // If files are attached, log that we're skipping image detection
+      if (hasAttachedFiles && !isImageTool) {
+        console.log(`[ChatInterface] Files attached (${currentFiles.length}), skipping image auto-detection - will process as document analysis`);
       }
       
       // Generate image if needed
