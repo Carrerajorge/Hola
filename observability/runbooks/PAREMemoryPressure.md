@@ -4,8 +4,8 @@
 This alert fires when the PARE service is experiencing high memory utilization. Memory pressure causes garbage collection pauses, increased latency, and can eventually lead to out-of-memory crashes if not addressed.
 
 ## Severity
-- **Warning threshold**: Heap usage > 75% of heap total
-- **Critical threshold**: Heap usage > 90% of heap total
+- **Warning threshold**: Process memory > 80% of available (5 min), or heap > 85% of heap total (5 min)
+- **Critical threshold**: Process memory > 90% of available (2 min sustained)
 - **SLO impact**: Memory pressure causes GC pauses that degrade latency. OOM crashes cause availability SLO violations.
 
 ## Symptoms

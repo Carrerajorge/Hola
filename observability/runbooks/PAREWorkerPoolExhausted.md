@@ -4,8 +4,8 @@
 This alert fires when the PARE worker pool has no available workers to process incoming requests. Worker pool exhaustion causes request queuing, increased latency, and eventually request failures if the condition persists.
 
 ## Severity
-- **Warning threshold**: Available workers = 0 for > 30 seconds, queue depth < 10
-- **Critical threshold**: Available workers = 0 for > 2 minutes, or queue depth > 50
+- **Warning threshold**: Active workers >= 8 (of 10) for > 1 min, or queue depth > 50
+- **Critical threshold**: Active workers >= 10 (pool exhausted) for > 30s, or queue depth > 100
 - **SLO impact**: Queued requests experience degraded latency. Extended exhaustion causes timeouts and availability SLO violations.
 
 ## Symptoms

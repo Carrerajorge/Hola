@@ -4,8 +4,8 @@
 This alert fires when one or more circuit breakers in the PARE service have opened due to repeated failures. Circuit breakers protect the system from cascading failures by stopping requests to unhealthy dependencies, but open breakers mean that parser functionality is degraded or unavailable.
 
 ## Severity
-- **Warning threshold**: Any single circuit breaker in HALF_OPEN state for > 2 minutes
-- **Critical threshold**: Any circuit breaker in OPEN state, or > 50% of breakers open
+- **Warning threshold**: Circuit breaker in HALF_OPEN state > 2 min, or trip rate > 0.1/min for 5 min
+- **Critical threshold**: Any circuit breaker OPEN for > 30s, or 2+ parsers OPEN simultaneously
 - **SLO impact**: Open circuit breakers cause immediate request failures for affected parser types, directly impacting availability SLO.
 
 ## Symptoms

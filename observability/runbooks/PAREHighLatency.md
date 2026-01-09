@@ -4,9 +4,9 @@
 This alert fires when the PARE document parsing service response times exceed acceptable thresholds. High latency degrades user experience and can cascade into timeouts, retries, and eventual failures throughout the system.
 
 ## Severity
-- **Warning threshold**: P95 latency > 2 seconds over 5 minutes
-- **Critical threshold**: P95 latency > 5 seconds over 5 minutes
-- **SLO impact**: Violates the P95 < 2s latency SLO for document processing. Extended latency causes client timeouts and retry storms.
+- **Warning threshold**: P99 latency > 3 seconds over 5 minutes
+- **Critical threshold**: P99 latency > 5 seconds over 5 minutes (SLO breach)
+- **SLO impact**: Violates the P99 < 5s latency SLO for document processing. Extended latency causes client timeouts and retry storms.
 
 ## Symptoms
 - Users report slow document uploads and analysis

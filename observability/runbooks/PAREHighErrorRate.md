@@ -4,9 +4,9 @@
 This alert fires when the PARE document parsing service experiences an elevated rate of failed requests. High error rates indicate parsing failures, upstream dependency issues, or invalid input documents that are not being handled gracefully.
 
 ## Severity
-- **Warning threshold**: Error rate > 5% over 5 minutes
-- **Critical threshold**: Error rate > 15% over 5 minutes
-- **SLO impact**: Directly affects the 99.5% availability SLO for document processing. Each 1% increase in errors reduces effective availability.
+- **Warning threshold**: Error rate > 0.1% over 5 minutes (burn rate 6x SLO budget)
+- **Critical threshold**: Error rate > 1% over 5 minutes (burn rate 14.4x SLO budget)
+- **SLO impact**: Directly affects the 99.9% availability SLO for document processing. At critical threshold, the monthly error budget is consumed in ~5 hours.
 
 ## Symptoms
 - Users report documents failing to parse or upload
