@@ -11,7 +11,28 @@ import { IntentClassifier } from "./intentClassifier";
 import { EntityExtractor } from "./entityExtractor";
 import { ToolRouter } from "./toolRouter";
 import { PlanGenerator } from "./planGenerator";
+import { RobustIntentClassifier, IntentResult, RobustIntent } from "./robustIntentClassifier";
+import { ContextDetector, ContextSignals } from "./contextDetector";
+import { ToolSelector, ToolSelection } from "./toolSelector";
+import { DeterministicRouter, RobustRouteDecision } from "./deterministicRouter";
 import { v4 as uuidv4 } from "uuid";
+
+export interface SimpleAttachment {
+  name?: string;
+  type?: string;
+  path?: string;
+}
+
+export interface RobustRouteResult {
+  route: "chat" | "agent";
+  intent: RobustIntent;
+  confidence: number;
+  tools: string[];
+  reason: string;
+  ruleApplied: string;
+  context: ContextSignals;
+  durationMs: number;
+}
 
 export class PAREOrchestrator {
   private config: PAREConfig;
@@ -21,9 +42,16 @@ export class PAREOrchestrator {
   private planGenerator: PlanGenerator;
   private enabled: boolean;
 
+  private robustIntentClassifier: RobustIntentClassifier;
+  private contextDetector: ContextDetector;
+  private toolSelector: ToolSelector;
+  private deterministicRouter: DeterministicRouter;
+  private useRobustRouter: boolean;
+
   constructor(config: Partial<PAREConfig> = {}) {
     this.config = { ...DEFAULT_PARE_CONFIG, ...config };
     this.enabled = process.env.PARE_ENABLED !== "false";
+    this.useRobustRouter = process.env.PARE_USE_ROBUST !== "false";
 
     this.intentClassifier = new IntentClassifier({
       confidenceThreshold: this.config.intentConfidenceThreshold,
@@ -38,7 +66,12 @@ export class PAREOrchestrator {
 
     this.planGenerator = new PlanGenerator();
 
-    console.log(`[PARE] Orchestrator initialized (enabled=${this.enabled})`);
+    this.robustIntentClassifier = new RobustIntentClassifier();
+    this.contextDetector = new ContextDetector();
+    this.toolSelector = new ToolSelector();
+    this.deterministicRouter = new DeterministicRouter();
+
+    console.log(`[PARE] Orchestrator initialized (enabled=${this.enabled}, robust=${this.useRobustRouter})`);
   }
 
   isEnabled(): boolean {
@@ -48,6 +81,45 @@ export class PAREOrchestrator {
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     console.log(`[PARE] Orchestrator ${enabled ? "enabled" : "disabled"}`);
+  }
+
+  setUseRobustRouter(useRobust: boolean): void {
+    this.useRobustRouter = useRobust;
+    console.log(`[PARE] Robust router ${useRobust ? "enabled" : "disabled"}`);
+  }
+
+  robustRoute(message: string, attachments: SimpleAttachment[] = []): RobustRouteResult {
+    const startTime = Date.now();
+
+    console.log(`[PARE:Robust] Starting route for message: "${message.slice(0, 80)}${message.length > 80 ? "..." : ""}"`);
+    console.log(`[PARE:Robust] Attachments: ${attachments.length > 0 ? attachments.map(a => a.name || a.path || "unknown").join(", ") : "none"}`);
+
+    const intentResult = this.robustIntentClassifier.classify(message);
+    console.log(`[PARE:Robust] Intent: ${intentResult.intent} (confidence: ${intentResult.confidence.toFixed(2)})`);
+
+    const context = this.contextDetector.detect(message, attachments);
+    console.log(`[PARE:Robust] Context: attachments=${context.hasAttachments}, urls=${context.hasUrls}, lang=${context.language}, urgency=${context.hasUrgency}`);
+
+    const toolSelection = this.toolSelector.select(intentResult.intent, context, message);
+    console.log(`[PARE:Robust] Tools: [${toolSelection.tools.slice(0, 5).join(", ")}${toolSelection.tools.length > 5 ? "..." : ""}], requiresAgent=${toolSelection.requiresAgent}`);
+
+    const decision = this.deterministicRouter.route(intentResult, context, toolSelection);
+
+    const durationMs = Date.now() - startTime;
+
+    console.log(`[PARE:Robust] DECISION: route=${decision.route}, rule=${decision.ruleApplied}, duration=${durationMs}ms`);
+    console.log(`[PARE:Robust] Reason: ${decision.reason}`);
+
+    return {
+      route: decision.route,
+      intent: decision.intent,
+      confidence: decision.confidence,
+      tools: decision.tools,
+      reason: decision.reason,
+      ruleApplied: decision.ruleApplied,
+      context,
+      durationMs
+    };
   }
 
   async analyze(prompt: string, context?: SessionContext): Promise<PromptAnalysisResult> {
@@ -128,6 +200,32 @@ export class PAREOrchestrator {
       return this.legacyRoute(prompt, hasAttachments);
     }
 
+    if (this.useRobustRouter) {
+      try {
+        const attachments: SimpleAttachment[] = context?.attachments?.map(a => ({
+          name: a.name,
+          type: a.type,
+        })) || [];
+
+        if (hasAttachments && attachments.length === 0) {
+          attachments.push({ type: "unknown", name: "attachment" });
+        }
+
+        const robustResult = this.robustRoute(prompt, attachments);
+
+        return {
+          route: robustResult.route,
+          confidence: robustResult.confidence,
+          reasons: [robustResult.reason],
+          toolNeeds: robustResult.tools,
+          planHint: [`Rule: ${robustResult.ruleApplied}`],
+          analysisResult: undefined,
+        };
+      } catch (error) {
+        console.error("[PARE] Robust router failed, falling back to legacy:", error);
+      }
+    }
+
     try {
       const enrichedContext: SessionContext = {
         ...context,
@@ -149,7 +247,6 @@ export class PAREOrchestrator {
 
       const primaryIntent = analysis.intents[0];
       
-      // Tools that require agent mode
       const agentRequiredTools = [
         "web_search", "fetch_url", "code_execute", "file_write", "doc_create",
         "file_read", "document_analyze", "read_file", "analyze_document",
@@ -160,7 +257,6 @@ export class PAREOrchestrator {
         agentRequiredTools.includes(t.toolName)
       );
       
-      // Force agent mode when attachments are present and intent is analysis/creation
       const hasAttachmentsForAnalysis = hasAttachments && 
         ["analysis", "creation", "query"].includes(primaryIntent?.category || "");
 
@@ -175,7 +271,6 @@ export class PAREOrchestrator {
         };
       }
 
-      // Route to agent for: external tools, attachments with analysis intent, or specific intents
       if (hasExternalToolNeeds || hasAttachmentsForAnalysis || 
           ["command", "creation", "automation", "research", "analysis", "code"].includes(primaryIntent?.category || "")) {
         const reasons = [];
@@ -298,3 +393,7 @@ Responde SOLO con JSON: {"questions":["pregunta1","pregunta2"]}`;
 }
 
 export const pareOrchestrator = new PAREOrchestrator();
+
+export function route(message: string, attachments: SimpleAttachment[] = []): RobustRouteResult {
+  return pareOrchestrator.robustRoute(message, attachments);
+}
