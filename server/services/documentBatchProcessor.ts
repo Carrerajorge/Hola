@@ -6,12 +6,16 @@ import { PptxParser } from "../parsers/pptxParser";
 import { TextParser } from "../parsers/textParser";
 import { CsvParser } from "../parsers/csvParser";
 import type { DetectedFileType, FileParser, ParsedResult } from "../parsers/base";
+import { runParserInSandbox, SandboxErrorCode, type SandboxOptions } from "../lib/parserSandbox";
+import { detectMime, type MimeDetectionResult } from "../lib/mimeDetector";
+import { validateZipDocument } from "../lib/zipBombGuard";
+import { ParserRegistry, createParserRegistry } from "../lib/parserRegistry";
 
 export interface SimpleAttachment {
   name: string;
   mimeType: string;
   storagePath: string;
-  content?: string; // Optional: pre-extracted content for text files
+  content?: string;
 }
 
 export interface DocumentChunk {
@@ -31,6 +35,11 @@ export interface DocumentProcessingStats {
   chunkCount: number;
   status: 'success' | 'failed';
   error?: string;
+  securityChecks?: {
+    mimeValidation: boolean;
+    zipBombCheck: boolean;
+    sandboxed: boolean;
+  };
 }
 
 export interface BatchProcessingResult {
@@ -43,14 +52,6 @@ export interface BatchProcessingResult {
   totalTokens: number;
 }
 
-interface ExtractedDocument {
-  docId: string;
-  filename: string;
-  docType: string;
-  content: string;
-  metadata: Record<string, any>;
-}
-
 interface ParserConfig {
   parser: FileParser;
   docType: string;
@@ -59,6 +60,14 @@ interface ParserConfig {
 
 const CHUNK_SIZE = 1500;
 const CHUNK_OVERLAP = 200;
+
+const ZIP_BASED_EXTENSIONS = ['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp'];
+
+const DEFAULT_SANDBOX_OPTIONS: Partial<SandboxOptions> = {
+  timeoutMs: 30000,
+  softMemoryLimitMB: 256,
+  hardMemoryLimitMB: 512,
+};
 
 export class DocumentBatchProcessor {
   private objectStorageService: ObjectStorageService;
@@ -70,8 +79,11 @@ export class DocumentBatchProcessor {
   private csvParser: CsvParser;
   private mimeTypeMap: Record<string, ParserConfig>;
   private chunkIndex: Map<string, DocumentChunk>;
+  private parserRegistry: ParserRegistry;
+  private sandboxOptions: Partial<SandboxOptions>;
+  private enableSecurityChecks: boolean;
 
-  constructor() {
+  constructor(options?: { sandboxOptions?: Partial<SandboxOptions>; enableSecurityChecks?: boolean }) {
     this.objectStorageService = new ObjectStorageService();
     this.pdfParser = new PdfParser();
     this.docxParser = new DocxParser();
@@ -80,6 +92,8 @@ export class DocumentBatchProcessor {
     this.textParser = new TextParser();
     this.csvParser = new CsvParser();
     this.chunkIndex = new Map();
+    this.sandboxOptions = options?.sandboxOptions || DEFAULT_SANDBOX_OPTIONS;
+    this.enableSecurityChecks = options?.enableSecurityChecks ?? true;
 
     this.mimeTypeMap = {
       "application/pdf": { parser: this.pdfParser, docType: "PDF", ext: "pdf" },
@@ -97,10 +111,67 @@ export class DocumentBatchProcessor {
       "text/html": { parser: this.textParser, docType: "HTML", ext: "html" },
       "application/json": { parser: this.textParser, docType: "JSON", ext: "json" },
     };
+
+    this.parserRegistry = createParserRegistry({
+      circuitBreakerThreshold: 5,
+      circuitBreakerResetMs: 60000,
+      fallbackEnabled: true,
+    });
+
+    this.initializeParserRegistry();
+  }
+
+  private initializeParserRegistry(): void {
+    this.parserRegistry.registerParser(
+      ["application/pdf"],
+      this.pdfParser,
+      10
+    );
+
+    this.parserRegistry.registerParser(
+      [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+      ],
+      this.docxParser,
+      10
+    );
+
+    this.parserRegistry.registerParser(
+      [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+      ],
+      this.xlsxParser,
+      10
+    );
+
+    this.parserRegistry.registerParser(
+      [
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-powerpoint",
+      ],
+      this.pptxParser,
+      10
+    );
+
+    this.parserRegistry.registerParser(
+      ["text/csv", "application/csv"],
+      this.csvParser,
+      10
+    );
+
+    this.parserRegistry.registerParser(
+      ["text/plain", "text/markdown", "text/md", "text/html", "application/json"],
+      this.textParser,
+      100
+    );
+
+    this.parserRegistry.setFallbackParser(this.textParser);
   }
 
   async processBatch(attachments: SimpleAttachment[]): Promise<BatchProcessingResult> {
-    console.log(`[DocumentBatchProcessor] Starting batch processing of ${attachments.length} attachments`);
+    console.log(`[DocumentBatchProcessor] Starting batch processing of ${attachments.length} attachments (security checks: ${this.enableSecurityChecks})`);
     const startTime = Date.now();
 
     const result: BatchProcessingResult = {
@@ -119,6 +190,11 @@ export class DocumentBatchProcessor {
       const attachment = attachments[i];
       const docId = this.generateDocId(attachment.name, i);
       const fileStartTime = Date.now();
+      const securityChecks = {
+        mimeValidation: false,
+        zipBombCheck: false,
+        sandboxed: false,
+      };
 
       try {
         let normalized: string;
@@ -126,45 +202,76 @@ export class DocumentBatchProcessor {
         let buffer: Buffer;
         let bytesRead = 0;
         
-        // Determine mime type from filename first (for correct parser selection)
-        const mimeType = this.detectMimeFromFilename(attachment.name, attachment.mimeType);
-        const parserConfig = this.selectParser(mimeType);
-        
-        if (!parserConfig) {
-          throw new Error(`Unsupported MIME type: ${mimeType} for file ${attachment.name}`);
-        }
-        
-        // For binary formats (PDF, Excel, Word, PPT), always fetch from storage
         const binaryFormats = ['pdf', 'xlsx', 'xls', 'docx', 'doc', 'pptx', 'ppt'];
         const ext = this.getExtensionFromFileName(attachment.name);
         const isBinaryFormat = binaryFormats.includes(ext);
         
         if (isBinaryFormat || !attachment.content || attachment.content.trim().length === 0) {
-          // Fetch from storage for binary formats or when no content provided
           if (!attachment.storagePath) {
             throw new Error(`No storage path provided for binary file: ${attachment.name}`);
           }
           buffer = await this.fetchDocument(attachment.storagePath);
           bytesRead = buffer.length;
-          parsed = await this.extractContent(buffer, parserConfig, attachment.name);
+
+          let mimeDetectionResult: MimeDetectionResult | undefined;
+          if (this.enableSecurityChecks) {
+            mimeDetectionResult = detectMime(buffer, attachment.name, attachment.mimeType);
+            securityChecks.mimeValidation = true;
+            
+            if (mimeDetectionResult.mismatch) {
+              console.warn(`[DocumentBatchProcessor] MIME mismatch for ${attachment.name}: ${mimeDetectionResult.mismatchDetails}`);
+            }
+          }
+
+          if (this.enableSecurityChecks && ZIP_BASED_EXTENSIONS.includes(ext)) {
+            const zipValidation = await validateZipDocument(buffer, attachment.name);
+            securityChecks.zipBombCheck = true;
+            
+            if (!zipValidation.valid) {
+              throw new Error(`Security check failed: ${zipValidation.error}`);
+            }
+          }
+
+          const detectedMimeType = mimeDetectionResult?.detectedMime || 
+            this.detectMimeFromFilename(attachment.name, attachment.mimeType);
+          
+          const parserConfig = this.selectParser(detectedMimeType);
+          
+          if (!parserConfig) {
+            throw new Error(`Unsupported MIME type: ${detectedMimeType} for file ${attachment.name}`);
+          }
+
+          parsed = await this.extractContentWithSandbox(
+            buffer, 
+            parserConfig, 
+            attachment.name,
+            securityChecks
+          );
           normalized = this.normalizeContent(parsed.text);
         } else {
-          // For text-based formats with pre-extracted content
           bytesRead = Buffer.byteLength(attachment.content, 'utf8');
           buffer = Buffer.from(attachment.content, 'utf8');
           
-          // For CSV files, use CsvParser to get row/col citations
+          const mimeType = this.detectMimeFromFilename(attachment.name, attachment.mimeType);
+          const parserConfig = this.selectParser(mimeType);
+          
+          if (!parserConfig) {
+            throw new Error(`Unsupported MIME type: ${mimeType} for file ${attachment.name}`);
+          }
+          
           if (ext === 'csv' && this.csvParser) {
             parsed = await this.csvParser.parse(buffer, attachment.name);
             normalized = this.normalizeContent(parsed.text);
           } else {
-            // Plain text files - use direct content
             normalized = this.normalizeContent(attachment.content);
             parsed = { text: normalized, metadata: { parser_used: parserConfig.parser.name } };
           }
         }
         
-        const chunks = this.chunkDocument(normalized, docId, attachment.name, parserConfig.docType, parsed.metadata);
+        const parserConfig = this.selectParser(this.detectMimeFromFilename(attachment.name, attachment.mimeType));
+        const docType = parserConfig?.docType || "Text";
+        
+        const chunks = this.chunkDocument(normalized, docId, attachment.name, docType, parsed.metadata);
         
         this.indexChunks(chunks);
         result.chunks.push(...chunks);
@@ -180,6 +287,7 @@ export class DocumentBatchProcessor {
           parseTimeMs,
           chunkCount: chunks.length,
           status: 'success',
+          securityChecks,
         });
 
         result.processedFiles++;
@@ -204,6 +312,7 @@ export class DocumentBatchProcessor {
           chunkCount: 0,
           status: 'failed',
           error: errorMessage,
+          securityChecks,
         });
       }
     }
@@ -214,6 +323,52 @@ export class DocumentBatchProcessor {
     console.log(`[DocumentBatchProcessor] Batch complete in ${totalTime}ms: ${result.processedFiles}/${attachments.length} files, ${result.chunks.length} chunks, ${result.totalTokens} tokens`);
 
     return result;
+  }
+
+  private async extractContentWithSandbox(
+    buffer: Buffer,
+    parserConfig: ParserConfig,
+    filename: string,
+    securityChecks: { mimeValidation: boolean; zipBombCheck: boolean; sandboxed: boolean }
+  ): Promise<ParsedResult> {
+    const ext = this.getExtensionFromFileName(filename) || parserConfig.ext;
+
+    const detectedType: DetectedFileType = {
+      mimeType: Object.keys(this.mimeTypeMap).find(k => this.mimeTypeMap[k] === parserConfig) || "",
+      extension: ext,
+      confidence: 1.0,
+    };
+
+    if (this.enableSecurityChecks) {
+      securityChecks.sandboxed = true;
+      
+      const sandboxResult = await runParserInSandbox(
+        parserConfig.parser,
+        buffer,
+        detectedType,
+        this.sandboxOptions
+      );
+
+      if (!sandboxResult.success) {
+        if (sandboxResult.errorCode === SandboxErrorCode.TIMEOUT) {
+          throw new Error(`Parser timeout: ${filename} took too long to process`);
+        }
+        if (sandboxResult.errorCode === SandboxErrorCode.MEMORY_EXCEEDED) {
+          throw new Error(`Memory limit exceeded while parsing: ${filename}`);
+        }
+        throw new Error(sandboxResult.error || 'Parser failed');
+      }
+
+      return {
+        ...sandboxResult.result!,
+        metadata: {
+          ...sandboxResult.result?.metadata,
+          sandbox_metrics: sandboxResult.metrics,
+        },
+      };
+    }
+
+    return parserConfig.parser.parse(buffer, detectedType);
   }
 
   private async fetchDocument(storagePath: string): Promise<Buffer> {
@@ -231,42 +386,17 @@ export class DocumentBatchProcessor {
     }
   }
 
-  private detectMime(buffer: Buffer, filename: string, providedMimeType: string): string {
-    let mimeType = providedMimeType;
-
-    if (!this.mimeTypeMap[mimeType]) {
-      const ext = this.getExtensionFromFileName(filename);
-      const inferredMime = this.inferMimeTypeFromExtension(ext);
-      if (inferredMime) {
-        mimeType = inferredMime;
-      }
-    }
-
-    if (mimeType?.startsWith('text/') && !this.mimeTypeMap[mimeType]) {
-      mimeType = 'text/plain';
-    }
-
-    return mimeType;
-  }
-
-  /**
-   * Detect MIME type from filename only (for parser selection before content fetch)
-   * This ensures binary formats get the correct parser even without buffer inspection
-   */
   private detectMimeFromFilename(filename: string, providedMimeType: string): string {
-    // First try the provided mime type
     if (this.mimeTypeMap[providedMimeType]) {
       return providedMimeType;
     }
     
-    // Infer from extension
     const ext = this.getExtensionFromFileName(filename);
     const inferredMime = this.inferMimeTypeFromExtension(ext);
     if (inferredMime && this.mimeTypeMap[inferredMime]) {
       return inferredMime;
     }
     
-    // Fallback to text/plain for unknown text-based types
     if (providedMimeType?.startsWith('text/')) {
       return 'text/plain';
     }
@@ -276,22 +406,6 @@ export class DocumentBatchProcessor {
 
   private selectParser(mimeType: string): ParserConfig | null {
     return this.mimeTypeMap[mimeType] || null;
-  }
-
-  private async extractContent(
-    buffer: Buffer,
-    parserConfig: ParserConfig,
-    filename: string
-  ): Promise<ParsedResult> {
-    const ext = this.getExtensionFromFileName(filename) || parserConfig.ext;
-
-    const detectedType: DetectedFileType = {
-      mimeType: Object.keys(this.mimeTypeMap).find(k => this.mimeTypeMap[k] === parserConfig) || "",
-      extension: ext,
-      confidence: 1.0,
-    };
-
-    return parserConfig.parser.parse(buffer, detectedType);
   }
 
   private normalizeContent(text: string): string {
@@ -317,7 +431,6 @@ export class DocumentBatchProcessor {
     docType: string,
     metadata?: Record<string, any>
   ): DocumentChunk[] {
-    const chunks: DocumentChunk[] = [];
     const ext = this.getExtensionFromFileName(filename).toLowerCase();
 
     if (docType === "Excel" && metadata?.sheets) {
@@ -678,6 +791,18 @@ export class DocumentBatchProcessor {
       'json': 'application/json',
     };
     return extMap[ext] || null;
+  }
+
+  getParserRegistry(): ParserRegistry {
+    return this.parserRegistry;
+  }
+
+  getCircuitBreakerStatus(): Record<string, any> {
+    return this.parserRegistry.getCircuitBreakerStatus();
+  }
+
+  resetCircuitBreakers(): void {
+    this.parserRegistry.resetAllCircuitBreakers();
   }
 }
 
