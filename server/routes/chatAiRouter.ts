@@ -6,6 +6,7 @@ import { generateImage, detectImageRequest, extractImagePrompt } from "../servic
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../etl";
 import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
 import { pareOrchestrator, type RobustRouteResult, type SimpleAttachment } from "../services/pare";
+import { DocumentBatchProcessor, type BatchProcessingResult, type SimpleAttachment as BatchAttachment } from "../services/documentBatchProcessor";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -450,56 +451,103 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }, 15000);
 
-      // Process attachments if present (for document analysis)
+      // Process attachments using DocumentBatchProcessor for atomic batch handling
       let attachmentContext = "";
+      let batchResult: BatchProcessingResult | null = null;
       const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
+      const attachmentsCount = hasAttachments ? attachments.length : 0;
+      
+      // GUARD: Detect if user requests "analyze all" - requires full coverage
+      const userMessage = messages[messages.length - 1]?.content || "";
+      const requiresFullCoverage = /\b(todos|all|completo|complete|cada|every)\b/i.test(userMessage);
       
       if (hasAttachments) {
-        console.log(`[Stream] Processing ${attachments.length} attachment(s):`, 
+        console.log(`[Stream] Processing ${attachmentsCount} attachment(s) as atomic batch:`, 
           attachments.map((a: any) => ({ 
             name: a.name, 
             type: a.type, 
-            hasContent: !!a.content, 
-            contentLength: a.content?.length || 0,
             storagePath: a.storagePath,
             fileId: a.fileId
           }))
         );
+        
         try {
-          const extractedContents: { fileName: string; content: string; mimeType: string }[] = [];
+          const batchProcessor = new DocumentBatchProcessor();
           
-          for (const att of attachments) {
-            // If content was sent directly, use it
-            if (att.content) {
-              extractedContents.push({
-                fileName: att.name || 'document',
-                content: att.content,
-                mimeType: att.mimeType || 'application/octet-stream'
-              });
-            } else if (att.storagePath || att.fileId) {
-              // Otherwise, extract from storage
-              try {
-                const extracted = await extractAttachmentContent({
-                  name: att.name,
-                  type: att.type,
-                  storagePath: att.storagePath,
-                  fileId: att.fileId
-                } as Attachment);
-                if (extracted) {
-                  extractedContents.push(extracted);
-                }
-              } catch (extractError) {
-                console.error(`[Stream] Error extracting ${att.name}:`, extractError);
-              }
-            }
+          // Convert attachments to BatchAttachment format
+          const batchAttachments: BatchAttachment[] = attachments
+            .filter((a: any) => a.storagePath || a.content)
+            .map((a: any) => ({
+              name: a.name || 'document',
+              mimeType: a.mimeType || a.type || 'application/octet-stream',
+              storagePath: a.storagePath || '',
+              content: a.content // Pass content if available (for text files)
+            }));
+          
+          batchResult = await batchProcessor.processBatch(batchAttachments);
+          
+          // Log observability metrics per file
+          console.log(`[Stream] Batch processing complete:`, {
+            attachmentsCount: batchResult.attachmentsCount,
+            processedFiles: batchResult.processedFiles,
+            failedFiles: batchResult.failedFiles.length,
+            totalChunks: batchResult.chunks.length,
+            totalTokens: batchResult.totalTokens
+          });
+          
+          // Log per-file stats
+          for (const stat of batchResult.stats) {
+            console.log(`[Stream] File stats: ${stat.filename}`, {
+              bytesRead: stat.bytesRead,
+              pagesProcessed: stat.pagesProcessed,
+              tokensExtracted: stat.tokensExtracted,
+              parseTimeMs: stat.parseTimeMs,
+              chunkCount: stat.chunkCount,
+              status: stat.status
+            });
           }
           
-          if (extractedContents.length > 0) {
-            attachmentContext = formatAttachmentsAsContext(extractedContents);
-            console.log(`[Stream] Extracted content from ${extractedContents.length} attachment(s), context length: ${attachmentContext.length}`);
+          // COVERAGE CHECK: If user asked to analyze "all" files, verify complete coverage
+          if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
+            const failedList = batchResult.failedFiles.map(f => `${f.filename}: ${f.error}`).join(', ');
+            const errorMsg = `Coverage check failed: processed ${batchResult.processedFiles}/${batchResult.attachmentsCount} files. Failed: ${failedList}`;
+            console.error(`[Stream] ${errorMsg}`);
+            
+            res.write(`event: error\ndata: ${JSON.stringify({
+              type: 'coverage_failure',
+              message: 'No se pudieron procesar todos los archivos solicitados',
+              details: {
+                requested: batchResult.attachmentsCount,
+                processed: batchResult.processedFiles,
+                failedFiles: batchResult.failedFiles
+              },
+              requestId,
+              timestamp: Date.now()
+            })}\n\n`);
+            
+            clearInterval(heartbeatInterval);
+            return res.end();
           }
-        } catch (attachmentError) {
-          console.error("[Stream] Error processing attachments:", attachmentError);
+          
+          // Use unified context from batch processor
+          if (batchResult.unifiedContext) {
+            attachmentContext = batchResult.unifiedContext;
+            console.log(`[Stream] Unified context from ${batchResult.processedFiles} files, length: ${attachmentContext.length} chars`);
+          }
+          
+        } catch (batchError: any) {
+          console.error("[Stream] Batch processing error:", batchError);
+          
+          res.write(`event: error\ndata: ${JSON.stringify({
+            type: 'batch_processing_error',
+            message: 'Error al procesar los archivos adjuntos',
+            details: batchError.message,
+            requestId,
+            timestamp: Date.now()
+          })}\n\n`);
+          
+          clearInterval(heartbeatInterval);
+          return res.end();
         }
       }
 
@@ -508,24 +556,57 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         content: msg.content
       }));
 
-      // Build system message with attachment awareness
+      // GUARD: Block image generation when attachments are present
+      if (hasAttachments && attachmentsCount > 0) {
+        console.log(`[Stream] GUARD: Image generation BLOCKED - ${attachmentsCount} attachments present`);
+        // Ensure route decision does not include image generation
+        if (routeDecision) {
+          routeDecision.tools = routeDecision.tools.filter(t => !['generate_image', 'image_gen', 'dall_e'].includes(t));
+          if (routeDecision.route === 'image_generation') {
+            routeDecision.route = 'document_analysis';
+            routeDecision.intent = 'analysis';
+          }
+        }
+      }
+
+      // Build system message with attachment awareness and citation instructions
       let systemContent = `Eres MICHAT, un asistente de IA avanzado. Responde de manera útil y profesional en el idioma del usuario.`;
       
-      if (hasAttachments && attachmentContext) {
-        const isDocumentAnalysis = routeDecision?.intent === 'analysis' || 
-                                    routeDecision?.tools.some(t => ['analyze_document', 'read_file', 'summarize'].includes(t));
+      if (hasAttachments && attachmentContext && batchResult) {
+        // Build citation format instructions based on document types
+        const citationFormats = batchResult.stats
+          .filter(s => s.status === 'success')
+          .map(s => {
+            const ext = s.filename.split('.').pop()?.toLowerCase();
+            switch(ext) {
+              case 'pdf': return `- ${s.filename}: [doc:${s.filename} p#]`;
+              case 'xlsx': case 'xls': return `- ${s.filename}: [doc:${s.filename} sheet:NombreHoja cell:A1]`;
+              case 'docx': case 'doc': return `- ${s.filename}: [doc:${s.filename} p#]`;
+              case 'pptx': case 'ppt': return `- ${s.filename}: [doc:${s.filename} slide:#]`;
+              case 'csv': return `- ${s.filename}: [doc:${s.filename} row:#]`;
+              default: return `- ${s.filename}: [doc:${s.filename}]`;
+            }
+          })
+          .join('\n');
         
-        if (isDocumentAnalysis) {
-          systemContent = `Eres un asistente experto en análisis de documentos. El usuario ha adjuntado archivos para que los analices.
-IMPORTANTE: Debes LEER y ANALIZAR el contenido de los archivos adjuntos. NO generes imágenes ni contenido ficticio.
-Responde basándote exclusivamente en el contenido real del documento adjunto.
+        systemContent = `Eres un asistente experto en análisis de documentos. El usuario ha adjuntado ${batchResult.processedFiles} archivo(s) para análisis.
 
+INSTRUCCIONES CRÍTICAS:
+1. ANALIZA el contenido de TODOS los documentos adjuntos
+2. NO generes imágenes, NO inventes información, NO uses datos ficticios
+3. Responde basándote EXCLUSIVAMENTE en el contenido real de los documentos
+4. Para cada hallazgo, SIEMPRE incluye la cita del documento fuente
+
+FORMATO DE CITAS (OBLIGATORIO):
+${citationFormats}
+
+DOCUMENTOS PROCESADOS (${batchResult.processedFiles}/${batchResult.attachmentsCount}):
+${batchResult.stats.map(s => `- ${s.filename}: ${s.status === 'success' ? `${s.tokensExtracted} tokens, ${s.pagesProcessed} páginas` : `ERROR: ${s.error}`}`).join('\n')}
+
+CONTENIDO DE LOS DOCUMENTOS:
 ${attachmentContext}
 
 ${systemContent}`;
-        } else {
-          systemContent = `${attachmentContext}\n\n${systemContent}`;
-        }
       }
 
       const systemMessage = {

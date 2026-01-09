@@ -10,6 +10,7 @@ export interface SimpleAttachment {
   name: string;
   mimeType: string;
   storagePath: string;
+  content?: string; // Optional: pre-extracted content for text files
 }
 
 export interface DocumentChunk {
@@ -116,16 +117,33 @@ export class DocumentBatchProcessor {
       const fileStartTime = Date.now();
 
       try {
-        const buffer = await this.fetchDocument(attachment.storagePath);
-        const mimeType = this.detectMime(buffer, attachment.name, attachment.mimeType);
-        const parserConfig = this.selectParser(mimeType);
+        let normalized: string;
+        let parsed: ParsedResult;
+        let buffer: Buffer | null = null;
+        let bytesRead = 0;
+        
+        // If content was pre-extracted (text files from frontend), use it directly
+        if (attachment.content && attachment.content.trim().length > 0) {
+          normalized = this.normalizeContent(attachment.content);
+          bytesRead = Buffer.byteLength(attachment.content, 'utf8');
+          parsed = { text: normalized, metadata: {} };
+        } else {
+          // Otherwise, fetch and parse from storage
+          buffer = await this.fetchDocument(attachment.storagePath);
+          bytesRead = buffer.length;
+          const mimeType = this.detectMime(buffer, attachment.name, attachment.mimeType);
+          const parserConfig = this.selectParser(mimeType);
 
-        if (!parserConfig) {
-          throw new Error(`Unsupported MIME type: ${mimeType}`);
+          if (!parserConfig) {
+            throw new Error(`Unsupported MIME type: ${mimeType}`);
+          }
+
+          parsed = await this.extractContent(buffer, parserConfig, attachment.name);
+          normalized = this.normalizeContent(parsed.text);
         }
-
-        const parsed = await this.extractContent(buffer, parserConfig, attachment.name);
-        const normalized = this.normalizeContent(parsed.text);
+        
+        const mimeType = this.detectMime(buffer || Buffer.alloc(0), attachment.name, attachment.mimeType);
+        const parserConfig = this.selectParser(mimeType) || { docType: 'Text', ext: 'txt', parser: this.textParser };
         const chunks = this.chunkDocument(normalized, docId, attachment.name, parserConfig.docType, parsed.metadata);
         
         this.indexChunks(chunks);
@@ -136,7 +154,7 @@ export class DocumentBatchProcessor {
 
         result.stats.push({
           filename: attachment.name,
-          bytesRead: buffer.length,
+          bytesRead,
           pagesProcessed: parsed.metadata?.pages || parsed.metadata?.slideCount || parsed.metadata?.sheetCount || 1,
           tokensExtracted,
           parseTimeMs,
