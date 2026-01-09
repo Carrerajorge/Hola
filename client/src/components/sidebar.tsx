@@ -280,7 +280,7 @@ export function Sidebar({
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="flex items-center gap-2 min-w-0" style={{ maxWidth: 'calc(100% - 44px)' }}>
             {chat.archived && <Archive className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
             <span className="truncate text-sm font-medium">{chat.title}</span>
             {processingChatIds.includes(chat.id) && (
@@ -299,11 +299,11 @@ export function Sidebar({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex-shrink-0 h-8 w-8 mr-3 flex items-center justify-center rounded-md bg-muted/50 hover:bg-muted border border-border/50 shadow-sm"
+                className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md bg-muted hover:bg-accent border border-border shadow-sm"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button-chat-menu-${chat.id}`}
               >
-                <MoreHorizontal className="h-5 w-5 text-foreground" />
+                <MoreHorizontal className="h-4 w-4 text-foreground" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
