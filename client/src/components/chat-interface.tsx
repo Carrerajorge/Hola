@@ -804,6 +804,7 @@ interface ChatInterfaceProps {
   activeGpt?: ActiveGpt | null;
   aiState: AiState;
   setAiState: React.Dispatch<React.SetStateAction<AiState>>;
+  aiStateChatId?: string | null;
   aiProcessSteps: AiProcessStep[];
   setAiProcessSteps: React.Dispatch<React.SetStateAction<AiProcessStep[]>>;
   chatId?: string | null;
@@ -890,6 +891,7 @@ export function ChatInterface({
   activeGpt,
   aiState,
   setAiState,
+  aiStateChatId,
   aiProcessSteps,
   setAiProcessSteps,
   chatId,
@@ -4426,8 +4428,8 @@ IMPORTANTE:
           </div>
         )}
 
-        {/* Thinking/Responding State */}
-        {aiState !== "idle" && !isGeneratingImage && (
+        {/* Thinking/Responding State - only show if aiState belongs to current chat */}
+        {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && (
           <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
             {/* Streaming Indicator with cancel button */}
             <StreamingIndicator
@@ -4672,7 +4674,7 @@ IMPORTANTE:
           ) : (
             /* No messages - center content vertically */
             <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
-              {aiState !== "idle" ? (
+              {aiState !== "idle" && (!aiStateChatId || chatId === aiStateChatId) ? (
                 /* Processing indicators when AI is working */
                 <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
                   <StreamingIndicator

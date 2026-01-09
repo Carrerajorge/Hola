@@ -112,8 +112,24 @@ export default function Home() {
   }, [moveChatToFolder, removeChatFromFolder]);
 
   // AI processing state - kept in parent to survive ChatInterface key changes
-  const [aiState, setAiState] = useState<"idle" | "thinking" | "responding">("idle");
+  const [aiState, setAiStateRaw] = useState<"idle" | "thinking" | "responding">("idle");
+  const [aiStateChatId, setAiStateChatId] = useState<string | null>(null);
   const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
+  
+  // Wrapper for setAiState that tracks which chat the state belongs to
+  const setAiState = useCallback((newState: "idle" | "thinking" | "responding" | ((prev: "idle" | "thinking" | "responding") => "idle" | "thinking" | "responding")) => {
+    const resolvedState = typeof newState === 'function' ? newState(aiState) : newState;
+    setAiStateRaw(resolvedState);
+    if (resolvedState === 'idle') {
+      setAiStateChatId(null);
+    } else {
+      // Capture the current chat ID when entering non-idle state
+      const currentChatId = activeChat?.id || pendingChatIdRef.current;
+      if (currentChatId) {
+        setAiStateChatId(currentChatId);
+      }
+    }
+  }, [aiState, activeChat?.id]);
   
   // Use global streaming store for tracking processing chats and pending badges
   const processingChatIds = useProcessingChatIds();
@@ -469,6 +485,7 @@ export default function Home() {
             activeGpt={activeGpt}
             aiState={aiState}
             setAiState={setAiState}
+            aiStateChatId={aiStateChatId}
             aiProcessSteps={aiProcessSteps}
             setAiProcessSteps={setAiProcessSteps}
             chatId={activeChat?.id || pendingChatIdRef.current || null}
