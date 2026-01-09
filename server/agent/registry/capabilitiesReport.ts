@@ -180,7 +180,7 @@ const SMOKE_TEST_INPUTS: Record<string, Record<string, unknown>> = {
   email_send: { to: ["test@example.com"], subject: "Test", body: "Test email" },
   message_compose: { platform: "email", content: "Test message", format: "plain" },
   notify: { channel: "slack", message: "Test notification" },
-  summarize: { content: "Long text to summarize", maxLength: 100 },
+  explain: { topic: "Complex topic to explain", audience: "beginner" },
   
   code_execute: { code: "console.log('test')", language: "javascript" },
   file_convert: { inputPath: "/tmp/test.txt", outputFormat: "pdf" },
