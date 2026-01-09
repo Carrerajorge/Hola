@@ -119,31 +119,39 @@ export class DocumentBatchProcessor {
       try {
         let normalized: string;
         let parsed: ParsedResult;
-        let buffer: Buffer | null = null;
+        let buffer: Buffer;
         let bytesRead = 0;
         
-        // If content was pre-extracted (text files from frontend), use it directly
-        if (attachment.content && attachment.content.trim().length > 0) {
-          normalized = this.normalizeContent(attachment.content);
-          bytesRead = Buffer.byteLength(attachment.content, 'utf8');
-          parsed = { text: normalized, metadata: {} };
-        } else {
-          // Otherwise, fetch and parse from storage
-          buffer = await this.fetchDocument(attachment.storagePath);
-          bytesRead = buffer.length;
-          const mimeType = this.detectMime(buffer, attachment.name, attachment.mimeType);
-          const parserConfig = this.selectParser(mimeType);
-
-          if (!parserConfig) {
-            throw new Error(`Unsupported MIME type: ${mimeType}`);
-          }
-
-          parsed = await this.extractContent(buffer, parserConfig, attachment.name);
-          normalized = this.normalizeContent(parsed.text);
+        // Determine mime type from filename first (for correct parser selection)
+        const mimeType = this.detectMimeFromFilename(attachment.name, attachment.mimeType);
+        const parserConfig = this.selectParser(mimeType);
+        
+        if (!parserConfig) {
+          throw new Error(`Unsupported MIME type: ${mimeType} for file ${attachment.name}`);
         }
         
-        const mimeType = this.detectMime(buffer || Buffer.alloc(0), attachment.name, attachment.mimeType);
-        const parserConfig = this.selectParser(mimeType) || { docType: 'Text', ext: 'txt', parser: this.textParser };
+        // For binary formats (PDF, Excel, Word, PPT), always fetch from storage
+        const binaryFormats = ['pdf', 'xlsx', 'xls', 'docx', 'doc', 'pptx', 'ppt'];
+        const ext = this.getExtensionFromFileName(attachment.name);
+        const isBinaryFormat = binaryFormats.includes(ext);
+        
+        if (isBinaryFormat || !attachment.content || attachment.content.trim().length === 0) {
+          // Fetch from storage for binary formats or when no content provided
+          if (!attachment.storagePath) {
+            throw new Error(`No storage path provided for binary file: ${attachment.name}`);
+          }
+          buffer = await this.fetchDocument(attachment.storagePath);
+          bytesRead = buffer.length;
+          parsed = await this.extractContent(buffer, parserConfig, attachment.name);
+          normalized = this.normalizeContent(parsed.text);
+        } else {
+          // Use pre-extracted content only for text-based formats
+          normalized = this.normalizeContent(attachment.content);
+          bytesRead = Buffer.byteLength(attachment.content, 'utf8');
+          buffer = Buffer.from(attachment.content, 'utf8');
+          parsed = { text: normalized, metadata: {} };
+        }
+        
         const chunks = this.chunkDocument(normalized, docId, attachment.name, parserConfig.docType, parsed.metadata);
         
         this.indexChunks(chunks);
@@ -227,6 +235,31 @@ export class DocumentBatchProcessor {
     }
 
     return mimeType;
+  }
+
+  /**
+   * Detect MIME type from filename only (for parser selection before content fetch)
+   * This ensures binary formats get the correct parser even without buffer inspection
+   */
+  private detectMimeFromFilename(filename: string, providedMimeType: string): string {
+    // First try the provided mime type
+    if (this.mimeTypeMap[providedMimeType]) {
+      return providedMimeType;
+    }
+    
+    // Infer from extension
+    const ext = this.getExtensionFromFileName(filename);
+    const inferredMime = this.inferMimeTypeFromExtension(ext);
+    if (inferredMime && this.mimeTypeMap[inferredMime]) {
+      return inferredMime;
+    }
+    
+    // Fallback to text/plain for unknown text-based types
+    if (providedMimeType?.startsWith('text/')) {
+      return 'text/plain';
+    }
+    
+    return providedMimeType || 'application/octet-stream';
   }
 
   private selectParser(mimeType: string): ParserConfig | null {
