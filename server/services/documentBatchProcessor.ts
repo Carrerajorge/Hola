@@ -10,6 +10,7 @@ import { runParserInSandbox, SandboxErrorCode, type SandboxOptions } from "../li
 import { detectMime, type MimeDetectionResult } from "../lib/mimeDetector";
 import { validateZipDocument } from "../lib/zipBombGuard";
 import { ParserRegistry, createParserRegistry } from "../lib/parserRegistry";
+import { validateAttachmentSecurity, type SecurityValidationResult, type SecurityViolation, SecurityViolationType } from "../lib/pareSecurityGuard";
 
 export interface SimpleAttachment {
   name: string;
@@ -33,13 +34,16 @@ export interface DocumentProcessingStats {
   tokensExtracted: number;
   parseTimeMs: number;
   chunkCount: number;
-  status: 'success' | 'failed';
+  status: 'success' | 'failed' | 'security_violation';
   error?: string;
   securityChecks?: {
     mimeValidation: boolean;
     zipBombCheck: boolean;
+    pathTraversalCheck: boolean;
+    dangerousFormatCheck: boolean;
     sandboxed: boolean;
   };
+  securityViolations?: SecurityViolation[];
 }
 
 export interface BatchProcessingResult {
@@ -193,8 +197,11 @@ export class DocumentBatchProcessor {
       const securityChecks = {
         mimeValidation: false,
         zipBombCheck: false,
+        pathTraversalCheck: false,
+        dangerousFormatCheck: false,
         sandboxed: false,
       };
+      let securityViolations: SecurityViolation[] = [];
 
       try {
         let normalized: string;
@@ -214,22 +221,34 @@ export class DocumentBatchProcessor {
           bytesRead = buffer.length;
 
           let mimeDetectionResult: MimeDetectionResult | undefined;
+          
           if (this.enableSecurityChecks) {
+            const securityResult = await validateAttachmentSecurity({
+              filename: attachment.name,
+              buffer,
+              providedMimeType: attachment.mimeType,
+            });
+            
+            securityChecks.mimeValidation = securityResult.checksPerformed.mimeValidation;
+            securityChecks.zipBombCheck = securityResult.checksPerformed.zipBombCheck;
+            securityChecks.pathTraversalCheck = securityResult.checksPerformed.pathTraversalCheck;
+            securityChecks.dangerousFormatCheck = securityResult.checksPerformed.dangerousFormatCheck;
+            securityViolations = securityResult.violations;
+            mimeDetectionResult = securityResult.mimeDetection;
+            
+            if (!securityResult.safe) {
+              const criticalViolations = securityResult.violations.filter(v => 
+                v.severity === 'critical' || v.severity === 'high'
+              );
+              
+              if (criticalViolations.length > 0) {
+                const violationMessages = criticalViolations.map(v => v.message).join('; ');
+                throw new Error(`Security violation: ${violationMessages}`);
+              }
+            }
+          } else {
             mimeDetectionResult = detectMime(buffer, attachment.name, attachment.mimeType);
             securityChecks.mimeValidation = true;
-            
-            if (mimeDetectionResult.mismatch) {
-              console.warn(`[DocumentBatchProcessor] MIME mismatch for ${attachment.name}: ${mimeDetectionResult.mismatchDetails}`);
-            }
-          }
-
-          if (this.enableSecurityChecks && ZIP_BASED_EXTENSIONS.includes(ext)) {
-            const zipValidation = await validateZipDocument(buffer, attachment.name);
-            securityChecks.zipBombCheck = true;
-            
-            if (!zipValidation.valid) {
-              throw new Error(`Security check failed: ${zipValidation.error}`);
-            }
           }
 
           const detectedMimeType = mimeDetectionResult?.detectedMime || 
@@ -251,6 +270,29 @@ export class DocumentBatchProcessor {
         } else {
           bytesRead = Buffer.byteLength(attachment.content, 'utf8');
           buffer = Buffer.from(attachment.content, 'utf8');
+          
+          if (this.enableSecurityChecks) {
+            const securityResult = await validateAttachmentSecurity({
+              filename: attachment.name,
+              buffer,
+              providedMimeType: attachment.mimeType,
+            });
+            
+            securityChecks.mimeValidation = securityResult.checksPerformed.mimeValidation;
+            securityChecks.dangerousFormatCheck = securityResult.checksPerformed.dangerousFormatCheck;
+            securityViolations = securityResult.violations;
+            
+            if (!securityResult.safe) {
+              const criticalViolations = securityResult.violations.filter(v => 
+                v.severity === 'critical' || v.severity === 'high'
+              );
+              
+              if (criticalViolations.length > 0) {
+                const violationMessages = criticalViolations.map(v => v.message).join('; ');
+                throw new Error(`Security violation: ${violationMessages}`);
+              }
+            }
+          }
           
           const mimeType = this.detectMimeFromFilename(attachment.name, attachment.mimeType);
           const parserConfig = this.selectParser(mimeType);
@@ -288,6 +330,7 @@ export class DocumentBatchProcessor {
           chunkCount: chunks.length,
           status: 'success',
           securityChecks,
+          securityViolations: securityViolations.length > 0 ? securityViolations : undefined,
         });
 
         result.processedFiles++;
@@ -303,6 +346,9 @@ export class DocumentBatchProcessor {
           error: errorMessage,
         });
 
+        const isSecurityViolation = errorMessage.includes('Security violation') || 
+          securityViolations.some(v => v.severity === 'critical' || v.severity === 'high');
+        
         result.stats.push({
           filename: attachment.name,
           bytesRead: 0,
@@ -310,9 +356,10 @@ export class DocumentBatchProcessor {
           tokensExtracted: 0,
           parseTimeMs: Date.now() - fileStartTime,
           chunkCount: 0,
-          status: 'failed',
+          status: isSecurityViolation ? 'security_violation' : 'failed',
           error: errorMessage,
           securityChecks,
+          securityViolations: securityViolations.length > 0 ? securityViolations : undefined,
         });
       }
     }
@@ -329,7 +376,7 @@ export class DocumentBatchProcessor {
     buffer: Buffer,
     parserConfig: ParserConfig,
     filename: string,
-    securityChecks: { mimeValidation: boolean; zipBombCheck: boolean; sandboxed: boolean }
+    securityChecks: { mimeValidation: boolean; zipBombCheck: boolean; pathTraversalCheck: boolean; dangerousFormatCheck: boolean; sandboxed: boolean }
   ): Promise<ParsedResult> {
     const ext = this.getExtensionFromFileName(filename) || parserConfig.ext;
 

@@ -4,6 +4,7 @@
  * 
  * Detects file types using magic bytes, with extension-based fallback
  * and content heuristics for text vs binary detection.
+ * Includes allowlist/denylist validation for security.
  */
 
 export interface MimeDetectionResult {
@@ -15,6 +16,12 @@ export interface MimeDetectionResult {
   isBinary: boolean;
 }
 
+export interface MimeValidationResult {
+  allowed: boolean;
+  reason?: string;
+  matchedRule?: 'allowlist' | 'denylist' | 'dangerous_magic';
+}
+
 export interface MagicSignature {
   bytes: number[];
   offset?: number;
@@ -22,6 +29,78 @@ export interface MagicSignature {
   mime: string;
   extension: string;
 }
+
+export interface DangerousMagicSignature {
+  bytes: number[];
+  offset?: number;
+  description: string;
+  threat: string;
+}
+
+const MIME_ALLOWLIST: string[] = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-excel',
+  'application/vnd.ms-powerpoint',
+  'application/msword',
+  'text/plain',
+  'text/csv',
+  'application/json',
+  'text/html',
+  'application/xml',
+  'text/xml',
+  'application/rtf',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+  'text/markdown',
+  'application/zip',
+];
+
+const MIME_ALLOWLIST_PATTERNS: RegExp[] = [
+  /^application\/vnd\.openxmlformats-officedocument\..*/,
+  /^application\/vnd\.oasis\.opendocument\..*/,
+  /^text\/.*/,
+  /^image\/(png|jpeg|gif|webp|svg\+xml)$/,
+];
+
+const MIME_DENYLIST: string[] = [
+  'application/x-executable',
+  'application/x-msdos-program',
+  'application/x-msdownload',
+  'application/x-sh',
+  'application/x-shellscript',
+  'application/javascript',
+  'text/javascript',
+  'application/x-python-code',
+  'application/x-perl',
+  'application/x-ruby',
+  'application/x-php',
+  'application/x-httpd-php',
+  'application/x-dosexec',
+  'application/x-elf',
+  'application/x-mach-binary',
+  'application/vnd.microsoft.portable-executable',
+  'application/x-bat',
+  'application/x-msi',
+  'application/x-dll',
+  'application/java-archive',
+  'application/x-java-class',
+];
+
+const DANGEROUS_MAGIC_SIGNATURES: DangerousMagicSignature[] = [
+  { bytes: [0x4D, 0x5A], description: 'DOS/Windows executable (MZ header)', threat: 'executable' },
+  { bytes: [0x7F, 0x45, 0x4C, 0x46], description: 'ELF executable', threat: 'executable' },
+  { bytes: [0xFE, 0xED, 0xFA, 0xCE], description: 'Mach-O executable (32-bit)', threat: 'executable' },
+  { bytes: [0xFE, 0xED, 0xFA, 0xCF], description: 'Mach-O executable (64-bit)', threat: 'executable' },
+  { bytes: [0xCF, 0xFA, 0xED, 0xFE], description: 'Mach-O executable (reverse)', threat: 'executable' },
+  { bytes: [0xCA, 0xFE, 0xBA, 0xBE], description: 'Java class file / Mach-O fat binary', threat: 'executable' },
+  { bytes: [0x23, 0x21], description: 'Shell script (shebang)', threat: 'script' },
+];
 
 const MAGIC_SIGNATURES: MagicSignature[] = [
   { bytes: [0x25, 0x50, 0x44, 0x46], mime: 'application/pdf', extension: 'pdf' },
@@ -37,6 +116,8 @@ const MAGIC_SIGNATURES: MagicSignature[] = [
   { bytes: [0x1A, 0x45, 0xDF, 0xA3], mime: 'video/webm', extension: 'webm' },
   { bytes: [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1], mime: 'application/x-cfb', extension: 'doc' },
   { bytes: [0x7B, 0x5C, 0x72, 0x74, 0x66], mime: 'application/rtf', extension: 'rtf' },
+  { bytes: [0x4D, 0x5A], mime: 'application/x-msdownload', extension: 'exe' },
+  { bytes: [0x7F, 0x45, 0x4C, 0x46], mime: 'application/x-elf', extension: 'elf' },
 ];
 
 const EXTENSION_TO_MIME: Record<string, string> = {
@@ -61,6 +142,15 @@ const EXTENSION_TO_MIME: Record<string, string> = {
   'gif': 'image/gif',
   'webp': 'image/webp',
   'svg': 'image/svg+xml',
+  'exe': 'application/x-msdownload',
+  'sh': 'application/x-sh',
+  'bat': 'application/x-bat',
+  'cmd': 'application/x-bat',
+  'ps1': 'application/x-powershell',
+  'js': 'application/javascript',
+  'py': 'text/x-python',
+  'rb': 'application/x-ruby',
+  'php': 'application/x-php',
 };
 
 const OOXML_CONTENT_TYPES: Record<string, string> = {
@@ -89,6 +179,43 @@ function matchMagicBytes(buffer: Buffer): MagicSignature | null {
     if (match) return sig;
   }
   return null;
+}
+
+function matchDangerousMagicBytes(buffer: Buffer): DangerousMagicSignature | null {
+  for (const sig of DANGEROUS_MAGIC_SIGNATURES) {
+    const offset = sig.offset || 0;
+    if (buffer.length < offset + sig.bytes.length) continue;
+    
+    let match = true;
+    for (let i = 0; i < sig.bytes.length; i++) {
+      if (buffer[offset + i] !== sig.bytes[i]) {
+        match = false;
+        break;
+      }
+    }
+    
+    if (match) return sig;
+  }
+  return null;
+}
+
+function isShellScript(buffer: Buffer): boolean {
+  if (buffer.length < 2) return false;
+  
+  if (buffer[0] === 0x23 && buffer[1] === 0x21) {
+    const header = buffer.toString('utf8', 0, Math.min(buffer.length, 256));
+    const shebangLine = header.split('\n')[0];
+    
+    const shellPatterns = [
+      /^#!\s*\/bin\/(bash|sh|zsh|ksh|csh|tcsh|fish)/,
+      /^#!\s*\/usr\/bin\/(bash|sh|env)/,
+      /^#!\s*\/usr\/bin\/env\s+(bash|sh|python|perl|ruby|node)/,
+    ];
+    
+    return shellPatterns.some(pattern => pattern.test(shebangLine));
+  }
+  
+  return false;
 }
 
 function detectOOXMLType(buffer: Buffer): string | null {
@@ -121,7 +248,6 @@ function isBinaryContent(buffer: Buffer): boolean {
   const checkLength = Math.min(buffer.length, 8192);
   let nullBytes = 0;
   let controlChars = 0;
-  let highBytes = 0;
   
   for (let i = 0; i < checkLength; i++) {
     const byte = buffer[i];
@@ -130,8 +256,6 @@ function isBinaryContent(buffer: Buffer): boolean {
       nullBytes++;
     } else if (byte < 0x09 || (byte > 0x0D && byte < 0x20 && byte !== 0x1B)) {
       controlChars++;
-    } else if (byte > 0x7F) {
-      highBytes++;
     }
   }
   
@@ -139,25 +263,6 @@ function isBinaryContent(buffer: Buffer): boolean {
   const controlRatio = controlChars / checkLength;
   
   return nullRatio > 0.01 || controlRatio > 0.1;
-}
-
-function isLikelyText(buffer: Buffer): boolean {
-  const content = buffer.toString('utf8', 0, Math.min(buffer.length, 1000));
-  
-  const textPatterns = [
-    /^[\s]*[{[\]"'a-zA-Z0-9]/,
-    /^<[?!]?[a-zA-Z]/,
-    /^#.*\n/,
-    /^[a-zA-Z_][a-zA-Z0-9_]*\s*[=:(]/,
-  ];
-  
-  for (const pattern of textPatterns) {
-    if (pattern.test(content)) {
-      return true;
-    }
-  }
-  
-  return false;
 }
 
 function detectTextMimeType(buffer: Buffer): string {
@@ -199,6 +304,58 @@ function detectTextMimeType(buffer: Buffer): string {
 function getExtension(filename: string): string {
   const parts = filename.split('.');
   return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
+}
+
+/**
+ * Validate a detected MIME type against allowlist/denylist
+ */
+export function validateMimeType(detectedMime: string, buffer?: Buffer): MimeValidationResult {
+  if (MIME_DENYLIST.includes(detectedMime)) {
+    console.warn(`[MimeDetector] SECURITY: Denylisted MIME type detected: ${detectedMime}`);
+    return {
+      allowed: false,
+      reason: `MIME type '${detectedMime}' is blocked for security reasons`,
+      matchedRule: 'denylist',
+    };
+  }
+  
+  if (buffer) {
+    const dangerousMagic = matchDangerousMagicBytes(buffer);
+    if (dangerousMagic) {
+      console.warn(`[MimeDetector] SECURITY: Dangerous file format detected: ${dangerousMagic.description}`);
+      return {
+        allowed: false,
+        reason: `Dangerous file format detected: ${dangerousMagic.description}`,
+        matchedRule: 'dangerous_magic',
+      };
+    }
+    
+    if (isShellScript(buffer)) {
+      console.warn(`[MimeDetector] SECURITY: Shell script detected`);
+      return {
+        allowed: false,
+        reason: 'Shell scripts are not allowed',
+        matchedRule: 'dangerous_magic',
+      };
+    }
+  }
+  
+  if (MIME_ALLOWLIST.includes(detectedMime)) {
+    return { allowed: true, matchedRule: 'allowlist' };
+  }
+  
+  for (const pattern of MIME_ALLOWLIST_PATTERNS) {
+    if (pattern.test(detectedMime)) {
+      return { allowed: true, matchedRule: 'allowlist' };
+    }
+  }
+  
+  console.warn(`[MimeDetector] MIME type not in allowlist: ${detectedMime}`);
+  return {
+    allowed: false,
+    reason: `MIME type '${detectedMime}' is not in the allowed list`,
+    matchedRule: 'allowlist',
+  };
 }
 
 /**
@@ -289,6 +446,24 @@ export function detectMime(
 }
 
 /**
+ * Detect dangerous file formats using magic bytes
+ */
+export function detectDangerousFormat(buffer: Buffer): {
+  isDangerous: boolean;
+  signature?: DangerousMagicSignature;
+  isShellScript: boolean;
+} {
+  const dangerousMagic = matchDangerousMagicBytes(buffer);
+  const shellScript = isShellScript(buffer);
+  
+  return {
+    isDangerous: dangerousMagic !== null || shellScript,
+    signature: dangerousMagic || undefined,
+    isShellScript: shellScript,
+  };
+}
+
+/**
  * Quick check if buffer looks like a specific MIME type
  */
 export function quickCheckMime(buffer: Buffer, expectedMime: string): boolean {
@@ -322,5 +497,9 @@ export const mimeDetector = {
   detectMime,
   quickCheckMime,
   validateMimeMatch,
+  validateMimeType,
+  detectDangerousFormat,
   EXTENSION_TO_MIME,
+  MIME_ALLOWLIST,
+  MIME_DENYLIST,
 };

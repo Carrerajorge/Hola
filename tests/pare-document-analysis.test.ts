@@ -78,7 +78,7 @@ describe('PARE Document Analysis System', () => {
 
       expect(response.status).toBe(400);
       const data = await response.json();
-      expect(data.error).toBe('ATTACHMENTS_REQUIRED');
+      expect(data.error.code).toBe('VALIDATION_ERROR');
     });
   });
 
@@ -118,17 +118,17 @@ describe('PARE Document Analysis System', () => {
   });
 
   describe('PARSE_FAILED Response', () => {
-    it('should return HTTP 422 PARSE_FAILED when tokens_extracted_total == 0', async () => {
+    it('should return HTTP 422 PARSE_FAILED when tokens_extracted_total == 0 (whitespace doc)', async () => {
       const response = await fetch(`${API_BASE}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [{ role: 'user', content: 'Analiza el documento' }],
           attachments: [{
-            name: 'empty.txt',
+            name: 'whitespace.txt',
             mimeType: 'text/plain',
             type: 'document',
-            content: ''
+            content: '   \n\n\t   '
           }]
         })
       });
@@ -276,10 +276,10 @@ describe('Acceptance Criteria Verification', () => {
       body: JSON.stringify({
         messages: [{ role: 'user', content: 'Analiza' }],
         attachments: [{
-          name: 'empty.txt',
+          name: 'whitespace.txt',
           mimeType: 'text/plain',
           type: 'document',
-          content: ''
+          content: '    \n\n\t   '
         }]
       })
     });

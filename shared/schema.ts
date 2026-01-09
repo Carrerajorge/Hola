@@ -2572,3 +2572,31 @@ export const insertAgentSessionStateSchema = createInsertSchema(agentSessionStat
 
 export type InsertAgentSessionState = z.infer<typeof insertAgentSessionStateSchema>;
 export type AgentSessionState = typeof agentSessionState.$inferSelect;
+
+// ==========================================
+// PARE Idempotency System - Phase 2
+// ==========================================
+
+export const pareIdempotencyStatusEnum = ['processing', 'completed', 'failed'] as const;
+export type PareIdempotencyStatus = typeof pareIdempotencyStatusEnum[number];
+
+export const pareIdempotencyKeys = pgTable("pare_idempotency_keys", {
+  id: serial("id").primaryKey(),
+  idempotencyKey: varchar("idempotency_key", { length: 255 }).notNull().unique(),
+  payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+  responseJson: jsonb("response_json").$type<Record<string, unknown>>(),
+  status: text("status").$type<PareIdempotencyStatus>().notNull().default('processing'),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull().default(sql`NOW() + INTERVAL '24 hours'`),
+}, (table) => [
+  index("pare_idempotency_key_idx").on(table.idempotencyKey),
+  index("pare_idempotency_expires_idx").on(table.expiresAt),
+]);
+
+export const insertPareIdempotencyKeySchema = createInsertSchema(pareIdempotencyKeys).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPareIdempotencyKey = z.infer<typeof insertPareIdempotencyKeySchema>;
+export type PareIdempotencyKey = typeof pareIdempotencyKeys.$inferSelect;

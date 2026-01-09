@@ -1,9 +1,15 @@
 import type { Request, Response, NextFunction } from "express";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
+import {
+  checkIdempotencyKey,
+  computePayloadHash,
+  type IdempotencyCheckResult
+} from "../lib/idempotencyStore";
 
 export interface PareContext {
   requestId: string;
   idempotencyKey: string | null;
+  payloadHash: string | null;
   isDataMode: boolean;
   attachmentsCount: number;
   startTime: number;
@@ -79,9 +85,15 @@ export function pareRequestContract(
   
   const isDataMode = detectDataMode(attachmentsCount);
   
+  let payloadHash: string | null = null;
+  if (idempotencyKey && req.body) {
+    payloadHash = computePayloadHash(req.body);
+  }
+  
   const pareContext: PareContext = {
     requestId,
     idempotencyKey,
+    payloadHash,
     isDataMode,
     attachmentsCount,
     startTime,
@@ -119,4 +131,87 @@ export function requirePareContext(req: Request): PareContext {
     throw new Error("PARE context not initialized - pareRequestContract middleware must be applied first");
   }
   return req.pareContext;
+}
+
+export async function pareIdempotencyGuard(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const pareContext = req.pareContext;
+  
+  if (!pareContext) {
+    next();
+    return;
+  }
+  
+  const { idempotencyKey, payloadHash, requestId } = pareContext;
+  
+  if (!idempotencyKey || !payloadHash) {
+    next();
+    return;
+  }
+  
+  try {
+    const result = await checkIdempotencyKey(idempotencyKey, payloadHash);
+    
+    switch (result.status) {
+      case 'new':
+        next();
+        return;
+      
+      case 'completed':
+        console.log(JSON.stringify({
+          level: "info",
+          event: "IDEMPOTENCY_REPLAY",
+          requestId,
+          idempotencyKey,
+          timestamp: new Date().toISOString()
+        }));
+        res.status(200).json(result.cachedResponse);
+        return;
+      
+      case 'processing':
+        console.log(JSON.stringify({
+          level: "warn",
+          event: "IDEMPOTENCY_IN_PROGRESS",
+          requestId,
+          idempotencyKey,
+          timestamp: new Date().toISOString()
+        }));
+        res.status(409).json({
+          error: "IDEMPOTENCY_IN_PROGRESS",
+          message: "Request with this idempotency key is currently being processed. Please retry later.",
+          requestId,
+          idempotencyKey
+        });
+        return;
+      
+      case 'conflict':
+        console.log(JSON.stringify({
+          level: "warn",
+          event: "IDEMPOTENCY_CONFLICT",
+          requestId,
+          idempotencyKey,
+          timestamp: new Date().toISOString()
+        }));
+        res.status(409).json({
+          error: "IDEMPOTENCY_CONFLICT",
+          message: "Request with this idempotency key exists with a different payload.",
+          requestId,
+          idempotencyKey
+        });
+        return;
+    }
+  } catch (error: any) {
+    console.error(JSON.stringify({
+      level: "error",
+      event: "IDEMPOTENCY_GUARD_ERROR",
+      requestId,
+      idempotencyKey,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    }));
+    next();
+  }
 }

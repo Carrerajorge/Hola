@@ -7,7 +7,8 @@ import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../e
 import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
 import { pareOrchestrator, type RobustRouteResult, type SimpleAttachment } from "../services/pare";
 import { DocumentBatchProcessor, type BatchProcessingResult, type SimpleAttachment as BatchAttachment } from "../services/documentBatchProcessor";
-import { pareRequestContract, pareRateLimiter, pareQuotaGuard, requirePareContext } from "../middleware";
+import { pareRequestContract, pareRateLimiter, pareQuotaGuard, requirePareContext, pareIdempotencyGuard, pareAnalyzeSchemaValidator } from "../middleware";
+import { completeIdempotencyKey, failIdempotencyKey } from "../lib/idempotencyStore";
 import { createPareLogger, type PareLogger } from "../lib/pareLogger";
 import { pareMetrics } from "../lib/pareMetrics";
 import { AuditTrailCollector, type AuditBatchSummary } from "../lib/pareAuditTrail";
@@ -840,8 +841,10 @@ ${systemContent}`;
   // ============================================================================================
   router.post("/analyze", 
     pareRequestContract,
+    pareAnalyzeSchemaValidator,
     pareRateLimiter(),
     pareQuotaGuard(),
+    pareIdempotencyGuard,
     async (req, res) => {
     const pareContext = requirePareContext(req);
     const { requestId, isDataMode, attachmentsCount: pareAttachmentsCount, startTime } = pareContext;
@@ -1233,17 +1236,80 @@ ${documentText}`;
       });
       
       // KILL-SWITCH: Validate DATA_MODE response before sending
-      const { validateDataModeResponse, DataModeOutputViolationError } = await import('../lib/dataModeValidator');
-      const validationResult = validateDataModeResponse(responsePayload, requestId);
+      // Phase 2: Enhanced validation with response contract
+      const { validateDataModeResponseEnhanced, DataModeOutputViolationError } = await import('../lib/dataModeValidator');
+      const { validateResponseContract } = await import('../lib/pareResponseContract');
+      
+      // Extract attachment names for coverage validation
+      const attachmentNames = batchResult.stats
+        .filter(s => s.status === 'success')
+        .map(s => s.filename);
+      
+      // Phase 2: Response contract validation with coverage check
+      const contractValidation = validateResponseContract(
+        responsePayload,
+        attachmentNames,
+        {
+          contentType: 'application/json',
+          requireFullCoverage: requiresFullCoverage
+        }
+      );
+      
+      // Log contract validation results
+      console.log(`[Analyze] RESPONSE_CONTRACT validation:`, {
+        valid: contractValidation.valid,
+        hasValidContentType: contractValidation.hasValidContentType,
+        hasNoBlobs: contractValidation.hasNoBlobs,
+        hasNoBase64Data: contractValidation.hasNoBase64Data,
+        hasNoImageUrls: contractValidation.hasNoImageUrls,
+        coverageRatio: contractValidation.coverageRatio.toFixed(2),
+        meetsCoverageRequirement: contractValidation.meetsCoverageRequirement,
+        documentsWithCitations: contractValidation.documentsWithCitations,
+        documentsWithoutCitations: contractValidation.documentsWithoutCitations,
+        violationCount: contractValidation.violations.length
+      });
+      
+      if (!contractValidation.valid) {
+        console.error(`[Analyze] ========== RESPONSE_CONTRACT_VIOLATION ${requestId} ==========`);
+        contractValidation.violations.forEach((v, i) => {
+          console.error(`[Analyze] [${i + 1}] ${v.code}: ${v.message}`);
+        });
+        
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        return res.status(500).json({
+          error: "RESPONSE_CONTRACT_VIOLATION",
+          message: "La respuesta no cumple con el contrato de respuesta PARE Phase 2",
+          violations: contractValidation.violations,
+          coverageInfo: {
+            documentsWithCitations: contractValidation.documentsWithCitations,
+            documentsWithoutCitations: contractValidation.documentsWithoutCitations,
+            coverageRatio: contractValidation.coverageRatio,
+            meetsCoverageRequirement: contractValidation.meetsCoverageRequirement
+          },
+          requestId,
+          progressReport
+        });
+      }
+      
+      // Enhanced DATA_MODE validation with all checks
+      const validationResult = validateDataModeResponseEnhanced(responsePayload, requestId, {
+        contentType: 'application/json',
+        attachmentNames,
+        requireFullCoverage: requiresFullCoverage,
+        userQuery
+      });
       
       if (!validationResult.valid) {
         console.error(`[Analyze] ========== DATA_MODE_OUTPUT_VIOLATION ${requestId} ==========`);
         console.error(`[Analyze] Violations: ${validationResult.violations.join('; ')}`);
         console.error(`[Analyze] Stack: ${validationResult.stack}`);
+        
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
         return res.status(500).json({
           error: "DATA_MODE_OUTPUT_VIOLATION",
           message: "La respuesta contiene elementos prohibidos en DATA_MODE (imágenes/artefactos)",
           violations: validationResult.violations,
+          violationDetails: validationResult.violationDetails,
           requestId,
           progressReport
         });
@@ -1253,10 +1319,30 @@ ${documentText}`;
       console.log(`[Analyze] ========== SUCCESS ${requestId} ==========`);
       console.log(`[Analyze] Response includes isDocumentMode: ${progressReport.isDocumentMode}, productionWorkflowBlocked: ${progressReport.productionWorkflowBlocked}`);
       console.log(`[Analyze] KILL-SWITCH: Payload validated, no image/artifact violations`);
+      console.log(`[Analyze] RESPONSE_CONTRACT: All ${attachmentNames.length} documents have citations`);
       
+      if (pareContext.idempotencyKey) {
+        try {
+          await completeIdempotencyKey(pareContext.idempotencyKey, responsePayload);
+        } catch (idempotencyError) {
+          console.error(`[Analyze] Failed to complete idempotency key: ${idempotencyError}`);
+        }
+      }
+      
+      // Set Content-Type header explicitly for PARE Phase 2 compliance
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.json(responsePayload);
       
     } catch (error: any) {
+      // Mark idempotency key as failed
+      if (pareContext.idempotencyKey) {
+        try {
+          await failIdempotencyKey(pareContext.idempotencyKey, error.message || 'Unknown error');
+        } catch (idempotencyError) {
+          console.error(`[Analyze] Failed to mark idempotency key as failed: ${idempotencyError}`);
+        }
+      }
+      
       // Log error using structured logger
       logger.logError({
         error,

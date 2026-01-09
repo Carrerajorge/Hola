@@ -4,11 +4,19 @@
  * 
  * Provides a centralized registry for document parsers with:
  * - Priority-based parser selection
- * - Circuit breaker pattern for fault tolerance
+ * - Circuit breaker pattern for fault tolerance (CLOSED, OPEN, HALF_OPEN states)
  * - Fallback to text extraction on parse failures
+ * - Per-parser configuration with success threshold in half-open state
  */
 
 import type { FileParser, ParsedResult, DetectedFileType } from "../parsers/base";
+import { SandboxErrorCode } from "./parserSandbox";
+
+export enum CircuitBreakerStateEnum {
+  CLOSED = 'closed',
+  OPEN = 'open',
+  HALF_OPEN = 'half-open',
+}
 
 export interface ParserRegistration {
   parser: FileParser;
@@ -19,43 +27,72 @@ export interface ParserRegistration {
 
 export interface ParserOptions {
   maxRetries?: number;
-  circuitBreakerThreshold?: number;
-  circuitBreakerResetMs?: number;
+  failureThreshold?: number;
+  resetTimeout?: number;
+  successThreshold?: number;
   fallbackEnabled?: boolean;
+  /** @deprecated Use failureThreshold instead */
+  circuitBreakerThreshold?: number;
+  /** @deprecated Use resetTimeout instead */
+  circuitBreakerResetMs?: number;
 }
 
 export interface CircuitBreakerState {
   failures: number;
+  successes: number;
   lastFailure: number;
-  state: 'closed' | 'open' | 'half-open';
+  lastStateChange: number;
+  state: CircuitBreakerStateEnum;
   totalCalls: number;
   totalFailures: number;
+  halfOpenAllowed: boolean;
+}
+
+export interface CircuitBreakerConfig {
+  failureThreshold: number;
+  resetTimeout: number;
+  successThreshold: number;
 }
 
 export interface ParseAttemptResult {
   success: boolean;
   result?: ParsedResult;
   error?: string;
+  errorCode?: string;
   parserUsed: string;
   fallbackUsed: boolean;
   circuitBreakerTripped: boolean;
 }
 
-const DEFAULT_OPTIONS: Required<ParserOptions> = {
+const DEFAULT_OPTIONS = {
   maxRetries: 1,
-  circuitBreakerThreshold: 5,
-  circuitBreakerResetMs: 60000,
+  failureThreshold: 5,
+  resetTimeout: 60000,
+  successThreshold: 2,
   fallbackEnabled: true,
 };
+
+function normalizeOptions(options?: Partial<ParserOptions>): typeof DEFAULT_OPTIONS {
+  if (!options) return { ...DEFAULT_OPTIONS };
+  
+  return {
+    maxRetries: options.maxRetries ?? DEFAULT_OPTIONS.maxRetries,
+    failureThreshold: options.failureThreshold ?? options.circuitBreakerThreshold ?? DEFAULT_OPTIONS.failureThreshold,
+    resetTimeout: options.resetTimeout ?? options.circuitBreakerResetMs ?? DEFAULT_OPTIONS.resetTimeout,
+    successThreshold: options.successThreshold ?? DEFAULT_OPTIONS.successThreshold,
+    fallbackEnabled: options.fallbackEnabled ?? DEFAULT_OPTIONS.fallbackEnabled,
+  };
+}
 
 export class ParserRegistry {
   private registrations: Map<string, ParserRegistration[]> = new Map();
   private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
+  private circuitBreakerConfigs: Map<string, CircuitBreakerConfig> = new Map();
   private fallbackParser: FileParser | null = null;
-  private globalOptions: Required<ParserOptions>;
+  private globalOptions: typeof DEFAULT_OPTIONS;
 
   constructor(options?: Partial<ParserOptions>) {
-    this.globalOptions = { ...DEFAULT_OPTIONS, ...options };
+    this.globalOptions = normalizeOptions(options);
   }
 
   /**
@@ -67,11 +104,13 @@ export class ParserRegistry {
     priority: number = 100,
     options?: ParserOptions
   ): void {
+    const parserOpts = normalizeOptions({ ...this.globalOptions, ...options });
+    
     const registration: ParserRegistration = {
       parser,
       mimeTypes,
       priority,
-      options: { ...this.globalOptions, ...options },
+      options: parserOpts,
     };
 
     for (const mimeType of mimeTypes) {
@@ -83,10 +122,19 @@ export class ParserRegistry {
 
     this.circuitBreakers.set(parser.name, {
       failures: 0,
+      successes: 0,
       lastFailure: 0,
-      state: 'closed',
+      lastStateChange: Date.now(),
+      state: CircuitBreakerStateEnum.CLOSED,
       totalCalls: 0,
       totalFailures: 0,
+      halfOpenAllowed: true,
+    });
+
+    this.circuitBreakerConfigs.set(parser.name, {
+      failureThreshold: parserOpts.failureThreshold!,
+      resetTimeout: parserOpts.resetTimeout!,
+      successThreshold: parserOpts.successThreshold!,
     });
 
     console.log(`[ParserRegistry] Registered parser: ${parser.name} for ${mimeTypes.join(', ')} (priority: ${priority})`);
@@ -108,22 +156,73 @@ export class ParserRegistry {
   }
 
   /**
+   * Get the current state of a circuit breaker
+   */
+  getCircuitState(parserName: string): CircuitBreakerStateEnum | null {
+    const state = this.circuitBreakers.get(parserName);
+    if (!state) return null;
+    
+    this.updateCircuitState(parserName);
+    return state.state;
+  }
+
+  /**
+   * Update circuit breaker state based on time elapsed
+   */
+  private updateCircuitState(parserName: string): void {
+    const state = this.circuitBreakers.get(parserName);
+    const config = this.circuitBreakerConfigs.get(parserName);
+    if (!state || !config) return;
+
+    if (state.state === CircuitBreakerStateEnum.OPEN) {
+      const timeSinceFailure = Date.now() - state.lastFailure;
+      if (timeSinceFailure >= config.resetTimeout) {
+        state.state = CircuitBreakerStateEnum.HALF_OPEN;
+        state.lastStateChange = Date.now();
+        state.halfOpenAllowed = true;
+        state.successes = 0;
+        console.log(`[ParserRegistry] Circuit breaker transitioned to HALF_OPEN for: ${parserName}`);
+      }
+    }
+  }
+
+  /**
    * Check if a parser's circuit breaker is open
    */
   isCircuitOpen(parserName: string): boolean {
     const state = this.circuitBreakers.get(parserName);
     if (!state) return false;
 
-    if (state.state === 'open') {
-      const timeSinceFailure = Date.now() - state.lastFailure;
-      if (timeSinceFailure > this.globalOptions.circuitBreakerResetMs) {
-        state.state = 'half-open';
-        return false;
-      }
+    this.updateCircuitState(parserName);
+
+    if (state.state === CircuitBreakerStateEnum.OPEN) {
       return true;
     }
 
+    if (state.state === CircuitBreakerStateEnum.HALF_OPEN) {
+      if (!state.halfOpenAllowed) {
+        return true;
+      }
+    }
+
     return false;
+  }
+
+  /**
+   * Check if a request should be allowed in half-open state
+   */
+  allowHalfOpenRequest(parserName: string): boolean {
+    const state = this.circuitBreakers.get(parserName);
+    if (!state) return true;
+    
+    this.updateCircuitState(parserName);
+
+    if (state.state === CircuitBreakerStateEnum.HALF_OPEN && state.halfOpenAllowed) {
+      state.halfOpenAllowed = false;
+      return true;
+    }
+
+    return state.state === CircuitBreakerStateEnum.CLOSED;
   }
 
   /**
@@ -131,15 +230,24 @@ export class ParserRegistry {
    */
   recordSuccess(parserName: string): void {
     const state = this.circuitBreakers.get(parserName);
-    if (state) {
-      state.totalCalls++;
-      if (state.state === 'half-open') {
-        state.state = 'closed';
+    const config = this.circuitBreakerConfigs.get(parserName);
+    if (!state || !config) return;
+
+    state.totalCalls++;
+
+    if (state.state === CircuitBreakerStateEnum.HALF_OPEN) {
+      state.successes++;
+      state.halfOpenAllowed = true;
+      
+      if (state.successes >= config.successThreshold) {
+        state.state = CircuitBreakerStateEnum.CLOSED;
         state.failures = 0;
-        console.log(`[ParserRegistry] Circuit breaker closed for: ${parserName}`);
-      } else {
-        state.failures = Math.max(0, state.failures - 1);
+        state.successes = 0;
+        state.lastStateChange = Date.now();
+        console.log(`[ParserRegistry] Circuit breaker CLOSED for: ${parserName} (${config.successThreshold} successes in half-open)`);
       }
+    } else if (state.state === CircuitBreakerStateEnum.CLOSED) {
+      state.failures = Math.max(0, state.failures - 1);
     }
   }
 
@@ -148,14 +256,23 @@ export class ParserRegistry {
    */
   recordFailure(parserName: string): void {
     const state = this.circuitBreakers.get(parserName);
-    if (state) {
-      state.failures++;
-      state.totalFailures++;
-      state.totalCalls++;
-      state.lastFailure = Date.now();
+    const config = this.circuitBreakerConfigs.get(parserName);
+    if (!state || !config) return;
 
-      if (state.failures >= this.globalOptions.circuitBreakerThreshold) {
-        state.state = 'open';
+    state.failures++;
+    state.totalFailures++;
+    state.totalCalls++;
+    state.lastFailure = Date.now();
+
+    if (state.state === CircuitBreakerStateEnum.HALF_OPEN) {
+      state.state = CircuitBreakerStateEnum.OPEN;
+      state.lastStateChange = Date.now();
+      state.successes = 0;
+      console.warn(`[ParserRegistry] Circuit breaker OPENED from half-open for: ${parserName} (failure during test)`);
+    } else if (state.state === CircuitBreakerStateEnum.CLOSED) {
+      if (state.failures >= config.failureThreshold) {
+        state.state = CircuitBreakerStateEnum.OPEN;
+        state.lastStateChange = Date.now();
         console.warn(`[ParserRegistry] Circuit breaker OPENED for: ${parserName} (${state.failures} consecutive failures)`);
       }
     }
@@ -185,13 +302,24 @@ export class ParserRegistry {
     let circuitBreakerTripped = false;
 
     for (const registration of parsers) {
-      const { parser, options } = registration;
-      const parserOpts = { ...this.globalOptions, ...options };
+      const { parser } = registration;
+      const state = this.circuitBreakers.get(parser.name);
+      
+      this.updateCircuitState(parser.name);
 
-      if (this.isCircuitOpen(parser.name)) {
+      if (state?.state === CircuitBreakerStateEnum.OPEN) {
         circuitBreakerTripped = true;
-        console.log(`[ParserRegistry] Skipping ${parser.name} - circuit breaker open`);
+        console.log(`[ParserRegistry] Skipping ${parser.name} - circuit breaker OPEN`);
         continue;
+      }
+
+      if (state?.state === CircuitBreakerStateEnum.HALF_OPEN) {
+        if (!this.allowHalfOpenRequest(parser.name)) {
+          circuitBreakerTripped = true;
+          console.log(`[ParserRegistry] Skipping ${parser.name} - circuit breaker HALF_OPEN (test in progress)`);
+          continue;
+        }
+        console.log(`[ParserRegistry] Allowing test request for ${parser.name} in HALF_OPEN state`);
       }
 
       try {
@@ -249,9 +377,12 @@ export class ParserRegistry {
       }
     }
 
+    const errorCode = circuitBreakerTripped ? SandboxErrorCode.CIRCUIT_BREAKER_OPEN : undefined;
+
     return {
       success: false,
       error: lastError || 'All parsers failed',
+      errorCode,
       parserUsed: 'none',
       fallbackUsed: false,
       circuitBreakerTripped,
@@ -259,14 +390,22 @@ export class ParserRegistry {
   }
 
   /**
-   * Get circuit breaker status for all parsers
+   * Get circuit breaker status for all parsers (for monitoring)
    */
   getCircuitBreakerStatus(): Record<string, CircuitBreakerState> {
     const status: Record<string, CircuitBreakerState> = {};
     this.circuitBreakers.forEach((state, name) => {
+      this.updateCircuitState(name);
       status[name] = { ...state };
     });
     return status;
+  }
+
+  /**
+   * Get all circuit breaker states (alias for getCircuitBreakerStatus)
+   */
+  getCircuitBreakerStates(): Record<string, CircuitBreakerState> {
+    return this.getCircuitBreakerStatus();
   }
 
   /**
@@ -276,7 +415,10 @@ export class ParserRegistry {
     const state = this.circuitBreakers.get(parserName);
     if (state) {
       state.failures = 0;
-      state.state = 'closed';
+      state.successes = 0;
+      state.state = CircuitBreakerStateEnum.CLOSED;
+      state.lastStateChange = Date.now();
+      state.halfOpenAllowed = true;
       console.log(`[ParserRegistry] Circuit breaker manually reset for: ${parserName}`);
     }
   }
@@ -287,7 +429,10 @@ export class ParserRegistry {
   resetAllCircuitBreakers(): void {
     this.circuitBreakers.forEach((state, name) => {
       state.failures = 0;
-      state.state = 'closed';
+      state.successes = 0;
+      state.state = CircuitBreakerStateEnum.CLOSED;
+      state.lastStateChange = Date.now();
+      state.halfOpenAllowed = true;
     });
     console.log(`[ParserRegistry] All circuit breakers reset`);
   }
@@ -305,6 +450,7 @@ export class ParserRegistry {
       }
     });
     this.circuitBreakers.delete(parserName);
+    this.circuitBreakerConfigs.delete(parserName);
     console.log(`[ParserRegistry] Unregistered parser: ${parserName}`);
   }
 

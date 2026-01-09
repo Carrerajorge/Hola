@@ -72,12 +72,12 @@ Test,"He said ""Hello""!"`;
   });
 
   describe('Empty/Scanned Document Handling', () => {
-    it('should return 422 PARSE_FAILED for empty document', async () => {
+    it('should return 400 VALIDATION_ERROR for empty document (content required)', async () => {
       const response = await fetch(`${API_BASE}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: 'Analyze this document',
+          messages: [{ role: 'user', content: 'Analyze this document' }],
           conversationId: 'test-empty-doc',
           attachments: [{
             name: 'empty.txt',
@@ -88,18 +88,17 @@ Test,"He said ""Hello""!"`;
         })
       });
 
-      expect(response.status).toBe(422);
+      expect(response.status).toBe(400);
       const data = await response.json();
-      expect(data.error).toBe('PARSE_FAILED');
-      expect(data.progressReport.tokens_extracted_total).toBe(0);
+      expect(data.error.code).toBe('VALIDATION_ERROR');
     });
 
-    it('should return 422 for whitespace-only document', async () => {
+    it('should return 422 PARSE_FAILED for whitespace-only document', async () => {
       const response = await fetch(`${API_BASE}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: 'Analyze this document',
+          messages: [{ role: 'user', content: 'Analyze this document' }],
           conversationId: 'test-whitespace-doc',
           attachments: [{
             name: 'whitespace.txt',
@@ -126,7 +125,7 @@ P002,Gadget,49.99`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: 'List all products and their prices',
+          messages: [{ role: 'user', content: 'List all products and their prices' }],
           conversationId: 'test-csv-processing',
           attachments: [{
             name: 'products.csv',
@@ -151,7 +150,7 @@ P002,Gadget,49.99`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: 'Analiza todos los documentos y resume su contenido',
+          messages: [{ role: 'user', content: 'Analiza todos los documentos y resume su contenido' }],
           conversationId: 'test-multi-coverage',
           attachments: [
             {
@@ -198,7 +197,7 @@ DATA: value1=100, value2=200`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: 'Resume el contenido en español y en inglés',
+          messages: [{ role: 'user', content: 'Resume el contenido en español y en inglés' }],
           conversationId: 'test-bilingual',
           attachments: [{
             name: 'bilingual.txt',

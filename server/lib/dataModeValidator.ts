@@ -3,11 +3,44 @@
  * 
  * Validates that responses in DATA_MODE contain no image/artifact fields.
  * If violation detected → logs error with stack trace and throws DATA_MODE_OUTPUT_VIOLATION.
+ * 
+ * PARE Phase 2 Integration:
+ * - Integrates with pareResponseContract for structural validation
+ * - Adds specific violation codes for categorized errors
  */
+
+import { 
+  validateResponseContract, 
+  extractCitationsFromText,
+  type ResponseContractValidation,
+  type ResponseContractViolation,
+  type ResponseContractViolationCode 
+} from './pareResponseContract';
+
+export type DataModeViolationCode =
+  | 'FORBIDDEN_KEY'
+  | 'FORBIDDEN_CONTENT_TYPE'
+  | 'FORBIDDEN_TEXT_PATTERN'
+  | 'MISSING_CONTENT_TYPE'
+  | 'INVALID_CONTENT_TYPE'
+  | 'BINARY_CONTENT_DETECTED'
+  | 'BASE64_DATA_DETECTED'
+  | 'IMAGE_URL_DETECTED'
+  | 'COVERAGE_INCOMPLETE'
+  | 'BLOB_DETECTED';
+
+export interface DataModeViolation {
+  code: DataModeViolationCode;
+  message: string;
+  path?: string;
+  details?: Record<string, any>;
+}
 
 export interface DataModeValidationResult {
   valid: boolean;
   violations: string[];
+  violationDetails?: DataModeViolation[];
+  responseContractValidation?: ResponseContractValidation;
   stack?: string;
 }
 
@@ -200,4 +233,128 @@ export function assertDataModeCompliance(payload: any, requestId: string): void 
   if (!result.valid) {
     throw new DataModeOutputViolationError(requestId, result.violations);
   }
+}
+
+/**
+ * Enhanced validation options for PARE Phase 2
+ */
+export interface EnhancedValidationOptions {
+  contentType?: string;
+  attachmentNames?: string[];
+  requireFullCoverage?: boolean;
+  userQuery?: string;
+}
+
+/**
+ * Detect if user query requires full document coverage
+ */
+export function detectFullCoverageRequirement(userQuery: string): boolean {
+  if (!userQuery) return false;
+  return /\b(todos|all|completo|complete|cada|every|analiza\s+todos)\b/i.test(userQuery);
+}
+
+/**
+ * Enhanced DATA_MODE validation with PARE Response Contract integration
+ * Combines traditional DATA_MODE checks with structural response contract validation
+ */
+export function validateDataModeResponseEnhanced(
+  payload: any, 
+  requestId: string,
+  options: EnhancedValidationOptions = {}
+): DataModeValidationResult {
+  const violations: string[] = [];
+  const violationDetails: DataModeViolation[] = [];
+  
+  const requireFullCoverage = options.requireFullCoverage ?? 
+    (options.userQuery ? detectFullCoverageRequirement(options.userQuery) : false);
+  
+  const responseContractResult = validateResponseContract(
+    payload,
+    options.attachmentNames || [],
+    {
+      contentType: options.contentType,
+      requireFullCoverage
+    }
+  );
+  
+  for (const contractViolation of responseContractResult.violations) {
+    violations.push(`${contractViolation.code}: ${contractViolation.message}`);
+    violationDetails.push({
+      code: contractViolation.code as DataModeViolationCode,
+      message: contractViolation.message,
+      path: contractViolation.path,
+      details: contractViolation.details
+    });
+  }
+  
+  const traditionalResult = scanForForbiddenKeys(payload);
+  for (const violation of traditionalResult) {
+    violations.push(violation);
+    violationDetails.push({
+      code: 'FORBIDDEN_KEY',
+      message: violation
+    });
+  }
+  
+  if (payload.answer_text) {
+    const textViolations = scanTextForViolations(payload.answer_text, 'answer_text');
+    for (const violation of textViolations) {
+      violations.push(violation);
+      violationDetails.push({
+        code: 'FORBIDDEN_TEXT_PATTERN',
+        message: violation
+      });
+    }
+  }
+  if (payload.answerText) {
+    const textViolations = scanTextForViolations(payload.answerText, 'answerText');
+    for (const violation of textViolations) {
+      violations.push(violation);
+      violationDetails.push({
+        code: 'FORBIDDEN_TEXT_PATTERN',
+        message: violation
+      });
+    }
+  }
+  
+  if (violations.length > 0) {
+    const stack = new Error().stack;
+    console.error(`[DATA_MODE_KILL_SWITCH_ENHANCED] ========== VIOLATION DETECTED ==========`);
+    console.error(`[DATA_MODE_KILL_SWITCH_ENHANCED] requestId: ${requestId}`);
+    console.error(`[DATA_MODE_KILL_SWITCH_ENHANCED] violations: ${violations.length}`);
+    violationDetails.forEach((v, i) => console.error(`[DATA_MODE_KILL_SWITCH_ENHANCED] [${i + 1}] ${v.code}: ${v.message}`));
+    console.error(`[DATA_MODE_KILL_SWITCH_ENHANCED] stack: ${stack}`);
+    
+    return {
+      valid: false,
+      violations,
+      violationDetails,
+      responseContractValidation: responseContractResult,
+      stack
+    };
+  }
+  
+  return { 
+    valid: true, 
+    violations: [],
+    violationDetails: [],
+    responseContractValidation: responseContractResult
+  };
+}
+
+/**
+ * Enhanced assertion that includes response contract validation
+ */
+export function assertDataModeComplianceEnhanced(
+  payload: any, 
+  requestId: string,
+  options: EnhancedValidationOptions = {}
+): DataModeValidationResult {
+  const result = validateDataModeResponseEnhanced(payload, requestId, options);
+  
+  if (!result.valid) {
+    throw new DataModeOutputViolationError(requestId, result.violations);
+  }
+  
+  return result;
 }

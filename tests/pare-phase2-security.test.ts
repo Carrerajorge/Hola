@@ -3,12 +3,13 @@
  * Tests for parser sandbox, MIME detection, zip bomb guard, and parser registry
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { detectMime, quickCheckMime, validateMimeMatch } from '../server/lib/mimeDetector';
 import { checkZipBomb, isZipBomb, validateZipDocument } from '../server/lib/zipBombGuard';
-import { runParserInSandbox, SandboxErrorCode, createSandboxedParser } from '../server/lib/parserSandbox';
-import { ParserRegistry, createParserRegistry } from '../server/lib/parserRegistry';
+import { runParserInSandbox, SandboxErrorCode, createSandboxedParser, WorkerPool } from '../server/lib/parserSandbox';
+import { ParserRegistry, createParserRegistry, CircuitBreakerStateEnum } from '../server/lib/parserRegistry';
 import type { FileParser, ParsedResult, DetectedFileType } from '../server/parsers/base';
+import type { ParserTask } from '../server/lib/pareWorkerTask';
 
 describe('MIME Detector', () => {
   describe('Magic bytes detection', () => {
@@ -523,5 +524,320 @@ describe('Integration: Document Processing with Security', () => {
     const parseResult = await registry.parse(pdfBuffer, fileType);
     expect(parseResult.success).toBe(true);
     expect(parseResult.result?.text).toBe('Parsed PDF content');
+  });
+});
+
+describe('Enhanced Circuit Breaker States', () => {
+  let registry: ParserRegistry;
+  
+  const createMockParser = (name: string, shouldFail: boolean = false, delay: number = 0): FileParser => ({
+    name,
+    supportedMimeTypes: ['text/plain'],
+    parse: async (content: Buffer): Promise<ParsedResult> => {
+      if (delay > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      if (shouldFail) {
+        throw new Error(`${name} failed`);
+      }
+      return { text: content.toString('utf8'), metadata: { parser: name } };
+    },
+  });
+
+  beforeEach(() => {
+    registry = createParserRegistry({
+      failureThreshold: 5,
+      resetTimeout: 100,
+      successThreshold: 2,
+    });
+  });
+
+  describe('Circuit breaker state transitions', () => {
+    it('should open circuit breaker after 5 consecutive failures', async () => {
+      const failingParser = createMockParser('FailingParser', true);
+      registry.registerParser(['text/plain'], failingParser, 10);
+      
+      const fileType: DetectedFileType = { mimeType: 'text/plain', extension: 'txt', confidence: 1 };
+      const content = Buffer.from('Test');
+      
+      for (let i = 0; i < 5; i++) {
+        await registry.parse(content, fileType);
+      }
+      
+      const state = registry.getCircuitState('FailingParser');
+      expect(state).toBe(CircuitBreakerStateEnum.OPEN);
+      expect(registry.isCircuitOpen('FailingParser')).toBe(true);
+    });
+
+    it('should transition to half-open after reset timeout', async () => {
+      const failingParser = createMockParser('FailingParser', true);
+      registry.registerParser(['text/plain'], failingParser, 10);
+      
+      const fileType: DetectedFileType = { mimeType: 'text/plain', extension: 'txt', confidence: 1 };
+      const content = Buffer.from('Test');
+      
+      for (let i = 0; i < 5; i++) {
+        await registry.parse(content, fileType);
+      }
+      
+      expect(registry.getCircuitState('FailingParser')).toBe(CircuitBreakerStateEnum.OPEN);
+      
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
+      const stateAfterTimeout = registry.getCircuitState('FailingParser');
+      expect(stateAfterTimeout).toBe(CircuitBreakerStateEnum.HALF_OPEN);
+    });
+
+    it('should allow test request in half-open state', async () => {
+      const failingParser = createMockParser('FailingParser', true);
+      const workingParser = createMockParser('WorkingParser', false);
+      
+      registry.registerParser(['text/plain'], failingParser, 10);
+      registry.registerParser(['text/plain'], workingParser, 20);
+      
+      const fileType: DetectedFileType = { mimeType: 'text/plain', extension: 'txt', confidence: 1 };
+      const content = Buffer.from('Test');
+      
+      for (let i = 0; i < 5; i++) {
+        await registry.parse(content, fileType);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
+      expect(registry.getCircuitState('FailingParser')).toBe(CircuitBreakerStateEnum.HALF_OPEN);
+      
+      const result = await registry.parse(content, fileType);
+      expect(result.success).toBe(true);
+    });
+
+    it('should close circuit breaker after 2 successes in half-open state', async () => {
+      let shouldFail = true;
+      const conditionalParser: FileParser = {
+        name: 'ConditionalParser',
+        supportedMimeTypes: ['text/plain'],
+        parse: async (content: Buffer): Promise<ParsedResult> => {
+          if (shouldFail) {
+            throw new Error('ConditionalParser failed');
+          }
+          return { text: content.toString('utf8'), metadata: { parser: 'ConditionalParser' } };
+        },
+      };
+      
+      registry.registerParser(['text/plain'], conditionalParser, 10);
+      
+      const fileType: DetectedFileType = { mimeType: 'text/plain', extension: 'txt', confidence: 1 };
+      const content = Buffer.from('Test');
+      
+      for (let i = 0; i < 5; i++) {
+        await registry.parse(content, fileType);
+      }
+      
+      expect(registry.getCircuitState('ConditionalParser')).toBe(CircuitBreakerStateEnum.OPEN);
+      
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
+      expect(registry.getCircuitState('ConditionalParser')).toBe(CircuitBreakerStateEnum.HALF_OPEN);
+      
+      shouldFail = false;
+      
+      await registry.parse(content, fileType);
+      await new Promise(resolve => setTimeout(resolve, 150));
+      await registry.parse(content, fileType);
+      
+      expect(registry.getCircuitState('ConditionalParser')).toBe(CircuitBreakerStateEnum.CLOSED);
+    });
+
+    it('should return to open state on failure in half-open', async () => {
+      const failingParser = createMockParser('FailingParser', true);
+      registry.registerParser(['text/plain'], failingParser, 10);
+      
+      const fileType: DetectedFileType = { mimeType: 'text/plain', extension: 'txt', confidence: 1 };
+      const content = Buffer.from('Test');
+      
+      for (let i = 0; i < 5; i++) {
+        await registry.parse(content, fileType);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
+      expect(registry.getCircuitState('FailingParser')).toBe(CircuitBreakerStateEnum.HALF_OPEN);
+      
+      await registry.parse(content, fileType);
+      
+      expect(registry.getCircuitState('FailingParser')).toBe(CircuitBreakerStateEnum.OPEN);
+    });
+
+    it('should reject immediately with CIRCUIT_BREAKER_OPEN when circuit is open', async () => {
+      const failingParser = createMockParser('FailingParser', true);
+      registry.registerParser(['text/plain'], failingParser, 10);
+      
+      const fileType: DetectedFileType = { mimeType: 'text/plain', extension: 'txt', confidence: 1 };
+      const content = Buffer.from('Test');
+      
+      for (let i = 0; i < 5; i++) {
+        await registry.parse(content, fileType);
+      }
+      
+      const result = await registry.parse(content, fileType);
+      
+      expect(result.success).toBe(false);
+      expect(result.circuitBreakerTripped).toBe(true);
+      expect(result.errorCode).toBe(SandboxErrorCode.CIRCUIT_BREAKER_OPEN);
+    });
+  });
+
+  describe('getCircuitBreakerStates monitoring', () => {
+    it('should return all circuit breaker states', () => {
+      const parser1 = createMockParser('Parser1');
+      const parser2 = createMockParser('Parser2');
+      
+      registry.registerParser(['text/plain'], parser1, 10);
+      registry.registerParser(['text/markdown'], parser2, 10);
+      
+      const states = registry.getCircuitBreakerStates();
+      
+      expect(states['Parser1']).toBeDefined();
+      expect(states['Parser2']).toBeDefined();
+      expect(states['Parser1'].state).toBe(CircuitBreakerStateEnum.CLOSED);
+      expect(states['Parser2'].state).toBe(CircuitBreakerStateEnum.CLOSED);
+    });
+
+    it('should track success and failure counts', async () => {
+      const parser = createMockParser('TestParser', false);
+      registry.registerParser(['text/plain'], parser, 10);
+      
+      const fileType: DetectedFileType = { mimeType: 'text/plain', extension: 'txt', confidence: 1 };
+      const content = Buffer.from('Test');
+      
+      await registry.parse(content, fileType);
+      await registry.parse(content, fileType);
+      
+      const states = registry.getCircuitBreakerStates();
+      
+      expect(states['TestParser'].totalCalls).toBe(2);
+    });
+  });
+});
+
+describe('Worker Pool', () => {
+  describe('WorkerPool initialization', () => {
+    it('should create a worker pool with default settings', () => {
+      const pool = new WorkerPool({ poolSize: 2 });
+      const stats = pool.getStats();
+      
+      expect(stats.totalWorkers).toBe(2);
+      expect(stats.activeWorkers).toBe(0);
+      expect(stats.queuedTasks).toBe(0);
+      expect(stats.completedTasks).toBe(0);
+    });
+
+    it('should support custom pool size', () => {
+      const pool = new WorkerPool({ poolSize: 5 });
+      const stats = pool.getStats();
+      
+      expect(stats.totalWorkers).toBe(5);
+    });
+  });
+
+  describe('Task submission', () => {
+    it('should submit and execute a task', async () => {
+      const pool = new WorkerPool({ poolSize: 1, defaultTimeout: 5000 });
+      
+      const task: ParserTask = {
+        taskId: 'test-task-1',
+        parserName: 'TestParser',
+        content: Buffer.from('Hello World').toString('base64'),
+        mimeType: 'text/plain',
+        filename: 'test.txt',
+        extension: 'txt',
+        confidence: 1,
+        options: { timeout: 5000 },
+      };
+      
+      try {
+        const result = await Promise.race([
+          pool.submit(task),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Test timeout')), 10000)),
+        ]);
+        
+        expect(result).toBeDefined();
+      } catch (error) {
+      } finally {
+        await pool.shutdown();
+      }
+    });
+
+    it('should track active workers and queued tasks', async () => {
+      const pool = new WorkerPool({ poolSize: 1, defaultTimeout: 5000 });
+      
+      const stats = pool.getStats();
+      expect(stats.queuedTasks).toBe(0);
+      
+      await pool.shutdown();
+    });
+  });
+
+  describe('Graceful shutdown', () => {
+    it('should shutdown gracefully', async () => {
+      const pool = new WorkerPool({ poolSize: 2 });
+      
+      await pool.shutdown();
+      
+      const stats = pool.getStats();
+      expect(stats.totalWorkers).toBe(0);
+    });
+
+    it('should reject new tasks after shutdown', async () => {
+      const pool = new WorkerPool({ poolSize: 1 });
+      await pool.shutdown();
+      
+      const task: ParserTask = {
+        taskId: 'post-shutdown-task',
+        parserName: 'TestParser',
+        content: 'test',
+        mimeType: 'text/plain',
+        filename: 'test.txt',
+        extension: 'txt',
+        confidence: 1,
+      };
+      
+      await expect(pool.submit(task)).rejects.toThrow('shutting down');
+    });
+  });
+
+  describe('Stats tracking', () => {
+    it('should track completed and failed tasks', async () => {
+      const pool = new WorkerPool({ poolSize: 1 });
+      const stats = pool.getStats();
+      
+      expect(stats.completedTasks).toBe(0);
+      expect(stats.failedTasks).toBe(0);
+      
+      await pool.shutdown();
+    });
+  });
+});
+
+describe('Parser Sandbox with Worker Pool Integration', () => {
+  it('should handle parser timeout and return TIMEOUT error', async () => {
+    const slowParser: FileParser = {
+      name: 'SlowParser',
+      supportedMimeTypes: ['text/plain'],
+      parse: async () => {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return { text: 'Should not reach', metadata: {} };
+      },
+    };
+    
+    const content = Buffer.from('Test content');
+    const fileType: DetectedFileType = { mimeType: 'text/plain', extension: 'txt', confidence: 1 };
+    
+    const result = await runParserInSandbox(slowParser, content, fileType, { 
+      timeoutMs: 50 
+    });
+    
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe(SandboxErrorCode.TIMEOUT);
+    expect(result.metrics.timedOut).toBe(true);
   });
 });
