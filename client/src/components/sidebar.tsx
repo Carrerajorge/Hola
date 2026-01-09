@@ -280,7 +280,7 @@ export function Sidebar({
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-2 min-w-0" style={{ maxWidth: 'calc(100% - 44px)' }}>
+          <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
             {chat.archived && <Archive className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
             <span className="truncate text-sm font-medium">{chat.title}</span>
             {processingChatIds.includes(chat.id) && (
@@ -299,11 +299,11 @@ export function Sidebar({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md bg-muted hover:bg-accent border border-border shadow-sm"
+                className="flex-shrink-0 ml-2 h-7 w-7 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button-chat-menu-${chat.id}`}
               >
-                <MoreHorizontal className="h-4 w-4 text-foreground" />
+                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
@@ -414,7 +414,7 @@ export function Sidebar({
   });
   
   return (
-    <div className={cn("flex h-screen w-[260px] flex-col liquid-sidebar-light dark:liquid-sidebar text-sidebar-foreground", className)}>
+    <div className={cn("flex h-screen w-[280px] flex-col liquid-sidebar-light dark:liquid-sidebar text-sidebar-foreground", className)}>
       <div className="flex h-14 items-center justify-between px-4 py-2">
         <div className="flex items-center gap-2">
           <IliaGPTLogo size={32} />
