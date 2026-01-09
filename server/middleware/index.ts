@@ -5,3 +5,9 @@ export { validateBody, validateQuery, validateParams, validate } from './validat
 export { requestLoggerMiddleware, getTraceId } from './requestLogger';
 
 export { getContext, getTraceId as getTraceIdFromContext, getUserId, setContext, runWithContext, updateContext, type CorrelationContext } from './correlationContext';
+
+export { pareRequestContract, getPareContext, requirePareContext, type PareContext } from './pareRequestContract';
+
+export { pareRateLimiter, clearPareRateLimitStores, getPareRateLimitStats } from './pareRateLimiter';
+
+export { pareQuotaGuard, getQuotaConfig, type QuotaConfig, type QuotaViolation } from './pareQuotaGuard';

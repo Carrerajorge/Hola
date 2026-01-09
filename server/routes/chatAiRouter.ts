@@ -7,6 +7,7 @@ import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../e
 import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
 import { pareOrchestrator, type RobustRouteResult, type SimpleAttachment } from "../services/pare";
 import { DocumentBatchProcessor, type BatchProcessingResult, type SimpleAttachment as BatchAttachment } from "../services/documentBatchProcessor";
+import { pareRequestContract, pareRateLimiter, pareQuotaGuard, requirePareContext } from "../middleware";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -831,26 +832,41 @@ ${systemContent}`;
   // UNIVERSAL DOCUMENT ANALYZER - POST /analyze
   // DATA_MODE enforced: NO image generation, NO artifact creation, NO web search
   // Only deterministic text extraction and LLM analysis with per-document citations
+  // PARE Phase 1: Request contract, rate limiting, and quota guard middlewares applied
   // ============================================================================================
-  router.post("/analyze", async (req, res) => {
-    const requestId = `analyze_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const timestamp = new Date().toISOString();
+  router.post("/analyze", 
+    pareRequestContract,
+    pareRateLimiter(),
+    pareQuotaGuard(),
+    async (req, res) => {
+    const pareContext = requirePareContext(req);
+    const { requestId, isDataMode, attachmentsCount: pareAttachmentsCount, startTime } = pareContext;
+    const timestamp = new Date(startTime).toISOString();
     
-    // SERVER-SIDE isDocumentMode flag - explicitly computed and logged
-    const isDocumentMode = true; // /analyze endpoint ALWAYS operates in document mode
-    const productionWorkflowBlocked = true; // ProductionWorkflowRunner is NEVER called
+    // SERVER-SIDE isDocumentMode flag - computed from PARE context (attachments.length > 0)
+    // PARE enforces DATA_MODE when attachments are present, regardless of frontend flag
+    const isDocumentMode = isDataMode; // Derived from PARE context (server-side enforcement)
+    const productionWorkflowBlocked = isDataMode; // ProductionWorkflowRunner is NEVER called in DATA_MODE
     
     console.log(`[Analyze] ========== REQUEST ${requestId} ==========`);
     console.log(`[Analyze] timestamp: ${timestamp}`);
-    console.log(`[Analyze] isDocumentMode: ${isDocumentMode} (reason: /analyze endpoint always DATA_MODE)`);
-    console.log(`[Analyze] productionWorkflowBlocked: ${productionWorkflowBlocked} (ProductionWorkflowRunner NEVER executed)`);
+    console.log(`[Analyze] isDocumentMode: ${isDocumentMode} (reason: PARE detected ${pareAttachmentsCount} attachments)`);
+    console.log(`[Analyze] productionWorkflowBlocked: ${productionWorkflowBlocked} (ProductionWorkflowRunner NEVER executed in DATA_MODE)`);
+    console.log(`[Analyze] pareContext:`, JSON.stringify({
+      requestId: pareContext.requestId,
+      idempotencyKey: pareContext.idempotencyKey,
+      isDataMode: pareContext.isDataMode,
+      attachmentsCount: pareContext.attachmentsCount,
+      clientIp: pareContext.clientIp,
+      userId: pareContext.userId,
+    }));
     
     try {
       const { messages, attachments, conversationId } = req.body;
       
       // GUARD: attachments are REQUIRED for /analyze endpoint
       if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
-        console.log(`[Analyze] REJECTED: No attachments provided`);
+        console.log(`[Analyze] REJECTED: No attachments provided (requestId: ${requestId})`);
         return res.status(400).json({
           error: "ATTACHMENTS_REQUIRED",
           message: "El endpoint /analyze requiere al menos un documento adjunto.",
