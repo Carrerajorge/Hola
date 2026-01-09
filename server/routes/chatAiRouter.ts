@@ -8,6 +8,10 @@ import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmen
 import { pareOrchestrator, type RobustRouteResult, type SimpleAttachment } from "../services/pare";
 import { DocumentBatchProcessor, type BatchProcessingResult, type SimpleAttachment as BatchAttachment } from "../services/documentBatchProcessor";
 import { pareRequestContract, pareRateLimiter, pareQuotaGuard, requirePareContext } from "../middleware";
+import { createPareLogger, type PareLogger } from "../lib/pareLogger";
+import { pareMetrics } from "../lib/pareMetrics";
+import { AuditTrailCollector, type AuditBatchSummary } from "../lib/pareAuditTrail";
+import { createChunkStore } from "../lib/pareChunkStore";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -843,23 +847,28 @@ ${systemContent}`;
     const { requestId, isDataMode, attachmentsCount: pareAttachmentsCount, startTime } = pareContext;
     const timestamp = new Date(startTime).toISOString();
     
+    // Initialize observability infrastructure
+    const logger = createPareLogger(requestId);
+    logger.setContext({ 
+      userId: pareContext.userId || undefined,
+      clientIp: pareContext.clientIp 
+    });
+    const auditCollector = new AuditTrailCollector(requestId);
+    const chunkStore = createChunkStore({ maxChunksPerDoc: 50 });
+    
     // SERVER-SIDE isDocumentMode flag - computed from PARE context (attachments.length > 0)
     // PARE enforces DATA_MODE when attachments are present, regardless of frontend flag
     const isDocumentMode = isDataMode; // Derived from PARE context (server-side enforcement)
     const productionWorkflowBlocked = isDataMode; // ProductionWorkflowRunner is NEVER called in DATA_MODE
     
-    console.log(`[Analyze] ========== REQUEST ${requestId} ==========`);
-    console.log(`[Analyze] timestamp: ${timestamp}`);
-    console.log(`[Analyze] isDocumentMode: ${isDocumentMode} (reason: PARE detected ${pareAttachmentsCount} attachments)`);
-    console.log(`[Analyze] productionWorkflowBlocked: ${productionWorkflowBlocked} (ProductionWorkflowRunner NEVER executed in DATA_MODE)`);
-    console.log(`[Analyze] pareContext:`, JSON.stringify({
-      requestId: pareContext.requestId,
-      idempotencyKey: pareContext.idempotencyKey,
-      isDataMode: pareContext.isDataMode,
-      attachmentsCount: pareContext.attachmentsCount,
+    // Log request start using structured logger
+    logger.logRequest({
+      method: req.method,
+      path: req.path,
+      attachmentsCount: pareAttachmentsCount,
       clientIp: pareContext.clientIp,
-      userId: pareContext.userId,
-    }));
+      userAgent: req.headers['user-agent']
+    });
     
     try {
       const { messages, attachments, conversationId } = req.body;
@@ -978,16 +987,75 @@ ${systemContent}`;
         }
       };
       
-      // Structured logging with all required fields
-      console.log(`[Analyze] ========== BATCH PROCESSING COMPLETE ==========`);
-      console.log(`[Analyze] requestId: ${requestId}`);
-      console.log(`[Analyze] isDocumentMode: ${isDocumentMode}`);
-      console.log(`[Analyze] productionWorkflowBlocked: ${productionWorkflowBlocked}`);
-      console.log(`[Analyze] attachments_count: ${progressReport.attachments_count}`);
-      console.log(`[Analyze] filenames: ${progressReport.perFileStats.map(s => s.filename).join(', ')}`);
-      console.log(`[Analyze] tokens_extracted_total: ${progressReport.tokens_extracted_total}`);
-      console.log(`[Analyze] perFileStats:`, JSON.stringify(progressReport.perFileStats, null, 2));
-      console.log(`[Analyze] ProductionWorkflowRunner: NOT_EXECUTED (DATA_MODE enforced)`);
+      // Record metrics and create audit records for each processed file
+      for (const stat of batchResult.stats) {
+        const originalAtt = resolvedAttachments.find((a: any) => a.name === stat.filename) || {};
+        const parserInfo = getParserInfo(originalAtt.mimeType || originalAtt.type || '', stat.filename);
+        
+        // Record parse duration metrics
+        pareMetrics.recordParseDuration(stat.parseTimeMs);
+        pareMetrics.recordFileProcessed(stat.status === 'success');
+        pareMetrics.recordParserExecution(parserInfo.parser_used, stat.parseTimeMs, stat.status === 'success');
+        
+        if (stat.status === 'success') {
+          pareMetrics.recordTokensExtracted(stat.tokensExtracted);
+        }
+        
+        // Log parsing result
+        logger.logParsing({
+          filename: stat.filename,
+          mimeType: parserInfo.mime_detect,
+          sizeBytes: stat.bytesRead,
+          parserUsed: parserInfo.parser_used,
+          durationMs: stat.parseTimeMs,
+          tokensExtracted: stat.tokensExtracted,
+          chunksGenerated: stat.chunkCount,
+          success: stat.status === 'success',
+          error: stat.error
+        });
+        
+        // Create audit record
+        auditCollector.addRecord(
+          {
+            filename: stat.filename,
+            mimeType: parserInfo.mime_detect,
+            sizeBytes: stat.bytesRead,
+            content: '' // Content hash computed from buffer in real scenario
+          },
+          {
+            success: stat.status === 'success',
+            parserUsed: parserInfo.parser_used,
+            tokensExtracted: stat.tokensExtracted,
+            chunksGenerated: stat.chunkCount,
+            parseTimeMs: stat.parseTimeMs,
+            error: stat.error
+          }
+        );
+      }
+      
+      // Store chunks with deduplication
+      for (const chunk of batchResult.chunks) {
+        chunkStore.addChunks(chunk.docId, chunk.filename, [{
+          content: chunk.content,
+          location: chunk.location,
+          offsets: chunk.offsets
+        }]);
+      }
+      
+      // Get audit summary and coverage report
+      const auditSummary = auditCollector.getSummary();
+      const coverageReport = chunkStore.getCoverageReport();
+      
+      // Log observability summary
+      logger.info("PARE_BATCH_COMPLETE", {
+        attachments_count: progressReport.attachments_count,
+        processedFiles: progressReport.processedFiles,
+        failedFiles: progressReport.failedFiles,
+        tokens_extracted_total: progressReport.tokens_extracted_total,
+        totalChunks: progressReport.totalChunks,
+        auditBatchId: auditSummary.batchId,
+        coverageRate: coverageReport.coverageRate
+      });
       
       // COVERAGE CHECK: If user asked to analyze "all", verify complete coverage
       if (requiresFullCoverage && batchResult.processedFiles !== batchResult.attachmentsCount) {
@@ -1105,7 +1173,11 @@ ${documentText}`;
         }
       }
       
-      // Build response payload
+      // Calculate total request duration
+      const requestDurationMs = Date.now() - startTime;
+      pareMetrics.recordRequestDuration(requestDurationMs);
+      
+      // Build response payload with audit summary
       const responsePayload = {
         success: true,
         requestId,
@@ -1113,13 +1185,52 @@ ${documentText}`;
         answer_text: answerText,
         per_doc_findings: perDocFindings,
         citations,
-        progressReport,  // camelCase to match test expectations
+        progressReport: {
+          ...progressReport,
+          auditSummary: {
+            batchId: auditSummary.batchId,
+            totalFiles: auditSummary.totalFiles,
+            successCount: auditSummary.successCount,
+            failureCount: auditSummary.failureCount,
+            totalTokens: auditSummary.totalTokens,
+            totalParseTimeMs: auditSummary.totalParseTimeMs
+          },
+          chunkCoverage: {
+            totalDocuments: coverageReport.totalDocuments,
+            uniqueChunks: coverageReport.uniqueChunks,
+            duplicatesRemoved: coverageReport.duplicatesRemoved,
+            coverageRate: coverageReport.coverageRate
+          }
+        },
         metadata: {
           totalTokensExtracted: batchResult.totalTokens,
           totalChunks: batchResult.chunks.length,
-          processingTimeMs: Date.now() - parseInt(requestId.split('_')[1])
+          processingTimeMs: requestDurationMs
         }
       };
+      
+      // Log response
+      logger.logResponse({
+        statusCode: 200,
+        durationMs: requestDurationMs,
+        chunksReturned: batchResult.chunks.length,
+        totalTokens: batchResult.totalTokens,
+        filesProcessed: batchResult.processedFiles,
+        filesFailed: batchResult.failedFiles.length
+      });
+      
+      // Log audit trail
+      logger.logAudit({
+        action: "document_analysis",
+        resource: "batch",
+        resourceId: auditSummary.batchId,
+        details: {
+          filesCount: auditSummary.totalFiles,
+          successCount: auditSummary.successCount,
+          failureCount: auditSummary.failureCount
+        },
+        outcome: auditSummary.failureCount === 0 ? "success" : "failure"
+      });
       
       // KILL-SWITCH: Validate DATA_MODE response before sending
       const { validateDataModeResponse, DataModeOutputViolationError } = await import('../lib/dataModeValidator');
@@ -1146,10 +1257,24 @@ ${documentText}`;
       res.json(responsePayload);
       
     } catch (error: any) {
-      console.error(`[Analyze] Error ${requestId}:`, error);
+      // Log error using structured logger
+      logger.logError({
+        error,
+        phase: "unknown",
+        stack: error.stack
+      });
+      
+      // Record failed request in metrics
+      pareMetrics.recordRequestDuration(Date.now() - startTime);
       
       // Check if it's a DATA_MODE violation error
       if (error.name === 'DataModeOutputViolationError') {
+        logger.logAudit({
+          action: "document_analysis",
+          resource: "batch",
+          details: { errorType: "DATA_MODE_OUTPUT_VIOLATION" },
+          outcome: "failure"
+        });
         return res.status(500).json({
           error: "DATA_MODE_OUTPUT_VIOLATION",
           message: error.message,
@@ -1157,6 +1282,13 @@ ${documentText}`;
           requestId
         });
       }
+      
+      logger.logAudit({
+        action: "document_analysis",
+        resource: "batch",
+        details: { errorType: "ANALYSIS_FAILED", errorMessage: error.message },
+        outcome: "failure"
+      });
       
       res.status(500).json({
         error: "ANALYSIS_FAILED",
