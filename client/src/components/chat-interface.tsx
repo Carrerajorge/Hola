@@ -3535,6 +3535,23 @@ IMPORTANTE:
         let sseError: Error | null = null;
 
         try {
+          // Build attachments array for streaming endpoint
+          const streamAttachments = currentFiles
+            .filter(f => f.status === "ready" || f.status === "processing")
+            .map(f => ({
+              type: f.type.startsWith("image/") ? "image" as const :
+                    f.type.includes("pdf") ? "pdf" as const :
+                    f.type.includes("word") || f.type.includes("document") ? "word" as const :
+                    f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
+                    f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
+                    "document" as const,
+              name: f.name,
+              mimeType: f.type,
+              storagePath: f.storagePath,
+              fileId: f.id,
+              content: f.content,
+            }));
+          
           const response = await fetch("/api/chat/stream", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -3542,7 +3559,8 @@ IMPORTANTE:
               messages: finalChatHistory,
               conversationId: chatId,
               runId: runInfo.id,
-              chatId: chatId
+              chatId: chatId,
+              attachments: streamAttachments.length > 0 ? streamAttachments : undefined
             }),
             signal: abortControllerRef.current?.signal
           });
