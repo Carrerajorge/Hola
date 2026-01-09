@@ -5,6 +5,7 @@ import { llmGateway } from "../lib/llmGateway";
 import { generateImage, detectImageRequest, extractImagePrompt } from "../services/imageGeneration";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../etl";
 import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
+import { pareOrchestrator, type RobustRouteResult, type SimpleAttachment } from "../services/pare";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -365,7 +366,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const { messages, conversationId, runId, chatId } = req.body;
+      const { messages, conversationId, runId, chatId, attachments } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -373,6 +374,28 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       const user = (req as any).user;
       const userId = user?.claims?.sub;
+
+      // Get the last user message for PARE routing
+      const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
+      const userMessageText = lastUserMessage?.content || '';
+
+      // Convert attachments to PARE format
+      const pareAttachments: SimpleAttachment[] = (attachments || []).map((att: any) => ({
+        name: att.name,
+        type: att.type || att.mimeType,
+        path: att.storagePath || att.fileId,
+      }));
+
+      // Use PARE for intelligent routing when attachments are present
+      let routeDecision: RobustRouteResult | null = null;
+      if (pareOrchestrator.isEnabled() && userMessageText) {
+        try {
+          routeDecision = pareOrchestrator.robustRoute(userMessageText, pareAttachments);
+          console.log(`[Stream] PARE routing: route=${routeDecision.route}, intent=${routeDecision.intent}, confidence=${routeDecision.confidence.toFixed(2)}, tools=${routeDecision.tools.slice(0, 3).join(',')}`);
+        } catch (routeError) {
+          console.error('[Stream] PARE routing error, falling back to chat:', routeError);
+        }
+      }
 
       // If runId provided, claim the pending run (idempotent processing)
       if (runId && chatId) {
@@ -427,14 +450,78 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }, 15000);
 
+      // Process attachments if present (for document analysis)
+      let attachmentContext = "";
+      const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
+      
+      if (hasAttachments) {
+        console.log(`[Stream] Processing ${attachments.length} attachment(s)`);
+        try {
+          const extractedContents: { fileName: string; content: string; mimeType: string }[] = [];
+          
+          for (const att of attachments) {
+            // If content was sent directly, use it
+            if (att.content) {
+              extractedContents.push({
+                fileName: att.name || 'document',
+                content: att.content,
+                mimeType: att.mimeType || 'application/octet-stream'
+              });
+            } else if (att.storagePath || att.fileId) {
+              // Otherwise, extract from storage
+              try {
+                const extracted = await extractAttachmentContent({
+                  name: att.name,
+                  type: att.type,
+                  storagePath: att.storagePath,
+                  fileId: att.fileId
+                } as Attachment);
+                if (extracted) {
+                  extractedContents.push(extracted);
+                }
+              } catch (extractError) {
+                console.error(`[Stream] Error extracting ${att.name}:`, extractError);
+              }
+            }
+          }
+          
+          if (extractedContents.length > 0) {
+            attachmentContext = formatAttachmentsAsContext(extractedContents);
+            console.log(`[Stream] Extracted content from ${extractedContents.length} attachment(s), context length: ${attachmentContext.length}`);
+          }
+        } catch (attachmentError) {
+          console.error("[Stream] Error processing attachments:", attachmentError);
+        }
+      }
+
       const formattedMessages = messages.map((msg: { role: string; content: string }) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content
       }));
 
+      // Build system message with attachment awareness
+      let systemContent = `Eres MICHAT, un asistente de IA avanzado. Responde de manera útil y profesional en el idioma del usuario.`;
+      
+      if (hasAttachments && attachmentContext) {
+        const isDocumentAnalysis = routeDecision?.intent === 'analysis' || 
+                                    routeDecision?.tools.some(t => ['analyze_document', 'read_file', 'summarize'].includes(t));
+        
+        if (isDocumentAnalysis) {
+          systemContent = `Eres un asistente experto en análisis de documentos. El usuario ha adjuntado archivos para que los analices.
+IMPORTANTE: Debes LEER y ANALIZAR el contenido de los archivos adjuntos. NO generes imágenes ni contenido ficticio.
+Responde basándote exclusivamente en el contenido real del documento adjunto.
+
+${attachmentContext}
+
+${systemContent}`;
+        } else {
+          systemContent = `${attachmentContext}\n\n${systemContent}`;
+        }
+      }
+
       const systemMessage = {
         role: "system" as const,
-        content: `Eres MICHAT, un asistente de IA avanzado. Responde de manera útil y profesional en el idioma del usuario.`
+        content: systemContent
       };
 
       // If we have a run, create an assistant message placeholder at the start
