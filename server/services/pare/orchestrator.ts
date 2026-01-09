@@ -15,6 +15,7 @@ import { RobustIntentClassifier, IntentResult, RobustIntent } from "./robustInte
 import { ContextDetector, ContextSignals } from "./contextDetector";
 import { ToolSelector, ToolSelection } from "./toolSelector";
 import { DeterministicRouter, RobustRouteDecision } from "./deterministicRouter";
+import { ExecutionValidator, ValidationResult } from "./executionValidator";
 import { v4 as uuidv4 } from "uuid";
 
 export interface SimpleAttachment {
@@ -31,6 +32,7 @@ export interface RobustRouteResult {
   reason: string;
   ruleApplied: string;
   context: ContextSignals;
+  validation: ValidationResult;
   durationMs: number;
 }
 
@@ -46,6 +48,7 @@ export class PAREOrchestrator {
   private contextDetector: ContextDetector;
   private toolSelector: ToolSelector;
   private deterministicRouter: DeterministicRouter;
+  private executionValidator: ExecutionValidator;
   private useRobustRouter: boolean;
 
   constructor(config: Partial<PAREConfig> = {}) {
@@ -70,6 +73,7 @@ export class PAREOrchestrator {
     this.contextDetector = new ContextDetector();
     this.toolSelector = new ToolSelector();
     this.deterministicRouter = new DeterministicRouter();
+    this.executionValidator = new ExecutionValidator();
 
     console.log(`[PARE] Orchestrator initialized (enabled=${this.enabled}, robust=${this.useRobustRouter})`);
   }
@@ -105,10 +109,34 @@ export class PAREOrchestrator {
 
     const decision = this.deterministicRouter.route(intentResult, context, toolSelection);
 
+    const validation = this.executionValidator.validatePreExecution(decision, context);
+    
+    if (validation.warnings.length > 0) {
+      console.log(`[PARE:Robust] Validation warnings: ${validation.warnings.map(w => w.code).join(", ")}`);
+    }
+    if (validation.suggestions.length > 0) {
+      console.log(`[PARE:Robust] Suggestions: ${validation.suggestions.slice(0, 2).join("; ")}`);
+    }
+
     const durationMs = Date.now() - startTime;
 
-    console.log(`[PARE:Robust] DECISION: route=${decision.route}, rule=${decision.ruleApplied}, duration=${durationMs}ms`);
+    console.log(`[PARE:Robust] DECISION: route=${decision.route}, rule=${decision.ruleApplied}, validation_score=${validation.score}, duration=${durationMs}ms`);
     console.log(`[PARE:Robust] Reason: ${decision.reason}`);
+
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      component: "PARE",
+      event: "robust_route_decision",
+      route: decision.route,
+      intent: decision.intent,
+      confidence: decision.confidence,
+      tools: decision.tools.slice(0, 5),
+      rule: decision.ruleApplied,
+      validationScore: validation.score,
+      warnings: validation.warnings.length,
+      durationMs,
+    }));
 
     return {
       route: decision.route,
@@ -118,6 +146,7 @@ export class PAREOrchestrator {
       reason: decision.reason,
       ruleApplied: decision.ruleApplied,
       context,
+      validation,
       durationMs
     };
   }

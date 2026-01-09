@@ -17,3 +17,6 @@ export type { ToolSelection } from "./toolSelector";
 
 export { DeterministicRouter, deterministicRoute } from "./deterministicRouter";
 export type { RobustRouteDecision, RouteType } from "./deterministicRouter";
+
+export { ExecutionValidator, executionValidator, validatePreExecution, validatePostExecution } from "./executionValidator";
+export type { ValidationResult, ValidationError, ValidationWarning, ToolExecutionResult, ExecutionContext } from "./executionValidator";
