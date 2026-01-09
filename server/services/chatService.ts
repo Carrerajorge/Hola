@@ -302,9 +302,10 @@ export async function handleChatRequest(
     model?: string;
     attachmentContext?: string;
     forceDirectResponse?: boolean;
+    hasRawAttachments?: boolean;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, userId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false } = options;
+  const { useRag = true, conversationId, userId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false, hasRawAttachments = false } = options;
   const hasImages = images && images.length > 0;
   
   // Fetch user settings for feature flags and preferences
@@ -557,9 +558,12 @@ export async function handleChatRequest(
                 role: "assistant"
               };
             }
-          } catch (docError) {
+          } catch (docError: any) {
             console.error("[ChatService] Document analysis error:", docError);
-            break;
+            return {
+              content: `**Error al analizar el documento**: ${docError.message || "No se pudo procesar el contenido del archivo. Por favor, intenta de nuevo o reformula tu pregunta."}`,
+              role: "assistant"
+            };
           }
         }
       }
@@ -700,7 +704,11 @@ FORMATO DE RESPUESTA:
     
     // PRODUCTION WORKFLOW: Route generation intents (image, slides, docs) through ProductionWorkflowRunner
     // This ensures real artifacts are generated with proper termination guarantees
-    if (!documentMode && !figmaMode && !hasImages) {
+    // IMPORTANT: Skip when attachments are present - document analysis takes priority
+    // Use hasRawAttachments (from original request) OR attachmentContext (extracted content) to ensure
+    // we block generation even if extraction failed
+    const hasAttachments = hasRawAttachments || (attachmentContext && attachmentContext.length > 0);
+    if (!documentMode && !figmaMode && !hasImages && !hasAttachments) {
       const intent = classifyIntent(lastUserMessage.content);
       if (isGenerationIntent(intent)) {
         console.log(`[ChatService] Generation intent detected: ${intent}, routing to ProductionWorkflowRunner`);

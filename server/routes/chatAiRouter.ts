@@ -178,6 +178,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         model,
         attachmentContext,
         forceDirectResponse: hasAttachments && attachmentContext.length > 0,
+        hasRawAttachments: hasAttachments,
         onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update)
       });
       
@@ -380,11 +381,28 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
       const userMessageText = lastUserMessage?.content || '';
 
-      // Convert attachments to PARE format
-      const pareAttachments: SimpleAttachment[] = (attachments || []).map((att: any) => ({
+      // Resolve storagePaths for all attachments first (before PARE routing)
+      // This ensures PARE has valid paths for routing decisions
+      const resolvedAttachments: any[] = [];
+      if (attachments && Array.isArray(attachments)) {
+        for (const att of attachments) {
+          const resolved = { ...att };
+          if (!resolved.storagePath && resolved.fileId) {
+            const fileRecord = await storage.getFile(resolved.fileId);
+            if (fileRecord && fileRecord.storagePath) {
+              resolved.storagePath = fileRecord.storagePath;
+              console.log(`[Stream] Pre-resolved storagePath for ${resolved.name}: ${resolved.storagePath}`);
+            }
+          }
+          resolvedAttachments.push(resolved);
+        }
+      }
+
+      // Convert attachments to PARE format using resolved paths
+      const pareAttachments: SimpleAttachment[] = resolvedAttachments.map((att: any) => ({
         name: att.name,
         type: att.type || att.mimeType,
-        path: att.storagePath || att.fileId,
+        path: att.storagePath || '',
       }));
 
       // Use PARE for intelligent routing when attachments are present
@@ -454,8 +472,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       // Process attachments using DocumentBatchProcessor for atomic batch handling
       let attachmentContext = "";
       let batchResult: BatchProcessingResult | null = null;
-      const hasAttachments = attachments && Array.isArray(attachments) && attachments.length > 0;
-      const attachmentsCount = hasAttachments ? attachments.length : 0;
+      const hasAttachments = resolvedAttachments.length > 0;
+      const attachmentsCount = hasAttachments ? resolvedAttachments.length : 0;
       
       // GUARD: Detect if user requests "analyze all" - requires full coverage
       const userMessage = messages[messages.length - 1]?.content || "";
@@ -463,7 +481,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       
       if (hasAttachments) {
         console.log(`[Stream] Processing ${attachmentsCount} attachment(s) as atomic batch:`, 
-          attachments.map((a: any) => ({ 
+          resolvedAttachments.map((a: any) => ({ 
             name: a.name, 
             type: a.type, 
             storagePath: a.storagePath,
@@ -474,14 +492,15 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         try {
           const batchProcessor = new DocumentBatchProcessor();
           
-          // Convert attachments to BatchAttachment format
-          const batchAttachments: BatchAttachment[] = attachments
-            .filter((a: any) => a.storagePath || a.content)
-            .map((a: any) => ({
-              name: a.name || 'document',
-              mimeType: a.mimeType || a.type || 'application/octet-stream',
-              storagePath: a.storagePath || '',
-              content: a.content // Pass content if available (for text files)
+          // Convert resolved attachments to BatchAttachment format
+          // storagePaths were already resolved earlier
+          const batchAttachments: BatchAttachment[] = resolvedAttachments
+            .filter((att: any) => att.storagePath || att.content)
+            .map((att: any) => ({
+              name: att.name || 'document',
+              mimeType: att.mimeType || att.type || 'application/octet-stream',
+              storagePath: att.storagePath || '',
+              content: att.content
             }));
           
           batchResult = await batchProcessor.processBatch(batchAttachments);

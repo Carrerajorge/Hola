@@ -126,6 +126,48 @@ const PROVIDER_MODELS = {
   },
 };
 
+const KNOWN_GEMINI_MODELS = new Set([
+  GEMINI_MODELS.FLASH_PREVIEW.toLowerCase(),
+  GEMINI_MODELS.FLASH.toLowerCase(),
+  GEMINI_MODELS.PRO.toLowerCase(),
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-2.0-pro",
+]);
+
+const KNOWN_XAI_MODELS = new Set([
+  MODELS.TEXT.toLowerCase(),
+  MODELS.VISION.toLowerCase(),
+  "grok-4-1-fast-non-reasoning",
+  "grok-4-fast-reasoning",
+  "grok-4-fast-non-reasoning",
+  "grok-4-0709",
+  "grok-3-fast",
+]);
+
+function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | null {
+  if (!model) return null;
+  
+  const normalizedModel = model.toLowerCase();
+  
+  if (KNOWN_GEMINI_MODELS.has(normalizedModel)) {
+    return "gemini";
+  }
+  if (KNOWN_XAI_MODELS.has(normalizedModel)) {
+    return "xai";
+  }
+  
+  if (/gemini/i.test(model)) {
+    return "gemini";
+  }
+  if (/grok/i.test(model)) {
+    return "xai";
+  }
+  
+  return null;
+}
+
 class LLMGateway {
   private xaiClient: OpenAI;
   private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
@@ -468,6 +510,12 @@ class LLMGateway {
       return options.provider;
     }
     
+    // Auto-detect provider based on model name using robust patterns
+    const detectedProvider = detectProviderFromModel(options.model);
+    if (detectedProvider) {
+      return detectedProvider;
+    }
+    
     // Check circuit breaker states
     const xaiAvailable = this.checkCircuitBreaker("xai");
     const geminiAvailable = this.checkCircuitBreaker("gemini");
@@ -634,7 +682,14 @@ class LLMGateway {
     options: LLMRequestOptions & { requestId: string; timeout: number },
     startTime: number
   ): Promise<LLMResponse> {
-    const model = options.model || (provider === "xai" ? MODELS.TEXT : GEMINI_MODELS.FLASH_PREVIEW);
+    const modelProvider = detectProviderFromModel(options.model);
+    
+    let model: string;
+    if (provider === "xai") {
+      model = (modelProvider === "xai") ? options.model! : MODELS.TEXT;
+    } else {
+      model = (modelProvider === "gemini") ? options.model! : GEMINI_MODELS.FLASH_PREVIEW;
+    }
     
     for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
       try {
@@ -788,6 +843,10 @@ class LLMGateway {
     startTime: number
   ): Promise<LLMResponse> {
     const { messages: geminiMessages, systemInstruction } = this.convertToGeminiMessages(messages);
+
+    if (geminiMessages.length === 0) {
+      throw new Error("Gemini API error: No valid messages after conversion (contents are required)");
+    }
 
     let response;
     try {
