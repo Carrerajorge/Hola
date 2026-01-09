@@ -238,7 +238,7 @@ export function Sidebar({
     <div
       key={chat.id}
       className={cn(
-        "group flex w-full items-center justify-between px-2 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-accent transition-all duration-300",
+        "group relative flex w-full items-center px-2 pr-10 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-accent transition-all duration-300",
         activeChatId === chat.id && "bg-accent shadow-sm",
         chat.archived && "opacity-70",
         indented && "ml-4"
@@ -299,7 +299,7 @@ export function Sidebar({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex-shrink-0 ml-2 h-7 w-7 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button-chat-menu-${chat.id}`}
               >
