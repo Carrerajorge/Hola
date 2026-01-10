@@ -139,6 +139,12 @@ function shouldUseAgenticPipeline(message: string, context: AgenticContext): boo
     /\b(planifica|plan|diseña|design)\b.*\b(estrategia|strategy|proyecto|project)\b/i,
     /\b(resume|summarize)\b.*\b(y|and)\b.*\b(crea|genera|create)\b/i,
     /\b(busca|search|find)\b.*\b(y|and|then)\b.*\b(crea|genera|create)\b/i,
+    // NEW: Research + artifact generation combinations (Spanish/English)
+    /\b(busca(me)?|encuentra(me)?|dame)\b.*\d+\s*(art[ií]culos?|tesis|papers?|informaci[oó]n).*\b(excel|hoja\s+de\s+c[aá]lculo|spreadsheet|documento|word|pdf|pptx?|presentaci[oó]n)\b/i,
+    /\b(busca(me)?|encuentra(me)?|dame|search|find|get)\b.*\b(y|and)\b.*\b(col[oó]ca(lo)?|pon(lo)?|exporta|genera|crea|guarda)\b.*\b(excel|documento|word|spreadsheet)\b/i,
+    /\b(col[oó]ca(lo)?|pon(lo|erlo)?|exporta(lo)?|guarda(lo)?)\b.*\b(en\s+)?(un\s+)?(excel|hoja\s+de\s+c[aá]lculo|spreadsheet|documento|word)\b/i,
+    /\b(genera|crea|build|create)\b.*\b(excel|spreadsheet|documento|word|pdf)\b.*\b(con|with)\b.*\d+/i,
+    /\b\d+\s*(art[ií]culos?|tesis|papers?|items?|elementos?)\b.*\b(tabla|table|lista|list|excel|spreadsheet)\b/i,
   ];
   
   const SIMPLE_PATTERNS = [
@@ -524,6 +530,15 @@ export async function handleChatRequest(
     
     const isSimpleSearchQueryEarly = (text: string) => {
       const normalized = normalizeText(text);
+      
+      // GUARD: If message contains artifact generation keywords, it's NOT a simple search
+      // These should be routed to the agentic pipeline instead
+      const ARTIFACT_KEYWORDS = /\b(excel|spreadsheet|hoja\s*de\s*c[aá]lculo|documento|word|pdf|pptx?|presentaci[oó]n|slides?|genera|crea|exporta|col[oó]ca(lo)?|pon(lo|erlo)?|guarda(lo)?)\b/i;
+      if (ARTIFACT_KEYWORDS.test(text) || ARTIFACT_KEYWORDS.test(normalized)) {
+        console.log(`[ChatService] Artifact keyword detected in query, skipping simple search path`);
+        return false;
+      }
+      
       // Check patterns against both original and normalized
       return SIMPLE_SEARCH_PATTERNS_EARLY.some(p => p.test(text) || p.test(normalized));
     };
@@ -765,26 +780,20 @@ export async function handleChatRequest(
           `[${i + 1}] ${s.title}\nFuente: ${s.siteName || s.domain}\nURL: ${s.url}\nResumen: ${s.snippet || "Sin resumen disponible"}`
         ).join("\n\n");
         
-        // Comprehensive system prompt for complete news response
-        const systemPrompt = `Eres un asistente de noticias. DEBES presentar EXACTAMENTE 5 noticias basándote en las fuentes proporcionadas.
+        // General-purpose system prompt for search results
+        const systemPrompt = `Eres IliaGPT, un asistente de IA versátil y capaz. Responde a la consulta del usuario basándote en las fuentes proporcionadas.
 
-REGLAS OBLIGATORIAS:
-1. Presenta EXACTAMENTE 5 noticias numeradas (1. 2. 3. 4. 5.)
-2. Cada noticia debe tener:
-   - Título en negrita
-   - Contexto de 2-4 líneas explicando los puntos clave
-   - Al final: [Fuente: N] donde N es el número de la fuente
-3. Si hay menos de 5 fuentes, usa las disponibles y menciona que solo hay N noticias disponibles.
+INSTRUCCIONES:
+1. Presenta la información de forma clara, estructurada y útil
+2. Si la consulta pide noticias o actualizaciones, presenta hasta 5 resultados relevantes numerados
+3. Si la consulta pide información general, sintetiza los datos de las fuentes
+4. Cada punto debe incluir al final: [Fuente: N] donde N es el número de la fuente
+5. Si la información es insuficiente, indícalo claramente
 
 FUENTES DISPONIBLES:
 ${richContext}
 
-FORMATO DE RESPUESTA:
-1. **Título de la noticia** — Contexto explicativo de 2-4 líneas con los puntos clave de la noticia. [Fuente: 1]
-
-2. **Título de la noticia** — Contexto explicativo de 2-4 líneas con los puntos clave de la noticia. [Fuente: 2]
-
-(continuar hasta 5 noticias)`;
+Responde de manera completa y profesional, adaptando el formato a lo que el usuario necesita.`;
 
         const llmMessages = [
           { role: "system" as const, content: systemPrompt },
