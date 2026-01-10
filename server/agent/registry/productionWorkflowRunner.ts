@@ -13,6 +13,7 @@ import {
   withResilience,
   ExponentialBackoff
 } from "./resilience";
+import { llmGateway } from "../../lib/llmGateway";
 
 export type RunStatus = "queued" | "planning" | "running" | "verifying" | "completed" | "failed" | "cancelled" | "timeout";
 
@@ -1082,45 +1083,147 @@ ${420 + streamLength}
     return Buffer.from(pdfContent);
   }
 
-  private async createRealPPTX(title: string, content: string): Promise<Buffer> {
+  private async createRealPPTX(title: string, userQuery: string): Promise<Buffer> {
     const PptxGenJS = (await import("pptxgenjs")).default;
     const pptx = new PptxGenJS();
-    pptx.title = title;
+    
+    // Extract the actual topic from the user query
+    const topicMatch = userQuery.match(/(?:de|sobre|acerca de|about)\s+(.+)/i);
+    const topic = topicMatch ? topicMatch[1].trim() : userQuery.replace(/crea|genera|haz|make|create|una?|ppt|pptx|powerpoint|presentaci[oó]n|presentation|slides|diapositivas/gi, '').trim() || title;
+    
+    // Generate real content using LLM
+    const contentPrompt = `Genera el contenido para una presentación PowerPoint profesional sobre: "${topic}"
+
+INSTRUCCIONES:
+- Crea exactamente 5-7 diapositivas
+- Cada diapositiva debe tener un título claro y 3-5 puntos de contenido
+- El contenido debe ser informativo, profesional y relevante
+- Usa formato estructurado
+
+FORMATO DE RESPUESTA (sigue exactamente este formato):
+## [Título de la Diapositiva 1]
+- Punto 1
+- Punto 2
+- Punto 3
+
+## [Título de la Diapositiva 2]
+- Punto 1
+- Punto 2
+- Punto 3
+
+(continúa con las demás diapositivas)`;
+
+    let slides: { title: string; content: string[] }[] = [];
+    
+    try {
+      console.log(`[PPTX] Generating content for topic: "${topic}"`);
+      const llmResponse = await llmGateway.chat([
+        { role: "system", content: "Eres un experto en crear presentaciones profesionales. Genera contenido estructurado y relevante." },
+        { role: "user", content: contentPrompt }
+      ], { temperature: 0.7, maxTokens: 2000 });
+      
+      // Parse the LLM response into slides
+      const sections = llmResponse.content.split(/(?=^##\s)/m);
+      for (const section of sections) {
+        const lines = section.trim().split("\n");
+        if (lines.length === 0) continue;
+        
+        const slideTitle = lines[0].replace(/^#+\s*/, "").replace(/^\[|\]$/g, "").trim();
+        if (!slideTitle) continue;
+        
+        const bulletPoints: string[] = [];
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (line && line.startsWith("-")) {
+            bulletPoints.push(line.replace(/^-\s*/, "").trim());
+          }
+        }
+        
+        if (bulletPoints.length > 0) {
+          slides.push({ title: slideTitle, content: bulletPoints });
+        }
+      }
+      
+      console.log(`[PPTX] Generated ${slides.length} slides from LLM response`);
+    } catch (error) {
+      console.error("[PPTX] LLM content generation failed, using fallback:", error);
+    }
+    
+    // Fallback if LLM fails or returns empty content
+    if (slides.length === 0) {
+      slides = [
+        { title: "Introducción", content: ["Definición del tema", "Importancia y contexto", "Objetivos de la presentación"] },
+        { title: "Conceptos Principales", content: ["Concepto fundamental 1", "Concepto fundamental 2", "Relación entre conceptos"] },
+        { title: "Desarrollo del Tema", content: ["Aspecto clave 1", "Aspecto clave 2", "Consideraciones importantes"] },
+        { title: "Aplicaciones Prácticas", content: ["Ejemplo de aplicación 1", "Ejemplo de aplicación 2", "Beneficios observados"] },
+        { title: "Conclusiones", content: ["Resumen de puntos clave", "Recomendaciones", "Próximos pasos"] },
+      ];
+    }
+    
+    // Create the presentation
+    pptx.title = topic || title;
     pptx.author = "IliaGPT";
     
-    const slide1 = pptx.addSlide();
-    slide1.addText(title, {
+    // Title slide
+    const titleSlide = pptx.addSlide();
+    titleSlide.addText(topic || title, {
       x: 0.5,
       y: 2,
       w: 9,
       h: 1.5,
-      fontSize: 36,
+      fontSize: 40,
       bold: true,
       color: "363636",
       align: "center",
+      fontFace: "Arial",
+    });
+    titleSlide.addText("Generado por IliaGPT", {
+      x: 0.5,
+      y: 4,
+      w: 9,
+      h: 0.5,
+      fontSize: 14,
+      color: "999999",
+      align: "center",
+      fontFace: "Arial",
     });
     
-    const slide2 = pptx.addSlide();
-    slide2.addText("Content", {
-      x: 0.5,
-      y: 0.5,
-      w: 9,
-      h: 0.8,
-      fontSize: 24,
-      bold: true,
-      color: "363636",
-    });
-    slide2.addText(content.slice(0, 800), {
-      x: 0.5,
-      y: 1.5,
-      w: 9,
-      h: 4,
-      fontSize: 14,
-      color: "666666",
-      valign: "top",
-    });
+    // Content slides
+    for (const slide of slides) {
+      const s = pptx.addSlide();
+      
+      // Slide title
+      s.addText(slide.title, {
+        x: 0.5,
+        y: 0.3,
+        w: 9,
+        h: 0.8,
+        fontSize: 28,
+        bold: true,
+        color: "363636",
+        fontFace: "Arial",
+      });
+      
+      // Bullet points
+      if (slide.content.length > 0) {
+        const bulletPoints = slide.content.map(text => ({
+          text: text,
+          options: { bullet: { type: "bullet" as const }, fontSize: 18, color: "444444" },
+        }));
+        
+        s.addText(bulletPoints, {
+          x: 0.5,
+          y: 1.3,
+          w: 9,
+          h: 4.5,
+          fontFace: "Arial",
+          valign: "top",
+        });
+      }
+    }
     
     const data = await pptx.write({ outputType: "nodebuffer" }) as Buffer;
+    console.log(`[PPTX] Created presentation with ${slides.length + 1} slides (${Math.round(data.length / 1024)}KB)`);
     return data;
   }
 
