@@ -9,6 +9,8 @@ import { CreateRunRequestSchema, RunResponseSchema, StepsArrayResponseSchema } f
 import { validateOrThrow, ValidationError } from "../agent/validation";
 import { checkIdempotency } from "../agent/idempotency";
 import { updateRunWithLock } from "../agent/dbTransactions";
+import { toolRegistry, TOOL_CATEGORIES } from "../agent/registry/toolRegistry";
+import { agentRegistry } from "../agent/registry/agentRegistry";
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   const user = (req as any).user;
@@ -607,6 +609,127 @@ export function createAgentModeRouter() {
     } catch (error: any) {
       console.error("[AgentRoutes] Error retrying run:", error);
       res.status(500).json({ error: "Failed to retry agent run" });
+    }
+  });
+
+  router.get("/skills", async (req: Request, res: Response) => {
+    try {
+      const allTools = toolRegistry.getAll();
+      
+      const categoryMap: Record<string, string> = {
+        "Web": "research",
+        "Generation": "media",
+        "Processing": "data",
+        "Data": "data",
+        "Document": "documents",
+        "Development": "code",
+        "Diagram": "media",
+        "API": "automation",
+        "Productivity": "automation",
+        "Security": "code",
+        "Automation": "automation",
+        "Database": "data",
+        "Monitoring": "automation",
+        "Utility": "automation",
+        "Memory": "data",
+        "Reasoning": "research",
+        "Orchestration": "automation",
+        "Communication": "communication",
+        "AdvancedSystem": "automation",
+      };
+      
+      const popularTools = new Set([
+        "search_web", "generate_image", "doc_create", "spreadsheet_create",
+        "code_generate", "data_analyze", "pdf_manipulate", "slides_create",
+        "browser_navigate", "fetch_url"
+      ]);
+      
+      const skills = allTools
+        .filter(tool => tool.metadata.implementationStatus === "implemented")
+        .map((tool) => {
+          const category = categoryMap[tool.metadata.category] || "automation";
+          return {
+            id: tool.metadata.name.toLowerCase().replace(/_/g, "-"),
+            name: tool.metadata.name.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
+            description: tool.metadata.description,
+            category,
+            primaryAgent: `${tool.metadata.category}Agent`,
+            tools: [tool.metadata.name],
+            requiredInputs: [],
+            outputType: "Resultado",
+            tags: tool.metadata.tags,
+            version: tool.metadata.version,
+            popular: popularTools.has(tool.metadata.name),
+            new: tool.metadata.experimental,
+            deprecated: tool.metadata.deprecated,
+            implementationStatus: tool.metadata.implementationStatus,
+          };
+        });
+
+      res.json({ skills });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error getting skills:", error);
+      res.status(500).json({ error: "Failed to get skills", skills: [] });
+    }
+  });
+
+  router.get("/capabilities", async (req: Request, res: Response) => {
+    try {
+      const toolStats = toolRegistry.getStats();
+      const agentStats = agentRegistry.getStats();
+      const allTools = toolRegistry.getAll();
+      
+      const categoryNameMap: Record<string, string> = {
+        "Web": "Investigación",
+        "Generation": "Multimedia",
+        "Processing": "Procesamiento",
+        "Data": "Datos y Análisis",
+        "Document": "Documentos",
+        "Development": "Desarrollo",
+        "Diagram": "Diagramas",
+        "API": "APIs",
+        "Productivity": "Productividad",
+        "Security": "Seguridad",
+        "Automation": "Automatización",
+        "Database": "Base de Datos",
+        "Monitoring": "Monitoreo",
+        "Utility": "Utilidades",
+        "Memory": "Memoria",
+        "Reasoning": "Razonamiento",
+        "Orchestration": "Orquestación",
+        "Communication": "Comunicación",
+        "AdvancedSystem": "Sistema Avanzado",
+      };
+      
+      const categories = Object.entries(toolStats.byCategory).map(([id, count]) => ({
+        id: id.toLowerCase(),
+        name: categoryNameMap[id] || id,
+        count,
+      }));
+      
+      const implementedCount = allTools.filter(
+        t => t.metadata.implementationStatus === "implemented"
+      ).length;
+
+      const stats = {
+        totalTools: toolStats.totalTools,
+        totalAgents: agentStats.totalAgents,
+        totalSkills: implementedCount,
+        categories,
+        traces: toolStats.traces,
+        byRole: agentStats.byRole,
+      };
+
+      res.json(stats);
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error getting capabilities:", error);
+      res.status(500).json({ 
+        error: "Failed to get capabilities",
+        totalTools: 0,
+        totalAgents: 0,
+        totalSkills: 0,
+        categories: [],
+      });
     }
   });
 
