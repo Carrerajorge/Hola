@@ -40,6 +40,7 @@ export interface ArtifactInfo {
   sizeBytes: number;
   createdAt: string;
   previewUrl?: string;
+  contentUrl?: string;
 }
 
 export interface RunEvent {
@@ -847,13 +848,16 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
       case "slides_create": {
         const filePath = path.join(ARTIFACTS_DIR, `slides_${safeTitle}_${timestamp}.pptx`);
+        const jsonPath = path.join(ARTIFACTS_DIR, `slides_${safeTitle}_${timestamp}.json`);
         console.log(`[WorkflowRunner] slides_create: Generating PPTX for "${run.query.slice(0, 50)}..."`);
         
         const pptxResult = await this.createRealPPTX((input as any).title || "Presentation", (input as any).content || run.query);
         fs.writeFileSync(filePath, pptxResult.buffer);
+        fs.writeFileSync(jsonPath, JSON.stringify(pptxResult.deckState, null, 2));
         
         const stats = fs.statSync(filePath);
         console.log(`[WorkflowRunner] slides_create: Saved PPTX to ${filePath} (${stats.size} bytes, ${pptxResult.slideCount} slides)`);
+        console.log(`[WorkflowRunner] slides_create: Saved deckState JSON to ${jsonPath}`);
         
         const artifact: ArtifactInfo = {
           artifactId: crypto.randomUUID(),
@@ -863,6 +867,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
           sizeBytes: stats.size,
           createdAt: new Date().toISOString(),
           previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
+          contentUrl: `/api/artifacts/${path.basename(jsonPath)}`,
         };
 
         return {
@@ -1093,7 +1098,7 @@ ${420 + streamLength}
     return Buffer.from(pdfContent);
   }
 
-  private async createRealPPTX(title: string, userQuery: string): Promise<{ buffer: Buffer; slideCount: number; totalElements: number }> {
+  private async createRealPPTX(title: string, userQuery: string): Promise<{ buffer: Buffer; slideCount: number; totalElements: number; deckState: any }> {
     const PptxGenJS = (await import("pptxgenjs")).default;
     const pptx = new PptxGenJS();
     
@@ -1254,7 +1259,94 @@ FORMATO DE RESPUESTA (sigue exactamente este formato):
       console.log(`[PPTX] Slide ${idx + 2}: "${slide.title}" with ${slide.content.length} bullet points`);
     });
     
-    return { buffer, slideCount, totalElements };
+    // Build deckState for the PPT editor (compatible with client/src/components/ppt/store/types.ts)
+    const deckState = {
+      title: topic || title,
+      slides: [
+        // Title slide
+        {
+          id: crypto.randomUUID(),
+          size: { w: 1280, h: 720 },
+          background: { color: "#FFFFFF" },
+          elements: [
+            {
+              id: crypto.randomUUID(),
+              type: "text",
+              x: 80,
+              y: 200,
+              w: 1120,
+              h: 150,
+              zIndex: 1,
+              delta: { ops: [{ insert: `${topic || title}\n` }] },
+              defaultTextStyle: {
+                fontFamily: "Inter",
+                fontSize: 44,
+                color: "#111111",
+                bold: true
+              }
+            },
+            {
+              id: crypto.randomUUID(),
+              type: "text",
+              x: 80,
+              y: 380,
+              w: 1120,
+              h: 60,
+              zIndex: 2,
+              delta: { ops: [{ insert: "Generado por IliaGPT\n" }] },
+              defaultTextStyle: {
+                fontFamily: "Inter",
+                fontSize: 18,
+                color: "#666666",
+                bold: false
+              }
+            }
+          ]
+        },
+        // Content slides
+        ...slides.map((slide, idx) => ({
+          id: crypto.randomUUID(),
+          size: { w: 1280, h: 720 },
+          background: { color: "#FFFFFF" },
+          elements: [
+            {
+              id: crypto.randomUUID(),
+              type: "text",
+              x: 80,
+              y: 40,
+              w: 1120,
+              h: 80,
+              zIndex: 1,
+              delta: { ops: [{ insert: `${slide.title}\n` }] },
+              defaultTextStyle: {
+                fontFamily: "Inter",
+                fontSize: 32,
+                color: "#111111",
+                bold: true
+              }
+            },
+            {
+              id: crypto.randomUUID(),
+              type: "text",
+              x: 80,
+              y: 140,
+              w: 1120,
+              h: 500,
+              zIndex: 2,
+              delta: { ops: slide.content.map((text, i) => ({ insert: `• ${text}\n` })) },
+              defaultTextStyle: {
+                fontFamily: "Inter",
+                fontSize: 20,
+                color: "#333333",
+                bold: false
+              }
+            }
+          ]
+        }))
+      ]
+    };
+    
+    return { buffer, slideCount, totalElements, deckState };
   }
 
   private async createRealDOCX(title: string, content: string): Promise<Buffer> {

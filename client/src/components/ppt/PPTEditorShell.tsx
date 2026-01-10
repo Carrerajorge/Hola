@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
 import { useDeckStore, selectDeck, selectCanUndo, selectCanRedo } from './store/deckStore';
 import { CanvasStage } from './canvas/CanvasStage';
 import { SlidesPanel, InstructionsPanel } from './panels';
@@ -24,19 +24,49 @@ import { exportDeckToPptx, downloadBlob } from '@/lib/pptExport';
 import { cn } from '@/lib/utils';
 import { createPptStreamParser } from '@/lib/pptStreaming';
 import { PPT_STREAMING_SYSTEM_PROMPT } from '@/lib/pptPrompts';
+import type { Deck } from './store/types';
 
 interface PPTEditorShellProps {
   onClose: () => void;
   onInsertContent?: (insertFn: (content: string) => void) => void;
   initialShowInstructions?: boolean;
+  initialContent?: string;
 }
 
-export function PPTEditorShell({ onClose, onInsertContent, initialShowInstructions = false }: PPTEditorShellProps) {
+export function PPTEditorShell({ onClose, onInsertContent, initialShowInstructions = false, initialContent }: PPTEditorShellProps) {
   const deck = useDeckStore(selectDeck);
   const activeSlideId = useDeckStore((s) => s.activeSlideId);
   const zoom = useDeckStore((s) => s.zoom);
   const setZoom = useDeckStore((s) => s.setZoom);
   const setTitle = useDeckStore((s) => s.setTitle);
+  const loadDeck = useDeckStore((s) => s.loadDeck);
+  const resetToDefault = useDeckStore((s) => s.resetToDefault);
+
+  const initialContentRef = React.useRef<string | undefined>(undefined);
+  
+  useEffect(() => {
+    // Only load if initialContent actually changed (avoid effect thrashing)
+    if (initialContent === initialContentRef.current) return;
+    initialContentRef.current = initialContent;
+    
+    if (initialContent && initialContent.length > 0) {
+      try {
+        const parsedDeck = JSON.parse(initialContent) as Deck;
+        if (parsedDeck && parsedDeck.slides && Array.isArray(parsedDeck.slides) && parsedDeck.slides.length > 0) {
+          console.log('[PPTEditorShell] Loading deck from initialContent:', parsedDeck.title, 'with', parsedDeck.slides.length, 'slides');
+          loadDeck(parsedDeck);
+        } else {
+          console.warn('[PPTEditorShell] Invalid deck structure, resetting to default');
+          resetToDefault();
+        }
+      } catch (error) {
+        console.error('[PPTEditorShell] Failed to parse initialContent:', error);
+        resetToDefault();
+      }
+    }
+    // Note: We don't call resetToDefault when initialContent is empty because
+    // the user might be creating a new presentation manually
+  }, [initialContent, loadDeck, resetToDefault]);
 
   const [showNotes, setShowNotes] = useState(true);
   const [showInstructions, setShowInstructions] = useState(initialShowInstructions);

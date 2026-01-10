@@ -1937,16 +1937,34 @@ const AssistantMessage = memo(function AssistantMessage({
                 <div className="flex items-center gap-2">
                   {(message.artifact.type === "presentation" || message.artifact.type === "document" || message.artifact.type === "spreadsheet") && onReopenDocument && (
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const docType = message.artifact?.type === "presentation" ? "ppt" 
                           : message.artifact?.type === "document" ? "word" 
                           : "excel";
+                        const docTitle = message.artifact?.type === "presentation" ? "Presentación PowerPoint"
+                          : message.artifact?.type === "document" ? "Documento Word"
+                          : "Hoja de cálculo Excel";
+                        
+                        // Try to fetch content from contentUrl if available (for PPT deck JSON)
+                        let content = "";
+                        const contentUrl = (message.artifact as any)?.contentUrl;
+                        if (contentUrl && docType === "ppt") {
+                          try {
+                            const response = await fetch(contentUrl);
+                            if (response.ok) {
+                              // Get raw text - PPTEditorShell will parse it
+                              content = await response.text();
+                              console.log("[View] Fetched PPT deck content, length:", content.length);
+                            }
+                          } catch (error) {
+                            console.error("[View] Failed to fetch content:", error);
+                          }
+                        }
+                        
                         onReopenDocument({ 
                           type: docType as "word" | "excel" | "ppt", 
-                          title: message.artifact?.type === "presentation" ? "Presentación PowerPoint"
-                            : message.artifact?.type === "document" ? "Documento Word"
-                            : "Hoja de cálculo Excel",
-                          content: "" 
+                          title: docTitle,
+                          content 
                         });
                       }}
                       className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg flex items-center gap-2 transition-colors"

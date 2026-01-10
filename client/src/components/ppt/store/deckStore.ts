@@ -114,6 +114,8 @@ type DeckState = {
   findOrCreateContentElement(slideId: string, yOffset: number): string;
   replaceElementText(elementId: string, newText: string): void;
   clearElementText(elementId: string): void;
+  loadDeck(deck: Deck): void;
+  resetToDefault(): void;
 };
 
 export const selectDeck = (state: DeckState): Deck => state.history.present;
@@ -547,6 +549,24 @@ export const useDeckStore = create<DeckState>((set, get) => {
         }
       }
       set({ history: { ...get().history, present: deck } });
+    },
+
+    loadDeck(deck) {
+      const clonedDeck = deepCloneDeck(deck);
+      set({
+        history: createHistory(clonedDeck),
+        activeSlideId: clonedDeck.slides[0]?.id || '',
+        selection: null
+      });
+    },
+
+    resetToDefault() {
+      const newDeck = defaultDeck();
+      set({
+        history: createHistory(newDeck),
+        activeSlideId: newDeck.slides[0].id,
+        selection: null
+      });
     }
   };
 });

@@ -63,7 +63,7 @@ export function withLazyLoading<P extends object>(
 
 export const LazyPPTEditorShell = React.lazy(() => import('@/components/ppt/PPTEditorShell'));
 
-export function PPTEditorShellLazy(props: { onClose: () => void; onInsertContent?: (insertFn: (content: string) => void) => void; initialShowInstructions?: boolean }) {
+export function PPTEditorShellLazy(props: { onClose: () => void; onInsertContent?: (insertFn: (content: string) => void) => void; initialShowInstructions?: boolean; initialContent?: string }) {
   return (
     <LazyLoadErrorBoundary 
       componentName="Editor de Presentaciones"

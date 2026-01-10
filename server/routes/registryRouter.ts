@@ -752,6 +752,49 @@ export function createRegistryRouter(): Router {
     }
   });
 
+  router.get("/artifacts/:filename", async (req: Request, res: Response) => {
+    try {
+      const { filename } = req.params;
+      
+      // Security: Only allow JSON files (deckState content files) via this endpoint
+      // Other files must use /download or /preview which have their own access controls
+      const ext = path.extname(filename).toLowerCase();
+      if (ext !== ".json") {
+        return res.status(403).json({
+          success: false,
+          error: "Only JSON content files are accessible via this endpoint",
+        });
+      }
+      
+      const artifactsDir = path.join(process.cwd(), "artifacts");
+      const filePath = path.join(artifactsDir, filename);
+      
+      // Prevent path traversal attacks
+      const realPath = path.resolve(filePath);
+      if (!realPath.startsWith(path.resolve(artifactsDir))) {
+        return res.status(403).json({
+          success: false,
+          error: "Invalid file path",
+        });
+      }
+      
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({
+          success: false,
+          error: "Artifact not found",
+        });
+      }
+      
+      res.type("application/json");
+      res.sendFile(filePath);
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
   router.post("/registry/classify-intent", async (req: Request, res: Response) => {
     try {
       const { query } = req.body;

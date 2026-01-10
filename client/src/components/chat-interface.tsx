@@ -4909,6 +4909,7 @@ IMPORTANTE:
                   onClose={closeDocEditor}
                   onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
                   initialShowInstructions={activeDocEditor?.showInstructions}
+                  initialContent={activeDocEditor?.content}
                 />
               ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
                 <SpreadsheetEditor

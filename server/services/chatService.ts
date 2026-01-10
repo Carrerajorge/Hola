@@ -859,6 +859,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
               sizeBytes: artifact.sizeBytes,
               downloadUrl: `/api/artifacts/${filename}/download`,
               previewUrl: artifact.previewUrl?.replace('/api/registry/', '/api/') || `/api/artifacts/${filename}/preview`,
+              contentUrl: artifact.contentUrl || null,
             };
           }
           
