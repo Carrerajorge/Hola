@@ -3920,9 +3920,14 @@ IMPORTANTE:
           const effectiveConversationId = chatId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
           
           console.log("[handleSubmit] Sending cleaned attachments:", cleanedAttachments.map((a: any) => ({ name: a.name, storagePath: a.storagePath, mimeType: a.mimeType, type: a.type })));
+          console.log("[handleSubmit] About to fetch /api/analyze with conversationId:", effectiveConversationId);
           
           let analyzeResponse: Response;
           try {
+            // Create a dedicated AbortController to avoid cancellation from navigation
+            const analyzeController = new AbortController();
+            
+            console.log("[handleSubmit] Starting fetch to /api/analyze...");
             analyzeResponse = await fetch("/api/analyze", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -3931,10 +3936,17 @@ IMPORTANTE:
                 attachments: cleanedAttachments,
                 conversationId: effectiveConversationId
               }),
-              signal: abortControllerRef.current?.signal
+              signal: analyzeController.signal
             });
+            console.log("[handleSubmit] Fetch completed with status:", analyzeResponse.status);
           } catch (fetchError: any) {
-            console.error("[handleSubmit] Fetch error:", fetchError?.message || fetchError);
+            console.error("[handleSubmit] Fetch error:", fetchError?.name, fetchError?.message || fetchError);
+            if (fetchError?.name === "AbortError") {
+              console.log("[handleSubmit] Fetch was aborted");
+              setAiState("idle");
+              setAiProcessSteps([]);
+              return;
+            }
             throw new Error(`Error de conexión: ${fetchError?.message || 'No se pudo conectar al servidor'}`);
           }
           
