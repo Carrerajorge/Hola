@@ -104,7 +104,14 @@ export class EventLogger {
 
       await db.insert(agentModeEvents).values(values);
       console.log(`[EventLogger] Flushed ${values.length} events`);
-    } catch (error) {
+    } catch (error: any) {
+      // Check if this is a foreign key constraint error (run doesn't exist in agent_mode_runs)
+      // This can happen when the pipeline runs without persisting to database (e.g., anonymous users)
+      // In this case, don't re-buffer as it will keep failing
+      if (error?.code === '23503' && error?.constraint?.includes('agent_mode_runs')) {
+        console.warn(`[EventLogger] Discarding ${eventsToFlush.length} events - run not persisted to database (local-only mode)`);
+        return;
+      }
       console.error("[EventLogger] Flush failed, re-buffering events:", error);
       this.buffer.unshift(...eventsToFlush);
     }
