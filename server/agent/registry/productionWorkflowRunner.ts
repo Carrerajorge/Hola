@@ -1625,7 +1625,9 @@ FORMATO DE RESPUESTA (sigue exactamente este formato):
     if (run.status === "completed") {
       if (run.artifacts.length > 0) {
         const artifact = run.artifacts[0];
-        const downloadUrl = `/api/artifacts/${artifact.artifactId}/download`;
+        // Extract filename from artifact.path for download URL
+        const filename = artifact.path ? artifact.path.split('/').pop() : artifact.artifactId;
+        const downloadUrl = `/api/artifacts/${filename}/download`;
         response = `He completado la tarea. ${this.formatArtifactDescription(run.intent, artifact)}
 
 Descargar: ${downloadUrl}`;

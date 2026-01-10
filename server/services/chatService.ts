@@ -850,13 +850,15 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           let artifactInfo = null;
           if (run.artifacts.length > 0) {
             const artifact = run.artifacts[0];
+            // Extract filename from artifact.path for download URL
+            const filename = artifact.path ? artifact.path.split('/').pop() : artifact.artifactId;
             artifactInfo = {
               artifactId: artifact.artifactId,
               type: artifact.type,
               mimeType: artifact.mimeType,
               sizeBytes: artifact.sizeBytes,
-              downloadUrl: `/api/artifacts/${artifact.artifactId}/download`,
-              previewUrl: artifact.previewUrl?.replace('/api/registry/', '/api/') || `/api/artifacts/${artifact.artifactId}/preview`,
+              downloadUrl: `/api/artifacts/${filename}/download`,
+              previewUrl: artifact.previewUrl?.replace('/api/registry/', '/api/') || `/api/artifacts/${filename}/preview`,
             };
           }
           
