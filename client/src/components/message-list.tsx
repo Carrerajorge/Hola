@@ -1934,15 +1934,38 @@ const AssistantMessage = memo(function AssistantMessage({
                     {message.artifact.sizeBytes ? `${Math.round(message.artifact.sizeBytes / 1024)}KB` : "Listo para descargar"}
                   </p>
                 </div>
-                <a
-                  href={message.artifact.downloadUrl}
-                  download
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors"
-                  data-testid={`button-download-artifact-${message.id}`}
-                >
-                  <Download className="h-4 w-4" />
-                  Descargar
-                </a>
+                <div className="flex items-center gap-2">
+                  {(message.artifact.type === "presentation" || message.artifact.type === "document" || message.artifact.type === "spreadsheet") && onReopenDocument && (
+                    <button
+                      onClick={() => {
+                        const docType = message.artifact?.type === "presentation" ? "ppt" 
+                          : message.artifact?.type === "document" ? "word" 
+                          : "excel";
+                        onReopenDocument({ 
+                          type: docType as "word" | "excel" | "ppt", 
+                          title: message.artifact?.type === "presentation" ? "Presentación PowerPoint"
+                            : message.artifact?.type === "document" ? "Documento Word"
+                            : "Hoja de cálculo Excel",
+                          content: "" 
+                        });
+                      }}
+                      className="px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg flex items-center gap-2 transition-colors"
+                      data-testid={`button-view-artifact-${message.id}`}
+                    >
+                      <Eye className="h-4 w-4" />
+                      Ver
+                    </button>
+                  )}
+                  <a
+                    href={message.artifact.downloadUrl}
+                    download
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-2 transition-colors"
+                    data-testid={`button-download-artifact-${message.id}`}
+                  >
+                    <Download className="h-4 w-4" />
+                    Descargar
+                  </a>
+                </div>
               </div>
             </div>
           )}
