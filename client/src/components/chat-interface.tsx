@@ -3900,13 +3900,20 @@ IMPORTANTE:
         if (hasDocumentAttachments) {
           console.log("[handleSubmit] DATA_MODE (Legacy): Using /analyze endpoint for document analysis");
           
-          // Clean attachments for server - remove large spreadsheetData to prevent payload issues
+          // Clean attachments for server - remove large spreadsheetData and normalize type
           const cleanedAttachments = attachments.map((att: any) => {
             const { spreadsheetData, previewData, ...rest } = att;
-            return rest;
+            // Normalize type: 'word', 'excel', 'pdf', 'ppt' -> 'document'
+            const normalizedType = ['word', 'excel', 'pdf', 'ppt', 'text', 'csv'].includes(rest.type?.toLowerCase?.()) 
+              ? 'document' 
+              : (rest.type === 'image' ? 'image' : 'document');
+            return { ...rest, type: normalizedType };
           });
           
-          console.log("[handleSubmit] Sending cleaned attachments:", cleanedAttachments.map((a: any) => ({ name: a.name, storagePath: a.storagePath, mimeType: a.mimeType })));
+          // Ensure conversationId is a string (generate one if null)
+          const effectiveConversationId = chatId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+          
+          console.log("[handleSubmit] Sending cleaned attachments:", cleanedAttachments.map((a: any) => ({ name: a.name, storagePath: a.storagePath, mimeType: a.mimeType, type: a.type })));
           
           let analyzeResponse: Response;
           try {
@@ -3916,7 +3923,7 @@ IMPORTANTE:
               body: JSON.stringify({
                 messages: finalChatHistory,
                 attachments: cleanedAttachments,
-                conversationId: chatId
+                conversationId: effectiveConversationId
               }),
               signal: abortControllerRef.current?.signal
             });
@@ -3928,7 +3935,9 @@ IMPORTANTE:
           if (!analyzeResponse.ok) {
             const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
             console.error("[handleSubmit] Analyze response error:", analyzeResponse.status, errorData);
-            throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
+            // Extract error message properly from nested error object
+            const errorMessage = errorData?.error?.message || errorData?.message || errorData?.error || `Analysis failed: ${analyzeResponse.status}`;
+            throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
           }
           
           const analyzeResult = await analyzeResponse.json();
