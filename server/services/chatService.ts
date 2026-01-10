@@ -475,9 +475,10 @@ export async function handleChatRequest(
     
     // INTENT GUARD SYSTEM: Detect intent and enforce response contracts
     // This prevents context contamination from previous sessions/templates
-    const hasActiveDocuments = persistentDocumentContext.length > 0 || attachmentContext.length > 0;
+    // CRITICAL: Include hasRawAttachments to ensure we catch attachments even if extraction failed
+    const hasActiveDocuments = persistentDocumentContext.length > 0 || (attachmentContext && attachmentContext.length > 0) || hasRawAttachments;
     
-    console.log(`[IntentGuard] PRE-CHECK: persistentDocLen=${persistentDocumentContext.length}, attachmentLen=${attachmentContext.length}, hasActiveDocuments=${hasActiveDocuments}`);
+    console.log(`[IntentGuard] PRE-CHECK: persistentDocLen=${persistentDocumentContext.length}, attachmentLen=${attachmentContext?.length || 0}, hasRawAttachments=${hasRawAttachments}, hasActiveDocuments=${hasActiveDocuments}`);
     
     // AGGRESSIVE DOCUMENT PRIORITY: If there's any document content, handle it FIRST before any search logic
     if (hasActiveDocuments && lastUserMessage) {
@@ -886,6 +887,7 @@ FORMATO DE RESPUESTA:
   };
 
   // Simple search patterns that should ALWAYS trigger web search regardless of feature flag
+  // IMPORTANT: These are BLOCKED when user has attachments - document takes priority
   const SIMPLE_SEARCH_PATTERNS = [
     /dame\s+\d*\s*noticias/i,
     /busca(me)?\s+(noticias|información|info|artículos?)/i,
@@ -905,11 +907,39 @@ FORMATO DE RESPUESTA:
     /investiga\s+(sobre|acerca)/i,
     /información\s+(sobre|de|del|acerca)/i,
   ];
+  
+  // Patterns that EXPLICITLY request internet search (even with attachments)
+  const EXPLICIT_WEB_PATTERNS = [
+    /busca\s+(en\s+)?(internet|la\s+web|online)/i,
+    /consulta\s+(fuentes?\s+)?(externas?|internet|web)/i,
+    /compara\s+(con\s+)?(información\s+)?(pública|de\s+internet|externa)/i,
+    /search\s+(the\s+)?(web|internet|online)/i,
+    /look\s+up\s+(on\s+)?(the\s+)?(web|internet)/i,
+    /find\s+(on\s+)?(the\s+)?(web|internet)/i,
+  ];
+  
   const isSimpleSearchQuery = (text: string) => SIMPLE_SEARCH_PATTERNS.some(p => p.test(text));
-  const forceWebSearch = lastUserMessage && isSimpleSearchQuery(lastUserMessage.content);
+  const isExplicitWebRequest = (text: string) => EXPLICIT_WEB_PATTERNS.some(p => p.test(text));
+  
+  // CRITICAL: Block web search when attachments are present UNLESS user explicitly requests internet
+  const userExplicitlyRequestsWeb = lastUserMessage && isExplicitWebRequest(lastUserMessage.content);
+  const forceWebSearch = lastUserMessage && isSimpleSearchQuery(lastUserMessage.content) && !hasAttachments;
+  
+  // Observability logging for routing decisions
+  console.log(`[ChatService:Routing] hasAttachments=${hasAttachments}, forceWebSearch=${forceWebSearch}, userExplicitlyRequestsWeb=${userExplicitlyRequestsWeb}`);
 
+  // CRITICAL: Web search is BLOCKED when attachments are present UNLESS user explicitly requests it
+  // This prevents the system from ignoring uploaded documents and searching the web instead
+  const allowWebSearch = !hasAttachments || userExplicitlyRequestsWeb;
+  
+  if (hasAttachments && !userExplicitlyRequestsWeb) {
+    console.log(`[ChatService:WebSearch] BLOCKED - Document mode active. hasAttachments=${hasAttachments}, userExplicitlyRequestsWeb=${userExplicitlyRequestsWeb}`);
+  }
+  
   // Web search: either forced by simple query OR gated by webSearchAuto feature flag
-  if (lastUserMessage && needsAcademicSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
+  // GATED: Only allowed when no attachments OR user explicitly requests web
+  if (allowWebSearch && lastUserMessage && needsAcademicSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
+    console.log(`[ChatService:WebSearch] Academic search triggered`);
     try {
       const scholarResults = await searchScholar(lastUserMessage.content, 5);
       
@@ -927,7 +957,8 @@ FORMATO DE RESPUESTA:
     } catch (error) {
       console.error("Academic search error:", error);
     }
-  } else if (lastUserMessage && needsWebSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
+  } else if (allowWebSearch && lastUserMessage && needsWebSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
+    console.log(`[ChatService:WebSearch] Web search triggered`);
     try {
       // Request more sources (15) for richer citations
       const searchResults = await searchWeb(lastUserMessage.content, 15);
