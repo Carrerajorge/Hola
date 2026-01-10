@@ -49,3 +49,4 @@ integrations = ["javascript_xai:1.0.0", "javascript_object_storage:2.0.0", "java
 ROUTER_CONFIDENCE_THRESHOLD = "0.65"
 MAX_AGENT_STEPS = "8"
 ENABLE_DYNAMIC_ESCALATION = "true"
+AGENTIC_PIPELINE_ENABLED = "true"
