@@ -956,8 +956,15 @@ export class ProductionWorkflowRunner extends EventEmitter {
         try {
           const { searchWeb, searchScholar, needsAcademicSearch } = await import("../../services/webSearch");
           const query = (input as any).query;
-          const maxResults = (input as any).maxResults || 10;
+          
+          // Extract number from user query dynamically (e.g., "busca 10 artículos", "find 15 articles")
+          const numberMatch = query.match(/\b(\d+)\s*(artículos?|articles?|resultados?|results?|fuentes?|sources?|referencias?|references?|noticias?|news?|links?|páginas?|pages?)/i);
+          const requestedCount = numberMatch ? parseInt(numberMatch[1], 10) : null;
+          const maxResults = requestedCount || (input as any).maxResults || 20;
+          
           const isAcademic = (input as any).academic || needsAcademicSearch(query);
+          
+          console.log(`[WebSearch] User requested ${requestedCount || 'default'} results, using maxResults=${maxResults}`);
           
           console.log(`[WebSearch] Searching for "${query}" with maxResults=${maxResults}, academic=${isAcademic}`);
           

@@ -33,8 +33,8 @@ export const TIMEOUTS = {
 } as const;
 
 export const LIMITS = {
-  MAX_SEARCH_RESULTS: 15,  // Enough results to get 10 good ones
-  MAX_CONTENT_FETCH: 10,  // Fetch 10 pages for metadata
+  MAX_SEARCH_RESULTS: 50,  // No fixed limit - user decides how many
+  MAX_CONTENT_FETCH: 50,  // Fetch as many pages as user requests
   EMBEDDING_BATCH_SIZE: 20,
   MAX_EMBEDDING_INPUT: 8000,
   RAG_SIMILAR_CHUNKS: 3,
