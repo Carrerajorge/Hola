@@ -649,11 +649,11 @@ export async function handleChatRequest(
       }
     }
     
-    // SPECIAL HANDLER: Search + Create Document (buscar artículos + crear PPT/documento)
-    // This is a common complex request that we handle directly for reliability
+    // DETERMINISTIC PIPELINE: Search + Analyze + Create Document
+    // 8-stage sequential pipeline: search → download → analyze → extract_data → generate_charts → generate_images → validate → assemble
     const SEARCH_AND_CREATE_PATTERN = /busca\s+(\d+)\s*(artículos?|fuentes?|referencias?).*(crea|genera|haz|hacer).*(ppt|powerpoint|presentaci[oó]n|word|documento|excel)/i;
     if (lastUserMessage && SEARCH_AND_CREATE_PATTERN.test(lastUserMessage.content) && !documentMode && !figmaMode) {
-      console.log(`[ChatService:SearchAndCreate] Detected search + create pattern, executing directly`);
+      console.log(`[ChatService:DeterministicPipeline] Detected search + create pattern`);
       
       try {
         const match = lastUserMessage.content.match(SEARCH_AND_CREATE_PATTERN);
@@ -661,18 +661,93 @@ export async function handleChatRequest(
         const isPPT = /ppt|powerpoint|presentaci[oó]n/i.test(lastUserMessage.content);
         const hasAPA = /apa|bibliograf[ií]a|referencias?|citas?/i.test(lastUserMessage.content);
         
-        // Extract the topic from the message
-        const topicMatch = lastUserMessage.content.match(/sobre\s+(?:la\s+|el\s+|los\s+|las\s+)?(.+?)(?:\s+y\s+crea|\s+crea|\s+genera|\s+haz|$)/i);
-        const topic = topicMatch ? topicMatch[1].trim() : lastUserMessage.content.replace(SEARCH_AND_CREATE_PATTERN, '').trim();
+        console.log(`[ChatService:DeterministicPipeline] Count: ${requestedCount}, PPT: ${isPPT}, APA: ${hasAPA}`);
         
-        console.log(`[ChatService:SearchAndCreate] Topic: "${topic}", Count: ${requestedCount}, PPT: ${isPPT}, APA: ${hasAPA}`);
+        if (isPPT) {
+          // Use the new 8-stage deterministic pipeline
+          const { DeterministicPipeline } = await import("../agent/pipelines/deterministicPipeline");
+          const pipeline = new DeterministicPipeline();
+          
+          // Subscribe to stage events for logging
+          pipeline.on("stage_start", ({ stage, index }) => {
+            console.log(`[DeterministicPipeline] Stage ${index + 1}/8: ${stage} started`);
+          });
+          pipeline.on("stage_complete", ({ stage, index, duration, inputCount, outputCount }) => {
+            console.log(`[DeterministicPipeline] Stage ${index + 1}/8: ${stage} completed in ${duration}ms (${inputCount} → ${outputCount})`);
+          });
+          
+          const result = await pipeline.execute(lastUserMessage.content, {
+            maxSources: requestedCount,
+            includeAcademic: hasAPA,
+            includeWeb: true,
+            generateImages: true,
+            imageCount: 3,
+            apaCitation: hasAPA,
+            slideTemplate: hasAPA ? "academic" : "standard",
+          });
+          
+          if (result.success && result.artifact) {
+            // Save artifact to disk
+            const fs = await import("fs");
+            const path = await import("path");
+            const artifactsDir = path.join(process.cwd(), "artifacts");
+            if (!fs.existsSync(artifactsDir)) {
+              fs.mkdirSync(artifactsDir, { recursive: true });
+            }
+            
+            const filename = `presentation_${Date.now()}.pptx`;
+            const filepath = path.join(artifactsDir, filename);
+            fs.writeFileSync(filepath, result.artifact.buffer);
+            
+            const state = result.state;
+            const sources = state.sources.slice(0, requestedCount);
+            
+            // Build traceability summary
+            const stagesSummary = result.traceability.stages
+              .map(s => `${s.stage}: ${s.duration}ms`)
+              .join(" → ");
+            
+            return {
+              content: `He creado una presentación profesional sobre **${state.topic}** usando el pipeline determinista de 8 etapas.
+
+**📊 Resumen del proceso:**
+- Fuentes encontradas: ${sources.length}
+- Tablas de datos: ${state.dataTables.length}
+- Gráficas generadas: ${state.charts.length}
+- Imágenes generadas: ${state.images.length}
+- Diapositivas: ${state.slides.length}
+
+**📚 Fuentes consultadas:**
+${sources.slice(0, 10).map((s, i) => `${i + 1}. ${s.title} (${s.year})`).join("\n")}
+
+**⏱️ Tiempo total:** ${(result.traceability.totalDurationMs / 1000).toFixed(1)}s
+**✓ Validación:** ${state.validation?.passed ? "Aprobada" : "Con observaciones"} (${((state.validation?.score || 0) * 100).toFixed(0)}%)${hasAPA ? `\n\n**📖 Bibliografía APA 7ma ed.:** Incluida en la última diapositiva` : ""}`,
+              role: "assistant",
+              artifact: {
+                type: "presentation",
+                mimeType: result.artifact.mimeType,
+                downloadUrl: `/api/artifacts/${filename}`,
+                contentUrl: `/api/artifacts/${filename}/content`,
+                sizeBytes: result.artifact.sizeBytes,
+              },
+              pipelineTraceability: {
+                stages: stagesSummary,
+                reproducible: result.traceability.reproducible,
+                totalDurationMs: result.traceability.totalDurationMs,
+              }
+            };
+          } else {
+            console.warn(`[ChatService:DeterministicPipeline] Pipeline failed:`, result.state.error);
+          }
+        }
         
-        // Step 1: Search for articles
+        // Fallback for non-PPT or pipeline failure: simple search + format
         const { searchScholar, searchWeb, needsAcademicSearch } = await import("./webSearch");
-        const isAcademic = hasAPA || needsAcademicSearch(topic);
+        const topicMatch = lastUserMessage.content.match(/sobre\s+(?:la\s+|el\s+|los\s+|las\s+)?(.+?)(?:\s+y\s+crea|\s+crea|\s+genera|\s+haz|$)/i);
+        const topic = topicMatch ? topicMatch[1].trim() : "el tema solicitado";
         
         let searchResults: any[] = [];
-        if (isAcademic) {
+        if (hasAPA || needsAcademicSearch(topic)) {
           const scholarResults = await searchScholar(topic, requestedCount);
           searchResults = scholarResults.map(r => ({
             title: r.title,
@@ -680,77 +755,20 @@ export async function handleChatRequest(
             snippet: r.snippet,
             authors: r.authors || "Autor desconocido",
             year: r.year || new Date().getFullYear().toString(),
-            citation: r.citation
           }));
         }
         
-        // Also get web results if not enough academic results
         if (searchResults.length < requestedCount) {
           const webResponse = await searchWeb(topic, requestedCount - searchResults.length);
-          const webResults = webResponse.results.map(r => ({
+          searchResults = [...searchResults, ...webResponse.results.map(r => ({
             title: r.title,
             url: r.url,
             snippet: r.snippet,
-            authors: r.authors || r.siteName || "Fuente web",
+            authors: r.siteName || "Fuente web",
             year: r.publishedDate?.slice(0, 4) || new Date().getFullYear().toString(),
-            citation: `${r.siteName || "Web"}. (${r.publishedDate?.slice(0, 4) || new Date().getFullYear()}). ${r.title}. Recuperado de ${r.url}`
-          }));
-          searchResults = [...searchResults, ...webResults];
+          }))];
         }
         
-        console.log(`[ChatService:SearchAndCreate] Found ${searchResults.length} sources`);
-        
-        // Step 2: Create presentation with search results
-        if (isPPT) {
-          // Use productionWorkflowRunner for PPT generation
-          const { ProductionWorkflowRunner } = await import("../agent/registry/productionWorkflowRunner");
-          const runner = new ProductionWorkflowRunner();
-          
-          // Build content with bibliography
-          const bibliography = searchResults.slice(0, requestedCount).map((r, i) => {
-            if (hasAPA) {
-              // Format in APA 7th edition
-              return `${r.authors} (${r.year}). ${r.title}. Recuperado de ${r.url}`;
-            }
-            return `[${i + 1}] ${r.title}. ${r.authors} (${r.year}). ${r.url}`;
-          }).join("\n");
-          
-          const enrichedQuery = `Crea una presentación sobre ${topic}. 
-          
-CONTENIDO BASADO EN ESTAS FUENTES:
-${searchResults.slice(0, Math.min(5, requestedCount)).map((r, i) => `${i + 1}. ${r.title}: ${r.snippet}`).join("\n")}
-
-BIBLIOGRAFÍA (APA 7ma edición):
-${bibliography}`;
-          
-          const result = await runner.runWorkflow({
-            runId: `ppt_${Date.now()}`,
-            query: enrichedQuery,
-            plan: {
-              steps: [{ index: 0, toolName: "slides_create", description: "Crear presentación con bibliografía" }]
-            }
-          });
-          
-          if (result.artifacts && result.artifacts.length > 0) {
-            const artifact = result.artifacts[0];
-            return {
-              content: `He creado una presentación sobre **${topic}** basada en ${searchResults.length} fuentes académicas${hasAPA ? " con bibliografía en formato APA 7ma edición" : ""}.
-
-**Fuentes consultadas:**
-${searchResults.slice(0, requestedCount).map((r, i) => `${i + 1}. ${r.title} (${r.year})`).join("\n")}`,
-              role: "assistant",
-              artifact: {
-                type: "presentation",
-                mimeType: artifact.mimeType,
-                downloadUrl: `/api/artifacts/${artifact.path?.split("/").pop()}`,
-                contentUrl: artifact.contentUrl,
-                sizeBytes: artifact.sizeBytes,
-              }
-            };
-          }
-        }
-        
-        // Fallback: Just return the search results formatted
         const formattedResults = searchResults.slice(0, requestedCount).map((r, i) => 
           `**${i + 1}. ${r.title}**\n   ${r.snippet?.slice(0, 200) || "Sin descripción"}...\n   📚 ${r.authors} (${r.year})\n   🔗 ${r.url}`
         ).join("\n\n");
@@ -764,8 +782,8 @@ ${searchResults.slice(0, requestedCount).map((r, i) => `${i + 1}. ${r.title} (${
           role: "assistant"
         };
         
-      } catch (searchCreateError: any) {
-        console.error(`[ChatService:SearchAndCreate] Error:`, searchCreateError);
+      } catch (pipelineError: any) {
+        console.error(`[ChatService:DeterministicPipeline] Error:`, pipelineError);
         // Fall through to normal flow
       }
     }
