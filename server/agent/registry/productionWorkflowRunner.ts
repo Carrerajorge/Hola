@@ -1098,46 +1098,62 @@ ${420 + streamLength}
     return Buffer.from(pdfContent);
   }
 
-  private async createRealPPTX(title: string, userQuery: string): Promise<{ buffer: Buffer; slideCount: number; totalElements: number; deckState: any }> {
+  private async createRealPPTX(title: string, userQuery: string): Promise<{ buffer: Buffer; slideCount: number; totalElements: number; deckState: any; slideImages: Map<number, string> }> {
     const PptxGenJS = (await import("pptxgenjs")).default;
+    const { generateImage } = await import("../../../services/imageGeneration");
     const pptx = new PptxGenJS();
+    
+    // Gamma.app inspired color themes
+    const GAMMA_THEMES = [
+      { primary: "#6366F1", secondary: "#8B5CF6", accent: "#EC4899", bg: "#0F172A", text: "#F8FAFC" }, // Indigo Purple
+      { primary: "#3B82F6", secondary: "#06B6D4", accent: "#10B981", bg: "#1E293B", text: "#F1F5F9" }, // Blue Cyan
+      { primary: "#F59E0B", secondary: "#EF4444", accent: "#EC4899", bg: "#18181B", text: "#FAFAFA" }, // Warm Orange
+      { primary: "#10B981", secondary: "#14B8A6", accent: "#3B82F6", bg: "#0D1117", text: "#E5E7EB" }, // Green Teal
+      { primary: "#8B5CF6", secondary: "#D946EF", accent: "#F43F5E", bg: "#1A1A2E", text: "#E5E7EB" }, // Purple Magenta
+    ];
+    
+    const theme = GAMMA_THEMES[Math.floor(Math.random() * GAMMA_THEMES.length)];
     
     // Extract the actual topic from the user query
     const topicMatch = userQuery.match(/(?:de|sobre|acerca de|about)\s+(.+)/i);
     const topic = topicMatch ? topicMatch[1].trim() : userQuery.replace(/crea|genera|haz|make|create|una?|ppt|pptx|powerpoint|presentaci[oó]n|presentation|slides|diapositivas/gi, '').trim() || title;
     
-    // Generate real content using LLM
-    const contentPrompt = `Genera el contenido para una presentación PowerPoint profesional sobre: "${topic}"
+    // Generate real content using LLM with Gamma.app style prompting
+    const contentPrompt = `Genera el contenido para una presentación profesional estilo Gamma.app sobre: "${topic}"
 
 INSTRUCCIONES:
-- Crea exactamente 5-7 diapositivas
-- Cada diapositiva debe tener un título claro y 3-5 puntos de contenido
-- El contenido debe ser informativo, profesional y relevante
-- Usa formato estructurado
+- Crea exactamente 5-7 diapositivas con diseño moderno y minimalista
+- Cada diapositiva debe tener un título impactante y 3-4 puntos concisos
+- El contenido debe ser informativo, visualmente atractivo y fácil de leer
+- Usa lenguaje directo y profesional
+- Para cada slide, incluye también una breve descripción de imagen que acompañe el contenido (máx 10 palabras)
 
 FORMATO DE RESPUESTA (sigue exactamente este formato):
 ## [Título de la Diapositiva 1]
+IMG: [descripción breve de imagen relevante]
 - Punto 1
 - Punto 2
 - Punto 3
 
 ## [Título de la Diapositiva 2]
+IMG: [descripción breve de imagen relevante]
 - Punto 1
 - Punto 2
 - Punto 3
 
 (continúa con las demás diapositivas)`;
 
-    let slides: { title: string; content: string[] }[] = [];
+    let slides: { title: string; content: string[]; imagePrompt: string }[] = [];
+    const slideImages = new Map<number, string>(); // Store base64 images by slide index
     
     try {
-      console.log(`[PPTX] Generating content for topic: "${topic}"`);
+      console.log(`[PPTX] Generating content for topic: "${topic}" with Gamma.app style`);
       const llmResponse = await llmGateway.chat([
-        { role: "system", content: "Eres un experto en crear presentaciones profesionales. Genera contenido estructurado y relevante." },
+        { role: "system", content: "Eres un experto en crear presentaciones profesionales estilo Gamma.app. Genera contenido estructurado, moderno y visualmente atractivo." },
         { role: "user", content: contentPrompt }
-      ], { temperature: 0.7, maxTokens: 2000 });
+      ], { temperature: 0.7, maxTokens: 2500 });
       
-      // Parse the LLM response into slides
+      // Parse the LLM response into slides with image prompts
       const sections = llmResponse.content.split(/(?=^##\s)/m);
       for (const section of sections) {
         const lines = section.trim().split("\n");
@@ -1146,20 +1162,28 @@ FORMATO DE RESPUESTA (sigue exactamente este formato):
         const slideTitle = lines[0].replace(/^#+\s*/, "").replace(/^\[|\]$/g, "").trim();
         if (!slideTitle) continue;
         
+        let imagePrompt = "";
         const bulletPoints: string[] = [];
+        
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i].trim();
-          if (line && line.startsWith("-")) {
+          if (line.startsWith("IMG:")) {
+            imagePrompt = line.replace(/^IMG:\s*/, "").replace(/^\[|\]$/g, "").trim();
+          } else if (line && line.startsWith("-")) {
             bulletPoints.push(line.replace(/^-\s*/, "").trim());
           }
         }
         
         if (bulletPoints.length > 0) {
-          slides.push({ title: slideTitle, content: bulletPoints });
+          slides.push({ 
+            title: slideTitle, 
+            content: bulletPoints,
+            imagePrompt: imagePrompt || `${slideTitle} professional illustration`
+          });
         }
       }
       
-      console.log(`[PPTX] Generated ${slides.length} slides from LLM response`);
+      console.log(`[PPTX] Generated ${slides.length} slides with image prompts from LLM response`);
     } catch (error) {
       console.error("[PPTX] LLM content generation failed, using fallback:", error);
     }
@@ -1167,74 +1191,164 @@ FORMATO DE RESPUESTA (sigue exactamente este formato):
     // Fallback if LLM fails or returns empty content
     if (slides.length === 0) {
       slides = [
-        { title: "Introducción", content: ["Definición del tema", "Importancia y contexto", "Objetivos de la presentación"] },
-        { title: "Conceptos Principales", content: ["Concepto fundamental 1", "Concepto fundamental 2", "Relación entre conceptos"] },
-        { title: "Desarrollo del Tema", content: ["Aspecto clave 1", "Aspecto clave 2", "Consideraciones importantes"] },
-        { title: "Aplicaciones Prácticas", content: ["Ejemplo de aplicación 1", "Ejemplo de aplicación 2", "Beneficios observados"] },
-        { title: "Conclusiones", content: ["Resumen de puntos clave", "Recomendaciones", "Próximos pasos"] },
+        { title: "Introducción", content: ["Definición del tema", "Importancia y contexto", "Objetivos de la presentación"], imagePrompt: `${topic} introduction concept illustration` },
+        { title: "Conceptos Principales", content: ["Concepto fundamental 1", "Concepto fundamental 2", "Relación entre conceptos"], imagePrompt: `${topic} key concepts diagram` },
+        { title: "Desarrollo del Tema", content: ["Aspecto clave 1", "Aspecto clave 2", "Consideraciones importantes"], imagePrompt: `${topic} development process` },
+        { title: "Aplicaciones Prácticas", content: ["Ejemplo de aplicación 1", "Ejemplo de aplicación 2", "Beneficios observados"], imagePrompt: `${topic} practical applications` },
+        { title: "Conclusiones", content: ["Resumen de puntos clave", "Recomendaciones", "Próximos pasos"], imagePrompt: `${topic} conclusion future vision` },
       ];
     }
     
-    // Create the presentation
+    // Generate images for slides using Gemini 2.5 Flash Image (Nano Banana)
+    console.log(`[PPTX] Generating AI images for ${Math.min(slides.length, 3)} slides with Gemini 2.5 Flash Image...`);
+    const imagePromises = slides.slice(0, 3).map(async (slide, idx) => {
+      try {
+        const enhancedPrompt = `Professional presentation slide illustration: ${slide.imagePrompt}. Style: modern, clean, minimalist, business professional, high quality, 16:9 aspect ratio, no text.`;
+        console.log(`[PPTX] Generating image ${idx + 1}: "${enhancedPrompt.slice(0, 80)}..."`);
+        const result = await generateImage(enhancedPrompt);
+        slideImages.set(idx, result.imageBase64);
+        console.log(`[PPTX] Image ${idx + 1} generated successfully (${result.model})`);
+      } catch (error: any) {
+        console.warn(`[PPTX] Image generation failed for slide ${idx + 1}:`, error.message);
+      }
+    });
+    
+    // Wait for all images (with timeout)
+    await Promise.race([
+      Promise.allSettled(imagePromises),
+      new Promise(resolve => setTimeout(resolve, 30000)) // 30s timeout
+    ]);
+    
+    console.log(`[PPTX] Generated ${slideImages.size} AI images for presentation`);
+    
+    // Create the presentation with Gamma.app inspired design
     pptx.title = topic || title;
     pptx.author = "IliaGPT";
+    pptx.layout = "LAYOUT_16x9";
     
-    // Title slide
+    // Helper to convert hex to RGB for gradient (pptxgenjs needs this)
+    const hexToRgb = (hex: string) => hex.replace("#", "");
+    
+    // Title slide with gradient background
     const titleSlide = pptx.addSlide();
-    titleSlide.addText(topic || title, {
-      x: 0.5,
-      y: 2,
-      w: 9,
-      h: 1.5,
-      fontSize: 40,
-      bold: true,
-      color: "363636",
-      align: "center",
-      fontFace: "Arial",
+    titleSlide.background = { color: hexToRgb(theme.bg) };
+    
+    // Decorative accent shape
+    titleSlide.addShape("rect", {
+      x: 0, y: 0, w: 10, h: 0.1,
+      fill: { color: hexToRgb(theme.primary) },
     });
-    titleSlide.addText("Generado por IliaGPT", {
-      x: 0.5,
-      y: 4,
-      w: 9,
-      h: 0.5,
-      fontSize: 14,
-      color: "999999",
+    
+    // Main title with modern styling
+    titleSlide.addText(topic || title, {
+      x: 0.8,
+      y: 2.2,
+      w: 8.4,
+      h: 1.5,
+      fontSize: 44,
+      bold: true,
+      color: hexToRgb(theme.text),
       align: "center",
       fontFace: "Arial",
     });
     
-    // Content slides
-    for (const slide of slides) {
+    // Subtitle with accent color
+    titleSlide.addText("Generado con AI por IliaGPT", {
+      x: 0.8,
+      y: 4,
+      w: 8.4,
+      h: 0.5,
+      fontSize: 16,
+      color: hexToRgb(theme.primary),
+      align: "center",
+      fontFace: "Arial",
+    });
+    
+    // Decorative bottom accent
+    titleSlide.addShape("rect", {
+      x: 0, y: 5.53, w: 10, h: 0.1,
+      fill: { color: hexToRgb(theme.secondary) },
+    });
+    
+    // Content slides with modern Gamma.app style
+    for (let idx = 0; idx < slides.length; idx++) {
+      const slide = slides[idx];
       const s = pptx.addSlide();
+      s.background = { color: hexToRgb(theme.bg) };
       
-      // Slide title
+      // Top accent bar
+      s.addShape("rect", {
+        x: 0, y: 0, w: 10, h: 0.08,
+        fill: { color: hexToRgb(theme.primary) },
+      });
+      
+      // Check if we have an image for this slide
+      const hasImage = slideImages.has(idx);
+      const contentWidth = hasImage ? 5.5 : 9;
+      
+      // Slide title with modern typography
       s.addText(slide.title, {
-        x: 0.5,
-        y: 0.3,
-        w: 9,
+        x: 0.6,
+        y: 0.4,
+        w: contentWidth,
         h: 0.8,
         fontSize: 28,
         bold: true,
-        color: "363636",
+        color: hexToRgb(theme.text),
         fontFace: "Arial",
       });
       
-      // Bullet points
+      // Bullet points with modern styling
       if (slide.content.length > 0) {
         const bulletPoints = slide.content.map(text => ({
           text: text,
-          options: { bullet: { type: "bullet" as const }, fontSize: 18, color: "444444" },
+          options: { 
+            bullet: { type: "bullet" as const, color: hexToRgb(theme.primary) }, 
+            fontSize: 18, 
+            color: hexToRgb(theme.text),
+            paraSpaceAfter: 12,
+          },
         }));
         
         s.addText(bulletPoints, {
-          x: 0.5,
-          y: 1.3,
-          w: 9,
-          h: 4.5,
+          x: 0.6,
+          y: 1.4,
+          w: contentWidth,
+          h: 4,
           fontFace: "Arial",
           valign: "top",
         });
       }
+      
+      // Add AI-generated image if available
+      if (hasImage) {
+        const imageData = slideImages.get(idx)!;
+        s.addImage({
+          data: `data:image/png;base64,${imageData}`,
+          x: 6.3,
+          y: 0.8,
+          w: 3.4,
+          h: 4.2,
+          rounding: true,
+        });
+      }
+      
+      // Bottom accent with slide number
+      s.addShape("rect", {
+        x: 0, y: 5.53, w: 10, h: 0.1,
+        fill: { color: hexToRgb(theme.secondary) },
+      });
+      
+      s.addText(`${idx + 2}`, {
+        x: 9.2,
+        y: 5.2,
+        w: 0.5,
+        h: 0.3,
+        fontSize: 12,
+        color: hexToRgb(theme.primary),
+        align: "right",
+        fontFace: "Arial",
+      });
     }
     
     const buffer = await pptx.write({ outputType: "nodebuffer" }) as Buffer;
@@ -1259,15 +1373,15 @@ FORMATO DE RESPUESTA (sigue exactamente este formato):
       console.log(`[PPTX] Slide ${idx + 2}: "${slide.title}" with ${slide.content.length} bullet points`);
     });
     
-    // Build deckState for the PPT editor (compatible with client/src/components/ppt/store/types.ts)
+    // Build deckState for the PPT editor with Gamma.app style theme
     const deckState = {
       title: topic || title,
       slides: [
-        // Title slide
+        // Title slide with theme colors
         {
           id: crypto.randomUUID(),
           size: { w: 1280, h: 720 },
-          background: { color: "#FFFFFF" },
+          background: { color: theme.bg },
           elements: [
             {
               id: crypto.randomUUID(),
@@ -1281,7 +1395,7 @@ FORMATO DE RESPUESTA (sigue exactamente este formato):
               defaultTextStyle: {
                 fontFamily: "Inter",
                 fontSize: 44,
-                color: "#111111",
+                color: theme.text,
                 bold: true
               }
             },
@@ -1293,60 +1407,83 @@ FORMATO DE RESPUESTA (sigue exactamente este formato):
               w: 1120,
               h: 60,
               zIndex: 2,
-              delta: { ops: [{ insert: "Generado por IliaGPT\n" }] },
+              delta: { ops: [{ insert: "Generado con AI por IliaGPT\n" }] },
               defaultTextStyle: {
                 fontFamily: "Inter",
                 fontSize: 18,
-                color: "#666666",
+                color: theme.primary,
                 bold: false
               }
             }
           ]
         },
-        // Content slides
-        ...slides.map((slide, idx) => ({
-          id: crypto.randomUUID(),
-          size: { w: 1280, h: 720 },
-          background: { color: "#FFFFFF" },
-          elements: [
+        // Content slides with images
+        ...slides.map((slide, idx) => {
+          const hasImage = slideImages.has(idx);
+          const contentWidth = hasImage ? 700 : 1120;
+          const elements: any[] = [
             {
               id: crypto.randomUUID(),
               type: "text",
-              x: 80,
+              x: 60,
               y: 40,
-              w: 1120,
+              w: contentWidth,
               h: 80,
               zIndex: 1,
               delta: { ops: [{ insert: `${slide.title}\n` }] },
               defaultTextStyle: {
                 fontFamily: "Inter",
                 fontSize: 32,
-                color: "#111111",
+                color: theme.text,
                 bold: true
               }
             },
             {
               id: crypto.randomUUID(),
               type: "text",
-              x: 80,
+              x: 60,
               y: 140,
-              w: 1120,
+              w: contentWidth,
               h: 500,
               zIndex: 2,
-              delta: { ops: slide.content.map((text, i) => ({ insert: `• ${text}\n` })) },
+              delta: { ops: slide.content.map((text) => ({ insert: `• ${text}\n` })) },
               defaultTextStyle: {
                 fontFamily: "Inter",
                 fontSize: 20,
-                color: "#333333",
+                color: theme.text,
                 bold: false
               }
             }
-          ]
-        }))
+          ];
+          
+          // Add image element if available
+          if (hasImage) {
+            elements.push({
+              id: crypto.randomUUID(),
+              type: "image",
+              x: 800,
+              y: 80,
+              w: 420,
+              h: 520,
+              zIndex: 3,
+              src: `data:image/png;base64,${slideImages.get(idx)}`,
+              mime: "image/png"
+            });
+          }
+          
+          return {
+            id: crypto.randomUUID(),
+            size: { w: 1280, h: 720 },
+            background: { color: theme.bg },
+            elements
+          };
+        })
       ]
     };
     
-    return { buffer, slideCount, totalElements, deckState };
+    console.log(`[PPTX] Presentation created with ${slideImages.size} AI-generated images`);
+    
+    return { buffer, slideCount, totalElements, deckState, slideImages };
   }
 
   private async createRealDOCX(title: string, content: string): Promise<Buffer> {
