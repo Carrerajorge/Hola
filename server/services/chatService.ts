@@ -885,6 +885,114 @@ ${iterationsSummary || "  (Ninguna - aprobó en primera iteración)"}
       }
     }
     
+    // DOCUMENT AGENTIC PIPELINE: Word/Excel generation with Planner → Executor → Critic loop
+    // Activated when user requests Word documents, Excel models, or reports/analysis
+    const DOCUMENT_AGENTIC_PATTERN = /(?:crea|genera|haz)\s+(?:un\s+)?(?:informe|reporte|an[aá]lisis|documento|modelo.*datos|excel|word)/i;
+    const HAS_AGENTIC_KEYWORDS = /(?:ag[eé]ntico|iterativo|optimiza|verifica|calidad|bucle|consistencia)/i;
+    if (lastUserMessage && DOCUMENT_AGENTIC_PATTERN.test(lastUserMessage.content) && !documentMode && !figmaMode) {
+      const isAgenticMode = HAS_AGENTIC_KEYWORDS.test(lastUserMessage.content);
+      
+      if (isAgenticMode) {
+        console.log(`[ChatService:DocumentAgentic] Detected document agentic pipeline request`);
+        
+        try {
+          const { DocumentAgenticPipeline } = await import("../agent/pipelines/documentAgenticPipeline");
+          const docPipeline = new DocumentAgenticPipeline();
+          
+          docPipeline.on("phase_start", ({ phase, iteration }) => {
+            console.log(`[DocumentAgenticPipeline] Phase: ${phase}${iteration !== undefined ? ` (iteration ${iteration})` : ""}`);
+          });
+          docPipeline.on("validation_result", ({ report }) => {
+            console.log(`[DocumentAgenticPipeline] Validation: ${report.passed}/${report.totalChecks} passed (${(report.overallScore * 100).toFixed(0)}%)`);
+          });
+          
+          const result = await docPipeline.execute(lastUserMessage.content, {
+            maxIterations: 3,
+          });
+          
+          if (result.success && result.artifacts.length > 0) {
+            const fs = await import("fs");
+            const path = await import("path");
+            const artifactsDir = path.join(process.cwd(), "artifacts");
+            if (!fs.existsSync(artifactsDir)) {
+              fs.mkdirSync(artifactsDir, { recursive: true });
+            }
+            
+            const savedArtifacts: any[] = [];
+            for (const artifact of result.artifacts) {
+              const filepath = path.join(artifactsDir, artifact.filename);
+              fs.writeFileSync(filepath, artifact.buffer);
+              savedArtifacts.push({
+                type: artifact.type,
+                filename: artifact.filename,
+                downloadUrl: `/api/artifacts/${artifact.filename}`,
+                mimeType: artifact.mimeType,
+                sizeBytes: artifact.sizeBytes,
+              });
+            }
+            
+            const state = result.state;
+            const wordPlan = state.wordPlan;
+            const excelPlan = state.excelPlan;
+            const validation = state.validationReport;
+            
+            const artifactsSummary = savedArtifacts.map(a => 
+              `  • ${a.type === "word" ? "📄 Word" : "📊 Excel"}: ${a.filename}`
+            ).join("\n");
+            
+            const iterationsSummary = state.iterations.map((it, i) => 
+              `  ${i + 1}. Score: ${(it.validationScore * 100).toFixed(0)}% - ${it.actions.join(", ")}`
+            ).join("\n");
+            
+            return {
+              content: `He creado los documentos solicitados usando el pipeline agéntico con bucle de validación y refinamiento.
+
+**📋 Configuración:**
+- Formato: ${state.outputFormat}
+- Audiencia: ${state.audience}
+- Objetivo: ${state.goal}
+
+**📊 Métricas de Extracción:**
+- Fuentes consultadas: ${state.sources.length}
+- Entidades extraídas: ${state.extractedEntities.length}
+- Tablas detectadas: ${state.extractedTables.length}
+- Series temporales: ${state.timeSeries.length}
+- Datasets normalizados: ${state.normalizedDatasets.length}
+
+**✅ Validación de Consistencia:**
+- Checks totales: ${validation?.totalChecks || 0}
+- Aprobados: ${validation?.passed || 0}
+- Advertencias: ${validation?.warnings || 0}
+- Score final: ${((validation?.overallScore || 0) * 100).toFixed(0)}%
+
+**🔄 Iteraciones de refinamiento:** ${state.iterations.length}
+${iterationsSummary || "  (Ninguna - aprobó en primera iteración)"}
+
+**📁 Archivos generados:**
+${artifactsSummary}
+
+${wordPlan ? `**📄 Estructura Word:** ${wordPlan.chapters.length} capítulos` : ""}
+${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""}`,
+              role: "assistant",
+              artifacts: savedArtifacts,
+              documentAgenticMetadata: {
+                iterations: state.iterations.length,
+                validationScore: validation?.overallScore || 0,
+                outputFormat: state.outputFormat,
+                audience: state.audience,
+                goal: state.goal,
+              }
+            };
+          } else {
+            console.warn(`[ChatService:DocumentAgentic] Pipeline failed:`, result.state.error);
+          }
+        } catch (docAgenticError: any) {
+          console.error(`[ChatService:DocumentAgentic] Error:`, docAgenticError);
+          // Fall through to normal flow
+        }
+      }
+    }
+    
     // AGENTIC PIPELINE: Route complex requests through AgentLoopFacade when feature flag is enabled
     // This provides multi-agent orchestration, QA verification, and SSE streaming for complex tasks
     if (AGENTIC_PIPELINE_ENABLED && lastUserMessage && !documentMode && !figmaMode && !hasImages) {
