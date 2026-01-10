@@ -1,52 +1,86 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const apiKey = process.env.GEMINI_API_KEY || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "";
+const baseURL = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
 
-const IMAGE_MODEL = "gemini-2.0-flash-exp-image-generation";
-const IMAGE_MODEL_ALT = "models/gemini-2.5-flash-preview-04-17";
+const ai = new GoogleGenAI({ 
+  apiKey,
+  ...(baseURL ? { baseURL } : {})
+});
+
+const IMAGE_MODELS = [
+  "gemini-2.5-flash-preview-native-audio-dialog",
+  "gemini-2.0-flash-exp-image-generation", 
+  "gemini-2.5-flash-image",
+  "gemini-3-pro-image-preview"
+];
 
 export interface ImageGenerationResult {
   imageBase64: string;
   mimeType: string;
   prompt: string;
+  model?: string;
 }
 
 export async function generateImage(prompt: string): Promise<ImageGenerationResult> {
-  try {
-    const response = await ai.models.generateContent({
-      model: IMAGE_MODEL,
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }]
-        }
-      ],
-      config: {
-        responseModalities: ["image", "text"],
-      }
-    });
-
-    const parts = response.candidates?.[0]?.content?.parts;
-    
-    if (!parts || parts.length === 0) {
-      throw new Error("No image generated");
-    }
-
-    for (const part of parts) {
-      if (part.inlineData) {
-        return {
-          imageBase64: part.inlineData.data || "",
-          mimeType: part.inlineData.mimeType || "image/png",
-          prompt
-        };
-      }
-    }
-
-    throw new Error("No image data in response");
-  } catch (error: any) {
-    console.error("[ImageGeneration] Error:", error.message);
-    throw new Error(`Image generation failed: ${error.message}`);
+  const startTime = Date.now();
+  console.log(`[ImageGeneration] Starting generation for prompt: "${prompt.slice(0, 100)}..."`);
+  
+  if (!apiKey) {
+    console.error("[ImageGeneration] No API key configured (GEMINI_API_KEY or AI_INTEGRATIONS_GEMINI_API_KEY)");
+    throw new Error("Image generation not configured - missing API key");
   }
+
+  let lastError: Error | null = null;
+  
+  for (const model of IMAGE_MODELS) {
+    try {
+      console.log(`[ImageGeneration] Trying model: ${model}`);
+      
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `Generate an image: ${prompt}` }]
+          }
+        ],
+        config: {
+          responseModalities: ["image", "text"],
+        }
+      });
+
+      const parts = response.candidates?.[0]?.content?.parts;
+      
+      if (!parts || parts.length === 0) {
+        console.log(`[ImageGeneration] Model ${model} returned no parts, trying next...`);
+        continue;
+      }
+
+      for (const part of parts) {
+        if (part.inlineData && part.inlineData.data) {
+          const durationMs = Date.now() - startTime;
+          console.log(`[ImageGeneration] Success with model ${model} in ${durationMs}ms`);
+          return {
+            imageBase64: part.inlineData.data,
+            mimeType: part.inlineData.mimeType || "image/png",
+            prompt,
+            model
+          };
+        }
+      }
+      
+      console.log(`[ImageGeneration] Model ${model} returned parts but no image data, trying next...`);
+    } catch (error: any) {
+      console.error(`[ImageGeneration] Model ${model} failed:`, error.message);
+      lastError = error;
+      continue;
+    }
+  }
+
+  const errorMsg = lastError?.message || "All models failed to generate image";
+  console.error(`[ImageGeneration] All models exhausted. Last error: ${errorMsg}`);
+  throw new Error(`Image generation failed: ${errorMsg}`);
 }
 
 export function detectImageRequest(message: string): boolean {

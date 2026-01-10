@@ -7,7 +7,7 @@ import { verifierAgent, RunResultPackage } from "./roles/verifierAgent";
 import type { TraceEventType } from "@shared/schema";
 import { db } from "../db";
 import { agentModeRuns, agentModeSteps } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 export interface PipelineRequest {
   chatId: string;
@@ -166,7 +166,10 @@ export class AgentPipeline {
     try {
       await db.update(agentModeSteps)
         .set(updates)
-        .where(eq(agentModeSteps.runId, runId));
+        .where(and(
+          eq(agentModeSteps.runId, runId),
+          eq(agentModeSteps.stepIndex, stepIndex)
+        ));
     } catch (error) {
       console.error(`[Pipeline] Failed to update step ${stepIndex} for run ${runId}:`, error);
     }

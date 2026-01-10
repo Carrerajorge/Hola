@@ -16,8 +16,27 @@ import { createChunkStore } from "../lib/pareChunkStore";
 import { normalizeDocument } from "../services/structuredDocumentNormalizer";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
 import type { DocumentSemanticModel, Table, Metric, Anomaly, Insight, SuggestedQuestion, SheetSummary } from "../../shared/schemas/documentSemanticModel";
+import { agentEventBus } from "../agent/eventBus";
+
+import type { Response } from "express";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
+
+function writeSse(res: Response, event: string, data: object): boolean {
+  try {
+    const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    res.write(chunk);
+    if (typeof (res as any).flush === 'function') {
+      (res as any).flush();
+    } else if (res.socket && typeof res.socket.write === 'function') {
+      res.socket.write('');
+    }
+    return true;
+  } catch (err) {
+    console.error('[SSE] Write failed:', err);
+    return false;
+  }
+}
 
 interface CategorizedError {
   category: ErrorCategory;
@@ -517,8 +536,11 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       }
 
       res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       res.setHeader("Connection", "keep-alive");
+      res.setHeader("Transfer-Encoding", "chunked");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("X-Request-Id", requestId);
       if (claimedRun) {
         res.setHeader("X-Run-Id", claimedRun.id);
@@ -718,12 +740,21 @@ ${systemContent}`;
         await storage.updateChatRunAssistantMessage(claimedRun.id, assistantMessageId);
       }
 
-      res.write(`event: start\ndata: ${JSON.stringify({ 
+      writeSse(res, 'start', { 
         requestId, 
         runId: claimedRun?.id,
         assistantMessageId,
         timestamp: Date.now() 
-      })}\n\n`);
+      });
+
+      const effectiveRunId = claimedRun?.id || requestId;
+      agentEventBus.emit(effectiveRunId, 'task_start', {
+        metadata: { chatId, userId, message: messages[messages.length - 1]?.content?.slice(0, 200) || '' }
+      }).catch(() => {});
+
+      agentEventBus.emit(effectiveRunId, 'thinking', {
+        content: 'Generating response...'
+      }).catch(() => {});
 
       const streamGenerator = llmGateway.streamChat(
         [systemMessage, ...formattedMessages],
@@ -749,20 +780,20 @@ ${systemContent}`;
         }
 
         if (chunk.done) {
-          res.write(`event: done\ndata: ${JSON.stringify({
+          writeSse(res, 'done', {
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
             runId: claimedRun?.id,
             timestamp: Date.now(),
-          })}\n\n`);
+          });
         } else {
-          res.write(`event: chunk\ndata: ${JSON.stringify({
+          writeSse(res, 'chunk', {
             content: chunk.content,
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
             runId: claimedRun?.id,
             timestamp: Date.now(),
-          })}\n\n`);
+          });
         }
       }
 
@@ -773,14 +804,19 @@ ${systemContent}`;
       }
 
       if (!isConnectionClosed) {
-        res.write(`event: complete\ndata: ${JSON.stringify({ 
+        writeSse(res, 'complete', { 
           requestId, 
           runId: claimedRun?.id,
           assistantMessageId,
           totalSequences: lastAckSequence + 1,
           contentLength: fullContent.length,
           timestamp: Date.now() 
-        })}\n\n`);
+        });
+        
+        agentEventBus.emit(effectiveRunId, 'done', {
+          summary: `Response completed (${fullContent.length} chars)`,
+          metadata: { contentLength: fullContent.length, sequences: lastAckSequence + 1 }
+        }).catch(() => {});
       }
 
       if (userId) {
@@ -815,16 +851,16 @@ ${systemContent}`;
       }
       
       if (!isConnectionClosed) {
-        try {
-          res.write(`event: error\ndata: ${JSON.stringify({ 
-            error: error.message, 
-            requestId,
-            runId: claimedRun?.id,
-            timestamp: Date.now() 
-          })}\n\n`);
-        } catch (writeError) {
-          console.error(`[SSE] Failed to write error event:`, writeError);
-        }
+        writeSse(res, 'error', { 
+          error: error.message, 
+          requestId,
+          runId: claimedRun?.id,
+          timestamp: Date.now() 
+        });
+        
+        agentEventBus.emit(claimedRun?.id || requestId, 'error', {
+          error: { message: error.message, code: error.code || 'UNKNOWN' }
+        }).catch(() => {});
       }
     } finally {
       if (heartbeatInterval) {
