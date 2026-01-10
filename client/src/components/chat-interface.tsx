@@ -3899,19 +3899,35 @@ IMPORTANTE:
         
         if (hasDocumentAttachments) {
           console.log("[handleSubmit] DATA_MODE (Legacy): Using /analyze endpoint for document analysis");
-          const analyzeResponse = await fetch("/api/analyze", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              messages: finalChatHistory,
-              attachments: attachments,
-              conversationId: chatId
-            }),
-            signal: abortControllerRef.current?.signal
+          
+          // Clean attachments for server - remove large spreadsheetData to prevent payload issues
+          const cleanedAttachments = attachments.map((att: any) => {
+            const { spreadsheetData, previewData, ...rest } = att;
+            return rest;
           });
+          
+          console.log("[handleSubmit] Sending cleaned attachments:", cleanedAttachments.map((a: any) => ({ name: a.name, storagePath: a.storagePath, mimeType: a.mimeType })));
+          
+          let analyzeResponse: Response;
+          try {
+            analyzeResponse = await fetch("/api/analyze", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messages: finalChatHistory,
+                attachments: cleanedAttachments,
+                conversationId: chatId
+              }),
+              signal: abortControllerRef.current?.signal
+            });
+          } catch (fetchError: any) {
+            console.error("[handleSubmit] Fetch error:", fetchError?.message || fetchError);
+            throw new Error(`Error de conexión: ${fetchError?.message || 'No se pudo conectar al servidor'}`);
+          }
           
           if (!analyzeResponse.ok) {
             const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+            console.error("[handleSubmit] Analyze response error:", analyzeResponse.status, errorData);
             throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
           }
           
@@ -4153,11 +4169,15 @@ IMPORTANTE:
       if (error.name === "AbortError") {
         return;
       }
-      console.error("Chat error:", error);
+      
+      // Enhanced error logging for debugging
+      const errorMessage = error?.message || error?.toString?.() || JSON.stringify(error) || 'Error desconocido';
+      console.error("Chat error:", error, "Message:", errorMessage, "Stack:", error?.stack);
+      
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: `Lo siento, hubo un error al procesar tu mensaje. Por favor intenta de nuevo.`,
+        content: `Lo siento, hubo un error al procesar tu mensaje: ${errorMessage}. Por favor intenta de nuevo.`,
         timestamp: new Date(),
         requestId: generateRequestId(),
         userMessageId: userMsgId,
