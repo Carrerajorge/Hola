@@ -13,6 +13,9 @@ import { createPareLogger, type PareLogger } from "../lib/pareLogger";
 import { pareMetrics } from "../lib/pareMetrics";
 import { AuditTrailCollector, type AuditBatchSummary } from "../lib/pareAuditTrail";
 import { createChunkStore } from "../lib/pareChunkStore";
+import { normalizeDocument } from "../services/structuredDocumentNormalizer";
+import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
+import type { DocumentSemanticModel, Table, Metric, Anomaly, Insight, SuggestedQuestion, SheetSummary } from "../../shared/schemas/documentSemanticModel";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -928,21 +931,104 @@ ${systemContent}`;
         resolvedAttachments.push(resolved);
       }
       
-      // Initialize batch processor
-      const batchProcessor = new DocumentBatchProcessor();
+      // Initialize ObjectStorageService for downloading files
+      const objectStorageService = new ObjectStorageService();
       
-      // Convert to batch format
-      const batchAttachments: BatchAttachment[] = resolvedAttachments
-        .filter((att: any) => att.storagePath || att.content)
-        .map((att: any) => ({
-          name: att.name || 'document',
-          mimeType: att.mimeType || att.type || 'application/octet-stream',
-          storagePath: att.storagePath || '',
-          content: att.content
-        }));
+      // Process each attachment using normalizeDocument for structured extraction
+      const documentModels: DocumentSemanticModel[] = [];
+      const processingStats: Array<{
+        filename: string;
+        status: 'success' | 'error';
+        bytesRead: number;
+        pagesProcessed: number;
+        tokensExtracted: number;
+        parseTimeMs: number;
+        chunkCount: number;
+        error?: string;
+      }> = [];
+      const failedFiles: Array<{ filename: string; error: string }> = [];
       
-      // Process documents atomically
-      const batchResult = await batchProcessor.processBatch(batchAttachments);
+      for (const att of resolvedAttachments) {
+        const filename = att.name || 'document';
+        const parseStartTime = Date.now();
+        
+        try {
+          let buffer: Buffer;
+          
+          // Download file from object storage using storagePath
+          if (att.storagePath) {
+            try {
+              buffer = await objectStorageService.getObjectEntityBuffer(att.storagePath);
+              console.log(`[Analyze] Downloaded ${filename} from storage: ${buffer.length} bytes`);
+            } catch (downloadError: any) {
+              console.error(`[Analyze] Failed to download ${filename} from ${att.storagePath}:`, downloadError);
+              throw new Error(`Failed to download file from storage: ${downloadError.message}`);
+            }
+          } else if (att.content) {
+            // Use inline content if provided (base64 or string)
+            buffer = Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'base64');
+          } else {
+            throw new Error('No storagePath or content provided for attachment');
+          }
+          
+          // Call normalizeDocument to extract structured data
+          const docModel = await normalizeDocument(buffer, filename, att.storagePath);
+          documentModels.push(docModel);
+          
+          const parseTimeMs = Date.now() - parseStartTime;
+          const tokensEstimate = Math.ceil(buffer.length / 4); // Rough token estimate
+          
+          processingStats.push({
+            filename,
+            status: 'success',
+            bytesRead: buffer.length,
+            pagesProcessed: docModel.documentMeta.pageCount || docModel.documentMeta.sheetCount || 1,
+            tokensExtracted: tokensEstimate,
+            parseTimeMs,
+            chunkCount: docModel.sections.length + docModel.tables.length
+          });
+          
+          console.log(`[Analyze] Processed ${filename}: ${docModel.documentMeta.documentType}, ${docModel.tables.length} tables, ${docModel.metrics.length} metrics, ${docModel.anomalies.length} anomalies`);
+          
+        } catch (error: any) {
+          const parseTimeMs = Date.now() - parseStartTime;
+          const errorMessage = error.message || 'Unknown error during document processing';
+          
+          processingStats.push({
+            filename,
+            status: 'error',
+            bytesRead: 0,
+            pagesProcessed: 0,
+            tokensExtracted: 0,
+            parseTimeMs,
+            chunkCount: 0,
+            error: errorMessage
+          });
+          
+          failedFiles.push({ filename, error: errorMessage });
+          console.error(`[Analyze] Failed to process ${filename}:`, errorMessage);
+        }
+      }
+      
+      // Create combined batch-like result for compatibility
+      const batchResult = {
+        attachmentsCount: resolvedAttachments.length,
+        processedFiles: documentModels.length,
+        failedFiles,
+        totalTokens: processingStats.reduce((sum, s) => sum + s.tokensExtracted, 0),
+        chunks: documentModels.flatMap(doc => 
+          doc.sections.map(section => ({
+            docId: doc.documentMeta.fileName,
+            filename: doc.documentMeta.fileName,
+            content: section.content || '',
+            location: section.sourceRef,
+            offsets: { start: 0, end: section.content?.length || 0 },
+            metadata: { sectionType: section.type }
+          }))
+        ),
+        stats: processingStats,
+        documentModels
+      };
       
       // Determine parser used based on mimeType/extension
       const getParserInfo = (mimeType: string, filename: string): { mime_detect: string; parser_used: string } => {
@@ -1082,32 +1168,99 @@ ${systemContent}`;
         });
       }
       
-      // Build document context with citation format instructions
-      const citationFormats = batchResult.stats
-        .filter(s => s.status === 'success')
-        .map(s => {
-          const ext = s.filename.split('.').pop()?.toLowerCase();
-          switch(ext) {
-            case 'pdf': return `[doc:${s.filename} p:#]`;
-            case 'xlsx': case 'xls': return `[doc:${s.filename} sheet:NombreHoja cell:A1]`;
-            case 'docx': case 'doc': return `[doc:${s.filename} p:#]`;
-            case 'pptx': case 'ppt': return `[doc:${s.filename} slide:#]`;
-            case 'csv': return `[doc:${s.filename} row:#]`;
-            default: return `[doc:${s.filename}]`;
-          }
-        });
+      // Build rich document context from DocumentSemanticModel
+      const buildDocumentStructureSummary = (doc: DocumentSemanticModel): string => {
+        const meta = doc.documentMeta;
+        const parts: string[] = [];
+        parts.push(`📄 ${meta.fileName} (${meta.documentType})`);
+        if (doc.sheets && doc.sheets.length > 0) {
+          parts.push(`  Sheets: ${doc.sheets.length} (${doc.sheets.map(s => s.name).join(', ')})`);
+        }
+        parts.push(`  Sections: ${doc.sections.length}, Tables: ${doc.tables.length}`);
+        if (meta.pageCount) parts.push(`  Pages: ${meta.pageCount}`);
+        if (meta.wordCount) parts.push(`  Words: ${meta.wordCount}`);
+        return parts.join('\n');
+      };
       
-      // Build the combined document text
-      const documentText = batchResult.chunks.map(chunk => {
-        const locator = chunk.metadata?.page ? `p:${chunk.metadata.page}` :
-                       chunk.metadata?.sheet ? `sheet:${chunk.metadata.sheet}` :
-                       chunk.metadata?.slide ? `slide:${chunk.metadata.slide}` :
-                       '';
-        return `--- ${chunk.docId}${locator ? ` (${locator})` : ''} ---\n${chunk.content}`;
+      const buildMetricsSummary = (doc: DocumentSemanticModel): string => {
+        if (doc.metrics.length === 0) return '';
+        const metricsText = doc.metrics.slice(0, 10).map(m => {
+          const trend = m.trend ? ` (${m.trend === 'up' ? '↑' : m.trend === 'down' ? '↓' : '→'})` : '';
+          return `  • ${m.name}: ${m.value}${m.unit ? ' ' + m.unit : ''}${trend} [${m.sourceRef}]`;
+        }).join('\n');
+        return `\n📊 Key Metrics (${doc.metrics.length} total):\n${metricsText}`;
+      };
+      
+      const buildAnomaliesSummary = (doc: DocumentSemanticModel): string => {
+        if (doc.anomalies.length === 0) return '';
+        const anomaliesText = doc.anomalies.slice(0, 5).map(a => 
+          `  ⚠️ [${a.severity.toUpperCase()}] ${a.type}: ${a.description} [${a.sourceRef}]`
+        ).join('\n');
+        return `\n🔍 Detected Anomalies (${doc.anomalies.length} total):\n${anomaliesText}`;
+      };
+      
+      const buildTablePreview = (table: Table, maxRows: number = 3): string => {
+        const header = table.headers.join(' | ');
+        const separator = table.headers.map(() => '---').join(' | ');
+        const previewRows = (table.previewRows || table.rows.slice(0, maxRows))
+          .map(row => row.map(cell => String(cell.value ?? '')).join(' | '))
+          .join('\n');
+        return `${table.title || 'Table'} [${table.sourceRef}]:\n| ${header} |\n| ${separator} |\n| ${previewRows.split('\n').join(' |\n| ')} |`;
+      };
+      
+      const buildTablesSummary = (doc: DocumentSemanticModel): string => {
+        if (doc.tables.length === 0) return '';
+        const tablesPreview = doc.tables.slice(0, 3).map(t => buildTablePreview(t)).join('\n\n');
+        return `\n📋 Tables Preview (${doc.tables.length} total):\n${tablesPreview}`;
+      };
+      
+      const buildSheetsSummary = (doc: DocumentSemanticModel): string => {
+        if (!doc.sheets || doc.sheets.length === 0) return '';
+        const sheetsText = doc.sheets.map(s => 
+          `  📑 ${s.name}: ${s.rowCount} rows × ${s.columnCount} cols, range: ${s.usedRange}\n` +
+          `     Headers: ${s.headers.slice(0, 5).join(', ')}${s.headers.length > 5 ? '...' : ''}`
+        ).join('\n');
+        return `\n📊 Sheets Overview:\n${sheetsText}`;
+      };
+      
+      // Build comprehensive context for each document
+      const documentContexts = documentModels.map(doc => {
+        return [
+          buildDocumentStructureSummary(doc),
+          buildSheetsSummary(doc),
+          buildMetricsSummary(doc),
+          buildAnomaliesSummary(doc),
+          buildTablesSummary(doc)
+        ].filter(Boolean).join('\n');
+      });
+      
+      // Build citation format examples
+      const citationFormats = documentModels.map(doc => {
+        const meta = doc.documentMeta;
+        switch(meta.documentType) {
+          case 'excel': 
+          case 'csv':
+            return `[doc:${meta.fileName} sheet:SheetName!A1:Z100]`;
+          case 'pdf': 
+            return `[doc:${meta.fileName} p:1]`;
+          case 'word': 
+            return `[doc:${meta.fileName} section:Title]`;
+          default: 
+            return `[doc:${meta.fileName}]`;
+        }
+      });
+      
+      // Build the combined document text from sections
+      const documentText = documentModels.map(doc => {
+        const sectionContent = doc.sections.map(section => {
+          const content = section.content || '';
+          return `[${section.type}${section.title ? ': ' + section.title : ''}] ${content}`;
+        }).join('\n');
+        return `--- ${doc.documentMeta.fileName} ---\n${sectionContent}`;
       }).join('\n\n');
       
-      // Build system prompt for document analysis (NO image generation instructions)
-      const systemPrompt = `Eres un asistente experto en análisis de documentos. 
+      // Build system prompt for document analysis with structured output request
+      const systemPrompt = `Eres un asistente experto en análisis de documentos empresariales.
 
 MODO: DATA_MODE (análisis de documentos)
 PROHIBIDO: Generar imágenes, crear artefactos, inventar datos, usar fuentes externas
@@ -1121,11 +1274,19 @@ INSTRUCCIONES CRÍTICAS:
 FORMATOS DE CITAS (usa estos exactamente):
 ${citationFormats.join('\n')}
 
-DOCUMENTOS PROCESADOS: ${batchResult.processedFiles}/${batchResult.attachmentsCount}
-${batchResult.stats.map(s => `- ${s.filename}: ${s.status === 'success' ? `${s.tokensExtracted} tokens` : `ERROR: ${s.error}`}`).join('\n')}
+DOCUMENTOS PROCESADOS: ${documentModels.length}/${resolvedAttachments.length}
 
-CONTENIDO DE LOS DOCUMENTOS:
-${documentText}`;
+ESTRUCTURA DE LOS DOCUMENTOS:
+${documentContexts.join('\n\n')}
+
+CONTENIDO DETALLADO:
+${documentText}
+
+TU RESPUESTA DEBE INCLUIR:
+1. **RESUMEN EJECUTIVO**: Síntesis de 2-3 párrafos del contenido principal
+2. **HALLAZGOS CLAVE**: Lista de los descubrimientos más importantes con citas específicas
+3. **RIESGOS IDENTIFICADOS**: Problemas, anomalías o áreas de preocupación detectadas
+4. **PREGUNTAS RECOMENDADAS**: 3-5 preguntas para profundizar en el análisis`;
 
       // Build messages for LLM
       const llmMessages = [
@@ -1180,12 +1341,106 @@ ${documentText}`;
       const requestDurationMs = Date.now() - startTime;
       pareMetrics.recordRequestDuration(requestDurationMs);
       
-      // Build response payload with audit summary
+      // Aggregate insights from all document models
+      const allInsights: Insight[] = documentModels.flatMap(doc => doc.insights || []);
+      
+      // Aggregate suggested questions from all document models  
+      const allSuggestedQuestions: SuggestedQuestion[] = documentModels.flatMap(doc => doc.suggestedQuestions || []);
+      
+      // Build actionable insights from the LLM response and document anomalies
+      const actionableInsights: Array<{
+        id: string;
+        type: 'finding' | 'risk' | 'opportunity' | 'recommendation';
+        title: string;
+        description: string;
+        confidence: 'low' | 'medium' | 'high';
+        sourceRefs: string[];
+      }> = [];
+      
+      // Extract risks from anomalies
+      documentModels.forEach(doc => {
+        doc.anomalies.forEach(anomaly => {
+          actionableInsights.push({
+            id: anomaly.id,
+            type: 'risk',
+            title: `${anomaly.type} detected`,
+            description: anomaly.description,
+            confidence: anomaly.severity === 'high' ? 'high' : anomaly.severity === 'medium' ? 'medium' : 'low',
+            sourceRefs: [anomaly.sourceRef]
+          });
+        });
+      });
+      
+      // Add insights from document models
+      allInsights.forEach(insight => {
+        actionableInsights.push({
+          id: insight.id,
+          type: insight.type as 'finding' | 'risk' | 'opportunity' | 'recommendation',
+          title: insight.title,
+          description: insight.description,
+          confidence: insight.confidence,
+          sourceRefs: insight.sourceRefs
+        });
+      });
+      
+      // Generate suggested questions for further analysis
+      const suggestedQuestionsOutput: Array<{
+        id: string;
+        question: string;
+        category: 'analysis' | 'clarification' | 'action' | 'deep-dive';
+        relatedSources: string[];
+      }> = allSuggestedQuestions.map(q => ({
+        id: q.id,
+        question: q.question,
+        category: q.category,
+        relatedSources: q.relatedSources
+      }));
+      
+      // Add default questions if none were extracted
+      if (suggestedQuestionsOutput.length === 0) {
+        const defaultQuestions = [
+          { id: 'q1', question: '¿Cuáles son las tendencias principales en los datos?', category: 'analysis' as const, relatedSources: documentModels.map(d => d.documentMeta.fileName) },
+          { id: 'q2', question: '¿Existen valores atípicos o anomalías importantes?', category: 'deep-dive' as const, relatedSources: documentModels.map(d => d.documentMeta.fileName) },
+          { id: 'q3', question: '¿Qué acciones se recomiendan basándose en estos datos?', category: 'action' as const, relatedSources: documentModels.map(d => d.documentMeta.fileName) },
+        ];
+        suggestedQuestionsOutput.push(...defaultQuestions);
+      }
+      
+      // Build response payload with full DocumentSemanticModel and enhanced fields
       const responsePayload = {
         success: true,
         requestId,
         mode: "DATA_MODE",
         answer_text: answerText,
+        documentModel: documentModels.length === 1 ? documentModels[0] : {
+          version: "1.0" as const,
+          documentMeta: {
+            id: `batch_${requestId}`,
+            fileName: documentModels.map(d => d.documentMeta.fileName).join(', '),
+            fileSize: documentModels.reduce((sum, d) => sum + d.documentMeta.fileSize, 0),
+            mimeType: 'application/batch',
+            documentType: 'unknown' as const,
+            title: `Batch Analysis: ${documentModels.length} documents`
+          },
+          sections: documentModels.flatMap(d => d.sections),
+          tables: documentModels.flatMap(d => d.tables),
+          metrics: documentModels.flatMap(d => d.metrics),
+          anomalies: documentModels.flatMap(d => d.anomalies),
+          insights: allInsights,
+          sources: documentModels.flatMap(d => d.sources),
+          sheets: documentModels.flatMap(d => d.sheets || []),
+          suggestedQuestions: allSuggestedQuestions,
+          extractionDiagnostics: {
+            extractedAt: new Date().toISOString(),
+            durationMs: requestDurationMs,
+            parserUsed: 'normalizeDocument',
+            mimeTypeDetected: 'batch',
+            bytesProcessed: documentModels.reduce((sum, d) => sum + d.documentMeta.fileSize, 0)
+          }
+        },
+        documentModels: documentModels,
+        insights: actionableInsights,
+        suggestedQuestions: suggestedQuestionsOutput,
         per_doc_findings: perDocFindings,
         citations,
         progressReport: {
@@ -1208,7 +1463,11 @@ ${documentText}`;
         metadata: {
           totalTokensExtracted: batchResult.totalTokens,
           totalChunks: batchResult.chunks.length,
-          processingTimeMs: requestDurationMs
+          processingTimeMs: requestDurationMs,
+          documentsProcessed: documentModels.length,
+          totalTables: documentModels.reduce((sum, d) => sum + d.tables.length, 0),
+          totalMetrics: documentModels.reduce((sum, d) => sum + d.metrics.length, 0),
+          totalAnomalies: documentModels.reduce((sum, d) => sum + d.anomalies.length, 0)
         }
       };
       

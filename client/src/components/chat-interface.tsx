@@ -3949,6 +3949,11 @@ IMPORTANTE:
             timestamp: new Date(),
             requestId: generateRequestId(),
             userMessageId: userMsgId,
+            documentAnalysis: analyzeResult.documentModel ? {
+              documentModel: analyzeResult.documentModel,
+              insights: analyzeResult.insights || [],
+              suggestedQuestions: analyzeResult.suggestedQuestions || [],
+            } : undefined,
           };
           onSendMessage(analysisMsg);
           

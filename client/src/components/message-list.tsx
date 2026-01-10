@@ -78,6 +78,7 @@ import { SuggestedReplies, generateSuggestions } from "@/components/suggested-re
 import { getFileTheme, getFileCategory } from "@/lib/fileTypeTheme";
 import { ChatSpreadsheetViewer } from "@/components/chat/ChatSpreadsheetViewer";
 import { DocumentAnalysisResults } from "@/components/chat/DocumentAnalysisResults";
+import { DocumentAnalysisResults as SemanticDocumentAnalysisResults } from "@/components/DocumentAnalysisResults";
 import { normalizeAgentEvent, hasPayloadDetails, type MappedAgentEvent } from "@/lib/agent-event-mapper";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { AgentStepsDisplay, type AgentArtifact } from "@/components/agent-steps-display";
@@ -1594,6 +1595,7 @@ interface AssistantMessageProps {
   onAgentCancel?: (messageId: string, runId: string) => void;
   onAgentRetry?: (messageId: string, userMessage: string) => void;
   onAgentArtifactPreview?: (artifact: AgentArtifact) => void;
+  onQuestionClick?: (question: string) => void;
 }
 
 const AssistantMessage = memo(function AssistantMessage({
@@ -1622,7 +1624,8 @@ const AssistantMessage = memo(function AssistantMessage({
   onRestoreDocument,
   onAgentCancel,
   onAgentRetry,
-  onAgentArtifactPreview
+  onAgentArtifactPreview,
+  onQuestionClick
 }: AssistantMessageProps) {
   const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
 
@@ -1771,6 +1774,18 @@ const AssistantMessage = memo(function AssistantMessage({
             </div>
           )}
         </>
+      )}
+
+      {message.documentAnalysis && !message.isThinking && (
+        <div className="mt-3 w-full">
+          <SemanticDocumentAnalysisResults
+            documentModel={message.documentAnalysis.documentModel}
+            summary={message.content || ""}
+            insights={message.documentAnalysis.insights || []}
+            suggestedQuestions={message.documentAnalysis.suggestedQuestions || []}
+            onQuestionClick={onQuestionClick || (() => {})}
+          />
+        </div>
       )}
 
       {showSkeleton && (
@@ -1986,7 +2001,8 @@ const AssistantMessage = memo(function AssistantMessage({
     prevProps.isRegenerating === nextProps.isRegenerating &&
     prevProps.isGeneratingImage === nextProps.isGeneratingImage &&
     prevProps.pendingGeneratedImage === nextProps.pendingGeneratedImage &&
-    prevProps.minimizedDocument === nextProps.minimizedDocument
+    prevProps.minimizedDocument === nextProps.minimizedDocument &&
+    prevProps.message.documentAnalysis === nextProps.message.documentAnalysis
   );
 });
 
@@ -2024,6 +2040,7 @@ interface MessageItemProps {
   onAgentCancel?: (messageId: string, runId: string) => void;
   onAgentRetry?: (messageId: string, userMessage: string) => void;
   onAgentArtifactPreview?: (artifact: AgentArtifact) => void;
+  onQuestionClick?: (question: string) => void;
 }
 
 const MessageItem = memo(function MessageItem({
@@ -2059,7 +2076,8 @@ const MessageItem = memo(function MessageItem({
   setEditContent,
   onAgentCancel,
   onAgentRetry,
-  onAgentArtifactPreview
+  onAgentArtifactPreview,
+  onQuestionClick
 }: MessageItemProps) {
   return (
     <div
@@ -2134,6 +2152,7 @@ const MessageItem = memo(function MessageItem({
             onAgentCancel={onAgentCancel}
             onAgentRetry={onAgentRetry}
             onAgentArtifactPreview={onAgentArtifactPreview}
+            onQuestionClick={onQuestionClick}
           />
         )}
       </div>
@@ -2146,6 +2165,7 @@ const MessageItem = memo(function MessageItem({
     prevProps.message.role === nextProps.message.role &&
     prevProps.message.agentRun?.status === nextProps.message.agentRun?.status &&
     prevProps.message.agentRun?.eventStream?.length === nextProps.message.agentRun?.eventStream?.length &&
+    prevProps.message.documentAnalysis === nextProps.message.documentAnalysis &&
     prevProps.msgIndex === nextProps.msgIndex &&
     prevProps.totalMessages === nextProps.totalMessages &&
     prevProps.variant === nextProps.variant &&
@@ -2323,6 +2343,7 @@ export function MessageList({
                 setEditContent={setEditContent}
                 onAgentCancel={onAgentCancel}
                 onAgentRetry={onAgentRetry}
+                onQuestionClick={onSelectSuggestedReply}
               />
             </div>
           );
@@ -2473,6 +2494,7 @@ export function MessageList({
           setEditContent={setEditContent}
           onAgentCancel={onAgentCancel}
           onAgentRetry={onAgentRetry}
+          onQuestionClick={onSelectSuggestedReply}
         />
       ))}
 

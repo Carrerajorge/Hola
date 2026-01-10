@@ -1,5 +1,10 @@
-import pdfParse from "pdf-parse";
 import Tesseract from "tesseract.js";
+
+// pdf-parse uses CommonJS exports, need dynamic import for ESM compatibility
+async function loadPdfParse() {
+  const module = await import("pdf-parse");
+  return module.default || module;
+}
 import type {
   DocumentSemanticModel,
   Table,
@@ -345,7 +350,8 @@ export async function extractPDF(
   let pdfMetadata: Record<string, unknown> = {};
 
   try {
-    const pdfData = await pdfParse(buffer);
+    const pdfParseLib = await loadPdfParse();
+    const pdfData = await pdfParseLib(buffer);
     extractedText = normalizeText(pdfData.text || "");
     pageCount = pdfData.numpages || 1;
     pdfMetadata = pdfData.info || {};

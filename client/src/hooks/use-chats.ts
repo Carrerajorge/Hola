@@ -96,6 +96,11 @@ export interface Message {
   agentRun?: AgentRunData;
   artifact?: MessageArtifact; // Generated artifact from ProductionWorkflowRunner
   webSources?: WebSource[]; // Web search sources for citations
+  documentAnalysis?: {
+    documentModel: any; // DocumentSemanticModel
+    insights: any[];
+    suggestedQuestions: any[];
+  };
 }
 
 export interface Chat {
