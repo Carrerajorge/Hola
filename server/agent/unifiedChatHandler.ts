@@ -1,5 +1,6 @@
 import { Response } from "express";
 import { randomUUID } from "crypto";
+import { eq, and, desc } from "drizzle-orm";
 import { agentEventBus } from "./eventBus";
 import { createRequestSpec, detectIntent, AttachmentSpecSchema, SessionStateSchema, RequestSpecSchema } from "./requestSpec";
 import type { z } from "zod";
@@ -9,7 +10,7 @@ type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 type SessionState = z.infer<typeof SessionStateSchema>;
 import { storage } from "../storage";
 import { db } from "../db";
-import { agentModeRuns, agentModeSteps } from "@shared/schema";
+import { agentModeRuns, agentModeSteps, agentMemoryStore, requestSpecHistory } from "@shared/schema";
 import { llmGateway } from "../lib/llmGateway";
 import type { TraceEventType } from "@shared/schema";
 
@@ -46,29 +47,127 @@ function writeSse(res: Response, event: string, data: object): boolean {
 
 export async function hydrateSessionState(chatId: string, userId: string): Promise<SessionState | undefined> {
   try {
-    const recentMessages = await storage.getChatMessages(chatId, { limit: 10 });
+    const [recentMessages, memoryRecords, previousSpecs] = await Promise.all([
+      storage.getChatMessages(chatId, { limit: 10 }),
+      db.select().from(agentMemoryStore)
+        .where(and(
+          eq(agentMemoryStore.chatId, chatId),
+          eq(agentMemoryStore.userId, userId)
+        ))
+        .orderBy(desc(agentMemoryStore.updatedAt))
+        .limit(20),
+      db.select().from(requestSpecHistory)
+        .where(eq(requestSpecHistory.chatId, chatId))
+        .orderBy(desc(requestSpecHistory.createdAt))
+        .limit(5)
+    ]);
     
-    if (recentMessages.length === 0) {
+    if (recentMessages.length === 0 && memoryRecords.length === 0) {
       return undefined;
     }
     
-    const previousIntents = recentMessages
-      .filter(m => m.role === 'user')
-      .slice(0, 5)
-      .map(m => detectIntent(m.content).intent);
+    const previousIntents = previousSpecs.length > 0
+      ? previousSpecs.map(spec => spec.intent)
+      : recentMessages
+          .filter(m => m.role === 'user')
+          .slice(0, 5)
+          .map(m => detectIntent(m.content).intent);
+    
+    const previousDeliverables = previousSpecs
+      .filter(spec => spec.deliverableType && spec.status === 'completed')
+      .map(spec => spec.deliverableType as string);
+    
+    const workingContext: Record<string, unknown> = {};
+    const memoryKeys: string[] = [];
+    
+    for (const record of memoryRecords) {
+      memoryKeys.push(record.memoryKey);
+      if (record.memoryType === 'context' || record.memoryType === 'fact') {
+        workingContext[record.memoryKey] = record.memoryValue;
+      }
+    }
+    
+    console.log(`[UnifiedChat] Hydrated session: ${memoryRecords.length} memory keys, ${previousSpecs.length} previous specs`);
     
     return {
       conversationId: chatId,
       turnNumber: recentMessages.length,
       previousIntents,
-      previousDeliverables: [],
-      workingContext: {},
-      memoryKeys: [],
+      previousDeliverables,
+      workingContext,
+      memoryKeys,
       lastUpdated: new Date()
     };
   } catch (error) {
     console.error('[UnifiedChat] Failed to hydrate session state:', error);
     return undefined;
+  }
+}
+
+export async function persistRequestSpec(
+  context: UnifiedChatContext,
+  status: 'pending' | 'completed' | 'failed',
+  durationMs?: number
+): Promise<void> {
+  try {
+    await db.insert(requestSpecHistory).values({
+      chatId: context.requestSpec.chatId,
+      runId: context.runId,
+      messageId: context.requestSpec.messageId,
+      intent: context.requestSpec.intent,
+      intentConfidence: context.requestSpec.intentConfidence,
+      deliverableType: context.requestSpec.deliverableType,
+      primaryAgent: context.requestSpec.primaryAgent,
+      targetAgents: context.requestSpec.targetAgents,
+      attachmentsCount: context.requestSpec.attachments.length,
+      executionDurationMs: durationMs,
+      status
+    });
+    console.log(`[UnifiedChat] Persisted RequestSpec for run ${context.runId}`);
+  } catch (error) {
+    console.error('[UnifiedChat] Failed to persist RequestSpec:', error);
+  }
+}
+
+export async function storeMemory(
+  chatId: string,
+  userId: string,
+  key: string,
+  value: unknown,
+  type: 'context' | 'fact' | 'preference' | 'artifact_ref' = 'context'
+): Promise<void> {
+  try {
+    const existing = await db.select()
+      .from(agentMemoryStore)
+      .where(and(
+        eq(agentMemoryStore.chatId, chatId),
+        eq(agentMemoryStore.userId, userId),
+        eq(agentMemoryStore.memoryKey, key)
+      ))
+      .limit(1);
+    
+    if (existing.length > 0) {
+      await db.update(agentMemoryStore)
+        .set({
+          memoryValue: value,
+          memoryType: type,
+          updatedAt: new Date()
+        })
+        .where(and(
+          eq(agentMemoryStore.id, existing[0].id),
+          eq(agentMemoryStore.userId, userId)
+        ));
+    } else {
+      await db.insert(agentMemoryStore).values({
+        chatId,
+        userId,
+        memoryKey: key,
+        memoryValue: value,
+        memoryType: type,
+      });
+    }
+  } catch (error) {
+    console.error(`[UnifiedChat] Failed to store memory key ${key}:`, error);
   }
 }
 
@@ -278,13 +377,24 @@ export async function executeUnifiedChat(
       timestamp: Date.now()
     });
     
-    try {
-      await db.update(agentModeRuns)
+    const memoryKeys = ['last_intent', 'last_deliverable'];
+    await Promise.all([
+      db.update(agentModeRuns)
         .set({ status: 'completed' })
-        .where(require('drizzle-orm').eq(agentModeRuns.id, runId));
-    } catch (dbError) {
-      console.error('[UnifiedChat] Failed to update run status:', dbError);
-    }
+        .where(eq(agentModeRuns.id, runId))
+        .catch(err => console.error('[UnifiedChat] Failed to update run status:', err)),
+      persistRequestSpec(context, 'completed', durationMs),
+      storeMemory(request.chatId, request.userId, 'last_intent', requestSpec.intent, 'context'),
+      storeMemory(request.chatId, request.userId, 'last_deliverable', requestSpec.deliverableType || 'none', 'context'),
+    ]).catch(() => {});
+    
+    await emitTraceEvent(runId, 'memory_saved', {
+      memory: {
+        keys: memoryKeys,
+        saved: memoryKeys.length,
+        chatId: request.chatId
+      }
+    }).catch(() => {});
     
   } catch (error: any) {
     console.error(`[UnifiedChat] Execution error:`, error);
@@ -304,13 +414,14 @@ export async function executeUnifiedChat(
       timestamp: Date.now()
     });
     
-    try {
-      await db.update(agentModeRuns)
+    const durationMs = Date.now() - context.startTime;
+    await Promise.all([
+      db.update(agentModeRuns)
         .set({ status: 'failed' })
-        .where(require('drizzle-orm').eq(agentModeRuns.id, runId));
-    } catch (dbError) {
-      console.error('[UnifiedChat] Failed to update run status:', dbError);
-    }
+        .where(eq(agentModeRuns.id, runId))
+        .catch(err => console.error('[UnifiedChat] Failed to update run status:', err)),
+      persistRequestSpec(context, 'failed', durationMs),
+    ]).catch(() => {});
   }
   
   res.end();

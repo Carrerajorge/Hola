@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -2278,6 +2278,62 @@ export const insertAgentWorkspaceSchema = createInsertSchema(agentWorkspaces).om
 
 export type InsertAgentWorkspace = z.infer<typeof insertAgentWorkspaceSchema>;
 export type AgentWorkspace = typeof agentWorkspaces.$inferSelect;
+
+// ==========================================
+// Agent Memory Persistence Tables
+// ==========================================
+
+export const agentMemoryStore = pgTable("agent_memory_store", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id").references(() => chats.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id),
+  memoryKey: text("memory_key").notNull(),
+  memoryValue: jsonb("memory_value").notNull(),
+  memoryType: text("memory_type").default("context"), // context, fact, preference, artifact_ref
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("agent_memory_store_chat_key_idx").on(table.chatId, table.memoryKey),
+  index("agent_memory_store_user_idx").on(table.userId),
+  index("agent_memory_store_type_idx").on(table.memoryType),
+]);
+
+export const insertAgentMemoryStoreSchema = createInsertSchema(agentMemoryStore).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAgentMemoryStore = z.infer<typeof insertAgentMemoryStoreSchema>;
+export type AgentMemoryStore = typeof agentMemoryStore.$inferSelect;
+
+export const requestSpecHistory = pgTable("request_spec_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id").references(() => chats.id, { onDelete: "cascade" }),
+  runId: varchar("run_id").references(() => agentModeRuns.id, { onDelete: "set null" }),
+  messageId: varchar("message_id").references(() => chatMessages.id, { onDelete: "set null" }),
+  intent: text("intent").notNull(),
+  intentConfidence: real("intent_confidence"),
+  deliverableType: text("deliverable_type"),
+  primaryAgent: text("primary_agent"),
+  targetAgents: text("target_agents").array(),
+  attachmentsCount: integer("attachments_count").default(0),
+  executionDurationMs: integer("execution_duration_ms"),
+  status: text("status").default("pending"), // pending, completed, failed
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("request_spec_history_chat_created_idx").on(table.chatId, table.createdAt),
+  index("request_spec_history_run_idx").on(table.runId),
+  index("request_spec_history_intent_idx").on(table.intent),
+]);
+
+export const insertRequestSpecHistorySchema = createInsertSchema(requestSpecHistory).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertRequestSpecHistory = z.infer<typeof insertRequestSpecHistorySchema>;
+export type RequestSpecHistory = typeof requestSpecHistory.$inferSelect;
 
 // ==========================================
 // Custom Skills Schema - User-defined Agent Skills
