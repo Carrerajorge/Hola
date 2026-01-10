@@ -1100,7 +1100,7 @@ ${420 + streamLength}
 
   private async createRealPPTX(title: string, userQuery: string): Promise<{ buffer: Buffer; slideCount: number; totalElements: number; deckState: any; slideImages: Map<number, string> }> {
     const PptxGenJS = (await import("pptxgenjs")).default;
-    const { generateImage } = await import("../../../services/imageGeneration");
+    const { generateImage } = await import("../../services/imageGeneration");
     const pptx = new PptxGenJS();
     
     // Gamma.app inspired color themes
