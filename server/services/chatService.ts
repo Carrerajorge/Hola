@@ -863,6 +863,10 @@ FORMATO DE RESPUESTA:
   let sources: ChatSource[] = [];
   let webSearchInfo = "";
   let webSources: WebSource[] = [];
+  
+  // Define hasAttachments for web search blocking logic
+  // Uses raw attachments from request OR presence of extracted content
+  const hasAttachments = hasRawAttachments || (attachmentContext && attachmentContext.length > 0);
 
   // Helper function to extract domain and create favicon URL
   const extractWebSource = (url: string, title: string, snippet?: string, year?: string, imageUrl?: string, siteName?: string, canonicalUrl?: string): WebSource => {
