@@ -55,6 +55,8 @@ import {
   browse as pythonAgentBrowse, search as pythonAgentSearch, createDocument as pythonAgentCreateDocument,
   executeTool as pythonAgentExecuteTool, listFiles as pythonAgentListFiles, getStatus as pythonAgentGetStatus
 } from "./services/pythonAgentClient";
+import express from "express";
+import path from "path";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -66,6 +68,21 @@ export async function registerRoutes(
 ): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
+  
+  const artifactsDir = path.join(process.cwd(), "generated_artifacts");
+  app.use("/api/artifacts", express.static(artifactsDir, {
+    setHeaders: (res, filePath) => {
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === ".pptx") {
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+      } else if (ext === ".docx") {
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      } else if (ext === ".xlsx") {
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      }
+      res.setHeader("Content-Disposition", `attachment; filename="${path.basename(filePath)}"`);
+    }
+  }));
   
   app.use("/api/ppt", pptExportRouter);
   app.use("/api", createChatsRouter());

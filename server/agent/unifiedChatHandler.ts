@@ -13,6 +13,7 @@ import { db } from "../db";
 import { agentModeRuns, agentModeSteps, agentMemoryStore, requestSpecHistory } from "@shared/schema";
 import { llmGateway } from "../lib/llmGateway";
 import type { TraceEventType } from "@shared/schema";
+import { executeAgentLoop } from "./agentExecutor";
 
 export interface UnifiedChatRequest {
   messages: Array<{ role: string; content: string }>;
@@ -313,77 +314,90 @@ export async function executeUnifiedChat(
     let fullResponse = '';
     let chunkCount = 0;
     
-    const streamGenerator = llmGateway.streamChat(formattedMessages, {
-      userId: request.userId,
-      requestId: runId,
-      disableImageGeneration: options.disableImageGeneration,
-    });
-    
-    for await (const chunk of streamGenerator) {
-      if (chunk.type === 'delta' && chunk.content) {
-        fullResponse += chunk.content;
-        chunkCount++;
-        
-        writeSse(res, 'chunk', {
-          content: chunk.content,
-          sequence: chunkCount,
-          runId
-        });
-        
-        if (options.onChunk) {
-          options.onChunk(chunk.content);
-        }
-        
-        if (chunkCount % 50 === 0) {
-          await emitTraceEvent(runId, 'progress_update', {
-            progress: {
-              current: chunkCount,
-              total: 0,
-              message: 'Generating response...'
-            }
-          });
-        }
-      } else if (chunk.type === 'done') {
-        break;
-      } else if (chunk.type === 'error') {
-        throw new Error(chunk.error || 'Stream error');
-      }
-    }
-    
-    const durationMs = Date.now() - context.startTime;
-    
     if (isAgenticMode) {
-      await emitTraceEvent(runId, 'agent_completed', {
-        agent: {
-          name: requestSpec.primaryAgent,
-          role: 'primary',
-          status: 'completed'
-        },
-        durationMs
+      await executeAgentLoop(formattedMessages, res, {
+        runId,
+        userId: request.userId,
+        chatId: request.chatId,
+        requestSpec,
+        maxIterations: 10
+      });
+      
+      await emitTraceEvent(runId, 'done', {
+        summary: 'Agent execution completed',
+        durationMs: Date.now() - context.startTime,
+        phase: 'completed'
+      });
+      
+      writeSse(res, 'done', {
+        runId,
+        totalChunks: 0,
+        durationMs: Date.now() - context.startTime,
+        intent: requestSpec.intent,
+        isAgenticMode: true,
+        timestamp: Date.now()
+      });
+    } else {
+      const streamGenerator = llmGateway.streamChat(formattedMessages, {
+        userId: request.userId,
+        requestId: runId,
+        disableImageGeneration: options.disableImageGeneration,
+      });
+      
+      for await (const chunk of streamGenerator) {
+        if (chunk.type === 'delta' && chunk.content) {
+          fullResponse += chunk.content;
+          chunkCount++;
+          
+          writeSse(res, 'chunk', {
+            content: chunk.content,
+            sequence: chunkCount,
+            runId
+          });
+          
+          if (options.onChunk) {
+            options.onChunk(chunk.content);
+          }
+          
+          if (chunkCount % 50 === 0) {
+            await emitTraceEvent(runId, 'progress_update', {
+              progress: {
+                current: chunkCount,
+                total: 0,
+                message: 'Generating response...'
+              }
+            });
+          }
+        } else if (chunk.type === 'done') {
+          break;
+        } else if (chunk.type === 'error') {
+          throw new Error(chunk.error || 'Stream error');
+        }
+      }
+      
+      await emitTraceEvent(runId, 'done', {
+        summary: fullResponse.slice(0, 200),
+        durationMs: Date.now() - context.startTime,
+        phase: 'completed'
+      });
+      
+      writeSse(res, 'done', {
+        runId,
+        totalChunks: chunkCount,
+        durationMs: Date.now() - context.startTime,
+        intent: requestSpec.intent,
+        timestamp: Date.now()
       });
     }
     
-    await emitTraceEvent(runId, 'done', {
-      summary: fullResponse.slice(0, 200),
-      durationMs,
-      phase: 'completed'
-    });
-    
-    writeSse(res, 'done', {
-      runId,
-      totalChunks: chunkCount,
-      durationMs,
-      intent: requestSpec.intent,
-      timestamp: Date.now()
-    });
-    
     const memoryKeys = ['last_intent', 'last_deliverable'];
+    const finalDurationMs = Date.now() - context.startTime;
     await Promise.all([
       db.update(agentModeRuns)
         .set({ status: 'completed' })
         .where(eq(agentModeRuns.id, runId))
         .catch(err => console.error('[UnifiedChat] Failed to update run status:', err)),
-      persistRequestSpec(context, 'completed', durationMs),
+      persistRequestSpec(context, 'completed', finalDurationMs),
       storeMemory(request.chatId, request.userId, 'last_intent', requestSpec.intent, 'context'),
       storeMemory(request.chatId, request.userId, 'last_deliverable', requestSpec.deliverableType || 'none', 'context'),
     ]).catch(() => {});

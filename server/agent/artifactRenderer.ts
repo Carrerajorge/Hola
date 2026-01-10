@@ -1079,9 +1079,15 @@ function formatBytes(bytes: number): string {
 // Exports
 // ============================================
 
-export {
-  PresentationSpec,
+export type {
+  SlideSpec,
   DocSpec,
   SheetSpec,
-  ArtifactSpec,
+} from "./builderSpec";
+
+export {
+  SlideSpecSchema,
+  DocSpecSchema,
+  SheetSpecSchema,
+  ArtifactSpecSchema,
 } from "./builderSpec";
