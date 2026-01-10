@@ -33,8 +33,38 @@ Preferred communication style: Simple, everyday language.
 - **Document Generation System**: Generates Excel and Word files using LLM orchestration with repair loops, including professional CV/Resume generation.
 - **Spreadsheet Analyzer Module**: AI-powered analysis, LLM agent for Python code generation (with AST-based security validation), and a secure Python sandbox for execution.
 - **Agent Infrastructure**: Modular plugin architecture with a StateMachine, Typed Contracts (Zod schemas), Event Sourcing, a PolicyEngine for RBAC, and an ExecutionEngine with circuit breakers and exponential backoff.
-- **Tool Registry**: Registers 9 core tools (`analyze_spreadsheet`, `web_search`, `generate_image`, `browse_url`, `generate_document`, `read_file`, `write_file`, `shell_command`, `list_files`) with standardized outputs and sandboxed execution.
-- **Enhanced Pipeline Tools**: 12 specialized tools for agent execution covering Web (search, navigate, extract), Files (generate, operations), Code (generate, shell_execute), Development (webdev_scaffold), Documents (slides_generate), Data (transform, analyze), and Response (respond).
+- **Tool Registry**: Production-grade registry with **103 agent tools** across 21 categories, standardized outputs, and sandboxed execution:
+  - **Orchestration (3)**: plan, orchestrate, workflow - multi-agent coordination with DAGs, parallel/sequential strategies
+  - **Memory (4)**: memory_store, memory_retrieve, context_manage, session_state - vector embeddings, semantic search, PostgreSQL persistence
+  - **Reasoning (3)**: reason (CoT/ToT/GoT), reflect, verify - logical reasoning with confidence scores
+  - **Communication (4)**: message, clarify, summarize, explain, decide - user interaction and decision framework
+  - **System (7)**: shell, code_execute, file, python, environment, file_convert, search_semantic - sandboxed execution
+  - **Research (4)**: search_web, fetch_url, research_deep, browser - multi-provider web search, content extraction
+  - **Web Automation (5)**: browser_navigate, browser_interact, browser_extract, browser_session - Playwright-based
+  - **Generation (6)**: generate_text, generate_image, generate_audio, generate_video, generate_music, qr_code_generate
+  - **Processing (4)**: transcribe_audio, vision_analyze, video_analyze, ocr_extract - multimodal processing
+  - **Data (4)**: data_analyze, data_visualize, data_transform, data_query - statistical analysis, charting
+  - **Documents (5)**: doc_create, slides_create, spreadsheet_create, pdf_manipulate, document - multi-format generation
+  - **Development (7)**: code_generate, code_review, code_refactor, code_test, code_debug, webdev_init_project
+  - **Diagrams (3)**: render_diagram, render_chart, render_math - Mermaid, PlantUML, KaTeX
+  - **API (3)**: api_call, webhook_send, graphql_query, oauth_token - HTTP client, webhooks, GraphQL
+  - **Productivity (5)**: calendar_create, reminder_set, note_create, task_create, timer_start - scheduling, tasks
+  - **Security (6)**: encrypt_data, decrypt_data, hash_data, validate_input, secrets_manage, audit_log - AES-256-GCM, PBKDF2
+  - **Automation (4)**: workflow_create, scheduler_create, event_emit, batch_process - n8n/Zapier/Temporal export
+  - **Database (4)**: db_migrate, db_backup, db_schema, db_optimize - Drizzle/Prisma/Knex support
+  - **Monitoring (4)**: metrics_collect, alert_create, logs_analyze, health_check, tracing_create - Prometheus, Grafana
+  - **Utility (7)**: translate_text, currency_convert, unit_convert, uuid_generate, regex_test - multi-language translation
+- **10 Specialized Agents**: Production-grade agent system with dedicated specialists:
+  - **OrchestratorAgent**: Super-agent for multi-agent coordination and workflow management
+  - **ResearchAgent**: Web research, information gathering, fact-checking with multi-source synthesis
+  - **CodeAgent**: Code generation, review, refactoring, debugging with AST validation
+  - **DataAgent**: Statistical analysis, transformation, visualization with Python sandbox
+  - **ContentAgent**: Content creation, document generation, professional writing
+  - **CommunicationAgent**: Email, notifications, messaging management
+  - **BrowserAgent**: Autonomous web browsing, automation, scraping with Playwright
+  - **DocumentAgent**: Document processing, conversion, analysis (PDF, DOCX, XLSX, PPTX)
+  - **QAAgent**: Testing, validation, quality assurance with automated test generation
+  - **SecurityAgent**: Security analysis, vulnerability assessment, compliance auditing
 - **Phase-Based Planning**: Agent plans organized into logical phases (Research → Planning → Execution → Verification → Delivery).
 - **WebTool Module**: Layered architecture for web navigation and information retrieval with URL canonicalization, content deduplication, quality scoring, content extraction, and sandbox security.
 - **Ultra-Fast Web Retrieval System**: High-performance web retrieval with parallel execution, intelligent caching, relevance filtering, and streaming results.
