@@ -788,6 +788,103 @@ ${sources.slice(0, 10).map((s, i) => `${i + 1}. ${s.title} (${s.year})`).join("\
       }
     }
     
+    // AGENTIC SUPER-COMPLEX PIPELINE: Planner → Executor → Critic loop with iterative refinement
+    // Activated when user requests "agentic", "iterative", "optimize", "verify quality" modes
+    const AGENTIC_COMPLEX_PATTERN = /(?:modo\s+)?(?:ag[eé]ntico|iterativo|optimiza|verifica|calidad|planner|critic|bucle|loop|refin)/i;
+    const PPT_REQUEST_PATTERN = /(?:crea|genera|haz).*(ppt|powerpoint|presentaci[oó]n)/i;
+    if (lastUserMessage && AGENTIC_COMPLEX_PATTERN.test(lastUserMessage.content) && PPT_REQUEST_PATTERN.test(lastUserMessage.content) && !documentMode && !figmaMode) {
+      console.log(`[ChatService:AgenticSuperComplex] Detected agentic pipeline request`);
+      
+      try {
+        const { AgenticPipeline } = await import("../agent/pipelines/agenticPipeline");
+        const agenticPipeline = new AgenticPipeline();
+        
+        // Subscribe to phase events for real-time feedback
+        agenticPipeline.on("phase_start", ({ phase, iteration }) => {
+          console.log(`[AgenticPipeline] Phase: ${phase}${iteration !== undefined ? ` (iteration ${iteration})` : ""}`);
+        });
+        agenticPipeline.on("critic_feedback", ({ feedback }) => {
+          console.log(`[AgenticPipeline] Critic: ${feedback.passed ? "PASSED" : "NEEDS_REFINEMENT"} (${(feedback.metrics.overallScore * 100).toFixed(0)}%)`);
+        });
+        
+        // Detect audience and goal from message
+        const isAcademic = /acad[eé]mic|universidad|tesis|paper|investigaci[oó]n|apa/i.test(lastUserMessage.content);
+        const isExecutive = /ejecutivo|gerente|director|junta|board|resumen/i.test(lastUserMessage.content);
+        
+        const result = await agenticPipeline.execute(lastUserMessage.content, {
+          audience: isAcademic ? "academic" : isExecutive ? "executive" : "general",
+          goal: isAcademic ? "educate" : "inform",
+          maxIterations: 3,
+        });
+        
+        if (result.success && result.artifact) {
+          const fs = await import("fs");
+          const path = await import("path");
+          const artifactsDir = path.join(process.cwd(), "artifacts");
+          if (!fs.existsSync(artifactsDir)) {
+            fs.mkdirSync(artifactsDir, { recursive: true });
+          }
+          
+          const filename = `agentic_ppt_${Date.now()}.pptx`;
+          const filepath = path.join(artifactsDir, filename);
+          fs.writeFileSync(filepath, result.artifact.buffer);
+          
+          const state = result.state;
+          const plan = state.plan!;
+          const lastFeedback = state.iterations.length > 0 ? state.iterations[state.iterations.length - 1].feedback : null;
+          
+          const iterationsSummary = state.iterations.map((it, i) => 
+            `  ${i + 1}. Score: ${(it.feedback.metrics.overallScore * 100).toFixed(0)}% - ${it.actionsCompleted.length} acciones`
+          ).join("\n");
+          
+          return {
+            content: `He creado una presentación profesional sobre **${plan.topic}** usando el pipeline agéntico con bucle Planner → Executor → Critic.
+
+**🎯 Configuración:**
+- Audiencia: ${plan.audience}
+- Objetivo: ${plan.goal}
+- Duración estimada: ${plan.duration} min
+- Story Arc: ${plan.storyArc.hook}
+
+**📊 Métricas de Calidad (final):**
+- Cobertura de fuentes: ${((lastFeedback?.metrics.sourceCoverage || 0) * 100).toFixed(0)}%
+- Coherencia narrativa: ${((lastFeedback?.metrics.narrativeCoherence || 0) * 100).toFixed(0)}%
+- Grounding de evidencia: ${((lastFeedback?.metrics.evidenceGrounding || 0) * 100).toFixed(0)}%
+- Score general: ${((lastFeedback?.metrics.overallScore || 0) * 100).toFixed(0)}%
+
+**🔄 Iteraciones de refinamiento:** ${state.iterations.length}
+${iterationsSummary || "  (Ninguna - aprobó en primera iteración)"}
+
+**📑 Estructura del deck:** ${state.slides.length} slides
+**🔗 Fuentes utilizadas:** ${state.sources.length}
+**📖 Claims con grounding:** ${state.evidence.filter(e => e.verified).length}/${state.evidence.length}
+
+**💡 Insights generados:** ${state.insights.length}`,
+            role: "assistant",
+            artifact: {
+              type: "presentation",
+              mimeType: result.artifact.mimeType,
+              downloadUrl: `/api/artifacts/${filename}`,
+              contentUrl: `/api/artifacts/${filename}/content`,
+              sizeBytes: result.artifact.sizeBytes,
+            },
+            agenticMetadata: {
+              iterations: state.iterations.length,
+              finalScore: lastFeedback?.metrics.overallScore || 0,
+              grounded: state.groundingReport?.overallGroundingScore || 0,
+              audience: plan.audience,
+              goal: plan.goal,
+            }
+          };
+        } else {
+          console.warn(`[ChatService:AgenticSuperComplex] Pipeline failed:`, result.state.error);
+        }
+      } catch (agenticError: any) {
+        console.error(`[ChatService:AgenticSuperComplex] Error:`, agenticError);
+        // Fall through to normal flow
+      }
+    }
+    
     // AGENTIC PIPELINE: Route complex requests through AgentLoopFacade when feature flag is enabled
     // This provides multi-agent orchestration, QA verification, and SSE streaming for complex tasks
     if (AGENTIC_PIPELINE_ENABLED && lastUserMessage && !documentMode && !figmaMode && !hasImages) {
