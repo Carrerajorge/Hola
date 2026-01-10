@@ -1845,34 +1845,6 @@ const AssistantMessage = memo(function AssistantMessage({
         </motion.div>
       )}
 
-      {message.content && !message.isThinking && (
-        <div className="flex items-center gap-3 mt-2">
-          {message.timestamp && (
-            <span className="text-[10px] text-muted-foreground/60">
-              {formatMessageTime(message.timestamp)}
-            </span>
-          )}
-          <ActionToolbar
-            messageId={message.id}
-            content={message.content}
-            msgIndex={msgIndex}
-            copiedMessageId={copiedMessageId}
-            messageFeedback={messageFeedback}
-            speakingMessageId={speakingMessageId}
-            aiState={aiState}
-            isRegenerating={isRegenerating}
-            variant={variant}
-            webSources={message.webSources}
-            onCopy={onCopyMessage}
-            onFeedback={onFeedback}
-            onRegenerate={onRegenerate}
-            onShare={onShare}
-            onReadAloud={onReadAloud}
-            onViewSources={() => setSourcesPanelOpen(true)}
-          />
-        </div>
-      )}
-
       {message.figmaDiagram && (
         <div className="mt-3 w-full">
           <FigmaBlock diagram={message.figmaDiagram} />
@@ -2016,6 +1988,34 @@ const AssistantMessage = memo(function AssistantMessage({
             attachments={message.attachments}
             variant={variant}
             onReopenDocument={onReopenDocument}
+          />
+        </div>
+      )}
+
+      {message.content && !message.isThinking && (
+        <div className="flex items-center gap-3 mt-4">
+          {message.timestamp && (
+            <span className="text-[10px] text-muted-foreground/60">
+              {formatMessageTime(message.timestamp)}
+            </span>
+          )}
+          <ActionToolbar
+            messageId={message.id}
+            content={message.content}
+            msgIndex={msgIndex}
+            copiedMessageId={copiedMessageId}
+            messageFeedback={messageFeedback}
+            speakingMessageId={speakingMessageId}
+            aiState={aiState}
+            isRegenerating={isRegenerating}
+            variant={variant}
+            webSources={message.webSources}
+            onCopy={onCopyMessage}
+            onFeedback={onFeedback}
+            onRegenerate={onRegenerate}
+            onShare={onShare}
+            onReadAloud={onReadAloud}
+            onViewSources={() => setSourcesPanelOpen(true)}
           />
         </div>
       )}
