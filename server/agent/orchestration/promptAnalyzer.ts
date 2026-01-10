@@ -454,11 +454,13 @@ export class PromptAnalyzer extends EventEmitter {
     runId?: string
   ): Promise<MemoryContext> {
     const now = Date.now();
+    console.log(`[Memory] Retrieving memory for session ${sessionId}${runId ? ` (run: ${runId})` : ''}`);
     
     try {
       const memory = await memoryStore.get(sessionId);
       
       if (!memory) {
+        console.log(`[Memory] No existing memory found for session ${sessionId}, starting fresh`);
         return {
           facts: [],
           previousActions: [],
@@ -508,7 +510,7 @@ export class PromptAnalyzer extends EventEmitter {
         lastMessageTimestamp: memory.messages[memory.messages.length - 1]?.timestamp
       };
 
-      return {
+      const memoryContext = {
         facts: facts.slice(-20),
         previousActions: previousActions.slice(-10),
         workingContext,
@@ -516,8 +518,12 @@ export class PromptAnalyzer extends EventEmitter {
         lastAccessedAt: now
       };
       
+      console.log(`[Memory] Retrieved ${memoryContext.facts.length} facts and ${memoryContext.previousActions.length} actions for session ${sessionId}`);
+      
+      return memoryContext;
+      
     } catch (error: any) {
-      console.error(`[PromptAnalyzer] Memory hydration failed: ${error.message}`);
+      console.error(`[Memory] Hydration failed for session ${sessionId}: ${error.message}`);
       return {
         facts: [],
         previousActions: [],
@@ -525,6 +531,76 @@ export class PromptAnalyzer extends EventEmitter {
         relevantTurns: 0,
         lastAccessedAt: now
       };
+    }
+  }
+
+  async storeExecutionMemory(
+    sessionId: string,
+    runId: string,
+    data: {
+      userMessage: string;
+      assistantResponse: string;
+      intent: string;
+      toolsUsed: string[];
+      agentsUsed: string[];
+      artifacts: Array<{ id: string; type: string; name: string }>;
+      success: boolean;
+    }
+  ): Promise<void> {
+    const now = Date.now();
+    console.log(`[Memory] Storing facts for session ${sessionId} (run: ${runId})`);
+    
+    try {
+      await memoryStore.addMessage(sessionId, "user", data.userMessage);
+      
+      const toolCallsData = data.toolsUsed.map(tool => ({
+        name: tool,
+        args: {},
+        result: data.success ? "success" : "failed"
+      }));
+      
+      await memoryStore.addMessage(
+        sessionId, 
+        "assistant", 
+        data.assistantResponse,
+        toolCallsData.length > 0 ? toolCallsData : undefined
+      );
+      
+      const contextUpdate: Record<string, any> = {
+        lastRunId: runId,
+        lastIntent: data.intent,
+        lastUpdated: now,
+        totalRuns: 0
+      };
+      
+      if (data.agentsUsed.length > 0) {
+        contextUpdate.lastAgentsUsed = data.agentsUsed;
+      }
+      
+      if (data.artifacts.length > 0) {
+        const existingMemory = await memoryStore.get(sessionId);
+        const existingArtifacts = existingMemory?.context?.artifacts || [];
+        contextUpdate.artifacts = [
+          ...existingArtifacts.slice(-20),
+          ...data.artifacts.map(a => ({
+            id: a.id,
+            type: a.type,
+            name: a.name,
+            createdAt: now,
+            runId
+          }))
+        ].slice(-25);
+      }
+      
+      const existingMemory = await memoryStore.get(sessionId);
+      contextUpdate.totalRuns = (existingMemory?.context?.totalRuns || 0) + 1;
+      
+      await memoryStore.updateContext(sessionId, contextUpdate);
+      
+      console.log(`[Memory] Stored execution data for session ${sessionId}: ${data.toolsUsed.length} tools, ${data.agentsUsed.length} agents, ${data.artifacts.length} artifacts`);
+      
+    } catch (error: any) {
+      console.error(`[Memory] Failed to store execution memory for session ${sessionId}: ${error.message}`);
     }
   }
 

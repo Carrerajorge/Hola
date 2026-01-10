@@ -329,6 +329,24 @@ export class AgentLoopFacade extends EventEmitter {
         artifactsCount: executionResult.artifacts.length,
       });
 
+      await this.promptAnalyzer.storeExecutionMemory(
+        validatedContext.sessionId,
+        runId,
+        {
+          userMessage: message,
+          assistantResponse: executionResult.content,
+          intent: analysis.intent,
+          toolsUsed: executionResult.toolsUsed,
+          agentsUsed: executionResult.agentsUsed,
+          artifacts: executionResult.artifacts.map(a => ({
+            id: a.id,
+            type: a.type,
+            name: a.name
+          })),
+          success: true
+        }
+      );
+
       this.emitPipelineEvent("pipeline_completed", runId, {
         success: true,
         durationMs,
@@ -347,6 +365,24 @@ export class AgentLoopFacade extends EventEmitter {
       activeRun.status = "failed";
 
       console.error(`[AgentLoopFacade] Pipeline failed for run ${runId}:`, error);
+
+      try {
+        await this.promptAnalyzer.storeExecutionMemory(
+          validatedContext.sessionId,
+          runId,
+          {
+            userMessage: message,
+            assistantResponse: `Error: ${error.message}`,
+            intent: activeRun.analysis?.intent || "unknown",
+            toolsUsed: [],
+            agentsUsed: [],
+            artifacts: [],
+            success: false
+          }
+        );
+      } catch (memError) {
+        console.error(`[Memory] Failed to store error context:`, memError);
+      }
 
       activityStreamPublisher.publishRunFailed(runId, {
         status: "failed",
