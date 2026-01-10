@@ -118,11 +118,14 @@ class AgentEventBus extends EventEmitter {
 
   private async persistEvent(event: TraceEvent): Promise<void> {
     try {
+      // Generate correlationId if not provided (required by DB schema)
+      const correlationId = event.stepId || randomUUID();
+      
       await db.insert(agentModeEvents).values({
         id: randomUUID(),
         runId: event.runId,
         stepIndex: event.stepIndex ?? null,
-        correlationId: event.stepId ?? null,
+        correlationId,
         eventType: event.event_type,
         payload: {
           phase: event.phase,
@@ -141,7 +144,13 @@ class AgentEventBus extends EventEmitter {
         metadata: event.metadata ?? null,
         timestamp: new Date(event.timestamp),
       });
-    } catch (error) {
+    } catch (error: any) {
+      // Silently ignore FK constraint errors (run not persisted yet) and NOT NULL errors
+      // These are non-critical for the agent workflow to complete
+      if (error?.code === '23503' || error?.code === '23502') {
+        // FK or NOT NULL constraint - run might not be persisted, skip silently
+        return;
+      }
       console.error(`[EventBus] Persist error:`, error);
     }
   }

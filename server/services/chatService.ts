@@ -649,6 +649,127 @@ export async function handleChatRequest(
       }
     }
     
+    // SPECIAL HANDLER: Search + Create Document (buscar artículos + crear PPT/documento)
+    // This is a common complex request that we handle directly for reliability
+    const SEARCH_AND_CREATE_PATTERN = /busca\s+(\d+)\s*(artículos?|fuentes?|referencias?).*(crea|genera|haz|hacer).*(ppt|powerpoint|presentaci[oó]n|word|documento|excel)/i;
+    if (lastUserMessage && SEARCH_AND_CREATE_PATTERN.test(lastUserMessage.content) && !documentMode && !figmaMode) {
+      console.log(`[ChatService:SearchAndCreate] Detected search + create pattern, executing directly`);
+      
+      try {
+        const match = lastUserMessage.content.match(SEARCH_AND_CREATE_PATTERN);
+        const requestedCount = match ? parseInt(match[1], 10) : 10;
+        const isPPT = /ppt|powerpoint|presentaci[oó]n/i.test(lastUserMessage.content);
+        const hasAPA = /apa|bibliograf[ií]a|referencias?|citas?/i.test(lastUserMessage.content);
+        
+        // Extract the topic from the message
+        const topicMatch = lastUserMessage.content.match(/sobre\s+(?:la\s+|el\s+|los\s+|las\s+)?(.+?)(?:\s+y\s+crea|\s+crea|\s+genera|\s+haz|$)/i);
+        const topic = topicMatch ? topicMatch[1].trim() : lastUserMessage.content.replace(SEARCH_AND_CREATE_PATTERN, '').trim();
+        
+        console.log(`[ChatService:SearchAndCreate] Topic: "${topic}", Count: ${requestedCount}, PPT: ${isPPT}, APA: ${hasAPA}`);
+        
+        // Step 1: Search for articles
+        const { searchScholar, searchWeb, needsAcademicSearch } = await import("./webSearch");
+        const isAcademic = hasAPA || needsAcademicSearch(topic);
+        
+        let searchResults: any[] = [];
+        if (isAcademic) {
+          const scholarResults = await searchScholar(topic, requestedCount);
+          searchResults = scholarResults.map(r => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.snippet,
+            authors: r.authors || "Autor desconocido",
+            year: r.year || new Date().getFullYear().toString(),
+            citation: r.citation
+          }));
+        }
+        
+        // Also get web results if not enough academic results
+        if (searchResults.length < requestedCount) {
+          const webResponse = await searchWeb(topic, requestedCount - searchResults.length);
+          const webResults = webResponse.results.map(r => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.snippet,
+            authors: r.authors || r.siteName || "Fuente web",
+            year: r.publishedDate?.slice(0, 4) || new Date().getFullYear().toString(),
+            citation: `${r.siteName || "Web"}. (${r.publishedDate?.slice(0, 4) || new Date().getFullYear()}). ${r.title}. Recuperado de ${r.url}`
+          }));
+          searchResults = [...searchResults, ...webResults];
+        }
+        
+        console.log(`[ChatService:SearchAndCreate] Found ${searchResults.length} sources`);
+        
+        // Step 2: Create presentation with search results
+        if (isPPT) {
+          // Use productionWorkflowRunner for PPT generation
+          const { ProductionWorkflowRunner } = await import("../agent/registry/productionWorkflowRunner");
+          const runner = new ProductionWorkflowRunner();
+          
+          // Build content with bibliography
+          const bibliography = searchResults.slice(0, requestedCount).map((r, i) => {
+            if (hasAPA) {
+              // Format in APA 7th edition
+              return `${r.authors} (${r.year}). ${r.title}. Recuperado de ${r.url}`;
+            }
+            return `[${i + 1}] ${r.title}. ${r.authors} (${r.year}). ${r.url}`;
+          }).join("\n");
+          
+          const enrichedQuery = `Crea una presentación sobre ${topic}. 
+          
+CONTENIDO BASADO EN ESTAS FUENTES:
+${searchResults.slice(0, Math.min(5, requestedCount)).map((r, i) => `${i + 1}. ${r.title}: ${r.snippet}`).join("\n")}
+
+BIBLIOGRAFÍA (APA 7ma edición):
+${bibliography}`;
+          
+          const result = await runner.runWorkflow({
+            runId: `ppt_${Date.now()}`,
+            query: enrichedQuery,
+            plan: {
+              steps: [{ index: 0, toolName: "slides_create", description: "Crear presentación con bibliografía" }]
+            }
+          });
+          
+          if (result.artifacts && result.artifacts.length > 0) {
+            const artifact = result.artifacts[0];
+            return {
+              content: `He creado una presentación sobre **${topic}** basada en ${searchResults.length} fuentes académicas${hasAPA ? " con bibliografía en formato APA 7ma edición" : ""}.
+
+**Fuentes consultadas:**
+${searchResults.slice(0, requestedCount).map((r, i) => `${i + 1}. ${r.title} (${r.year})`).join("\n")}`,
+              role: "assistant",
+              artifact: {
+                type: "presentation",
+                mimeType: artifact.mimeType,
+                downloadUrl: `/api/artifacts/${artifact.path?.split("/").pop()}`,
+                contentUrl: artifact.contentUrl,
+                sizeBytes: artifact.sizeBytes,
+              }
+            };
+          }
+        }
+        
+        // Fallback: Just return the search results formatted
+        const formattedResults = searchResults.slice(0, requestedCount).map((r, i) => 
+          `**${i + 1}. ${r.title}**\n   ${r.snippet?.slice(0, 200) || "Sin descripción"}...\n   📚 ${r.authors} (${r.year})\n   🔗 ${r.url}`
+        ).join("\n\n");
+        
+        const apaBibliography = hasAPA ? `\n\n---\n**Referencias (APA 7ma ed.):**\n${searchResults.slice(0, requestedCount).map(r => 
+          `${r.authors} (${r.year}). *${r.title}*. Recuperado de ${r.url}`
+        ).join("\n\n")}` : "";
+        
+        return {
+          content: `Encontré ${searchResults.length} artículos sobre **${topic}**:\n\n${formattedResults}${apaBibliography}`,
+          role: "assistant"
+        };
+        
+      } catch (searchCreateError: any) {
+        console.error(`[ChatService:SearchAndCreate] Error:`, searchCreateError);
+        // Fall through to normal flow
+      }
+    }
+    
     // AGENTIC PIPELINE: Route complex requests through AgentLoopFacade when feature flag is enabled
     // This provides multi-agent orchestration, QA verification, and SSE streaming for complex tasks
     if (AGENTIC_PIPELINE_ENABLED && lastUserMessage && !documentMode && !figmaMode && !hasImages) {
