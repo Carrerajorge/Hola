@@ -494,8 +494,17 @@ export async function handleChatRequest(
       
       console.log(`[IntentGuard] Detected intent: ${intentContract.taskType}, goal: ${intentContract.userGoal}, documentPresent: ${intentContract.documentPresent}`);
       
-      // DOCUMENT ANALYSIS MODE: If document is present and task is document-related
-      if (intentContract.documentPresent && intentContract.taskType.startsWith("document_")) {
+      // CHECK: Does user also want to generate an OUTPUT artifact (DOCX, XLSX, PPTX)?
+      // If so, skip document-only analysis and let ProductionWorkflowRunner handle it
+      const outputArtifactIntent = classifyIntent(lastUserMessage.content);
+      const wantsOutputArtifact = isGenerationIntent(outputArtifactIntent);
+      
+      if (wantsOutputArtifact) {
+        console.log(`[IntentGuard] OUTPUT ARTIFACT REQUESTED: ${outputArtifactIntent} - Skipping document-only analysis, routing to ProductionWorkflowRunner`);
+        // Fall through to ProductionWorkflowRunner handling below
+      }
+      // DOCUMENT ANALYSIS MODE: If document is present and task is document-related (but NO output artifact requested)
+      else if (intentContract.documentPresent && intentContract.taskType.startsWith("document_")) {
         console.log("[ChatService] DOCUMENT ANALYSIS MODE: Intent contract enforced");
         
         const fullDocContext = persistentDocumentContext + attachmentContext;
@@ -705,16 +714,24 @@ FORMATO DE RESPUESTA:
     
     // PRODUCTION WORKFLOW: Route generation intents (image, slides, docs) through ProductionWorkflowRunner
     // This ensures real artifacts are generated with proper termination guarantees
-    // IMPORTANT: Skip when attachments are present - document analysis takes priority
-    // Use hasRawAttachments (from original request) OR attachmentContext (extracted content) to ensure
-    // we block generation even if extraction failed
+    // NEW: Allow artifact generation WITH attachments if user explicitly wants OUTPUT artifact
+    // (e.g., "genera un documento Word con el resumen de este PDF")
     const hasAttachments = hasRawAttachments || (attachmentContext && attachmentContext.length > 0);
-    if (!documentMode && !figmaMode && !hasImages && !hasAttachments) {
-      const intent = classifyIntent(lastUserMessage.content);
-      if (isGenerationIntent(intent)) {
-        console.log(`[ChatService] Generation intent detected: ${intent}, routing to ProductionWorkflowRunner`);
+    const intent = classifyIntent(lastUserMessage.content);
+    const wantsOutputArtifact = isGenerationIntent(intent);
+    
+    // Execute ProductionWorkflowRunner if:
+    // 1. No attachments and generation intent detected, OR
+    // 2. Has attachments but user explicitly wants to GENERATE an output artifact
+    if (!documentMode && !figmaMode && !hasImages && (wantsOutputArtifact || !hasAttachments)) {
+      if (wantsOutputArtifact) {
+        console.log(`[ChatService] Generation intent detected: ${intent}, routing to ProductionWorkflowRunner${hasAttachments ? ' (with attachment context)' : ''}`);
         try {
-          const { run, response } = await productionWorkflowRunner.executeAndWait(lastUserMessage.content);
+          // Include attachment context in the prompt if available
+          const enrichedPrompt = hasAttachments && attachmentContext 
+            ? `${lastUserMessage.content}\n\n[DOCUMENTO DE REFERENCIA]\n${attachmentContext.slice(0, 20000)}`
+            : lastUserMessage.content;
+          const { run, response } = await productionWorkflowRunner.executeAndWait(enrichedPrompt);
           
           // Build response with artifact information
           let artifactInfo = null;
