@@ -1257,6 +1257,12 @@ export function ChatInterface({
         console.debug('[ChatInterface] Aborted pending request due to chat switch');
       }
       
+      if (analysisAbortControllerRef.current) {
+        analysisAbortControllerRef.current.abort();
+        analysisAbortControllerRef.current = null;
+        console.debug('[ChatInterface] Aborted pending analysis due to chat switch');
+      }
+      
       // Clear streaming content - the content was for the previous chat
       setStreamingContent("");
       streamingContentRef.current = "";
@@ -1660,6 +1666,7 @@ export function ChatInterface({
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const analysisAbortControllerRef = useRef<AbortController | null>(null);
   const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const streamingContentRef = useRef<string>("");
   const aiStateRef = useRef<"idle" | "thinking" | "responding">("idle");
@@ -1719,6 +1726,12 @@ export function ChatInterface({
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
+    }
+    
+    // Abort any ongoing document analysis request
+    if (analysisAbortControllerRef.current) {
+      analysisAbortControllerRef.current.abort();
+      analysisAbortControllerRef.current = null;
     }
     
     // Clear any streaming interval
@@ -3148,6 +3161,111 @@ export function ChatInterface({
     };
 
     console.log("[handleSubmit] sending user message:", userMsg, "chatId:", chatId);
+    
+    // DATA_MODE: Pre-check if we have document attachments that need analysis
+    // This must happen BEFORE onSendMessage to avoid race conditions with chat navigation
+    const isDocumentFileLegacyPrecheck = (mimeType: string, fileName: string, type?: string): boolean => {
+      const lowerMime = (mimeType || "").toLowerCase();
+      const lowerName = (fileName || "").toLowerCase();
+      const lowerType = (type || "").toLowerCase();
+      
+      if (lowerType === "image" || lowerMime.startsWith("image/")) return false;
+      
+      const docMimePatterns = ["pdf", "word", "document", "sheet", "excel", "spreadsheet", "presentation", "powerpoint", "csv", "text/plain", "text/csv", "application/json"];
+      if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
+      
+      const docExtensions = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"];
+      if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
+      
+      if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType)) return true;
+      
+      if (!lowerMime || lowerMime === "application/octet-stream") {
+        const hasImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"].some(ext => lowerName.endsWith(ext));
+        return !hasImageExt;
+      }
+      
+      return false;
+    };
+    
+    const hasDocumentAttachmentsPrecheck = attachments.some(a => isDocumentFileLegacyPrecheck(a.mimeType || String(a.type), a.name, String(a.type)));
+    
+    // Store pre-fetched analysis result to use later (prevents race condition)
+    let preFetchedAnalysisResult: { 
+      answer_text?: string; 
+      ui_components?: any[]; 
+      documentModel?: any; 
+      insights?: string[];
+      suggestedQuestions?: string[];
+    } | null = null;
+    
+    // If we have document attachments, execute analysis BEFORE calling onSendMessage
+    // This prevents race condition where chat navigation interrupts the fetch
+    // The result is stored and used later in the legacy flow
+    // Use a DEDICATED controller for pre-fetch to not interfere with main abortControllerRef
+    if (hasDocumentAttachmentsPrecheck) {
+      console.log("[handleSubmit] DATA_MODE (Pre-send): Executing document analysis BEFORE chat navigation");
+      
+      // Create a dedicated abort controller for the pre-fetch, stored in shared ref for cancellation
+      analysisAbortControllerRef.current = new AbortController();
+      
+      try {
+        // Clean attachments for server
+        const cleanedAttachments = attachments.map((att: any) => {
+          const { spreadsheetData, previewData, ...rest } = att;
+          const normalizedType = ['word', 'excel', 'pdf', 'ppt', 'text', 'csv'].includes(rest.type?.toLowerCase?.()) 
+            ? 'document' 
+            : (rest.type === 'image' ? 'image' : 'document');
+          return { ...rest, type: normalizedType };
+        });
+        
+        const effectiveConversationId = chatId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+        const finalChatHistoryPrecheck = [
+          ...messages.map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+          { role: "user", content: userInput }
+        ];
+        
+        console.log("[handleSubmit] Pre-send: Fetching /api/analyze with attachments:", cleanedAttachments.map((a: any) => ({ name: a.name, storagePath: a.storagePath })));
+        
+        const analyzeResponse = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: finalChatHistoryPrecheck,
+            attachments: cleanedAttachments,
+            conversationId: effectiveConversationId
+          }),
+          signal: analysisAbortControllerRef.current.signal
+        });
+        
+        console.log("[handleSubmit] Pre-send: Analyze response status:", analyzeResponse.status);
+        
+        if (analyzeResponse.ok) {
+          preFetchedAnalysisResult = await analyzeResponse.json();
+          console.log("[handleSubmit] Pre-send: Analysis successful, stored for later use");
+        } else {
+          const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+          console.error("[handleSubmit] Pre-send: Analyze error:", analyzeResponse.status, errorData);
+          // Fall through to normal flow if analysis fails
+        }
+      } catch (analyzeError: any) {
+        if (analyzeError?.name === "AbortError") {
+          console.log("[handleSubmit] Pre-send: Analysis was cancelled by user");
+          setAiState("idle");
+          setAiProcessSteps([]);
+          analysisAbortControllerRef.current = null;
+          return; // User cancelled, don't continue
+        } else {
+          console.error("[handleSubmit] Pre-send: Analysis failed:", analyzeError?.message || analyzeError);
+        }
+        // Fall through to normal flow
+      } finally {
+        analysisAbortControllerRef.current = null; // Clear the ref after analysis completes
+      }
+    }
+    
     // Send user message and get run info for SSE streaming
     const messageResult = await onSendMessage(userMsg);
     console.log("[handleSubmit] messageResult:", messageResult);
@@ -3903,32 +4021,52 @@ IMPORTANTE:
         
         const hasDocumentAttachments = attachments.some(a => isDocumentFileLegacy(a.mimeType || a.type, a.name, a.type));
         
-        if (hasDocumentAttachments) {
-          console.log("[handleSubmit] DATA_MODE (Legacy): Using /analyze endpoint for document analysis");
+        // Use pre-fetched result if available (prevents race condition)
+        // Note: We send the analysis result and then continue with normal flow (no early return)
+        if (hasDocumentAttachments && preFetchedAnalysisResult) {
+          console.log("[handleSubmit] DATA_MODE (Legacy): Using pre-fetched analysis result");
           
-          // Clean attachments for server - remove large spreadsheetData and normalize type
+          // Send analysis result as assistant message
+          const analysisMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: preFetchedAnalysisResult.answer_text || "Análisis del documento completado.",
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+            ui_components: preFetchedAnalysisResult.ui_components || [],
+            documentAnalysis: preFetchedAnalysisResult.documentModel ? {
+              documentModel: preFetchedAnalysisResult.documentModel,
+              insights: preFetchedAnalysisResult.insights || [],
+              suggestedQuestions: preFetchedAnalysisResult.suggestedQuestions || [],
+            } : undefined,
+          };
+          onSendMessage(analysisMsg);
+          
+          // Complete the flow and return - document analysis is a complete response
+          setAiState("idle");
+          setAiProcessSteps([]);
+          abortControllerRef.current = null;
+          return;
+        } else if (hasDocumentAttachments && !preFetchedAnalysisResult) {
+          // Pre-fetch failed, try again (fallback - shouldn't normally happen)
+          console.log("[handleSubmit] DATA_MODE (Legacy): Pre-fetch failed, falling back to /api/analyze fetch");
+          
           const cleanedAttachments = attachments.map((att: any) => {
             const { spreadsheetData, previewData, ...rest } = att;
-            // Normalize type: 'word', 'excel', 'pdf', 'ppt' -> 'document'
             const normalizedType = ['word', 'excel', 'pdf', 'ppt', 'text', 'csv'].includes(rest.type?.toLowerCase?.()) 
               ? 'document' 
               : (rest.type === 'image' ? 'image' : 'document');
             return { ...rest, type: normalizedType };
           });
           
-          // Ensure conversationId is a string (generate one if null)
           const effectiveConversationId = chatId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
           
-          console.log("[handleSubmit] Sending cleaned attachments:", cleanedAttachments.map((a: any) => ({ name: a.name, storagePath: a.storagePath, mimeType: a.mimeType, type: a.type })));
-          console.log("[handleSubmit] About to fetch /api/analyze with conversationId:", effectiveConversationId);
+          // Create a new AbortController for the fallback fetch (stored in shared ref for cancellation)
+          analysisAbortControllerRef.current = new AbortController();
           
-          let analyzeResponse: Response;
           try {
-            // Create a dedicated AbortController to avoid cancellation from navigation
-            const analyzeController = new AbortController();
-            
-            console.log("[handleSubmit] Starting fetch to /api/analyze...");
-            analyzeResponse = await fetch("/api/analyze", {
+            const analyzeResponse = await fetch("/api/analyze", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -3936,50 +4074,49 @@ IMPORTANTE:
                 attachments: cleanedAttachments,
                 conversationId: effectiveConversationId
               }),
-              signal: analyzeController.signal
+              signal: analysisAbortControllerRef.current.signal
             });
-            console.log("[handleSubmit] Fetch completed with status:", analyzeResponse.status);
-          } catch (fetchError: any) {
-            console.error("[handleSubmit] Fetch error:", fetchError?.name, fetchError?.message || fetchError);
-            if (fetchError?.name === "AbortError") {
-              console.log("[handleSubmit] Fetch was aborted");
+            
+            if (analyzeResponse.ok) {
+              const analyzeResult = await analyzeResponse.json();
+              
+              const analysisMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: analyzeResult.answer_text || "Análisis del documento completado.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+                ui_components: analyzeResult.ui_components || [],
+                documentAnalysis: analyzeResult.documentModel ? {
+                  documentModel: analyzeResult.documentModel,
+                  insights: analyzeResult.insights || [],
+                  suggestedQuestions: analyzeResult.suggestedQuestions || [],
+                } : undefined,
+              };
+              onSendMessage(analysisMsg);
+              
               setAiState("idle");
               setAiProcessSteps([]);
+              analysisAbortControllerRef.current = null;
+              return;
+            } else {
+              const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+              const errorMessage = errorData?.error?.message || errorData?.message || errorData?.error || `Analysis failed: ${analyzeResponse.status}`;
+              throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
+            }
+          } catch (fetchError: any) {
+            if (fetchError?.name === "AbortError") {
+              console.log("[handleSubmit] Fallback fetch was aborted by user");
+              setAiState("idle");
+              setAiProcessSteps([]);
+              analysisAbortControllerRef.current = null;
               return;
             }
-            throw new Error(`Error de conexión: ${fetchError?.message || 'No se pudo conectar al servidor'}`);
+            throw fetchError;
+          } finally {
+            analysisAbortControllerRef.current = null;
           }
-          
-          if (!analyzeResponse.ok) {
-            const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
-            console.error("[handleSubmit] Analyze response error:", analyzeResponse.status, errorData);
-            // Extract error message properly from nested error object
-            const errorMessage = errorData?.error?.message || errorData?.message || errorData?.error || `Analysis failed: ${analyzeResponse.status}`;
-            throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
-          }
-          
-          const analyzeResult = await analyzeResponse.json();
-          
-          const analysisMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: analyzeResult.answer_text || "No se pudo analizar el documento.",
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-            userMessageId: userMsgId,
-            ui_components: analyzeResult.ui_components || [],
-            documentAnalysis: analyzeResult.documentModel ? {
-              documentModel: analyzeResult.documentModel,
-              insights: analyzeResult.insights || [],
-              suggestedQuestions: analyzeResult.suggestedQuestions || [],
-            } : undefined,
-          };
-          onSendMessage(analysisMsg);
-          
-          setAiState("idle");
-          setAiProcessSteps([]);
-          abortControllerRef.current = null;
-          return;
         }
         
         const response = await fetch("/api/chat", {
