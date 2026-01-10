@@ -12,7 +12,7 @@ export interface ISearchAdapter {
 export class DuckDuckGoSearchAdapter implements ISearchAdapter {
   private readonly defaultMaxResults: number;
   
-  constructor(defaultMaxResults: number = 5) {
+  constructor(defaultMaxResults: number = 10) {
     this.defaultMaxResults = defaultMaxResults;
   }
   

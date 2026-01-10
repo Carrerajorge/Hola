@@ -954,31 +954,86 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
       case "web_search": {
         try {
+          const { searchWeb, searchScholar, needsAcademicSearch } = await import("../../services/webSearch");
           const query = (input as any).query;
-          const maxResults = (input as any).maxResults || 5;
-          const wikiUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=${maxResults}&format=json&origin=*`;
+          const maxResults = (input as any).maxResults || 10;
+          const isAcademic = (input as any).academic || needsAcademicSearch(query);
           
-          const response = await fetch(wikiUrl, {
-            headers: { "User-Agent": "IliaGPT/1.0" },
-          });
-          const data = await response.json();
+          console.log(`[WebSearch] Searching for "${query}" with maxResults=${maxResults}, academic=${isAcademic}`);
           
-          const titles = data[1] || [];
-          const snippets = data[2] || [];
-          const urls = data[3] || [];
+          let results: any[] = [];
+          let contents: any[] = [];
           
-          const results = titles.map((title: string, i: number) => ({
-            title,
-            url: urls[i],
-            snippet: snippets[i] || "",
-          }));
+          if (isAcademic) {
+            // searchScholar returns SearchResult[] directly
+            const scholarResults = await searchScholar(query, maxResults);
+            results = scholarResults.map((r: any) => ({
+              title: r.title,
+              url: r.url,
+              snippet: r.snippet,
+              authors: r.authors,
+              year: r.year,
+              citation: r.citation,
+            }));
+          } else {
+            // searchWeb returns WebSearchResponse with results and contents
+            const webResponse = await searchWeb(query, maxResults);
+            results = webResponse.results.map((r: any) => ({
+              title: r.title,
+              url: r.url,
+              snippet: r.snippet,
+              authors: r.authors,
+              year: r.year,
+              citation: r.citation,
+              siteName: r.siteName,
+              publishedDate: r.publishedDate,
+            }));
+            contents = webResponse.contents?.slice(0, maxResults) || [];
+          }
+
+          console.log(`[WebSearch] Found ${results.length} results, ${contents.length} with content`);
 
           return {
             success: true,
-            data: { query, resultsCount: results.length, results, source: "wikipedia" },
+            data: { 
+              query, 
+              resultsCount: results.length, 
+              results, 
+              contents,
+              source: isAcademic ? "academic" : "web",
+              isAcademic 
+            },
           };
         } catch (error: any) {
-          return { success: false, data: null, error: error.message };
+          console.error(`[WebSearch] Error:`, error.message);
+          // Fallback to Wikipedia if main search fails
+          try {
+            const query = (input as any).query;
+            const maxResults = (input as any).maxResults || 10;
+            const wikiUrl = `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=${maxResults}&format=json&origin=*`;
+            
+            const response = await fetch(wikiUrl, {
+              headers: { "User-Agent": "IliaGPT/1.0" },
+            });
+            const data = await response.json();
+            
+            const titles = data[1] || [];
+            const snippets = data[2] || [];
+            const urls = data[3] || [];
+            
+            const results = titles.map((title: string, i: number) => ({
+              title,
+              url: urls[i],
+              snippet: snippets[i] || "",
+            }));
+
+            return {
+              success: true,
+              data: { query, resultsCount: results.length, results, source: "wikipedia_fallback" },
+            };
+          } catch (fallbackError: any) {
+            return { success: false, data: null, error: error.message };
+          }
         }
       }
 
