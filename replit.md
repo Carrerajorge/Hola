@@ -9,7 +9,7 @@ Preferred communication style: Simple, everyday language.
 ## System Architecture
 ### UI/UX
 - **Frontend**: React with TypeScript and Vite, utilizing shadcn/ui (Radix UI) and Tailwind CSS for a modern, themable interface with light/dark mode.
-- **Features**: Chat folders, command history, draft auto-save, suggested replies, conversation export, message favorites, prompt templates, PWA support, keyboard shortcuts, offline mode, unified workspace, AI quality system, and **Sources/Fuentes citation system** (ChatGPT-style web source display with favicon logos and side panel citations).
+- **Features**: Chat folders, command history, draft auto-save, suggested replies, conversation export, message favorites, prompt templates, PWA support, keyboard shortcuts, offline mode, unified workspace, AI quality system, and Sources/Fuentes citation system.
 - **Content Support**: Markdown, code highlighting (Monaco Editor), and mathematical expressions.
 - **Data Visualization**: Recharts, ECharts, and TanStack Table.
 - **Graphics Rendering**: Multi-layer system supporting SVG (D3.js), Canvas 2D, and 3D (Three.js).
@@ -21,66 +21,29 @@ Preferred communication style: Simple, everyday language.
 - **LLM Gateway**: Manages AI model interactions with multi-provider fallback, request deduplication, streaming recovery, token usage tracking, circuit breakers, rate limiting, and response caching.
 - **ETL Agent**: Automates economic data processing and generates ZIP bundles with Excel workbooks and audit reports.
 - **Multi-Intent Pipeline**: Processes complex user prompts through defined stages (Plan, Decompose, Execute, Aggregate).
-- **PARE System (Prompt Analysis & Routing Engine)**: Production-grade document processing with defense-in-depth architecture:
-  - **Pipeline**: fetch → mime_detect → parser_select → extract → normalize → chunk → index
-  - **Formats**: PDF, DOCX, XLSX, PPTX, CSV, TXT with per-document citations `[doc:File.ext p#|sheet:X|slide:#|row:#]`
-  - **Phase 1**: Request contract with idempotency keys, DATA_MODE detection, rate limiting (60/min IP, 30/min user), resource quotas (50MB/file, 100MB total, 20 files, 500 pages)
-  - **Phase 2**: PostgreSQL-backed idempotency with 24h TTL, Zod schema validation, parser sandboxing with worker pool (3 workers, 30s timeout, 512MB limit), circuit breaker (CLOSED/OPEN/HALF_OPEN), zip-bomb guard, path traversal detection, MIME allowlist/denylist, response contract validation
-  - **Phase 3 (Observability)**: OpenTelemetry tracing with W3C TraceContext, Prometheus metrics (`/metrics` endpoint with histograms p50/p95/p99, counters, gauges), Kubernetes health probes (`/health/pare/live`, `/health/pare/ready`), structured JSON logging with PII redaction, internal metrics dashboard (`/api/pare/metrics`)
-  - **Phase 3 Enterprise SRE**: 27 Prometheus alert rules with SLO burn rates (99.9% availability, p99 < 5s), Grafana dashboard (22 panels, 5 rows), strict label cardinality control (6 dimensions with allowlists), 5 detailed runbooks with diagnosis commands and escalation paths
-  - **Guards**: Blocks image/artifact generation when attachments present, coverage verification
-  - **Tests**: 424 tests covering all PARE functionality and observability
+- **PARE System (Prompt Analysis & Routing Engine)**: Production-grade document processing with a defense-in-depth architecture supporting various formats (PDF, DOCX, XLSX, PPTX, CSV, TXT) with per-document citations. Includes robust request validation, sandboxing, circuit breakers, and comprehensive observability (OpenTelemetry tracing, Prometheus metrics, Kubernetes health probes, structured JSON logging).
 - **Document Generation System**: Generates Excel and Word files using LLM orchestration with repair loops, including professional CV/Resume generation.
 - **Spreadsheet Analyzer Module**: AI-powered analysis, LLM agent for Python code generation (with AST-based security validation), and a secure Python sandbox for execution.
 - **Agent Infrastructure**: Modular plugin architecture with a StateMachine, Typed Contracts (Zod schemas), Event Sourcing, a PolicyEngine for RBAC, and an ExecutionEngine with circuit breakers and exponential backoff.
-- **Tool Registry**: Production-grade registry with **103 agent tools** across 21 categories, standardized outputs, and sandboxed execution:
-  - **Orchestration (3)**: plan, orchestrate, workflow - multi-agent coordination with DAGs, parallel/sequential strategies
-  - **Memory (4)**: memory_store, memory_retrieve, context_manage, session_state - vector embeddings, semantic search, PostgreSQL persistence
-  - **Reasoning (3)**: reason (CoT/ToT/GoT), reflect, verify - logical reasoning with confidence scores
-  - **Communication (4)**: message, clarify, summarize, explain, decide - user interaction and decision framework
-  - **System (7)**: shell, code_execute, file, python, environment, file_convert, search_semantic - sandboxed execution
-  - **Research (4)**: search_web, fetch_url, research_deep, browser - multi-provider web search, content extraction
-  - **Web Automation (5)**: browser_navigate, browser_interact, browser_extract, browser_session - Playwright-based
-  - **Generation (6)**: generate_text, generate_image, generate_audio, generate_video, generate_music, qr_code_generate
-  - **Processing (4)**: transcribe_audio, vision_analyze, video_analyze, ocr_extract - multimodal processing
-  - **Data (4)**: data_analyze, data_visualize, data_transform, data_query - statistical analysis, charting
-  - **Documents (5)**: doc_create, slides_create, spreadsheet_create, pdf_manipulate, document - multi-format generation
-  - **Development (7)**: code_generate, code_review, code_refactor, code_test, code_debug, webdev_init_project
-  - **Diagrams (3)**: render_diagram, render_chart, render_math - Mermaid, PlantUML, KaTeX
-  - **API (3)**: api_call, webhook_send, graphql_query, oauth_token - HTTP client, webhooks, GraphQL
-  - **Productivity (5)**: calendar_create, reminder_set, note_create, task_create, timer_start - scheduling, tasks
-  - **Security (6)**: encrypt_data, decrypt_data, hash_data, validate_input, secrets_manage, audit_log - AES-256-GCM, PBKDF2
-  - **Automation (4)**: workflow_create, scheduler_create, event_emit, batch_process - n8n/Zapier/Temporal export
-  - **Database (4)**: db_migrate, db_backup, db_schema, db_optimize - Drizzle/Prisma/Knex support
-  - **Monitoring (4)**: metrics_collect, alert_create, logs_analyze, health_check, tracing_create - Prometheus, Grafana
-  - **Utility (7)**: translate_text, currency_convert, unit_convert, uuid_generate, regex_test - multi-language translation
-- **10 Specialized Agents**: Production-grade agent system with dedicated specialists:
-  - **OrchestratorAgent**: Super-agent for multi-agent coordination and workflow management
-  - **ResearchAgent**: Web research, information gathering, fact-checking with multi-source synthesis
-  - **CodeAgent**: Code generation, review, refactoring, debugging with AST validation
-  - **DataAgent**: Statistical analysis, transformation, visualization with Python sandbox
-  - **ContentAgent**: Content creation, document generation, professional writing
-  - **CommunicationAgent**: Email, notifications, messaging management
-  - **BrowserAgent**: Autonomous web browsing, automation, scraping with Playwright
-  - **DocumentAgent**: Document processing, conversion, analysis (PDF, DOCX, XLSX, PPTX)
-  - **QAAgent**: Testing, validation, quality assurance with automated test generation
-  - **SecurityAgent**: Security analysis, vulnerability assessment, compliance auditing
+- **Tool Registry**: Production-grade registry with 103 agent tools across 21 categories, standardized outputs, and sandboxed execution, covering orchestration, memory, reasoning, communication, system, research, web automation, generation, processing, data, documents, development, diagrams, API, productivity, security, automation, database, monitoring, and utility.
+- **Specialized Agents**: Production-grade agent system with 10 dedicated specialists including OrchestratorAgent, ResearchAgent, CodeAgent, DataAgent, ContentAgent, CommunicationAgent, BrowserAgent, DocumentAgent, QAAgent, and SecurityAgent.
 - **Phase-Based Planning**: Agent plans organized into logical phases (Research → Planning → Execution → Verification → Delivery).
 - **WebTool Module**: Layered architecture for web navigation and information retrieval with URL canonicalization, content deduplication, quality scoring, content extraction, and sandbox security.
 - **Ultra-Fast Web Retrieval System**: High-performance web retrieval with parallel execution, intelligent caching, relevance filtering, and streaming results.
 - **Agent Orchestration**: Manus-like architecture with RunController, PlannerAgent, ExecutorAgent, and VerifierAgent roles.
 - **Agent Mode Features**: Event stream tracking, todo.md tracking, virtual workspace files, step verification with LLM-based evaluation, dynamic replanning, and error retention in context for learning.
-- **Agent Cancellation System**: Robust cancellation with AbortController/CancellationToken propagation, supporting states like queued, planning, running, verifying, completed, failed, and cancelled.
-- **Router System**: Hybrid decision system to route messages between chat and agent mode using heuristic patterns, complexity analysis, and LLM routing for ambiguous cases.
+- **Agent Cancellation System**: Robust cancellation with AbortController/CancellationToken propagation.
+- **Router System**: Hybrid decision system to route messages between chat and agent mode using heuristic patterns, complexity analysis, and LLM routing.
 - **AgentRunner**: Simplified agent loop for executing multi-step tasks with heuristic fallback, event emission, configurable max steps, and guardrails.
-- **Sandbox Agent V2**: Comprehensive TypeScript agent system with phase-based execution, automatic task decomposition, and secure sandboxed operations (8 tools, 5 safe HTTP exposed).
-- **Python Agent v5.0**: Standalone Python-based agent system with 8 tools, multi-level caching, per-domain rate limiting, browser pool, security guard, and pattern-based intent detection.
+- **Sandbox Agent V2**: Comprehensive TypeScript agent system with phase-based execution, automatic task decomposition, and secure sandboxed operations.
+- **Python Agent v5.0**: Standalone Python-based agent system with tools, multi-level caching, per-domain rate limiting, browser pool, security guard, and pattern-based intent detection.
 - **LangGraph Agent System**: Enterprise-grade agent orchestration using the LangGraph framework with StateGraph-based workflow management, supervisor and reflection patterns, human-in-the-loop approvals, PostgreSQL checkpoint persistence, and conversation memory.
+- **Agentic Orchestration Pipeline**: Professional multi-agent system including PromptAnalyzer (intent classification, memory hydration), IntentRouter (routes prompts to direct, single_agent, or multi_agent paths), SupervisorAgent (LangGraph orchestrator for parallel execution, retry logic), AgentLoopFacade (main pipeline composer), ActivityStreamPublisher (SSE streaming for real-time UI updates), and a comprehensive Memory System for persisting and hydrating execution context.
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt, multi-tenant validation, authentication middleware, max iterations/timeout for agent runs.
-- **Safe Process Execution**: Centralized secure execution modules (`safe_exec.py` for Python, `safeSpawn.ts` for TypeScript) with program allowlists, argument validation, and environment sanitization to prevent command injection and secret leakage.
-- **Package Installation Security**: Pip and npm package installations use `execFile` with argument arrays and minimal environments (no shell execution, no secret leakage).
+- **Safe Process Execution**: Centralized secure execution modules (`safe_exec.py` for Python, `safeSpawn.ts` for TypeScript) with program allowlists, argument validation, and environment sanitization.
+- **Package Installation Security**: Pip and npm package installations use `execFile` with argument arrays and minimal environments.
 - **SQL Security**: Admin query explorer uses strict SELECT-only validation with dangerous pattern blocking and comprehensive audit logging.
 - **Modular Repositories**: Generic base repository with ownership validation and transaction helpers.
 - **Error Handling**: Custom error classes and global Express error handler.
