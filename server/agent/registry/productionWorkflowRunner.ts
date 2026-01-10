@@ -847,10 +847,14 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
       case "slides_create": {
         const filePath = path.join(ARTIFACTS_DIR, `slides_${safeTitle}_${timestamp}.pptx`);
-        const pptxContent = await this.createRealPPTX((input as any).title || "Presentation", (input as any).content || run.query);
-        fs.writeFileSync(filePath, pptxContent);
+        console.log(`[WorkflowRunner] slides_create: Generating PPTX for "${run.query.slice(0, 50)}..."`);
+        
+        const pptxResult = await this.createRealPPTX((input as any).title || "Presentation", (input as any).content || run.query);
+        fs.writeFileSync(filePath, pptxResult.buffer);
         
         const stats = fs.statSync(filePath);
+        console.log(`[WorkflowRunner] slides_create: Saved PPTX to ${filePath} (${stats.size} bytes, ${pptxResult.slideCount} slides)`);
+        
         const artifact: ArtifactInfo = {
           artifactId: crypto.randomUUID(),
           type: "presentation",
@@ -863,7 +867,13 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
         return {
           success: true,
-          data: { slidesCreated: true, filePath, slideCount: 2 },
+          data: { 
+            slidesCreated: true, 
+            filePath, 
+            slideCount: pptxResult.slideCount, 
+            totalElements: pptxResult.totalElements,
+            fileSize: stats.size 
+          },
           artifacts: [artifact],
         };
       }
@@ -1083,7 +1093,7 @@ ${420 + streamLength}
     return Buffer.from(pdfContent);
   }
 
-  private async createRealPPTX(title: string, userQuery: string): Promise<Buffer> {
+  private async createRealPPTX(title: string, userQuery: string): Promise<{ buffer: Buffer; slideCount: number; totalElements: number }> {
     const PptxGenJS = (await import("pptxgenjs")).default;
     const pptx = new PptxGenJS();
     
@@ -1222,9 +1232,29 @@ FORMATO DE RESPUESTA (sigue exactamente este formato):
       }
     }
     
-    const data = await pptx.write({ outputType: "nodebuffer" }) as Buffer;
-    console.log(`[PPTX] Created presentation with ${slides.length + 1} slides (${Math.round(data.length / 1024)}KB)`);
-    return data;
+    const buffer = await pptx.write({ outputType: "nodebuffer" }) as Buffer;
+    
+    // QA Gate: Validate that the PPTX has content
+    const slideCount = slides.length + 1; // +1 for title slide
+    const totalElements = slides.reduce((acc, slide) => acc + slide.content.length + 1, 2); // title + subtitle on title slide + title + bullets per slide
+    
+    console.log(`[PPTX] QA Validation: ${slideCount} slides, ${totalElements} elements, ${Math.round(buffer.length / 1024)}KB`);
+    
+    if (slideCount < 2 || buffer.length < 10000) {
+      console.warn(`[PPTX] QA WARNING: Presentation may be empty or too small (slides=${slideCount}, size=${buffer.length}bytes)`);
+    }
+    
+    if (slides.length === 0) {
+      console.error(`[PPTX] QA FAILED: No content slides generated!`);
+      throw new Error("PPTX generation failed: No content slides were created");
+    }
+    
+    // Log slide details for debugging
+    slides.forEach((slide, idx) => {
+      console.log(`[PPTX] Slide ${idx + 2}: "${slide.title}" with ${slide.content.length} bullet points`);
+    });
+    
+    return { buffer, slideCount, totalElements };
   }
 
   private async createRealDOCX(title: string, content: string): Promise<Buffer> {

@@ -57,6 +57,7 @@ import {
 } from "./services/pythonAgentClient";
 import express from "express";
 import path from "path";
+import fs from "fs";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -69,18 +70,28 @@ export async function registerRoutes(
   await setupAuth(app);
   registerAuthRoutes(app);
   
-  const artifactsDir = path.join(process.cwd(), "generated_artifacts");
+  const artifactsDir = path.join(process.cwd(), "artifacts");
+  if (!fs.existsSync(artifactsDir)) {
+    fs.mkdirSync(artifactsDir, { recursive: true });
+  }
   app.use("/api/artifacts", express.static(artifactsDir, {
     setHeaders: (res, filePath) => {
       const ext = path.extname(filePath).toLowerCase();
+      const stats = fs.statSync(filePath);
       if (ext === ".pptx") {
         res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
       } else if (ext === ".docx") {
         res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       } else if (ext === ".xlsx") {
         res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      } else if (ext === ".pdf") {
+        res.setHeader("Content-Type", "application/pdf");
+      } else if (ext === ".png") {
+        res.setHeader("Content-Type", "image/png");
       }
+      res.setHeader("Content-Length", stats.size);
       res.setHeader("Content-Disposition", `attachment; filename="${path.basename(filePath)}"`);
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     }
   }));
   

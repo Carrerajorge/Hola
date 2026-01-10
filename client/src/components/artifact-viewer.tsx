@@ -273,17 +273,45 @@ const DocumentArtifact = memo(function DocumentArtifact({
     onClick?.();
   }, [onClick]);
 
-  const handleDownload = useCallback((e: React.MouseEvent) => {
+  const handleDownload = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (onDownload) {
       onDownload();
       return;
     }
-    const url = artifact.url || artifact.previewUrl;
-    if (url) {
+    
+    // Construct download URL from artifact path or use provided URL
+    let downloadUrl = artifact.url || artifact.previewUrl;
+    
+    // If we have a path, construct the proper download endpoint
+    const artifactPath = artifact.path || artifact.data?.filePath || artifact.data?.path;
+    if (artifactPath) {
+      const filename = artifactPath.split('/').pop();
+      downloadUrl = `/api/artifacts/${filename}/download`;
+    }
+    
+    if (!downloadUrl) return;
+    
+    try {
+      // Use blob download pattern for binary files (Office documents)
+      const response = await fetch(downloadUrl);
+      if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+      
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = url;
-      link.download = artifact.name;
+      link.href = blobUrl;
+      link.download = artifact.name || "document";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error("[ArtifactDownload] Blob download failed, trying direct link:", error);
+      // Fallback to direct link
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = artifact.name || "document";
       link.click();
     }
   }, [onDownload, artifact]);

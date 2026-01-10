@@ -673,8 +673,43 @@ export function createRegistryRouter(): Router {
         });
       }
       
-      res.download(filePath);
+      const stats = fs.statSync(filePath);
+      const ext = path.extname(filename).toLowerCase();
+      
+      // Set appropriate Content-Type based on file extension
+      const mimeTypes: Record<string, string> = {
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".pdf": "application/pdf",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".html": "text/html",
+      };
+      
+      const contentType = mimeTypes[ext] || "application/octet-stream";
+      
+      // Set headers for binary download
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Length", stats.size);
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      
+      // Stream the file as binary
+      const fileStream = fs.createReadStream(filePath);
+      fileStream.pipe(res);
+      
+      fileStream.on("error", (err) => {
+        console.error(`[ArtifactDownload] Stream error for ${filename}:`, err);
+        if (!res.headersSent) {
+          res.status(500).json({ success: false, error: "Failed to stream file" });
+        }
+      });
     } catch (error: any) {
+      console.error(`[ArtifactDownload] Error downloading ${req.params.filename}:`, error);
       res.status(500).json({
         success: false,
         error: error.message,
