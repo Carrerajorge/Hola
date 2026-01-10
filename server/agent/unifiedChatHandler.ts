@@ -1,7 +1,12 @@
 import { Response } from "express";
 import { randomUUID } from "crypto";
 import { agentEventBus } from "./eventBus";
-import { createRequestSpec, RequestSpec, AttachmentSpec, SessionState, detectIntent } from "./requestSpec";
+import { createRequestSpec, detectIntent, AttachmentSpecSchema, SessionStateSchema, RequestSpecSchema } from "./requestSpec";
+import type { z } from "zod";
+
+type RequestSpec = z.infer<typeof RequestSpecSchema>;
+type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
+type SessionState = z.infer<typeof SessionStateSchema>;
 import { storage } from "../storage";
 import { db } from "../db";
 import { agentModeRuns, agentModeSteps } from "@shared/schema";

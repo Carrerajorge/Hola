@@ -17,6 +17,12 @@ import { normalizeDocument } from "../services/structuredDocumentNormalizer";
 import { ObjectStorageService } from "../replit_integrations/object_storage/objectStorage";
 import type { DocumentSemanticModel, Table, Metric, Anomaly, Insight, SuggestedQuestion, SheetSummary } from "../../shared/schemas/documentSemanticModel";
 import { agentEventBus } from "../agent/eventBus";
+import { createUnifiedRun, hydrateSessionState, emitTraceEvent } from "../agent/unifiedChatHandler";
+import type { UnifiedChatRequest, UnifiedChatContext } from "../agent/unifiedChatHandler";
+import { createRequestSpec, AttachmentSpecSchema } from "../agent/requestSpec";
+import type { z } from "zod";
+
+type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
 import type { Response } from "express";
 
@@ -505,6 +511,31 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
+      // Create UnifiedChatContext for RequestSpec-driven execution
+      const attachmentSpecs: AttachmentSpec[] = resolvedAttachments.map((att: any) => ({
+        id: att.fileId || `att_${Date.now()}`,
+        name: att.name || 'document',
+        mimeType: att.mimeType || att.type || 'application/octet-stream',
+        size: att.size || 0,
+        storagePath: att.storagePath,
+      }));
+
+      let unifiedContext: UnifiedChatContext | null = null;
+      try {
+        const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
+        unifiedContext = await createUnifiedRun({
+          messages: messages as Array<{ role: string; content: string }>,
+          chatId: effectiveChatId,
+          userId: userId || 'anonymous',
+          runId: runId,
+          messageId: `msg_${Date.now()}`,
+          attachments: attachmentSpecs,
+        });
+        console.log(`[Stream] UnifiedContext created - intent: ${unifiedContext.requestSpec.intent}, confidence: ${unifiedContext.requestSpec.intentConfidence.toFixed(2)}, primaryAgent: ${unifiedContext.requestSpec.primaryAgent}`);
+      } catch (contextError) {
+        console.error('[Stream] Failed to create unified context:', contextError);
+      }
+
       // If runId provided, claim the pending run (idempotent processing)
       if (runId && chatId) {
         const existingRun = await storage.getChatRun(runId);
@@ -544,6 +575,12 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       res.setHeader("X-Request-Id", requestId);
       if (claimedRun) {
         res.setHeader("X-Run-Id", claimedRun.id);
+      }
+      if (unifiedContext) {
+        res.setHeader("X-Intent", unifiedContext.requestSpec.intent);
+        res.setHeader("X-Intent-Confidence", String(unifiedContext.requestSpec.intentConfidence.toFixed(2)));
+        res.setHeader("X-Primary-Agent", unifiedContext.requestSpec.primaryAgent);
+        res.setHeader("X-Agentic-Mode", String(unifiedContext.isAgenticMode));
       }
       res.flushHeaders();
 
@@ -740,20 +777,56 @@ ${systemContent}`;
         await storage.updateChatRunAssistantMessage(claimedRun.id, assistantMessageId);
       }
 
+      const effectiveRunId = claimedRun?.id || unifiedContext?.runId || requestId;
+
       writeSse(res, 'start', { 
         requestId, 
-        runId: claimedRun?.id,
+        runId: effectiveRunId,
         assistantMessageId,
+        intent: unifiedContext?.requestSpec.intent,
+        intentConfidence: unifiedContext?.requestSpec.intentConfidence,
+        deliverableType: unifiedContext?.requestSpec.deliverableType,
+        primaryAgent: unifiedContext?.requestSpec.primaryAgent,
+        targetAgents: unifiedContext?.requestSpec.targetAgents,
+        isAgenticMode: unifiedContext?.isAgenticMode,
         timestamp: Date.now() 
       });
-
-      const effectiveRunId = claimedRun?.id || requestId;
-      agentEventBus.emit(effectiveRunId, 'task_start', {
-        metadata: { chatId, userId, message: messages[messages.length - 1]?.content?.slice(0, 200) || '' }
+      
+      emitTraceEvent(effectiveRunId, 'task_start', {
+        metadata: { 
+          chatId, 
+          userId, 
+          message: messages[messages.length - 1]?.content?.slice(0, 200) || '',
+          intent: unifiedContext?.requestSpec.intent,
+          intentConfidence: unifiedContext?.requestSpec.intentConfidence,
+          deliverableType: unifiedContext?.requestSpec.deliverableType,
+          attachmentsCount: attachmentsCount,
+          isAgenticMode: unifiedContext?.isAgenticMode
+        }
       }).catch(() => {});
 
-      agentEventBus.emit(effectiveRunId, 'thinking', {
-        content: 'Generating response...'
+      if (unifiedContext?.requestSpec.sessionState) {
+        emitTraceEvent(effectiveRunId, 'memory_loaded', {
+          memory: {
+            keys: unifiedContext.requestSpec.sessionState.memoryKeys,
+            loaded: unifiedContext.requestSpec.sessionState.turnNumber
+          }
+        }).catch(() => {});
+      }
+
+      if (unifiedContext?.isAgenticMode) {
+        emitTraceEvent(effectiveRunId, 'agent_delegated', {
+          agent: {
+            name: unifiedContext.requestSpec.primaryAgent,
+            role: 'primary',
+            status: 'active'
+          }
+        }).catch(() => {});
+      }
+
+      emitTraceEvent(effectiveRunId, 'thinking', {
+        content: `Analyzing request: ${unifiedContext?.requestSpec.intent || 'chat'}`,
+        phase: 'planning'
       }).catch(() => {});
 
       const streamGenerator = llmGateway.streamChat(
@@ -783,7 +856,8 @@ ${systemContent}`;
           writeSse(res, 'done', {
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
-            runId: claimedRun?.id,
+            runId: effectiveRunId,
+            intent: unifiedContext?.requestSpec.intent,
             timestamp: Date.now(),
           });
         } else {
@@ -791,7 +865,7 @@ ${systemContent}`;
             content: chunk.content,
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
-            runId: claimedRun?.id,
+            runId: effectiveRunId,
             timestamp: Date.now(),
           });
         }
@@ -803,18 +877,36 @@ ${systemContent}`;
         await storage.updateChatRunStatus(claimedRun.id, 'done');
       }
 
+      const durationMs = unifiedContext ? Date.now() - unifiedContext.startTime : 0;
+      
       if (!isConnectionClosed) {
+        if (unifiedContext?.isAgenticMode) {
+          emitTraceEvent(effectiveRunId, 'agent_completed', {
+            agent: {
+              name: unifiedContext.requestSpec.primaryAgent,
+              role: 'primary',
+              status: 'completed'
+            },
+            durationMs
+          }).catch(() => {});
+        }
+        
         writeSse(res, 'complete', { 
           requestId, 
-          runId: claimedRun?.id,
+          runId: effectiveRunId,
           assistantMessageId,
           totalSequences: lastAckSequence + 1,
           contentLength: fullContent.length,
+          intent: unifiedContext?.requestSpec.intent,
+          deliverableType: unifiedContext?.requestSpec.deliverableType,
+          durationMs,
           timestamp: Date.now() 
         });
         
-        agentEventBus.emit(effectiveRunId, 'done', {
-          summary: `Response completed (${fullContent.length} chars)`,
+        emitTraceEvent(effectiveRunId, 'done', {
+          summary: fullContent.slice(0, 200),
+          durationMs,
+          phase: 'completed',
           metadata: { contentLength: fullContent.length, sequences: lastAckSequence + 1 }
         }).catch(() => {});
       }
@@ -850,15 +942,17 @@ ${systemContent}`;
         }
       }
       
+      const errorRunId = claimedRun?.id || unifiedContext?.runId || requestId;
       if (!isConnectionClosed) {
         writeSse(res, 'error', { 
           error: error.message, 
           requestId,
-          runId: claimedRun?.id,
+          runId: errorRunId,
+          intent: unifiedContext?.requestSpec.intent,
           timestamp: Date.now() 
         });
         
-        agentEventBus.emit(claimedRun?.id || requestId, 'error', {
+        emitTraceEvent(errorRunId, 'error', {
           error: { message: error.message, code: error.code || 'UNKNOWN' }
         }).catch(() => {});
       }
