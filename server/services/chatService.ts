@@ -10,6 +10,9 @@ import type { PipelineResponse } from "../../shared/schemas/multiIntent";
 import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
 import { detectEmailIntent, handleEmailChatRequest } from "./gmailChatIntegration";
 import { productionWorkflowRunner, classifyIntent, isGenerationIntent } from "../agent/registry/productionWorkflowRunner";
+import { agentLoopFacade, promptAnalyzer, type ComplexityLevel } from "../agent/orchestration";
+
+const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true';
 
 // Simple in-memory cache for search results (5 minute TTL)
 const searchCache = new Map<string, { results: any; timestamp: number }>();
@@ -115,6 +118,58 @@ function detectDiagramType(prompt: string): DiagramType {
 function detectMemoryIntent(message: string): boolean {
   const lowerMessage = message.toLowerCase();
   return MEMORY_INTENT_KEYWORDS.some(keyword => lowerMessage.includes(keyword));
+}
+
+interface AgenticContext {
+  hasAttachments: boolean;
+  hasActiveDocuments: boolean;
+  conversationLength: number;
+}
+
+function shouldUseAgenticPipeline(message: string, context: AgenticContext): boolean {
+  const lowerMessage = message.toLowerCase();
+  
+  const COMPLEX_PATTERNS = [
+    /\b(investiga|research|analiza\s+a\s+fondo|deep\s+dive)\b/i,
+    /\b(crea|genera|build|create)\b.*\b(y|and|then|luego|después)\b/i,
+    /\b(primero|segundo|tercero|step\s+\d+|paso\s+\d+)\b/i,
+    /\b(compara|compare)\b.*\b(con|with|and|y)\b/i,
+    /\b(recopila|gather|collect)\b.*\b(información|datos|data|info)\b/i,
+    /\b(multi-?step|múltiples?\s+pasos?|varios?\s+tareas?)\b/i,
+    /\b(planifica|plan|diseña|design)\b.*\b(estrategia|strategy|proyecto|project)\b/i,
+    /\b(resume|summarize)\b.*\b(y|and)\b.*\b(crea|genera|create)\b/i,
+    /\b(busca|search|find)\b.*\b(y|and|then)\b.*\b(crea|genera|create)\b/i,
+  ];
+  
+  const SIMPLE_PATTERNS = [
+    /^(hola|hello|hi|hey|buenos?\s+d[ií]as?|buenas?\s+tardes?|buenas?\s+noches?)$/i,
+    /^(gracias|thanks|ok|sí|no|claro|vale|perfecto)$/i,
+    /^(qué|cuál|quién|dónde|cuándo|what|who|where|when|how)\s+\w{1,20}(\?)?$/i,
+  ];
+  
+  if (SIMPLE_PATTERNS.some(p => p.test(message.trim()))) {
+    return false;
+  }
+  
+  if (context.hasActiveDocuments && context.hasAttachments) {
+    return false;
+  }
+  
+  if (COMPLEX_PATTERNS.some(p => p.test(lowerMessage))) {
+    console.log(`[ChatService:AgenticPipeline] Complex pattern matched for: "${message.slice(0, 50)}..."`);
+    return true;
+  }
+  
+  const wordCount = message.split(/\s+/).filter(w => w.length > 0).length;
+  const hasMultipleClauses = (message.match(/[,;]/g) || []).length >= 2;
+  const hasListMarkers = /(\d+\.|[-•])\s+/g.test(message);
+  
+  if (wordCount > 50 && (hasMultipleClauses || hasListMarkers)) {
+    console.log(`[ChatService:AgenticPipeline] Complex message structure detected: ${wordCount} words, clauses: ${hasMultipleClauses}, lists: ${hasListMarkers}`);
+    return true;
+  }
+  
+  return false;
 }
 
 function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: string[] } {
@@ -575,6 +630,55 @@ export async function handleChatRequest(
               role: "assistant"
             };
           }
+        }
+      }
+    }
+    
+    // AGENTIC PIPELINE: Route complex requests through AgentLoopFacade when feature flag is enabled
+    // This provides multi-agent orchestration, QA verification, and SSE streaming for complex tasks
+    if (AGENTIC_PIPELINE_ENABLED && lastUserMessage && !documentMode && !figmaMode && !hasImages) {
+      const agenticContext: AgenticContext = {
+        hasAttachments: hasRawAttachments || (attachmentContext?.length > 0) || false,
+        hasActiveDocuments: hasActiveDocuments,
+        conversationLength: messages.length
+      };
+      
+      if (shouldUseAgenticPipeline(lastUserMessage.content, agenticContext)) {
+        console.log(`[ChatService:AgenticPipeline] Routing to AgentLoopFacade for complex task`);
+        
+        try {
+          const pipelineResult = await agentLoopFacade.execute(
+            lastUserMessage.content,
+            {
+              sessionId: conversationId || `session_${Date.now()}`,
+              userId: userId || "anonymous",
+              chatId: conversationId || `chat_${Date.now()}`,
+              messages: messages.map(m => ({
+                role: m.role,
+                content: m.content,
+                timestamp: Date.now()
+              })),
+              attachments: [],
+              model: model || DEFAULT_MODEL
+            }
+          );
+          
+          if (pipelineResult.success) {
+            console.log(`[ChatService:AgenticPipeline] Pipeline completed successfully in ${pipelineResult.metadata.durationMs}ms`);
+            
+            return {
+              content: pipelineResult.response.content,
+              role: "assistant",
+              agentRunId: pipelineResult.runId,
+              wasAgentTask: true,
+              pipelineSteps: pipelineResult.metadata.totalSteps,
+              pipelineSuccess: true
+            };
+          } else {
+            console.warn(`[ChatService:AgenticPipeline] Pipeline failed, falling back to normal flow`);
+          }
+        } catch (agenticError: any) {
+          console.error(`[ChatService:AgenticPipeline] Error executing pipeline:`, agenticError);
         }
       }
     }

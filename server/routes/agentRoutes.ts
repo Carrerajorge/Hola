@@ -3,6 +3,7 @@ import { db } from "../db";
 import { agentModeRuns, agentModeSteps, agentModeEvents } from "@shared/schema";
 import { agentManager } from "../agent/agentOrchestrator";
 import { agentEventBus } from "../agent/eventBus";
+import { activityStreamPublisher, agentLoopFacade } from "../agent/orchestration";
 import { eq, desc, asc } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { CreateRunRequestSchema, RunResponseSchema, StepsArrayResponseSchema } from "../agent/contracts";
@@ -378,6 +379,89 @@ export function createAgentModeRouter() {
     }
   });
 
+  router.get("/runs/:id/stream", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, id));
+
+      if (!run) {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      const clientId = activityStreamPublisher.subscribe(id, res);
+      console.log(`[AgentRoutes] Activity stream client ${clientId} connected to run ${id}`);
+
+      req.on("close", () => {
+        activityStreamPublisher.unsubscribe(id, res);
+        console.log(`[AgentRoutes] Activity stream client ${clientId} disconnected from run ${id}`);
+      });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error setting up activity stream:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to setup activity stream" });
+      }
+    }
+  });
+
+  router.get("/runs/:id/status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const pipelineStatus = await agentLoopFacade.getRunStatus(id);
+
+      const [run] = await db.select()
+        .from(agentModeRuns)
+        .where(eq(agentModeRuns.id, id));
+
+      if (!run && pipelineStatus.status === "completed") {
+        return res.status(404).json({ error: "Run not found" });
+      }
+
+      const response = {
+        runId: id,
+        status: run?.status || pipelineStatus.status,
+        currentStep: pipelineStatus.currentStep,
+        totalSteps: run?.totalSteps || pipelineStatus.totalSteps,
+        completedSteps: run?.completedSteps || 0,
+        startedAt: run?.startedAt?.toISOString() || (pipelineStatus.startedAt ? new Date(pipelineStatus.startedAt).toISOString() : undefined),
+        completedAt: run?.completedAt?.toISOString() || (pipelineStatus.completedAt ? new Date(pipelineStatus.completedAt).toISOString() : undefined),
+        error: run?.error || pipelineStatus.error,
+        summary: run?.summary,
+        pipeline: {
+          status: pipelineStatus.status,
+          currentStep: pipelineStatus.currentStep,
+          totalSteps: pipelineStatus.totalSteps,
+        },
+      };
+
+      res.json(response);
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error getting run status:", error);
+      res.status(500).json({ error: "Failed to get run status" });
+    }
+  });
+
+  router.get("/runs/:id/events/history", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      const memoryEvents = activityStreamPublisher.getHistory(id);
+
+      res.json({ 
+        runId: id,
+        events: memoryEvents,
+        count: memoryEvents.length,
+        source: "memory",
+      });
+    } catch (error: any) {
+      console.error("[AgentRoutes] Error getting event history:", error);
+      res.status(500).json({ error: "Failed to get event history" });
+    }
+  });
+
   router.post("/runs/:id/cancel", requireAuth, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -397,7 +481,8 @@ export function createAgentModeRouter() {
         });
       }
 
-      const cancelled = await agentManager.cancelRun(id);
+      const agentManagerCancelled = await agentManager.cancelRun(id);
+      const pipelineCancelled = await agentLoopFacade.cancelRun(id);
 
       const lockResult = await updateRunWithLock(id, run.status, { 
         status: "cancelled", 
@@ -411,7 +496,10 @@ export function createAgentModeRouter() {
         });
       }
 
-      res.json({ success: true });
+      res.json({ 
+        success: true, 
+        cancelled: agentManagerCancelled || pipelineCancelled,
+      });
     } catch (error: any) {
       console.error("[AgentRoutes] Error cancelling run:", error);
       res.status(500).json({ error: "Failed to cancel agent run" });

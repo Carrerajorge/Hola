@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Brain,
@@ -1054,6 +1054,9 @@ export function ActivityFeed({ runId, isOpen, onClose, onCancel, onRetry }: Acti
   const run = runId ? runs.get(runId) : getActiveRun();
   const phaseConfig = run ? PHASE_CONFIG[run.phase] : null;
   const PhaseIcon = phaseConfig?.icon || Brain;
+  
+  const scrollEndRef = useRef<HTMLDivElement>(null);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
 
   useEffect(() => {
     if (runId && isOpen) {
@@ -1061,6 +1064,12 @@ export function ActivityFeed({ runId, isOpen, onClose, onCancel, onRetry }: Acti
       return () => unsubscribeFromRun(runId);
     }
   }, [runId, isOpen, subscribeToRun, unsubscribeFromRun]);
+
+  useEffect(() => {
+    if (autoScrollEnabled && scrollEndRef.current) {
+      scrollEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [run?.steps.length, run?.artifacts.length, run?.verifications.length, autoScrollEnabled]);
 
   const activeStep = useMemo(() => {
     if (!run) return null;
@@ -1209,6 +1218,22 @@ export function ActivityFeed({ runId, isOpen, onClose, onCancel, onRetry }: Acti
                   </CardContent>
                 </Card>
               )}
+
+              {(run.status === "planning" || run.status === "running") && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex items-center gap-2 p-3 rounded-lg bg-muted/50"
+                  data-testid="running-indicator"
+                >
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span className="text-sm text-muted-foreground">
+                    {run.status === "planning" ? "Creando plan..." : "Ejecutando pasos..."}
+                  </span>
+                </motion.div>
+              )}
+              
+              <div ref={scrollEndRef} />
             </>
           )}
         </div>
