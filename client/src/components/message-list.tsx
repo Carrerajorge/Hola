@@ -1776,13 +1776,16 @@ const AssistantMessage = memo(function AssistantMessage({
         </>
       )}
 
-      {message.documentAnalysis && !message.isThinking && (
+      {message.documentAnalysis && 
+       message.ui_components && 
+       message.ui_components.length > 0 && 
+       !message.isThinking && (
         <div className="mt-3 w-full">
           <SemanticDocumentAnalysisResults
             documentModel={message.documentAnalysis.documentModel}
             summary={message.content || ""}
-            insights={message.documentAnalysis.insights || []}
-            suggestedQuestions={message.documentAnalysis.suggestedQuestions || []}
+            insights={message.ui_components.includes('insights_panel') ? (message.documentAnalysis.insights || []) : []}
+            suggestedQuestions={message.ui_components.includes('suggested_questions') ? (message.documentAnalysis.suggestedQuestions || []) : []}
             onQuestionClick={onQuestionClick || (() => {})}
           />
         </div>

@@ -101,6 +101,7 @@ export interface Message {
     insights: any[];
     suggestedQuestions: any[];
   };
+  ui_components?: string[]; // Components to render: 'executive_summary', 'suggested_questions', 'insights_panel'
 }
 
 export interface Chat {

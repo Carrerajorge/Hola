@@ -918,6 +918,11 @@ ${systemContent}`;
       // Detect coverage requirement
       const requiresFullCoverage = /\b(todos|all|completo|complete|cada|every|analiza\s+todos)\b/i.test(userQuery);
       
+      // Detect if user explicitly requests enrichment (summary/insights/questions)
+      const enrichmentPatterns = /\b(resumen|summary|insights|analiza|análisis|analisis|preguntas sugeridas|sugerencias|key findings|hallazgos|overview|resúmen|conclusiones)\b/i;
+      const enrichmentEnabled = enrichmentPatterns.test(userQuery);
+      console.log(`[Analyze] enrichmentEnabled: ${enrichmentEnabled} (query: "${userQuery.substring(0, 50)}...")`);
+      
       // Resolve storagePaths for all attachments
       const resolvedAttachments: any[] = [];
       for (const att of attachments) {
@@ -1341,14 +1346,8 @@ TU RESPUESTA DEBE INCLUIR:
       const requestDurationMs = Date.now() - startTime;
       pareMetrics.recordRequestDuration(requestDurationMs);
       
-      // Aggregate insights from all document models
-      const allInsights: Insight[] = documentModels.flatMap(doc => doc.insights || []);
-      
-      // Aggregate suggested questions from all document models  
-      const allSuggestedQuestions: SuggestedQuestion[] = documentModels.flatMap(doc => doc.suggestedQuestions || []);
-      
-      // Build actionable insights from the LLM response and document anomalies
-      const actionableInsights: Array<{
+      // Only generate enrichment UI components when explicitly requested
+      let actionableInsights: Array<{
         id: string;
         type: 'finding' | 'risk' | 'opportunity' | 'recommendation';
         title: string;
@@ -1357,53 +1356,71 @@ TU RESPUESTA DEBE INCLUIR:
         sourceRefs: string[];
       }> = [];
       
-      // Extract risks from anomalies
-      documentModels.forEach(doc => {
-        doc.anomalies.forEach(anomaly => {
-          actionableInsights.push({
-            id: anomaly.id,
-            type: 'risk',
-            title: `${anomaly.type} detected`,
-            description: anomaly.description,
-            confidence: anomaly.severity === 'high' ? 'high' : anomaly.severity === 'medium' ? 'medium' : 'low',
-            sourceRefs: [anomaly.sourceRef]
-          });
-        });
-      });
-      
-      // Add insights from document models
-      allInsights.forEach(insight => {
-        actionableInsights.push({
-          id: insight.id,
-          type: insight.type as 'finding' | 'risk' | 'opportunity' | 'recommendation',
-          title: insight.title,
-          description: insight.description,
-          confidence: insight.confidence,
-          sourceRefs: insight.sourceRefs
-        });
-      });
-      
-      // Generate suggested questions for further analysis
-      const suggestedQuestionsOutput: Array<{
+      let suggestedQuestionsOutput: Array<{
         id: string;
         question: string;
         category: 'analysis' | 'clarification' | 'action' | 'deep-dive';
         relatedSources: string[];
-      }> = allSuggestedQuestions.map(q => ({
-        id: q.id,
-        question: q.question,
-        category: q.category,
-        relatedSources: q.relatedSources
-      }));
+      }> = [];
       
-      // Add default questions if none were extracted
-      if (suggestedQuestionsOutput.length === 0) {
-        const defaultQuestions = [
-          { id: 'q1', question: '¿Cuáles son las tendencias principales en los datos?', category: 'analysis' as const, relatedSources: documentModels.map(d => d.documentMeta.fileName) },
-          { id: 'q2', question: '¿Existen valores atípicos o anomalías importantes?', category: 'deep-dive' as const, relatedSources: documentModels.map(d => d.documentMeta.fileName) },
-          { id: 'q3', question: '¿Qué acciones se recomiendan basándose en estos datos?', category: 'action' as const, relatedSources: documentModels.map(d => d.documentMeta.fileName) },
-        ];
-        suggestedQuestionsOutput.push(...defaultQuestions);
+      // Aggregate insights and questions only when enrichment is enabled
+      let allInsights: Insight[] = [];
+      let allSuggestedQuestions: SuggestedQuestion[] = [];
+      
+      if (enrichmentEnabled) {
+        console.log(`[Analyze] Enrichment ENABLED - generating insights and suggested questions`);
+        
+        // Aggregate insights from all document models
+        allInsights = documentModels.flatMap(doc => doc.insights || []);
+        
+        // Aggregate suggested questions from all document models  
+        allSuggestedQuestions = documentModels.flatMap(doc => doc.suggestedQuestions || []);
+        
+        // Extract risks from anomalies
+        documentModels.forEach(doc => {
+          doc.anomalies.forEach(anomaly => {
+            actionableInsights.push({
+              id: anomaly.id,
+              type: 'risk',
+              title: `${anomaly.type} detected`,
+              description: anomaly.description,
+              confidence: anomaly.severity === 'high' ? 'high' : anomaly.severity === 'medium' ? 'medium' : 'low',
+              sourceRefs: [anomaly.sourceRef]
+            });
+          });
+        });
+        
+        // Add insights from document models
+        allInsights.forEach(insight => {
+          actionableInsights.push({
+            id: insight.id,
+            type: insight.type as 'finding' | 'risk' | 'opportunity' | 'recommendation',
+            title: insight.title,
+            description: insight.description,
+            confidence: insight.confidence,
+            sourceRefs: insight.sourceRefs
+          });
+        });
+        
+        // Generate suggested questions for further analysis
+        suggestedQuestionsOutput = allSuggestedQuestions.map(q => ({
+          id: q.id,
+          question: q.question,
+          category: q.category,
+          relatedSources: q.relatedSources
+        }));
+        
+        // Add default questions if none were extracted
+        if (suggestedQuestionsOutput.length === 0) {
+          const defaultQuestions = [
+            { id: 'q1', question: '¿Cuáles son las tendencias principales en los datos?', category: 'analysis' as const, relatedSources: documentModels.map(d => d.documentMeta.fileName) },
+            { id: 'q2', question: '¿Existen valores atípicos o anomalías importantes?', category: 'deep-dive' as const, relatedSources: documentModels.map(d => d.documentMeta.fileName) },
+            { id: 'q3', question: '¿Qué acciones se recomiendan basándose en estos datos?', category: 'action' as const, relatedSources: documentModels.map(d => d.documentMeta.fileName) },
+          ];
+          suggestedQuestionsOutput.push(...defaultQuestions);
+        }
+      } else {
+        console.log(`[Analyze] Enrichment DISABLED - returning direct answer only`);
       }
       
       // Build response payload with full DocumentSemanticModel and enhanced fields
@@ -1441,6 +1458,8 @@ TU RESPUESTA DEBE INCLUIR:
         documentModels: documentModels,
         insights: actionableInsights,
         suggestedQuestions: suggestedQuestionsOutput,
+        ui_components: enrichmentEnabled ? ['executive_summary', 'suggested_questions', 'insights_panel'] : [],
+        enrichmentEnabled,
         per_doc_findings: perDocFindings,
         citations,
         progressReport: {

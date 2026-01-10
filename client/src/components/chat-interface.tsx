@@ -3623,6 +3623,12 @@ IMPORTANTE:
               timestamp: new Date(),
               requestId: generateRequestId(),
               userMessageId: userMsgId,
+              ui_components: analyzeResult.ui_components || [],
+              documentAnalysis: analyzeResult.documentModel ? {
+                documentModel: analyzeResult.documentModel,
+                insights: analyzeResult.insights || [],
+                suggestedQuestions: analyzeResult.suggestedQuestions || [],
+              } : undefined,
             };
             onSendMessage(analysisMsg);
             
@@ -3949,6 +3955,7 @@ IMPORTANTE:
             timestamp: new Date(),
             requestId: generateRequestId(),
             userMessageId: userMsgId,
+            ui_components: analyzeResult.ui_components || [],
             documentAnalysis: analyzeResult.documentModel ? {
               documentModel: analyzeResult.documentModel,
               insights: analyzeResult.insights || [],
