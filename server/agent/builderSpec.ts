@@ -6,10 +6,11 @@ import { randomUUID } from "crypto";
 // ============================================
 
 export const PositionSchema = z.object({
-  x: z.number().min(0).describe("X coordinate (percentage or pixels)"),
-  y: z.number().min(0).describe("Y coordinate (percentage or pixels)"),
-  w: z.number().min(0).describe("Width"),
-  h: z.number().min(0).describe("Height"),
+  x: z.number().min(0),
+  y: z.number().min(0),
+  w: z.number().min(0),
+  h: z.number().min(0),
+  unit: z.enum(["percent", "px", "inches"]).optional(),
 });
 export type Position = z.infer<typeof PositionSchema>;
 

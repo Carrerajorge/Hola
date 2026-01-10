@@ -1,6 +1,49 @@
 import { create } from 'zustand';
 import type { TraceEvent, TraceEventType } from '@shared/schema';
 
+export interface TraceCitation {
+  source: string;
+  text: string;
+  page?: number;
+  url?: string;
+  favicon?: string;
+}
+
+export interface TraceProgress {
+  current: number;
+  total: number;
+  percentage?: number;
+  message?: string;
+}
+
+export interface TraceAgent {
+  name: string;
+  role?: string;
+  status?: string;
+}
+
+export interface TraceMemoryEvent {
+  type: 'loaded' | 'saved';
+  keys?: string[];
+  count?: number;
+  timestamp: number;
+}
+
+export interface TraceVerification {
+  passed: boolean;
+  message?: string;
+  timestamp: number;
+}
+
+export interface TraceToolCall {
+  toolName: string;
+  status: 'started' | 'running' | 'succeeded' | 'failed';
+  startedAt: number;
+  completedAt?: number;
+  durationMs?: number;
+  error?: string;
+}
+
 export interface TraceStep {
   index: number;
   toolName: string;
@@ -8,10 +51,12 @@ export interface TraceStep {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'retrying' | 'cancelled';
   startedAt?: number;
   completedAt?: number;
+  durationMs?: number;
   output?: string;
   error?: string;
   artifacts: TraceArtifact[];
   events: TraceEvent[];
+  toolCalls: TraceToolCall[];
   isExpanded: boolean;
 }
 
@@ -20,6 +65,8 @@ export interface TraceArtifact {
   name: string;
   url?: string;
   data?: any;
+  mimeType?: string;
+  size?: number;
 }
 
 export interface TracePlan {
@@ -36,6 +83,12 @@ export interface TraceRun {
   steps: TraceStep[];
   artifacts: TraceArtifact[];
   events: TraceEvent[];
+  citations: TraceCitation[];
+  verifications: TraceVerification[];
+  memoryEvents: TraceMemoryEvent[];
+  activeAgent: TraceAgent | null;
+  delegatedAgents: TraceAgent[];
+  progress: TraceProgress | null;
   summary?: string;
   error?: string;
   startedAt?: number;
@@ -67,6 +120,12 @@ const createEmptyRun = (runId: string): TraceRun => ({
   steps: [],
   artifacts: [],
   events: [],
+  citations: [],
+  verifications: [],
+  memoryEvents: [],
+  activeAgent: null,
+  delegatedAgents: [],
+  progress: null,
   currentStepIndex: 0,
 });
 
@@ -100,9 +159,14 @@ export const useAgentTraceStore = create<AgentTraceState>((set, get) => ({
 
     const eventTypes: TraceEventType[] = [
       'task_start', 'plan_created', 'plan_step', 'step_started',
-      'tool_call', 'tool_output', 'tool_chunk', 'observation',
-      'verification', 'step_completed', 'step_failed', 'step_retried',
-      'replan', 'thinking', 'shell_output', 'artifact_created',
+      'tool_call', 'tool_call_started', 'tool_call_succeeded', 'tool_call_failed',
+      'tool_output', 'tool_chunk', 'observation',
+      'verification', 'verification_passed', 'verification_failed',
+      'step_completed', 'step_failed', 'step_retried',
+      'replan', 'thinking', 'shell_output',
+      'artifact_created', 'artifact_ready',
+      'citations_added', 'memory_loaded', 'memory_saved',
+      'agent_delegated', 'agent_completed', 'progress_update',
       'error', 'done', 'cancelled', 'heartbeat'
     ];
 
@@ -173,6 +237,7 @@ export const useAgentTraceStore = create<AgentTraceState>((set, get) => ({
               status: 'pending' as const,
               artifacts: [],
               events: [],
+              toolCalls: [],
               isExpanded: i === 0,
             }));
           }
@@ -284,6 +349,167 @@ export const useAgentTraceStore = create<AgentTraceState>((set, get) => ({
           updatedRun.status = 'cancelled';
           updatedRun.phase = 'cancelled';
           updatedRun.completedAt = event.timestamp;
+          break;
+
+        case 'tool_call_started':
+          if (event.stepIndex !== undefined && event.tool_name) {
+            const step = updatedRun.steps[event.stepIndex];
+            if (step) {
+              const toolCall: TraceToolCall = {
+                toolName: event.tool_name,
+                status: 'started',
+                startedAt: event.timestamp,
+              };
+              step.toolCalls.push(toolCall);
+              const MAX_TOOL_CALLS = 50;
+              if (step.toolCalls.length > MAX_TOOL_CALLS) {
+                step.toolCalls = step.toolCalls.slice(-MAX_TOOL_CALLS);
+              }
+              step.events.push(event);
+            }
+          }
+          break;
+
+        case 'tool_call_succeeded':
+          if (event.stepIndex !== undefined && event.tool_name) {
+            const step = updatedRun.steps[event.stepIndex];
+            if (step) {
+              const toolCall = step.toolCalls.find(
+                tc => tc.toolName === event.tool_name && tc.status !== 'succeeded' && tc.status !== 'failed'
+              );
+              if (toolCall) {
+                toolCall.status = 'succeeded';
+                toolCall.completedAt = event.timestamp;
+                toolCall.durationMs = event.durationMs || (event.timestamp - toolCall.startedAt);
+              }
+              step.events.push(event);
+            }
+          }
+          break;
+
+        case 'tool_call_failed':
+          if (event.stepIndex !== undefined && event.tool_name) {
+            const step = updatedRun.steps[event.stepIndex];
+            if (step) {
+              const toolCall = step.toolCalls.find(
+                tc => tc.toolName === event.tool_name && tc.status !== 'succeeded' && tc.status !== 'failed'
+              );
+              if (toolCall) {
+                toolCall.status = 'failed';
+                toolCall.completedAt = event.timestamp;
+                toolCall.durationMs = event.durationMs || (event.timestamp - toolCall.startedAt);
+                toolCall.error = event.error?.message;
+              }
+              step.events.push(event);
+            }
+          }
+          break;
+
+        case 'artifact_ready':
+          if (event.artifact) {
+            const artifact: TraceArtifact = {
+              type: event.artifact.type,
+              name: event.artifact.name,
+              url: event.artifact.url,
+              data: event.artifact.data,
+              mimeType: event.artifact.mimeType,
+              size: event.artifact.size,
+            };
+            const existing = updatedRun.artifacts.find(a => a.name === artifact.name);
+            if (!existing) {
+              updatedRun.artifacts.push(artifact);
+            }
+            if (event.stepIndex !== undefined) {
+              const step = updatedRun.steps[event.stepIndex];
+              if (step) {
+                const stepExisting = step.artifacts.find(a => a.name === artifact.name);
+                if (!stepExisting) {
+                  step.artifacts.push(artifact);
+                }
+              }
+            }
+          }
+          break;
+
+        case 'citations_added':
+          if (event.citations) {
+            const newCitations: TraceCitation[] = event.citations.map(c => ({
+              source: c.source,
+              text: c.text,
+              page: c.page,
+              url: c.url,
+            }));
+            updatedRun.citations = [...updatedRun.citations, ...newCitations];
+          }
+          break;
+
+        case 'verification_passed':
+          updatedRun.verifications.push({
+            passed: true,
+            message: event.content,
+            timestamp: event.timestamp,
+          });
+          break;
+
+        case 'verification_failed':
+          updatedRun.verifications.push({
+            passed: false,
+            message: event.error?.message || event.content,
+            timestamp: event.timestamp,
+          });
+          break;
+
+        case 'agent_delegated':
+          if (event.agent) {
+            const agent: TraceAgent = {
+              name: event.agent.name,
+              role: event.agent.role,
+              status: 'active',
+            };
+            updatedRun.activeAgent = agent;
+            updatedRun.delegatedAgents.push(agent);
+          }
+          break;
+
+        case 'agent_completed':
+          if (event.agent) {
+            const agent = updatedRun.delegatedAgents.find(a => a.name === event.agent?.name);
+            if (agent) {
+              agent.status = 'completed';
+            }
+            if (updatedRun.activeAgent?.name === event.agent.name) {
+              updatedRun.activeAgent = null;
+            }
+          }
+          break;
+
+        case 'progress_update':
+          if (event.progress) {
+            updatedRun.progress = {
+              current: event.progress.current,
+              total: event.progress.total,
+              percentage: event.progress.percentage,
+              message: event.progress.message,
+            };
+          }
+          break;
+
+        case 'memory_loaded':
+          updatedRun.memoryEvents.push({
+            type: 'loaded',
+            keys: event.memory?.keys,
+            count: event.memory?.loaded,
+            timestamp: event.timestamp,
+          });
+          break;
+
+        case 'memory_saved':
+          updatedRun.memoryEvents.push({
+            type: 'saved',
+            keys: event.memory?.keys,
+            count: event.memory?.saved,
+            timestamp: event.timestamp,
+          });
           break;
       }
 
