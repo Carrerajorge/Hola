@@ -939,6 +939,7 @@ export function ChatInterface({
   const [browserUrl, setBrowserUrl] = useState("https://www.google.com");
   const [isBrowserMaximized, setIsBrowserMaximized] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const pendingUploadsRef = useRef<Map<string, Promise<void>>>(new Map());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
   const [regeneratingMsgIndex, setRegeneratingMsgIndex] = useState<number | null>(null);
@@ -2513,7 +2514,7 @@ export function ChatInterface({
     
     if (validFiles.length === 0) return;
 
-    const uploadPromises = validFiles.map(async (file) => {
+    for (const file of validFiles) {
       const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2)}`;
       const isImage = file.type.startsWith("image/");
       const isExcel = [
@@ -2542,111 +2543,126 @@ export function ChatInterface({
       };
       setUploadedFiles((prev) => [...prev, tempFile]);
 
-      try {
-        const urlRes = await fetch("/api/objects/upload", { method: "POST" });
-        const { uploadURL, storagePath } = await urlRes.json();
-        if (!uploadURL || !storagePath) throw new Error("No upload URL received");
+      const doUpload = async (): Promise<void> => {
+        try {
+          const urlRes = await fetch("/api/objects/upload", { method: "POST" });
+          const { uploadURL, storagePath } = await urlRes.json();
+          if (!uploadURL || !storagePath) throw new Error("No upload URL received");
 
-        const uploadRes = await fetch(uploadURL, {
-          method: "PUT",
-          headers: { "Content-Type": file.type },
-          body: file,
-        });
-        if (!uploadRes.ok) throw new Error("Upload failed");
+          const uploadRes = await fetch(uploadURL, {
+            method: "PUT",
+            headers: { "Content-Type": file.type },
+            body: file,
+          });
+          if (!uploadRes.ok) throw new Error("Upload failed");
 
-        let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
-        
-        if (isExcel) {
-          try {
-            const formData = new FormData();
-            formData.append('file', file);
-            
-            const spreadsheetRes = await fetch('/api/spreadsheet/upload', {
-              method: 'POST',
-              body: formData,
-            });
-            
-            if (spreadsheetRes.ok) {
-              const spreadsheetResult = await spreadsheetRes.json();
-              const uploadId = spreadsheetResult.id;
-              const sheetDetails = spreadsheetResult.sheetDetails || [];
-              const sheets = sheetDetails.map((s: any) => ({
-                name: s.name,
-                rowCount: s.rowCount,
-                columnCount: s.columnCount,
-              }));
+          let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
+          
+          if (isExcel) {
+            try {
+              const formData = new FormData();
+              formData.append('file', file);
               
-              spreadsheetData = {
-                uploadId,
-                sheets,
-              };
+              const spreadsheetRes = await fetch('/api/spreadsheet/upload', {
+                method: 'POST',
+                body: formData,
+              });
               
-              if (spreadsheetResult.firstSheetPreview) {
-                spreadsheetData.previewData = {
-                  headers: spreadsheetResult.firstSheetPreview.headers || [],
-                  data: spreadsheetResult.firstSheetPreview.data || [],
+              if (spreadsheetRes.ok) {
+                const spreadsheetResult = await spreadsheetRes.json();
+                const uploadId = spreadsheetResult.id;
+                const sheetDetails = spreadsheetResult.sheetDetails || [];
+                const sheets = sheetDetails.map((s: any) => ({
+                  name: s.name,
+                  rowCount: s.rowCount,
+                  columnCount: s.columnCount,
+                }));
+                
+                spreadsheetData = {
+                  uploadId,
+                  sheets,
                 };
+                
+                if (spreadsheetResult.firstSheetPreview) {
+                  spreadsheetData.previewData = {
+                    headers: spreadsheetResult.firstSheetPreview.headers || [],
+                    data: spreadsheetResult.firstSheetPreview.data || [],
+                  };
+                }
+                
+                triggerDocumentAnalysis(uploadId, file.name, (analysisId) => {
+                  setUploadedFiles((prev) =>
+                    prev.map((f) => f.id === tempId ? { ...f, analysisId } : f)
+                  );
+                });
               }
-              
-              triggerDocumentAnalysis(uploadId, file.name, (analysisId) => {
+            } catch (spreadsheetError) {
+              console.warn("Failed to parse spreadsheet:", spreadsheetError);
+            }
+          }
+
+          if (isImage) {
+            const registerRes = await fetch("/api/files/quick", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
+            });
+            const registeredFile = await registerRes.json();
+            if (!registerRes.ok) throw new Error(registeredFile.error);
+            
+            setUploadedFiles((prev) =>
+              prev.map((f) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
+            );
+          } else {
+            setUploadedFiles((prev) =>
+              prev.map((f) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
+            );
+            
+            const registerRes = await fetch("/api/files", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
+            });
+            const registeredFile = await registerRes.json();
+            if (!registerRes.ok) throw new Error(registeredFile.error);
+
+            setUploadedFiles((prev) =>
+              prev.map((f) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
+            );
+
+            pollFileStatusFast(registeredFile.id, tempId);
+            
+            if (isAnalyzableFile(file.name) && !isExcel) {
+              triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
                 setUploadedFiles((prev) =>
-                  prev.map((f) => f.id === tempId ? { ...f, analysisId } : f)
+                  prev.map((f) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
                 );
               });
             }
-          } catch (spreadsheetError) {
-            console.warn("Failed to parse spreadsheet:", spreadsheetError);
           }
+        } catch (error) {
+          console.error("File upload error:", error);
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.id === tempId ? { ...f, status: "error" } : f))
+          );
         }
+      };
 
-        if (isImage) {
-          const registerRes = await fetch("/api/files/quick", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
-          });
-          const registeredFile = await registerRes.json();
-          if (!registerRes.ok) throw new Error(registeredFile.error);
-          
-          setUploadedFiles((prev) =>
-            prev.map((f) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
-          );
-        } else {
-          setUploadedFiles((prev) =>
-            prev.map((f) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
-          );
-          
-          const registerRes = await fetch("/api/files", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: file.name, type: file.type, size: file.size, storagePath }),
-          });
-          const registeredFile = await registerRes.json();
-          if (!registerRes.ok) throw new Error(registeredFile.error);
+      const uploadPromise = doUpload();
+      pendingUploadsRef.current.set(tempId, uploadPromise);
+      uploadPromise.finally(() => {
+        pendingUploadsRef.current.delete(tempId);
+      });
+    }
+  };
 
-          setUploadedFiles((prev) =>
-            prev.map((f) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
-          );
-
-          pollFileStatusFast(registeredFile.id, tempId);
-          
-          if (isAnalyzableFile(file.name) && !isExcel) {
-            triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
-              setUploadedFiles((prev) =>
-                prev.map((f) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
-              );
-            });
-          }
-        }
-      } catch (error) {
-        console.error("File upload error:", error);
-        setUploadedFiles((prev) =>
-          prev.map((f) => (f.id === tempId ? { ...f, status: "error" } : f))
-        );
-      }
-    });
-
-    await Promise.all(uploadPromises);
+  const waitForPendingUploads = async (): Promise<void> => {
+    const promises = Array.from(pendingUploadsRef.current.values());
+    if (promises.length > 0) {
+      console.log("[waitForPendingUploads] Waiting for", promises.length, "uploads to complete");
+      await Promise.all(promises);
+      console.log("[waitForPendingUploads] All uploads complete");
+    }
   };
   
   const pollFileStatusFast = async (fileId: string, trackingId: string) => {
@@ -2798,10 +2814,18 @@ export function ChatInterface({
 
   const handleSubmit = async () => {
     console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
-    // Don't submit if files are still uploading/processing
+    
+    // Wait for any pending uploads to complete before proceeding
+    if (pendingUploadsRef.current.size > 0) {
+      console.log("[handleSubmit] Waiting for", pendingUploadsRef.current.size, "pending uploads...");
+      await waitForPendingUploads();
+      console.log("[handleSubmit] All pending uploads completed");
+    }
+    
+    // Don't submit if files are still uploading/processing (double-check state after waiting)
     const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) {
-      console.log("[handleSubmit] files still loading, returning");
+      console.log("[handleSubmit] files still loading after wait, returning");
       return;
     }
     
