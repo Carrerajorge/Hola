@@ -1,14 +1,36 @@
 import Tesseract from "tesseract.js";
 
-// pdf-parse uses CommonJS exports, need dynamic import for ESM compatibility
-async function loadPdfParse() {
-  const module = await import("pdf-parse");
-  // pdf-parse exports the function directly as default in ESM mode
-  const pdfParse = module.default?.default || module.default || module;
-  if (typeof pdfParse !== 'function') {
-    throw new Error('pdf-parse module did not export a function');
+// pdf-parse v2.x exports PDFParse class instead of a function
+// Need to use the new API: new PDFParse({ data: buffer }).getText()
+async function parsePdfBuffer(buffer: Buffer): Promise<{ text: string; numpages: number; info: Record<string, unknown> }> {
+  const pdfParseModule = await import("pdf-parse");
+  const PDFParse = pdfParseModule.PDFParse;
+  
+  if (!PDFParse) {
+    throw new Error('pdf-parse module did not export PDFParse class');
   }
-  return pdfParse;
+  
+  // PDFParse v2 requires either 'url', 'data' (Uint8Array), or 'path'
+  // Convert Buffer to Uint8Array for compatibility
+  const uint8Array = new Uint8Array(buffer);
+  
+  const parser = new PDFParse({ data: uint8Array });
+  const result = await parser.getText();
+  
+  // Get document info if available
+  let info: Record<string, unknown> = {};
+  try {
+    const infoResult = await parser.getInfo();
+    info = infoResult.info || {};
+  } catch {
+    // getInfo may fail on some PDFs, continue without metadata
+  }
+  
+  return {
+    text: result.text || "",
+    numpages: result.pages?.length || 1,
+    info
+  };
 }
 import type {
   DocumentSemanticModel,
@@ -378,8 +400,7 @@ export async function extractPDF(
   let pdfMetadata: Record<string, unknown> = {};
 
   try {
-    const pdfParseLib = await loadPdfParse();
-    const pdfData = await pdfParseLib(buffer);
+    const pdfData = await parsePdfBuffer(buffer);
     extractedText = normalizeText(pdfData.text || "");
     pageCount = pdfData.numpages || 1;
     pdfMetadata = pdfData.info || {};
