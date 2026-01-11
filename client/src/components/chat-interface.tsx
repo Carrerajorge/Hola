@@ -3186,6 +3186,11 @@ export function ChatInterface({
 
     console.log("[handleSubmit] sending user message:", userMsg, "chatId:", chatId);
     
+    // CRITICAL: Add user message to UI IMMEDIATELY (optimistic update)
+    // This ensures the user sees their message with attachments right away,
+    // before any async operations like document analysis begin
+    setMessages(prev => [...prev, userMsg]);
+    
     // DATA_MODE: Pre-check if we have document attachments that need analysis
     // This must happen BEFORE onSendMessage to avoid race conditions with chat navigation
     const isDocumentFileLegacyPrecheck = (mimeType: string, fileName: string, type?: string): boolean => {
