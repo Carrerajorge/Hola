@@ -981,6 +981,22 @@ export function ChatInterface({
   // Track the current agent message ID for this chat session
   const [currentAgentMessageId, setCurrentAgentMessageId] = useState<string | null>(null);
   
+  // Optimistic messages - shown immediately before they appear in props
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
+  
+  // Clean up optimistic messages once they appear in props.messages
+  useEffect(() => {
+    if (optimisticMessages.length > 0 && messages.length > 0) {
+      const propsMessageIds = new Set(messages.map(m => m.id));
+      setOptimisticMessages(prev => prev.filter(m => !propsMessageIds.has(m.id)));
+    }
+  }, [messages, optimisticMessages.length]);
+  
+  // Clear optimistic messages when chatId changes
+  useEffect(() => {
+    setOptimisticMessages([]);
+  }, [chatId]);
+  
   // Use the store-based polling hook for the active agent run (only when valid messageId exists)
   useAgentPolling(currentAgentMessageId);
   
@@ -997,9 +1013,12 @@ export function ChatInterface({
     return runs.find(r => r.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(r.status)) || null;
   }, [currentAgentMessageId, allAgentRuns, chatId]);
   
-  // Combined messages: prop messages + agent runs from store
+  // Combined messages: prop messages + optimistic messages + agent runs from store
   const displayMessages = useMemo(() => {
-    const msgMap = new Map(messages.map(m => [m.id, m]));
+    // Start with optimistic messages, then merge prop messages (prop messages take priority)
+    const msgMap = new Map(optimisticMessages.map(m => [m.id, m]));
+    // Override with prop messages (they are the source of truth once available)
+    messages.forEach(m => msgMap.set(m.id, m));
     
     // Merge agent runs from the store into messages (use reactive allAgentRuns)
     Object.entries(allAgentRuns).forEach(([messageId, runState]) => {
@@ -1044,7 +1063,7 @@ export function ChatInterface({
     return Array.from(msgMap.values()).sort((a, b) => 
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
-  }, [messages, allAgentRuns, chatId]);
+  }, [messages, optimisticMessages, allAgentRuns, chatId]);
   
   // Reset current agent message ID when chatId changes - polling auto-starts via useAgentPolling
   useEffect(() => {
@@ -2862,6 +2881,8 @@ export function ChatInterface({
           content: userMessageContent,
           timestamp: new Date(),
         };
+        // Show message immediately (optimistic update)
+        setOptimisticMessages(prev => [...prev, userMessage]);
         onSendMessage(userMessage);
         
         // Clear input IMMEDIATELY after capturing the value to prevent duplicates
@@ -2989,6 +3010,8 @@ export function ChatInterface({
         timestamp: new Date(),
         requestId: generateRequestId(),
       };
+      // Show message immediately (optimistic update)
+      setOptimisticMessages(prev => [...prev, userMsg]);
       onSendMessage(userMsg);
       
       try {
@@ -3098,6 +3121,8 @@ export function ChatInterface({
             content: userMessageContent,
             timestamp: new Date(),
           };
+          // Show message immediately (optimistic update)
+          setOptimisticMessages(prev => [...prev, userMessage]);
           onSendMessage(userMessage);
           
           setSelectedTool(null);
@@ -3189,7 +3214,7 @@ export function ChatInterface({
     // CRITICAL: Add user message to UI IMMEDIATELY (optimistic update)
     // This ensures the user sees their message with attachments right away,
     // before any async operations like document analysis begin
-    setMessages(prev => [...prev, userMsg]);
+    setOptimisticMessages(prev => [...prev, userMsg]);
     
     // DATA_MODE: Pre-check if we have document attachments that need analysis
     // This must happen BEFORE onSendMessage to avoid race conditions with chat navigation
