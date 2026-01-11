@@ -62,13 +62,20 @@ export class ImageParser implements FileParser {
       console.error("AI Vision OCR failed, falling back to Tesseract:", error);
     }
 
-    // Fallback to Tesseract
+    // Fallback to Tesseract with robust error handling
     try {
+      if (!content || content.length === 0) {
+        return {
+          text: "",
+          warnings: ["Imagen vacía o inválida"],
+        };
+      }
+
       const result = await Tesseract.recognize(content, "spa+eng", {
         logger: () => {},
       });
       
-      const text = result.data.text.trim();
+      const text = result?.data?.text?.trim() || "";
       
       if (!text || text.length === 0) {
         return {
@@ -84,9 +91,12 @@ export class ImageParser implements FileParser {
           confidence: result.data.confidence,
         },
       };
-    } catch (error) {
-      console.error("Error parsing image with OCR:", error);
-      throw new Error("Failed to extract text from image");
+    } catch (error: any) {
+      console.error("Error parsing image with OCR:", error?.message || error);
+      return {
+        text: "",
+        warnings: ["No se pudo extraer texto de la imagen: " + (error?.message || "Error de OCR")],
+      };
     }
   }
 }
