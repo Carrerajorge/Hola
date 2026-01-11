@@ -21,6 +21,7 @@ interface RecordingPanelProps {
   hasContent: boolean;
   isAgentRunning?: boolean;
   onAgentStop?: () => void;
+  isFilesLoading?: boolean;
 }
 
 function formatRecordingTime(seconds: number): string {
@@ -46,6 +47,7 @@ export function RecordingPanel({
   hasContent,
   isAgentRunning,
   onAgentStop,
+  isFilesLoading = false,
 }: RecordingPanelProps) {
   // Show stop button if either AI is processing OR agent is running
   const showStopButton = aiState !== "idle" || isAgentRunning;
@@ -193,8 +195,12 @@ export function RecordingPanel({
           <Button 
             onClick={onSubmit}
             size="icon" 
-            className="h-9 w-9 rounded-full transition-all duration-300 liquid-btn focus-visible:ring-2 focus-visible:ring-primary/50"
-            aria-label="Send message (Cmd+Enter)"
+            disabled={isFilesLoading}
+            className={cn(
+              "h-9 w-9 rounded-full transition-all duration-300 focus-visible:ring-2 focus-visible:ring-primary/50",
+              isFilesLoading ? "opacity-50 cursor-not-allowed bg-muted" : "liquid-btn"
+            )}
+            aria-label={isFilesLoading ? "Uploading files..." : "Send message (Cmd+Enter)"}
             data-testid="button-send-message"
           >
             <ArrowUp className="h-5 w-5" aria-hidden="true" />

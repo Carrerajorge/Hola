@@ -118,6 +118,7 @@ export interface ComposerProps {
   isGoogleFormsActive?: boolean;
   setIsGoogleFormsActive?: (value: boolean) => void;
   onTextareaFocus?: () => void;
+  isFilesLoading?: boolean;
 }
 
 function formatFileSize(bytes: number): string {
@@ -184,6 +185,7 @@ export function Composer({
   isGoogleFormsActive,
   setIsGoogleFormsActive,
   onTextareaFocus,
+  isFilesLoading = false,
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
@@ -1022,7 +1024,7 @@ export function Composer({
               handleMentionKeyDown(e);
               if (showMentionPopover) return;
               handleHistoryNavigation(e);
-              const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+              const filesStillLoading = isFilesLoading || uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !filesStillLoading) {
                 e.preventDefault();
                 handleSubmitWithHistory();
@@ -1144,6 +1146,7 @@ export function Composer({
                 hasContent={hasContent}
                 isAgentRunning={isAgentRunning}
                 onAgentStop={handleAgentStop}
+                isFilesLoading={isFilesLoading}
               />
             </div>
           </div>

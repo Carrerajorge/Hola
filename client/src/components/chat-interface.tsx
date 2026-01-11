@@ -4892,6 +4892,7 @@ IMPORTANTE:
             selectedDocText={selectedDocText}
             handleDocTextDeselect={handleDocTextDeselect}
             onTextareaFocus={handleCloseModelSelector}
+            isFilesLoading={uploadedFiles.some(f => f.status === "uploading" || f.status === "processing")}
           />
             </div>
           </Panel>
@@ -5169,6 +5170,7 @@ IMPORTANTE:
             isGoogleFormsActive={isGoogleFormsActive}
             setIsGoogleFormsActive={setIsGoogleFormsActive}
             onTextareaFocus={handleCloseModelSelector}
+            isFilesLoading={uploadedFiles.some(f => f.status === "uploading" || f.status === "processing")}
           />
         </div>
       )}
