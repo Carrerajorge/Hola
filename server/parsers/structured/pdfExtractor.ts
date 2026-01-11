@@ -3,7 +3,12 @@ import Tesseract from "tesseract.js";
 // pdf-parse uses CommonJS exports, need dynamic import for ESM compatibility
 async function loadPdfParse() {
   const module = await import("pdf-parse");
-  return module.default || module;
+  // pdf-parse exports the function directly as default in ESM mode
+  const pdfParse = module.default?.default || module.default || module;
+  if (typeof pdfParse !== 'function') {
+    throw new Error('pdf-parse module did not export a function');
+  }
+  return pdfParse;
 }
 import type {
   DocumentSemanticModel,
@@ -277,25 +282,48 @@ async function performOcr(
 ): Promise<{ text: string; confidence: number; language: string }> {
   console.log("[pdfExtractor] Performing OCR with tesseract.js...");
 
+  // Tesseract cannot read PDF buffers directly - only image formats
+  // Check for PDF magic bytes and skip OCR if detected
+  const isPdfBuffer = buffer.length >= 4 && 
+    buffer[0] === 0x25 && buffer[1] === 0x50 && 
+    buffer[2] === 0x44 && buffer[3] === 0x46; // %PDF
+
+  if (isPdfBuffer) {
+    console.log("[pdfExtractor] Cannot perform OCR on PDF buffer directly - Tesseract requires image input");
+    return {
+      text: "",
+      confidence: 0,
+      language: "spa+eng",
+    };
+  }
+
+  let worker: Tesseract.Worker | null = null;
   try {
-    const worker = await Tesseract.createWorker("spa+eng");
+    worker = await Tesseract.createWorker("spa+eng");
     
     const {
       data: { text, confidence },
     } = await worker.recognize(buffer);
     
     await worker.terminate();
+    worker = null;
 
     return {
       text: normalizeText(text),
       confidence: confidence || 0,
       language: "spa+eng",
     };
-  } catch (error) {
-    console.error("[pdfExtractor] OCR failed:", error);
-    throw new Error(
-      `OCR processing failed: ${error instanceof Error ? error.message : "Unknown error"}`
-    );
+  } catch (error: any) {
+    console.error("[pdfExtractor] OCR failed:", error?.message || error);
+    if (worker) {
+      try { await worker.terminate(); } catch { /* ignore */ }
+    }
+    // Return empty result instead of throwing to prevent app crash
+    return {
+      text: "",
+      confidence: 0,
+      language: "spa+eng",
+    };
   }
 }
 
