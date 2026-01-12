@@ -47,7 +47,7 @@ export interface PipelineResult {
   warnings: string[];
 }
 
-const SEARCH_QUERIES = [
+const ALL_SEARCH_QUERIES = [
   `"recycled steel" concrete strength`,
   `"recycled steel fibers" concrete compressive strength`,
   `"scrap steel" concrete mechanical properties`,
@@ -60,9 +60,6 @@ const SEARCH_QUERIES = [
   `recycled steel bar concrete durability`,
   `steel slag concrete compressive`,
   `waste steel fiber concrete strength`,
-];
-
-const EXPANDED_QUERIES = [
   `"recycled steel" concrete "compressive strength"`,
   `"steel fibers" recycled concrete mechanical properties`,
   `"scrap steel" reinforced concrete strength`,
@@ -71,14 +68,14 @@ const EXPANDED_QUERIES = [
   `"recycled aggregate" steel concrete strength`,
   `recycled steel wire concrete tensile`,
   `steel manufacturing waste concrete`,
+  `industrial steel waste concrete reinforcement`,
+  `recycled steel shavings concrete mix`,
+  `post-consumer steel fiber concrete`,
+  `steel mill byproduct concrete strength`,
 ];
 
 function buildSearchQueries(topic: string, iteration: number = 0): string[] {
-  const base = [...SEARCH_QUERIES];
-  
-  if (iteration >= 1) {
-    base.push(...EXPANDED_QUERIES);
-  }
+  const base = [...ALL_SEARCH_QUERIES];
   
   const topicTerms = extractKeyTerms(topic);
   if (topicTerms.length > 0) {
@@ -118,7 +115,7 @@ function extractKeyTerms(topic: string): string[] {
   return terms;
 }
 
-const doiCache = new Map<string, boolean>();
+export const doiCache = new Map<string, boolean>();
 
 export async function runAcademicPipeline(
   topic: string,

@@ -1,7 +1,45 @@
 import { AcademicCandidate } from "./openAlexClient";
 import { lookupDOI, verifyDOI } from "./crossrefClient";
+import { doiCache } from "./academicPipeline";
 
 const RELEVANCE_THRESHOLD = 0.72;
+
+class Semaphore {
+  private permits: number;
+  private queue: (() => void)[] = [];
+
+  constructor(permits: number) {
+    this.permits = permits;
+  }
+
+  async acquire(): Promise<void> {
+    if (this.permits > 0) {
+      this.permits--;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(resolve);
+    });
+  }
+
+  release(): void {
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      if (next) next();
+    } else {
+      this.permits++;
+    }
+  }
+
+  async withPermit<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+}
 
 const REQUIRED_KEYWORDS = {
   material: ["concrete", "mortar", "cement", "cementitious"],
@@ -175,7 +213,25 @@ export async function verifyCandidate(
     };
   }
 
+  const doiKey = candidate.doi.toLowerCase().trim();
+  
+  if (doiCache.has(doiKey)) {
+    const cachedValid = doiCache.get(doiKey);
+    if (!cachedValid) {
+      return {
+        verified: false,
+        doiValid: false,
+        urlAccessible: false,
+        titleMatch: 0,
+        finalUrl: "",
+        reason: "DOI previously failed verification (cached)",
+      };
+    }
+  }
+
   const doiResult = await verifyDOI(candidate.doi);
+  
+  doiCache.set(doiKey, doiResult.valid);
   
   if (!doiResult.valid) {
     return {
@@ -213,46 +269,44 @@ export async function verifyCandidate(
 
 export async function verifyBatch(
   candidates: AcademicCandidate[],
-  maxConcurrency: number = 5,
+  maxConcurrency: number = 8,
   yearStart: number = 2020,
   yearEnd: number = 2025
 ): Promise<AcademicCandidate[]> {
-  console.log(`[LinkVerifierAgent] Verifying ${candidates.length} candidates (years ${yearStart}-${yearEnd})...`);
+  console.log(`[LinkVerifierAgent] Verifying ${candidates.length} candidates (years ${yearStart}-${yearEnd}, concurrency=${maxConcurrency})...`);
+  console.log(`[LinkVerifierAgent] DOI cache size: ${doiCache.size} entries`);
   
   const verified: AcademicCandidate[] = [];
   const failed: { title: string; reason: string }[] = [];
+  
+  const semaphore = new Semaphore(maxConcurrency);
+  
+  const verificationPromises = candidates.map(async (candidate) => {
+    return semaphore.withPermit(async () => {
+      const result = await verifyCandidate(candidate, yearStart, yearEnd);
+      return { candidate, result };
+    });
+  });
 
-  for (let i = 0; i < candidates.length; i += maxConcurrency) {
-    const batch = candidates.slice(i, i + maxConcurrency);
-    
-    const results = await Promise.all(
-      batch.map(async (candidate) => {
-        const result = await verifyCandidate(candidate, yearStart, yearEnd);
-        return { candidate, result };
-      })
-    );
+  const results = await Promise.all(verificationPromises);
 
-    for (const { candidate, result } of results) {
-      if (result.verified) {
-        candidate.verified = true;
-        candidate.verificationStatus = "verified";
-        candidate.landingUrl = result.finalUrl || candidate.landingUrl;
-        verified.push(candidate);
-      } else {
-        candidate.verificationStatus = "failed";
-        failed.push({
-          title: candidate.title.substring(0, 50),
-          reason: result.reason,
-        });
-      }
-    }
-
-    if (i + maxConcurrency < candidates.length) {
-      await new Promise(resolve => setTimeout(resolve, 200));
+  for (const { candidate, result } of results) {
+    if (result.verified) {
+      candidate.verified = true;
+      candidate.verificationStatus = "verified";
+      candidate.landingUrl = result.finalUrl || candidate.landingUrl;
+      verified.push(candidate);
+    } else {
+      candidate.verificationStatus = "failed";
+      failed.push({
+        title: candidate.title.substring(0, 50),
+        reason: result.reason,
+      });
     }
   }
 
   console.log(`[LinkVerifierAgent] Verified: ${verified.length}, Failed: ${failed.length}`);
+  console.log(`[LinkVerifierAgent] DOI cache size after: ${doiCache.size} entries`);
 
   return verified;
 }
