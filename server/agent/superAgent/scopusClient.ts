@@ -26,6 +26,56 @@ export interface ScopusSearchResult {
 const SCOPUS_API_BASE = "https://api.elsevier.com/content/search/scopus";
 const SCOPUS_ABSTRACT_BASE = "https://api.elsevier.com/content/abstract/scopus_id";
 
+const SPANISH_TO_ENGLISH: Record<string, string> = {
+  "acero": "steel",
+  "reciclado": "recycled",
+  "concreto": "concrete",
+  "hormigón": "concrete",
+  "hormigon": "concrete",
+  "resistencia": "strength",
+  "construcción": "construction",
+  "construccion": "construction",
+  "sostenible": "sustainable",
+  "sustentable": "sustainable",
+  "materiales": "materials",
+  "cemento": "cement",
+  "estructuras": "structures",
+  "edificaciones": "buildings",
+  "ingeniería": "engineering",
+  "ingenieria": "engineering",
+  "civil": "civil",
+  "ambiental": "environmental",
+  "impacto": "impact",
+  "carbono": "carbon",
+  "emisiones": "emissions",
+  "propiedades": "properties",
+  "mecánicas": "mechanical",
+  "mecanicas": "mechanical",
+  "fibras": "fibers",
+  "refuerzo": "reinforcement",
+  "uso": "use",
+  "influencia": "influence",
+};
+
+export function translateToEnglish(query: string): string {
+  let translated = query.toLowerCase();
+  
+  translated = translated
+    .replace(/\s+del\s+\d{4}\s+(al|hasta)\s+\d{4}/gi, "")
+    .replace(/\s+\d{4}-\d{4}/g, "")
+    .replace(/\s+en\s+/g, " ");
+  
+  for (const [spanish, english] of Object.entries(SPANISH_TO_ENGLISH)) {
+    const regex = new RegExp(`\\b${spanish}\\b`, "gi");
+    translated = translated.replace(regex, english);
+  }
+  
+  const yearMatch = query.match(/(\d{4})[- ]+(al|hasta|to)[- ]+(\d{4})/i) || 
+                    query.match(/(\d{4})-(\d{4})/);
+  
+  return translated.trim();
+}
+
 export async function searchScopus(
   query: string,
   options: {
@@ -43,7 +93,11 @@ export async function searchScopus(
   const { maxResults = 25, startYear, endYear, documentType } = options;
   const startTime = Date.now();
 
-  let searchQuery = query;
+  const translatedQuery = translateToEnglish(query);
+  console.log(`[Scopus] Original query: "${query}"`);
+  console.log(`[Scopus] Translated query: "${translatedQuery}"`);
+  
+  let searchQuery = translatedQuery;
   if (startYear && endYear) {
     searchQuery += ` AND PUBYEAR > ${startYear - 1} AND PUBYEAR < ${endYear + 1}`;
   }

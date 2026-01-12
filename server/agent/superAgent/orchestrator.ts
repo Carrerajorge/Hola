@@ -840,18 +840,43 @@ export class SuperAgentOrchestrator extends EventEmitter {
   }
 
   private extractSearchTopic(prompt: string): string {
+    const aboutMatch = prompt.match(/(?:sobre|about|acerca\s+de)\s+(.+?)(?:\s+(?:del|from|en\s+excel|y\s+coloca|ordenado|con\s+\d+|\d{4}\s+al\s+\d{4}|$))/i);
+    if (aboutMatch && aboutMatch[1]) {
+      let topic = aboutMatch[1]
+        .replace(/\s*\d+\s*(artículos?|articulos?|fuentes?|sources?|papers?).*$/i, "")
+        .replace(/\s*(científicos?|cientificos?|académicos?)$/i, "")
+        .trim();
+      
+      const yearMatch = prompt.match(/(?:del|from)\s+(\d{4})\s+(?:al|to|hasta)\s+(\d{4})/i);
+      if (yearMatch && !topic.includes(yearMatch[1])) {
+        topic = `${topic} ${yearMatch[1]}-${yearMatch[2]}`;
+      }
+      
+      if (topic.length >= 10) {
+        return topic.substring(0, 100);
+      }
+    }
+    
     const stopWords = new Set([
       "dame", "give", "quiero", "want", "necesito", "need", "crea", "create",
       "genera", "generate", "busca", "search", "investiga", "research",
       "información", "information", "sobre", "about", "con", "with",
       "me", "un", "una", "el", "la", "los", "las", "de", "del", "y", "and",
-      "fuentes", "sources", "referencias", "mínimo", "minimum", "favor", "por"
+      "fuentes", "sources", "referencias", "mínimo", "minimum", "favor", "por",
+      "buscarme", "artículos", "articulos", "científicos", "cientificos",
+      "papers", "excel", "word", "documento", "ordenado", "coloca", "colocalo",
+      "tabla", "en"
     ]);
     
     const cleaned = prompt
-      .replace(/\s*\d+\s*(fuentes?|sources?|referencias?).*$/i, "")
-      .replace(/^(dame|give me|quiero|want|necesito|need|crea|create|genera|generate|busca|search|investiga|research)\s+/i, "")
+      .replace(/\s*\d+\s*(artículos?|articulos?|fuentes?|sources?|referencias?|papers?).*$/i, "")
+      .replace(/\s*(científicos?|cientificos?|académicos?|academicos?)/gi, "")
+      .replace(/^(dame|give me|quiero|want|necesito|need|crea|create|genera|generate|busca|buscarme|search|investiga|research)\s+/i, "")
       .replace(/\s+(información|information)\s+(sobre|about|de|del)\s+/gi, " ")
+      .replace(/\s+(del|from)\s+\d{4}\s+(al|to|hasta)\s+\d{4}/i, "")
+      .replace(/\s+en\s+(excel|word|tabla|documento)/gi, "")
+      .replace(/\s+ordenado\s+por.*$/i, "")
+      .replace(/\s+y\s+coloca.*$/i, "")
       .trim();
     
     const words = cleaned.split(/\s+/).filter(word => {
