@@ -3180,6 +3180,11 @@ export function ChatInterface({
       const { startRun, updateState, completeRun } = useSuperAgentStore.getState();
       startRun(superAgentMessageId);
       
+      // Generate run ID on frontend to enable immediate LiveExecutionConsole display
+      const frontendRunId = `run_${crypto.randomUUID()}`;
+      console.log("[Super Agent] Starting with run_id:", frontendRunId);
+      setActiveRunId(frontendRunId);
+      
       // Set up SSE stream by making POST request
       setAiState("thinking");
       
@@ -3190,6 +3195,7 @@ export function ChatInterface({
           body: JSON.stringify({
             prompt: userInput,
             session_id: superAgentMessageId,
+            run_id: frontendRunId,
             options: {
               enforce_min_sources: true,
             },
@@ -3197,21 +3203,8 @@ export function ChatInterface({
         });
         
         if (!response.ok) {
+          setActiveRunId(null);
           throw new Error(`Super Agent request failed: ${response.status}`);
-        }
-        
-        // Capture run ID from response header for Live Execution Console
-        const runId = response.headers.get("X-Run-ID");
-        console.log("[Super Agent] Response headers:", {
-          runId,
-          allHeaders: Array.from(response.headers.entries()),
-          exposeHeaders: response.headers.get("Access-Control-Expose-Headers"),
-        });
-        if (runId) {
-          console.log("[Super Agent] Setting activeRunId:", runId);
-          setActiveRunId(runId);
-        } else {
-          console.warn("[Super Agent] X-Run-ID header not found in response");
         }
         
         const reader = response.body?.getReader();

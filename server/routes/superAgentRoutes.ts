@@ -18,6 +18,7 @@ const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 const ChatRequestSchema = z.object({
   prompt: z.string().min(1).max(10000),
   session_id: z.string().optional(),
+  run_id: z.string().optional(),
   options: z.object({
     enforce_min_sources: z.boolean().optional(),
     max_iterations: z.number().int().min(1).max(5).optional(),
@@ -47,9 +48,9 @@ router.post("/super/analyze", async (req: Request, res: Response) => {
 
 router.post("/super/stream", async (req: Request, res: Response) => {
   try {
-    const { prompt, session_id, options } = ChatRequestSchema.parse(req.body);
+    const { prompt, session_id, run_id, options } = ChatRequestSchema.parse(req.body);
     const sessionId = session_id || randomUUID();
-    const runId = `run_${randomUUID()}`;
+    const runId = run_id || `run_${randomUUID()}`;
     
     const traceBus = new TraceBus(runId);
     const gateway = getStreamGateway();
@@ -331,6 +332,51 @@ router.get("/super/artifacts/:id/download", async (req: Request, res: Response) 
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+router.get("/runs/:runId/events", async (req: Request, res: Response) => {
+  const { runId } = req.params;
+  const fromSeq = parseInt(req.query.from as string) || 0;
+  
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.flushHeaders();
+  
+  const gateway = getStreamGateway();
+  let seq = fromSeq;
+  let heartbeatInterval: NodeJS.Timeout | null = null;
+  
+  const unsubscribe = gateway.subscribe(runId, (event) => {
+    seq++;
+    const sseEvent = {
+      ...event,
+      seq,
+    };
+    res.write(`id: ${seq}\n`);
+    res.write(`event: ${event.event_type}\n`);
+    res.write(`data: ${JSON.stringify(sseEvent)}\n\n`);
+  });
+  
+  seq++;
+  res.write(`id: ${seq}\n`);
+  res.write(`event: connected\n`);
+  res.write(`data: ${JSON.stringify({ run_id: runId, seq, connected: true })}\n\n`);
+  
+  heartbeatInterval = setInterval(() => {
+    seq++;
+    res.write(`id: ${seq}\n`);
+    res.write(`event: heartbeat\n`);
+    res.write(`data: ${JSON.stringify({ run_id: runId, seq, ts: Date.now() })}\n\n`);
+  }, 15000);
+  
+  req.on("close", () => {
+    unsubscribe();
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+    }
+  });
 });
 
 router.get("/super/health", async (req: Request, res: Response) => {

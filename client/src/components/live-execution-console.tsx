@@ -217,8 +217,32 @@ export function LiveExecutionConsole({
       .slice(-20);
   }, [state?.events]);
 
-  if (!runId || !state) {
+  if (!runId) {
     return null;
+  }
+
+  if (!state) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={cn(
+          "bg-gradient-to-br from-muted/40 to-muted/20 rounded-xl border border-border/50 shadow-lg overflow-hidden p-6",
+          className
+        )}
+      >
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Loader2 className="w-5 h-5 text-primary animate-spin" />
+            <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-sm">Iniciando búsqueda académica</h3>
+            <p className="text-xs text-muted-foreground">Conectando con el agente de investigación...</p>
+          </div>
+        </div>
+      </motion.div>
+    );
   }
 
   const isComplete = state.status === "completed" || state.status === "failed";

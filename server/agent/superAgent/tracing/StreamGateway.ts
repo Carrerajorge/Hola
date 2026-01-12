@@ -21,10 +21,13 @@ interface StreamGatewayOptions {
   clientTimeout?: number;
 }
 
+type EventCallback = (event: TraceEvent) => void;
+
 export class StreamGateway {
   private clients: Map<string, StreamClient> = new Map();
   private runBuses: Map<string, TraceBus> = new Map();
   private heartbeatTimers: Map<string, NodeJS.Timeout> = new Map();
+  private subscribers: Map<string, Set<EventCallback>> = new Map();
   private options: Required<StreamGatewayOptions>;
 
   constructor(options: StreamGatewayOptions = {}) {
@@ -204,6 +207,33 @@ export class StreamGateway {
 
   publish(runId: string, event: TraceEvent): void {
     this.broadcastToRun(runId, event);
+    
+    const subs = this.subscribers.get(runId);
+    if (subs) {
+      for (const callback of subs) {
+        try {
+          callback(event);
+        } catch (e) {
+          console.error("[StreamGateway] Subscriber callback error:", e);
+        }
+      }
+    }
+  }
+
+  subscribe(runId: string, callback: EventCallback): () => void {
+    let subs = this.subscribers.get(runId);
+    if (!subs) {
+      subs = new Set();
+      this.subscribers.set(runId, subs);
+    }
+    subs.add(callback);
+    
+    return () => {
+      subs?.delete(callback);
+      if (subs?.size === 0) {
+        this.subscribers.delete(runId);
+      }
+    };
   }
 
   getStats(): {
