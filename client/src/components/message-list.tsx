@@ -2287,6 +2287,7 @@ export interface MessageListProps {
   onQuestionClick?: (question: string) => void;
   activeRunId?: string | null;
   onRunComplete?: (artifacts: Array<{ id: string; type: string; name: string; url: string }>) => void;
+  uiPhase?: 'idle' | 'thinking' | 'console' | 'done';
 }
 
 const VIRTUALIZATION_THRESHOLD = 50;
@@ -2332,13 +2333,14 @@ export function MessageList({
   onSuperAgentRetry,
   onQuestionClick,
   activeRunId,
-  onRunComplete
+  onRunComplete,
+  uiPhase = 'idle'
 }: MessageListProps) {
   const internalParentRef = useRef<HTMLDivElement>(null);
   const scrollRef = parentRef || internalParentRef;
 
   // Debug: Log activeRunId and variant for troubleshooting
-  console.log('[MessageList] Render check:', { activeRunId, variant, aiState, streamingContent: !!streamingContent });
+  console.log('[MessageList] Render check:', { activeRunId, variant, aiState, uiPhase, streamingContent: !!streamingContent });
 
   const shouldVirtualize = enableVirtualization && messages.length > VIRTUALIZATION_THRESHOLD && variant === "default";
 
@@ -2475,8 +2477,8 @@ export function MessageList({
           </motion.div>
         )}
 
-        {/* Super Agent Live Execution Console - ALWAYS show when activeRunId exists (virtualized) */}
-        {activeRunId && variant === "default" && (
+        {/* Super Agent Live Execution Console - show when uiPhase is 'console' (virtualized) */}
+        {uiPhase === 'console' && activeRunId && variant === "default" && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -2497,8 +2499,8 @@ export function MessageList({
           </motion.div>
         )}
 
-        {/* Regular thinking/responding spinner - only when no Super Agent active (virtualized) */}
-        {aiState !== "idle" && !streamingContent && variant === "default" && !activeRunId && (
+        {/* Regular thinking/responding spinner - only when uiPhase is 'thinking' or 'idle' and no Super Agent (virtualized) */}
+        {aiState !== "idle" && !streamingContent && variant === "default" && uiPhase !== 'console' && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -2634,8 +2636,8 @@ export function MessageList({
         </motion.div>
       )}
 
-      {/* Super Agent Live Execution Console - ALWAYS show when activeRunId exists */}
-      {activeRunId && variant === "default" && (
+      {/* Super Agent Live Execution Console - show when uiPhase is 'console' */}
+      {uiPhase === 'console' && activeRunId && variant === "default" && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -2649,8 +2651,8 @@ export function MessageList({
         </motion.div>
       )}
 
-      {/* Regular thinking/responding spinner - only when no Super Agent active */}
-      {aiState !== "idle" && !streamingContent && variant === "default" && !activeRunId && (
+      {/* Regular thinking/responding spinner - only when uiPhase is 'thinking' or 'idle' and no Super Agent */}
+      {aiState !== "idle" && !streamingContent && variant === "default" && uiPhase !== 'console' && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}

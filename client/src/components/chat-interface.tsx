@@ -349,14 +349,18 @@ interface StreamingIndicatorProps {
   aiState: "idle" | "thinking" | "responding";
   streamingContent: string;
   onCancel: () => void;
+  uiPhase?: 'idle' | 'thinking' | 'console' | 'done';
 }
 
-function StreamingIndicator({ aiState, streamingContent, onCancel }: StreamingIndicatorProps) {
+function StreamingIndicator({ aiState, streamingContent, onCancel, uiPhase }: StreamingIndicatorProps) {
   const estimatedTokens = useMemo(() => {
     if (!streamingContent) return 0;
     return Math.ceil(streamingContent.length / 4);
   }, [streamingContent]);
 
+  // Hide completely when in console phase (Super Agent is showing LiveExecutionConsole)
+  if (uiPhase === 'console') return null;
+  
   if (aiState === "idle") return null;
 
   return (
@@ -986,9 +990,10 @@ export function ChatInterface({
   
   // Track active run ID for Live Execution Console
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  // Grace window: force show LiveExecutionConsole after 2000ms
-  const [graceWindowPassed, setGraceWindowPassed] = useState(false);
-  const graceWindowTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // uiPhase: single source of truth for UI state during Super Agent runs
+  // 'idle' = normal state, 'thinking' = spinner (max 2s), 'console' = LiveExecutionConsole, 'done' = completed
+  const [uiPhase, setUiPhase] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
+  const uiPhaseTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Optimistic messages - shown immediately before they appear in props
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
@@ -3185,16 +3190,18 @@ export function ChatInterface({
       
       // Generate run ID on frontend to enable immediate LiveExecutionConsole display
       const frontendRunId = `run_${crypto.randomUUID()}`;
-      console.log("[Super Agent] Starting with run_id:", frontendRunId);
+      console.log('[uiPhase] runId created, uiPhase=thinking', { runId: frontendRunId });
       
-      // Start grace window timer - force show LiveExecutionConsole after 2000ms
-      setGraceWindowPassed(false);
-      if (graceWindowTimerRef.current) {
-        clearTimeout(graceWindowTimerRef.current);
+      // Set uiPhase to 'thinking' immediately (shows spinner for max 2s)
+      setUiPhase('thinking');
+      
+      // Start grace window timer - transition to 'console' phase after 2000ms
+      if (uiPhaseTimerRef.current) {
+        clearTimeout(uiPhaseTimerRef.current);
       }
-      graceWindowTimerRef.current = setTimeout(() => {
-        console.log("[Super Agent] Grace window passed (2000ms) - forcing LiveExecutionConsole");
-        setGraceWindowPassed(true);
+      uiPhaseTimerRef.current = setTimeout(() => {
+        console.log('[uiPhase] Grace window expired, uiPhase=console');
+        setUiPhase('console');
       }, 2000);
       
       setActiveRunId(frontendRunId);
@@ -3471,6 +3478,17 @@ export function ChatInterface({
     
     const userInput = input;
     const currentFiles = [...uploadedFiles];
+    
+    // Reset uiPhase to 'idle' for regular (non-Super Agent) messages
+    if (uiPhase !== 'idle') {
+      console.log('[uiPhase] Reset to idle for regular message');
+      setUiPhase('idle');
+    }
+    // Clear any pending uiPhase timer
+    if (uiPhaseTimerRef.current) {
+      clearTimeout(uiPhaseTimerRef.current);
+      uiPhaseTimerRef.current = null;
+    }
     
     // Initialize process steps based on context (reuse hasAttachedFiles from above)
     const initialSteps: {step: string; status: "pending" | "active" | "done"}[] = [];
@@ -5106,7 +5124,12 @@ IMPORTANTE:
                 onSuperAgentRetry={handleSuperAgentRetry}
                 onQuestionClick={(text) => setInput(text)}
                 activeRunId={activeRunId}
-                onRunComplete={() => setActiveRunId(null)}
+                onRunComplete={() => {
+                  console.log('[uiPhase] Run completed, uiPhase=done');
+                  setUiPhase('done');
+                  setActiveRunId(null);
+                }}
+                uiPhase={uiPhase}
               />
 
               {/* Agent Observer - Show when agent is running */}
@@ -5140,14 +5163,15 @@ IMPORTANTE:
           </div>
         )}
 
-        {/* Thinking/Responding State - only show if aiState belongs to current chat and no Super Agent active */}
-        {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && !activeRunId && (
+        {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
+        {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' && (
           <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
             {/* Streaming Indicator with cancel button */}
             <StreamingIndicator
               aiState={aiState}
               streamingContent={streamingContent}
               onCancel={handleStopChat}
+              uiPhase={uiPhase}
             />
             
             {/* Streaming content with fade-in animation */}
@@ -5367,7 +5391,12 @@ IMPORTANTE:
                   onSuperAgentRetry={handleSuperAgentRetry}
                   onQuestionClick={(text) => setInput(text)}
                   activeRunId={activeRunId}
-                  onRunComplete={() => setActiveRunId(null)}
+                  onRunComplete={() => {
+                    console.log('[uiPhase] Run completed, uiPhase=done');
+                    setUiPhase('done');
+                    setActiveRunId(null);
+                  }}
+                  uiPhase={uiPhase}
                 />
                 <div ref={messagesEndRef} />
               </div>
@@ -5393,13 +5422,14 @@ IMPORTANTE:
           ) : (
             /* No messages - center content vertically */
             <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
-              {aiState !== "idle" && (!aiStateChatId || chatId === aiStateChatId) ? (
+              {aiState !== "idle" && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' ? (
                 /* Processing indicators when AI is working */
                 <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
                   <StreamingIndicator
                     aiState={aiState}
                     streamingContent={streamingContent}
                     onCancel={handleStopChat}
+                    uiPhase={uiPhase}
                   />
                   {streamingContent && (
                     <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">

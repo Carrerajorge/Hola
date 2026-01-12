@@ -188,9 +188,13 @@ export function LiveExecutionConsole({
   const [showTimeline, setShowTimeline] = useState(true);
 
   useEffect(() => {
+    console.log('[LiveExecutionConsole] Mounted with runId=', runId);
+  }, [runId]);
+
+  useEffect(() => {
     if (!runId) return;
 
-    console.log(`[LiveExecutionConsole] Mounting for run: ${runId}`);
+    console.log(`[LiveExecutionConsole] Connecting to run: ${runId}`);
     const streamClient = new RunStreamClient(runId);
     setClient(streamClient);
 
@@ -239,6 +243,7 @@ export function LiveExecutionConsole({
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
+        data-testid="live-execution-console"
         className={cn(
           "bg-gradient-to-br from-muted/40 to-muted/20 rounded-xl border border-border/50 shadow-lg overflow-hidden p-6",
           className
@@ -270,6 +275,7 @@ export function LiveExecutionConsole({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
+      data-testid="live-execution-console"
       className={cn(
         "bg-gradient-to-br from-muted/40 to-muted/20 rounded-xl border border-border/50 shadow-lg overflow-hidden",
         className
