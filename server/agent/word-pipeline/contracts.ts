@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const PIPELINE_VERSION = "2.0.0";
+export const PIPELINE_VERSION = "3.0.0";
 
 export const SupportedLocaleSchema = z.enum(["es", "en", "pt", "fr", "de", "it", "ar", "hi", "ja", "ko", "zh", "ru", "tr", "id"]);
 export type SupportedLocale = z.infer<typeof SupportedLocaleSchema>;

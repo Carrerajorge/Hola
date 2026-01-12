@@ -78,11 +78,41 @@ export const MultiIntentResultSchema = z.object({
   cache_hit: z.boolean().optional()
 });
 
+export const CompoundPlanStepSchema = z.object({
+  type: z.enum(["WEB_RESEARCH", "EVIDENCE_BUILD", "OUTLINE", "DRAFT_SECTIONS", "FACT_VERIFY", "RENDER_DOCX"]),
+  query: z.string().optional(),
+  constraints: z.record(z.any()).optional(),
+  min_sources: z.number().optional(),
+  dedupe: z.boolean().optional(),
+  rank: z.string().optional(),
+  sections: z.array(z.string()).optional(),
+  require_citations: z.boolean().optional(),
+  halt_below_rate: z.number().optional(),
+  template: z.string().optional(),
+  theme: z.string().optional(),
+});
+
+export const CompoundPlanSchema = z.object({
+  isCompound: z.boolean(),
+  intent: z.string(),
+  doc_type: z.string().nullable(),
+  output_format: z.string().nullable(),
+  topic: z.string().nullable(),
+  requires_research: z.boolean(),
+  plan: z.object({
+    id: z.string(),
+    steps: z.array(CompoundPlanStepSchema),
+  }).nullable(),
+  confidence: z.number(),
+  locale: z.string(),
+});
+
 export const IntentResultSchema = SingleIntentResultSchema.extend({
   type: z.literal("single").optional(),
   router_version: z.string().optional(),
   processing_time_ms: z.number().optional(),
-  cache_hit: z.boolean().optional()
+  cache_hit: z.boolean().optional(),
+  compound_plan: CompoundPlanSchema.optional(),
 });
 
 export const UnifiedIntentResultSchema = z.union([

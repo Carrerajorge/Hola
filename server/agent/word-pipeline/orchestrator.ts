@@ -8,6 +8,23 @@ import {
   DocumentPlan, SourceRef, EvidenceChunk, NormalizedFact, SectionContent, Claim
 } from "./contracts";
 import { detectLanguage } from "../../services/intent-engine/langDetect";
+import type { DocumentSpec } from "./documentSpec";
+import type { ThemeId } from "./themeManager";
+
+export interface CompoundPlanStep {
+  id: string;
+  type: "generate_section" | "verify_claims" | "apply_style" | "assemble";
+  sectionId?: string;
+  config?: Record<string, unknown>;
+  dependsOn?: string[];
+}
+
+export interface CompoundPlan {
+  id: string;
+  steps: CompoundPlanStep[];
+  documentSpec?: DocumentSpec;
+  themeId?: ThemeId;
+}
 
 type StageId = "planner" | "evidence" | "analyzer" | "normalizer" | "writer" | "claims" | "verifier" | "critic" | "assembler";
 
@@ -45,13 +62,20 @@ export class WordAgentOrchestrator extends EventEmitter {
   async execute(query: string, options: {
     locale?: SupportedLocale;
     onEvent?: (event: PipelineEvent) => void;
+    documentSpec?: DocumentSpec;
+    themeId?: ThemeId;
+    compoundPlan?: CompoundPlan;
   } = {}): Promise<{ success: boolean; state: PipelineState; artifacts: PipelineState["artifacts"] }> {
     const runId = uuidv4();
     const startTime = Date.now();
     this.abortController = new AbortController();
     
     const detectedLang = detectLanguage(query);
-    const locale = options.locale || detectedLang.locale;
+    const locale = options.locale || options.documentSpec?.locale || detectedLang.locale;
+    
+    const documentSpec = options.documentSpec;
+    const themeId = options.themeId || (documentSpec?.theme_id as ThemeId) || "default";
+    const compoundPlan = options.compoundPlan;
     
     this.state = PipelineStateSchema.parse({
       runId,
@@ -70,6 +94,16 @@ export class WordAgentOrchestrator extends EventEmitter {
       artifacts: [],
       startedAt: new Date().toISOString(),
     });
+    
+    if (documentSpec) {
+      (this.state as any).documentSpec = documentSpec;
+    }
+    if (themeId) {
+      (this.state as any).themeId = themeId;
+    }
+    if (compoundPlan) {
+      (this.state as any).compoundPlan = compoundPlan;
+    }
 
     const emitEvent = (event: Omit<PipelineEvent, "runId" | "timestamp">) => {
       const fullEvent = createPipelineEvent(runId, event.eventType, event);

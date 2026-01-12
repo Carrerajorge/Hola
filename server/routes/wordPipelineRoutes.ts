@@ -1,6 +1,19 @@
 import { Router, Request, Response } from "express";
 import { z } from "zod";
-import { createWordPipeline, PipelineEvent, PIPELINE_VERSION, SupportedLocaleSchema } from "../agent/word-pipeline";
+import { 
+  createWordPipeline, 
+  PipelineEvent, 
+  PIPELINE_VERSION, 
+  SupportedLocaleSchema, 
+  createLayoutPlanner, 
+  validateRenderTree, 
+  createThemeManager, 
+  ThemeIdSchema,
+  getAvailableThemes
+} from "../agent/word-pipeline";
+import type { CompoundPlan, CompoundPlanStep } from "../agent/word-pipeline";
+import { DocumentSpecSchema, DocumentTypeSchema, ToneSchema, AudienceSchema } from "../agent/word-pipeline/documentSpec";
+import { routeDocIntent, getAvailableDocTypes } from "../agent/word-pipeline/docIntentRouter";
 
 const router = Router();
 
@@ -180,6 +193,7 @@ router.get("/version", (_req: Request, res: Response) => {
       "ClaimExtractor",
       "FactVerifier",
       "ConsistencyCritic",
+      "LayoutPlanner",
       "WordAssembler",
     ],
     features: {
@@ -189,8 +203,243 @@ router.get("/version", (_req: Request, res: Response) => {
       sseStreaming: true,
       gapDetection: true,
       claimVerification: true,
+      documentTypeRouting: true,
+      theming: true,
+      layoutEngine: true,
+      compoundIntentPlanning: true,
     },
   });
+});
+
+const CompoundPlanStepSchema = z.object({
+  id: z.string(),
+  type: z.enum(["generate_section", "verify_claims", "apply_style", "assemble"]),
+  sectionId: z.string().optional(),
+  config: z.record(z.any()).optional(),
+  dependsOn: z.array(z.string()).optional(),
+});
+
+const CompoundPlanSchema = z.object({
+  id: z.string(),
+  steps: z.array(CompoundPlanStepSchema),
+  documentSpec: DocumentSpecSchema.optional(),
+  themeId: ThemeIdSchema.optional(),
+});
+
+const CompileRequestSchema = z.object({
+  documentSpec: DocumentSpecSchema.optional(),
+  query: z.string().min(1).max(5000).optional(),
+  locale: SupportedLocaleSchema.optional(),
+  doc_type: DocumentTypeSchema.optional(),
+  tone: ToneSchema.optional(),
+  audience: AudienceSchema.optional(),
+  theme_id: ThemeIdSchema.optional(),
+  topic: z.string().optional(),
+  compound_plan: CompoundPlanSchema.optional(),
+  contentGraph: z.object({
+    sections: z.array(z.object({
+      id: z.string(),
+      title: z.string(),
+      content: z.string(),
+    })).optional(),
+    assets: z.array(z.object({
+      id: z.string(),
+      type: z.enum(["image", "chart", "logo"]),
+      url: z.string().optional(),
+      data: z.string().optional(),
+    })).optional(),
+  }).optional(),
+});
+
+router.post("/compile", async (req: Request, res: Response) => {
+  try {
+    const body = CompileRequestSchema.parse(req.body);
+    
+    let documentSpec = body.documentSpec || body.compound_plan?.documentSpec;
+    const compoundPlan = body.compound_plan;
+    
+    if (!documentSpec && body.query) {
+      const docIntentResult = routeDocIntent({
+        query: body.query,
+        locale: body.locale || "en",
+        topic: body.topic,
+        doc_type: body.doc_type,
+        tone: body.tone,
+        audience: body.audience,
+        theme_id: body.theme_id,
+      });
+      documentSpec = docIntentResult.documentSpec;
+    }
+
+    if (!documentSpec) {
+      res.status(400).json({
+        success: false,
+        error: "Either documentSpec, compound_plan.documentSpec, or query is required",
+      });
+      return;
+    }
+
+    const themeId = body.theme_id || compoundPlan?.themeId || (documentSpec.theme_id as any) || "default";
+    
+    const themeManager = createThemeManager(
+      themeId,
+      documentSpec.doc_type,
+      documentSpec.locale
+    );
+
+    const pipeline = createWordPipeline({
+      maxIterations: 3,
+      enableSemanticCache: true,
+    });
+
+    const result = await pipeline.execute(body.query || documentSpec.title, {
+      locale: documentSpec.locale,
+      documentSpec,
+      themeId,
+      compoundPlan: compoundPlan as CompoundPlan | undefined,
+    });
+
+    if (result.success && result.artifacts.length > 0) {
+      const artifact = result.artifacts[0];
+      
+      const layoutPlanner = createLayoutPlanner(documentSpec, themeManager);
+      const sectionContents = result.state.sections.map(s => ({
+        sectionId: s.sectionId,
+        markdown: s.markdown,
+        claims: result.state.claims.filter(c => c.sectionId === s.sectionId),
+        wordCount: s.wordCount,
+        entities: s.entities || [],
+      }));
+      
+      const renderTree = layoutPlanner.planLayout(sectionContents);
+      const renderTreeValidation = validateRenderTree(renderTree);
+      
+      res.json({
+        success: true,
+        docx_url: `/api/word-pipeline/download/${result.state.runId}`,
+        render_report: {
+          runId: result.state.runId,
+          pipelineVersion: PIPELINE_VERSION,
+          templateVersion: documentSpec.template_id || "default_v1",
+          sectionsRendered: result.state.sections.length,
+          totalWordCount: result.state.sections.reduce((sum, s) => sum + s.wordCount, 0),
+          renderTree: {
+            id: renderTree.id,
+            sectionCount: renderTree.sections.length,
+            totalBlocks: renderTree.sections.reduce((sum, s) => sum + s.blocks.length, 0),
+            bibliographyEntries: renderTree.bibliography?.length || 0,
+          },
+          renderTreeValidation: {
+            isValid: renderTreeValidation.isValid,
+            errors: renderTreeValidation.errors,
+          },
+        },
+        style_report: {
+          theme: themeId,
+          themeDefinition: themeManager.getTheme(),
+          typography: themeManager.getTypography(),
+          colorPalette: themeManager.getColorPalette(),
+          spacing: themeManager.getSpacing(),
+          margins: themeManager.getMargins(),
+          pageSetup: themeManager.getPageSetup(),
+          ooxmlStyles: themeManager.getAllOOXMLStyles(),
+        },
+        verification_report: {
+          claimsTotal: result.state.claims.length,
+          claimsVerified: result.state.claims.filter(c => c.verified).length,
+          verificationRate: result.state.claims.length > 0 
+            ? result.state.claims.filter(c => c.verified).length / result.state.claims.length 
+            : 1,
+          gapsDetected: result.state.gaps.length,
+          qualityGatesPassed: result.state.qualityGates.filter(g => g.passed).length,
+        },
+        layout_report: {
+          documentSpecId: documentSpec.id,
+          documentType: documentSpec.doc_type,
+          sectionsPlanned: documentSpec.sections.length,
+          sectionsRendered: renderTree.sections.length,
+          renderBlocks: renderTree.sections.map(s => ({
+            sectionId: s.id,
+            title: s.title,
+            blockCount: s.blocks.length,
+            blockTypes: s.blocks.map(b => b.type),
+          })),
+        },
+        compound_plan_report: compoundPlan ? {
+          planId: compoundPlan.id,
+          stepsTotal: compoundPlan.steps.length,
+          stepsExecuted: compoundPlan.steps.length,
+        } : undefined,
+        artifact: {
+          id: artifact.id,
+          filename: artifact.filename,
+          mimeType: artifact.mimeType,
+          sizeBytes: artifact.sizeBytes,
+        },
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.state.error || "Pipeline failed to compile document",
+        runId: result.state.runId,
+        gaps: result.state.gaps,
+        style_report: {
+          theme: themeId,
+          typography: themeManager.getTypography(),
+          colorPalette: themeManager.getColorPalette(),
+        },
+      });
+    }
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ success: false, error: "Invalid request", details: error.errors });
+    } else {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+});
+
+router.get("/doc-types", (_req: Request, res: Response) => {
+  res.json({
+    docTypes: getAvailableDocTypes(),
+  });
+});
+
+router.get("/themes", (_req: Request, res: Response) => {
+  res.json({
+    themes: getAvailableThemes(),
+  });
+});
+
+router.post("/preview-spec", (req: Request, res: Response) => {
+  try {
+    const { query, locale, doc_type, tone, audience, theme_id, topic } = req.body;
+    
+    if (!query && !doc_type) {
+      res.status(400).json({ success: false, error: "Query or doc_type required" });
+      return;
+    }
+
+    const result = routeDocIntent({
+      query: query || "",
+      locale: locale || "en",
+      topic,
+      doc_type,
+      tone,
+      audience,
+      theme_id,
+    });
+
+    res.json({
+      success: true,
+      documentSpec: result.documentSpec,
+      suggestedTemplate: result.suggestedTemplate,
+      confidence: result.confidence,
+      extractedEntities: result.extractedEntities,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 export default router;

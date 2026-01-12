@@ -59,4 +59,12 @@ export {
   PIPELINE_VERSION,
 };
 
+export type { CompoundPlan, CompoundPlanStep } from "./orchestrator";
+
+export { createLayoutPlanner, validateRenderTree, LayoutPlanner } from "./layoutPlanner";
+export type { RenderTree, RenderSection, RenderBlock, RenderBlockType } from "./layoutPlanner";
+
+export { createThemeManager, getAvailableThemes, getThemeById, ThemeManager, ThemeIdSchema } from "./themeManager";
+export type { ThemeId, ThemeDefinition, StyleToken, OOXMLStyle } from "./themeManager";
+
 export * from "./contracts";

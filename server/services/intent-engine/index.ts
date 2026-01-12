@@ -59,6 +59,14 @@ import {
   mergeSlots
 } from "./multiIntent";
 import {
+  detectCompoundIntent,
+  validateCompoundPlan,
+  serializeCompoundResult,
+  isResearchEnabled,
+  type CompoundIntentResult,
+  type CompoundPlanStep
+} from "./compoundIntentPlanner";
+import {
   recordFeedback,
   recordCorrection,
   getFeedbackBatch,
@@ -361,6 +369,75 @@ export async function routeIntent(
           intents: multiResult.detectedIntents,
           separator: multiResult.separatorType
         });
+      }
+    }
+
+    const compoundResult = detectCompoundIntent(text, locale);
+    if (compoundResult.isCompound) {
+      logStructured("info", "Compound intent detected (research + document)", {
+        doc_type: compoundResult.doc_type,
+        topic: compoundResult.topic,
+        requires_research: compoundResult.requires_research,
+        steps_count: compoundResult.plan?.steps.length || 0
+      });
+
+      const validation = validateCompoundPlan(compoundResult);
+      
+      if (validation.errors.includes("research_not_enabled")) {
+        logStructured("warn", "Research not enabled for compound intent", {
+          topic: compoundResult.topic
+        });
+        
+        const result: IntentResult = {
+          intent: "NEED_CLARIFICATION",
+          output_format: compoundResult.output_format,
+          slots: { topic: compoundResult.topic || undefined },
+          confidence: 0.85,
+          normalized_text: normalized,
+          clarification_question: locale === "es" 
+            ? "La investigación web no está habilitada. ¿Deseas que cree el documento sin investigación previa?"
+            : "Web research is not enabled. Would you like me to create the document without prior research?",
+          matched_patterns: ["compound_research_document"],
+          fallback_used: "none",
+          language_detected: locale,
+          type: "single",
+          router_version: ROUTER_VERSION,
+          processing_time_ms: Date.now() - startTime,
+          cache_hit: false,
+          compound_plan: serializeCompoundResult(compoundResult)
+        };
+        
+        endTrace(ctx, result, true);
+        return result;
+      }
+
+      if (validation.isValid && compoundResult.plan) {
+        const result: IntentResult = {
+          intent: "CREATE_DOCUMENT",
+          output_format: compoundResult.output_format,
+          slots: { 
+            topic: compoundResult.topic || undefined,
+            doc_type: compoundResult.doc_type || undefined
+          },
+          confidence: compoundResult.confidence,
+          normalized_text: normalized,
+          matched_patterns: ["compound_research_document"],
+          fallback_used: "none",
+          language_detected: locale,
+          type: "single",
+          router_version: ROUTER_VERSION,
+          processing_time_ms: Date.now() - startTime,
+          cache_hit: false,
+          compound_plan: serializeCompoundResult(compoundResult)
+        };
+        
+        if (effectiveConfig.enableCache) {
+          setCached(normalized, ROUTER_VERSION, result);
+        }
+        
+        notifyIntentRouted(result, text);
+        endTrace(ctx, result, true);
+        return result;
       }
     }
 
