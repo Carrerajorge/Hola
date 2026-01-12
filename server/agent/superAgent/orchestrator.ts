@@ -16,6 +16,7 @@ import { createXlsx, createDocx, storeArtifactMeta, packCitations, XlsxSpec, Doc
 import { evaluateQualityGate, shouldRetry, formatGateReport } from "./qualityGate";
 import { searchScopus, scopusArticlesToSourceSignals, isScopusConfigured, ScopusArticle } from "./scopusClient";
 import { searchWos, WosArticle } from "./wosClient";
+import { runAcademicPipeline, candidatesToSourceSignals, PipelineResult } from "./academicPipeline";
 
 function isWosConfigured(): boolean {
   return !!process.env.WOS_API_KEY;
@@ -220,9 +221,104 @@ export class SuperAgentOrchestrator extends EventEmitter {
     const hasScopus = isScopusConfigured();
     const hasWos = isWosConfigured();
     
-    if (isScientific && (hasScopus || hasWos)) {
-      await this.executeSignalsWithAcademicDatabases(prompt, targetCount, hasScopus, hasWos);
+    if (isScientific) {
+      if (hasScopus || hasWos) {
+        await this.executeSignalsWithAcademicDatabases(prompt, targetCount, hasScopus, hasWos);
+      } else {
+        await this.executeSignalsWithOpenAlex(prompt, targetCount);
+      }
     } else {
+      await this.executeSignalsWithWebSearch(researchDecision, targetCount);
+    }
+  }
+
+  private async executeSignalsWithOpenAlex(prompt: string, targetCount: number): Promise<void> {
+    if (!this.state) return;
+    
+    const searchTopic = this.extractSearchTopic(prompt);
+    const yearRange = this.extractYearRange(prompt);
+    
+    this.emitSSE("tool_call", {
+      id: "tc_signals_openalex",
+      tool: "academic_pipeline",
+      input: { query: searchTopic, target: targetCount, yearRange },
+    });
+
+    this.emitSSE("progress", {
+      phase: "signals",
+      status: "multi_agent_pipeline",
+      message: `Ejecutando pipeline multi-agente para: "${searchTopic}"`,
+    });
+
+    try {
+      const pipelineEmitter = new EventEmitter();
+      
+      pipelineEmitter.on("pipeline_phase", (data) => {
+        this.emitSSE("progress", {
+          phase: "signals",
+          status: data.phase,
+          ...data,
+        });
+      });
+
+      const result = await runAcademicPipeline(searchTopic, pipelineEmitter, {
+        targetCount: Math.min(targetCount, 50),
+        yearStart: yearRange.start || 2020,
+        yearEnd: yearRange.end || 2025,
+      });
+
+      const signals = candidatesToSourceSignals(result.articles);
+      for (const signal of signals) {
+        this.emitSSE("source_signal", signal);
+      }
+
+      this.state.sources = signals;
+      this.state.sources_count = signals.length;
+
+      if (result.artifact) {
+        this.state.artifacts.push({
+          type: "xlsx",
+          filename: result.artifact.filename,
+          path: result.artifact.path,
+          size: result.artifact.size,
+          url: result.artifact.url,
+          created_at: Date.now(),
+        });
+      }
+
+      this.emitSSE("tool_result", {
+        tool_call_id: "tc_signals_openalex",
+        success: result.success,
+        output: {
+          collected: result.stats.finalCount,
+          target: targetCount,
+          source: "OpenAlex+CrossRef",
+          verified: result.stats.verifiedCount,
+          duration_ms: result.stats.durationMs,
+          criticPassed: result.criticResult.passed,
+        },
+      });
+
+      this.state.tool_results.push({
+        tool_call_id: "tc_signals_openalex",
+        success: result.success,
+        output: { 
+          collected: result.stats.finalCount, 
+          source: "OpenAlex+CrossRef",
+          verified: result.stats.verifiedCount,
+        },
+      });
+
+    } catch (error: any) {
+      console.error(`[OpenAlex Pipeline] Error: ${error.message}`);
+      
+      this.emitSSE("tool_result", {
+        tool_call_id: "tc_signals_openalex",
+        success: false,
+        error: error.message,
+      });
+
+      const researchDecision = shouldResearch(prompt);
       await this.executeSignalsWithWebSearch(researchDecision, targetCount);
     }
   }
