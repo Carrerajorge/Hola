@@ -39,6 +39,8 @@ import { createSandboxAgentRouter } from "./routes/sandboxAgentRouter";
 import { createLangGraphRouter } from "./routes/langGraphRouter";
 import { createRegistryRouter } from "./routes/registryRouter";
 import wordPipelineRoutes from "./routes/wordPipelineRoutes";
+import redisSSERouter from "./routes/redisSSERouter";
+import { initializeRedisSSE } from "./lib/redisSSE";
 import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
 import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
@@ -132,6 +134,13 @@ export async function registerRoutes(
   app.use("/api", createLangGraphRouter());
   app.use("/api", createRegistryRouter());
   app.use("/api/word-pipeline", wordPipelineRoutes);
+  app.use("/api/sse", redisSSERouter);
+
+  initializeRedisSSE().then(() => {
+    console.log("[RedisSSE] Initialized");
+  }).catch(err => {
+    console.warn("[RedisSSE] Not available (Redis may not be configured):", err.message);
+  });
 
   initializeAgentSystem({ runSmokeTest: false }).then(result => {
     console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
