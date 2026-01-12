@@ -77,10 +77,18 @@ export function extractSearchQueries(prompt: string): string[] {
   const aboutPattern = /(?:sobre|about|acerca de|regarding)\s+([^,.!?]+)/gi;
   let match;
   while ((match = aboutPattern.exec(prompt)) !== null) {
-    const extracted = match[1]
-      .replace(/\s*(con|with)\s*\d+\s*(fuentes?|sources?|referencias?).*$/i, '')
-      .replace(/\s+(y|and)\s+(crea|genera|create|generate).*$/i, '')
+    let extracted = match[1]
+      .replace(/\s*(con|with)\s*\d+\s*(fuentes?|sources?|referencias?|artículos?|articulos?|papers?).*$/i, '')
+      .replace(/\s+(y|and)\s+(crea|genera|create|generate|coloca|pon).*$/i, '')
+      .replace(/\s+(del|from)\s+\d{4}\s+(al|to|hasta)\s+\d{4}.*$/i, '')
+      .replace(/\s+ordenado\s+por.*$/i, '')
       .trim();
+    
+    const yearMatch = prompt.match(/(?:del|from)\s+(\d{4})\s+(?:al|to|hasta)\s+(\d{4})/i);
+    if (yearMatch) {
+      extracted = `${extracted} ${yearMatch[1]}-${yearMatch[2]}`;
+    }
+    
     if (extracted.length > 3) {
       queries.push(extracted);
     }

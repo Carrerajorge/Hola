@@ -349,12 +349,68 @@ export class SuperAgentOrchestrator extends EventEmitter {
     }
   }
 
+  private extractRequestedColumns(prompt: string): string[] | null {
+    const orderByMatch = prompt.match(/(?:ordenado\s+por|ordered\s+by|columns?:?|columnas?:?)\s+(.+?)(?:\s*$|\.\s)/i);
+    if (orderByMatch) {
+      const columnsStr = orderByMatch[1];
+      const columns = columnsStr
+        .split(/\s+/)
+        .map(c => c.trim())
+        .filter(c => c.length > 0 && !["por", "by", "y", "and", "en", "in"].includes(c.toLowerCase()));
+      if (columns.length >= 3) return columns;
+    }
+    return null;
+  }
+
   private buildXlsxSpec(): XlsxSpec {
     const sources = this.state?.sources || [];
     const deepSources = this.state?.deep_sources || [];
+    const prompt = this.state?.contract.original_prompt || "";
+    
+    const requestedColumns = this.extractRequestedColumns(prompt);
+    
+    if (requestedColumns && requestedColumns.length > 0) {
+      const dataRows = sources.slice(0, 100).map((s, i) => {
+        return requestedColumns.map(col => {
+          const colLower = col.toLowerCase();
+          if (colLower === "title" || colLower === "titulo" || colLower === "título") return s.title;
+          if (colLower === "authors" || colLower === "autores" || colLower === "author") return this.extractAuthors(s);
+          if (colLower === "year" || colLower === "año") return this.extractYear(s);
+          if (colLower === "journal" || colLower === "revista") return s.domain;
+          if (colLower === "abstract" || colLower === "resumen") return s.snippet || s.content?.substring(0, 300) || "";
+          if (colLower === "keywords" || colLower === "palabras") return "";
+          if (colLower === "language" || colLower === "idioma") return "Spanish/English";
+          if (colLower === "document" || colLower === "type" || colLower === "tipo") return "Article";
+          if (colLower === "doi") return this.extractDOI(s);
+          if (colLower === "city" || colLower === "ciudad") return "";
+          if (colLower === "country" || colLower === "pais" || colLower === "país") return "";
+          if (colLower === "scopus") return s.url.includes("scopus") ? "Yes" : "";
+          if (colLower === "wos" || colLower === "webofscience") return s.url.includes("webofscience") ? "Yes" : "";
+          if (colLower === "url" || colLower === "link") return s.url;
+          if (colLower === "#" || colLower === "no" || colLower === "número") return (i + 1).toString();
+          return "";
+        });
+      });
+      
+      return {
+        title: this.extractResearchTitle(prompt),
+        sheets: [
+          {
+            name: "Articles",
+            headers: requestedColumns,
+            data: dataRows,
+            summary: {
+              "Total Articles Found": sources.length,
+              "Generated At": new Date().toISOString(),
+              "Search Query": prompt.substring(0, 100),
+            },
+          },
+        ],
+      };
+    }
     
     return {
-      title: this.state?.contract.original_prompt.substring(0, 50) || "Research",
+      title: this.extractResearchTitle(prompt),
       sheets: [
         {
           name: "Summary",
@@ -368,12 +424,15 @@ export class SuperAgentOrchestrator extends EventEmitter {
         },
         {
           name: "Sources",
-          headers: ["#", "Title", "Domain", "Score", "URL"],
+          headers: ["#", "Title", "Authors", "Year", "Journal/Source", "Abstract", "DOI", "URL"],
           data: sources.slice(0, 100).map((s, i) => [
             (i + 1).toString(),
-            s.title.substring(0, 80),
+            s.title,
+            this.extractAuthors(s),
+            this.extractYear(s),
             s.domain,
-            s.score.toFixed(2),
+            s.snippet || "",
+            this.extractDOI(s),
             s.url,
           ]),
         },
@@ -386,6 +445,32 @@ export class SuperAgentOrchestrator extends EventEmitter {
         },
       ],
     };
+  }
+
+  private extractResearchTitle(prompt: string): string {
+    const match = prompt.match(/(?:sobre|about)\s+(.{10,60}?)(?:\s+(?:del|from|con|y|and)|$)/i);
+    return match ? match[1].trim() : prompt.substring(0, 50);
+  }
+
+  private extractAuthors(source: SourceSignal): string {
+    if (source.content) {
+      const authorMatch = source.content.match(/(?:by|por|authors?|autores?)[:\s]+([A-Z][a-záéíóúñ]+(?:\s+[A-Z][a-záéíóúñ]+)?(?:,?\s+(?:and|y|&)?\s*[A-Z][a-záéíóúñ]+(?:\s+[A-Z][a-záéíóúñ]+)?)*)/i);
+      if (authorMatch) return authorMatch[1].substring(0, 100);
+    }
+    return "";
+  }
+
+  private extractYear(source: SourceSignal): string {
+    const yearMatch = source.title.match(/\b(20\d{2})\b/) || 
+                      source.url.match(/\b(20\d{2})\b/) ||
+                      (source.snippet && source.snippet.match(/\b(20\d{2})\b/));
+    return yearMatch ? yearMatch[1] : "";
+  }
+
+  private extractDOI(source: SourceSignal): string {
+    const doiMatch = source.url.match(/10\.\d{4,}\/[^\s]+/) ||
+                     (source.content && source.content.match(/10\.\d{4,}\/[^\s]+/));
+    return doiMatch ? doiMatch[0] : "";
   }
 
   private buildDocxSpec(): DocxSpec {
