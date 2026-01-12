@@ -372,7 +372,7 @@ function StreamingIndicator({ aiState, streamingContent, onCancel, uiPhase }: St
             <span className="typing-dot" />
             <span className="typing-dot" />
           </div>
-          <span className="text-sm text-muted-foreground">Pensando...</span>
+          <span className="text-sm text-muted-foreground" data-testid="streaming-indicator-pensando">Pensando...</span>
         </div>
       )}
       
@@ -838,6 +838,11 @@ interface ChatInterfaceProps {
   onMoveToFolder?: (chatId: string, folderId: string | null) => void;
   onCreateFolder?: (name: string) => void;
   currentFolderId?: string | null;
+  // Super Agent UI state - kept in parent to survive ChatInterface key changes
+  uiPhase?: 'idle' | 'thinking' | 'console' | 'done';
+  setUiPhase?: React.Dispatch<React.SetStateAction<'idle' | 'thinking' | 'console' | 'done'>>;
+  activeRunId?: string | null;
+  setActiveRunId?: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 interface UploadedFile {
@@ -924,7 +929,12 @@ export function ChatInterface({
   folders = [],
   onMoveToFolder,
   onCreateFolder,
-  currentFolderId
+  currentFolderId,
+  // Super Agent UI state from parent to survive key changes
+  uiPhase: uiPhaseProp,
+  setUiPhase: setUiPhaseProp,
+  activeRunId: activeRunIdProp,
+  setActiveRunId: setActiveRunIdProp
 }: ChatInterfaceProps) {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -989,10 +999,17 @@ export function ChatInterface({
   const [currentAgentMessageId, setCurrentAgentMessageId] = useState<string | null>(null);
   
   // Track active run ID for Live Execution Console
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  // Use props from parent to survive key changes, with local state as fallback
+  const [activeRunIdLocal, setActiveRunIdLocal] = useState<string | null>(null);
+  const activeRunId = activeRunIdProp !== undefined ? activeRunIdProp : activeRunIdLocal;
+  const setActiveRunId = setActiveRunIdProp || setActiveRunIdLocal;
+  
   // uiPhase: single source of truth for UI state during Super Agent runs
   // 'idle' = normal state, 'thinking' = spinner (max 2s), 'console' = LiveExecutionConsole, 'done' = completed
-  const [uiPhase, setUiPhase] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
+  const [uiPhaseLocal, setUiPhaseLocal] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
+  const uiPhase = uiPhaseProp !== undefined ? uiPhaseProp : uiPhaseLocal;
+  const setUiPhase = setUiPhaseProp || setUiPhaseLocal;
+  
   const uiPhaseTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Optimistic messages - shown immediately before they appear in props

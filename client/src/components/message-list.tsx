@@ -2504,6 +2504,7 @@ export function MessageList({
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
+            data-testid="thinking-indicator-virtualized"
             className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
             style={{
               position: 'absolute',
@@ -2656,6 +2657,7 @@ export function MessageList({
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
+          data-testid="thinking-indicator-standard"
           className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
         >
           <div className="flex items-center gap-3 py-3 px-5 text-sm text-muted-foreground bg-gradient-to-r from-muted/40 to-muted/20 rounded-2xl border border-border/30 shadow-sm">

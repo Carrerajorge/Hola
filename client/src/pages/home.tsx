@@ -116,6 +116,10 @@ export default function Home() {
   const [aiStateChatId, setAiStateChatId] = useState<string | null>(null);
   const [aiProcessSteps, setAiProcessSteps] = useState<{step: string; status: "pending" | "active" | "done"}[]>([]);
   
+  // Super Agent UI state - kept in parent to survive ChatInterface key changes
+  const [uiPhase, setUiPhase] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  
   // Wrapper for setAiState that tracks which chat the state belongs to
   const setAiState = useCallback((newState: "idle" | "thinking" | "responding" | ((prev: "idle" | "thinking" | "responding") => "idle" | "thinking" | "responding")) => {
     const resolvedState = typeof newState === 'function' ? newState(aiState) : newState;
@@ -520,6 +524,10 @@ export default function Home() {
             onMoveToFolder={handleMoveToFolder}
             onCreateFolder={createFolder}
             currentFolderId={activeChat?.id ? getFolderForChat(activeChat.id)?.id || null : null}
+            uiPhase={uiPhase}
+            setUiPhase={setUiPhase}
+            activeRunId={activeRunId}
+            setActiveRunId={setActiveRunId}
           />
         )}
       </main>
