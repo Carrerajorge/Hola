@@ -1783,7 +1783,6 @@ const AssistantMessage = memo(function AssistantMessage({
         <div className="mt-3 w-full">
           <SemanticDocumentAnalysisResults
             documentModel={message.documentAnalysis.documentModel}
-            summary={message.content || ""}
             insights={message.ui_components.includes('insights_panel') ? (message.documentAnalysis.insights || []) : []}
             suggestedQuestions={message.ui_components.includes('suggested_questions') ? (message.documentAnalysis.suggestedQuestions || []) : []}
             onQuestionClick={onQuestionClick || (() => {})}

@@ -37,7 +37,6 @@ import type {
 
 export interface DocumentAnalysisResultsProps {
   documentModel: DocumentSemanticModel;
-  summary: string;
   insights: Insight[];
   suggestedQuestions: SuggestedQuestion[];
   onQuestionClick: (question: string) => void;
@@ -119,92 +118,6 @@ const CitationBadge = ({
     {sourceRef}
   </Badge>
 );
-
-function SummarySection({
-  summary,
-  llmSummary,
-  isOpen,
-  onToggle,
-}: {
-  summary: string;
-  llmSummary?: DocumentSemanticModel['llmSummary'];
-  isOpen: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <Collapsible open={isOpen} onOpenChange={onToggle} data-testid="summary-section">
-      <Card className="border-l-4 border-l-primary">
-        <CollapsibleTrigger asChild>
-          <CardHeader className="cursor-pointer hover:bg-muted/30 transition-colors py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-primary" />
-                <CardTitle className="text-lg">Executive Summary</CardTitle>
-              </div>
-              {isOpen ? (
-                <ChevronDown className="h-5 w-5 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-5 w-5 text-muted-foreground" />
-              )}
-            </div>
-          </CardHeader>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <CardContent className="pt-0 space-y-4" data-testid="summary-content">
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <MarkdownRenderer content={llmSummary?.executive || summary} />
-            </div>
-
-            {llmSummary?.keyFindings && llmSummary.keyFindings.length > 0 && (
-              <div data-testid="key-findings">
-                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                  <Lightbulb className="h-4 w-4 text-blue-500" />
-                  Key Findings
-                </h4>
-                <ul className="space-y-1.5">
-                  {llmSummary.keyFindings.map((finding, idx) => (
-                    <li
-                      key={idx}
-                      className="flex items-start gap-2 text-sm text-muted-foreground"
-                      data-testid={`key-finding-${idx}`}
-                    >
-                      <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
-                      <span>{finding}</span>
-                      {llmSummary.citationsUsed?.[idx] && (
-                        <CitationBadge sourceRef={llmSummary.citationsUsed[idx]} />
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {llmSummary?.risks && llmSummary.risks.length > 0 && (
-              <div data-testid="risks-section">
-                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2 text-amber-600">
-                  <AlertTriangle className="h-4 w-4" />
-                  Risks Identified
-                </h4>
-                <ul className="space-y-1.5">
-                  {llmSummary.risks.map((risk, idx) => (
-                    <li
-                      key={idx}
-                      className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded-md p-2"
-                      data-testid={`risk-item-${idx}`}
-                    >
-                      <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                      <span>{risk}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </CardContent>
-        </CollapsibleContent>
-      </Card>
-    </Collapsible>
-  );
-}
 
 function InsightsSection({ insights }: { insights: Insight[] }) {
   if (!insights || insights.length === 0) return null;
@@ -616,12 +529,10 @@ function SuggestedQuestionsSection({
 
 export function DocumentAnalysisResults({
   documentModel,
-  summary,
   insights,
   suggestedQuestions,
   onQuestionClick,
 }: DocumentAnalysisResultsProps) {
-  const [summaryOpen, setSummaryOpen] = useState(true);
   const [activeSheet, setActiveSheet] = useState<string>(
     documentModel.sheets?.[0]?.name || ''
   );
@@ -641,13 +552,6 @@ export function DocumentAnalysisResults({
         className="space-y-6 w-full max-w-4xl mx-auto"
         data-testid="document-analysis-results"
       >
-        <SummarySection
-          summary={summary}
-          llmSummary={documentModel.llmSummary}
-          isOpen={summaryOpen}
-          onToggle={() => setSummaryOpen(!summaryOpen)}
-        />
-
         <InsightsSection insights={insights} />
 
         {hasSheets ? (
