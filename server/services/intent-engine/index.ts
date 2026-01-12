@@ -11,10 +11,39 @@ import {
 import { preprocess, type PreprocessResult } from "./preprocess";
 import { detectLanguage, isCodeSwitching, type LanguageDetectionResult } from "./langDetect";
 import { ruleBasedMatch, extractSlots, type RuleMatchResult } from "./ruleMatcher";
-import { knnMatch, type KNNResult } from "./embeddingMatcher";
-import { calibrate, type CalibrationOutput } from "./confidenceCalibrator";
+import { 
+  knnMatch, 
+  knnMatchSync,
+  initializeEmbeddingIndex, 
+  isSemanticIndexReady,
+  type KNNResult 
+} from "./embeddingMatcher";
+import { 
+  calibrate, 
+  calibrateWithConformal,
+  getCalibrationStatus,
+  getCalibratorConfig,
+  configureCal,
+  type CalibrationOutput 
+} from "./confidenceCalibrator";
+import {
+  getConformalPredictionSet,
+  getConfidenceZone,
+  getConformalStats,
+  isDriftDetected,
+  initializeConformalPredictor,
+  recordCoverageOutcome,
+  type ConformalPredictionSet,
+  type ConfidenceZone,
+  type CalibrationExample
+} from "./conformalPredictor";
 import { llmFallback, getCircuitBreakerStats } from "./fallbackManager";
 import { getCached, setCached, getCacheStats, invalidateCache } from "./cache";
+import {
+  getSemanticCacheHit,
+  setSemanticCache,
+  getSemanticCacheStats
+} from "./semanticCache";
 import {
   startTrace,
   endTrace,
@@ -29,12 +58,82 @@ import {
   generateDisambiguationQuestion,
   mergeSlots
 } from "./multiIntent";
+import {
+  recordFeedback,
+  recordCorrection,
+  getFeedbackBatch,
+  processFeedbackBatch,
+  getFeedbackStats,
+  registerFeedbackProcessor,
+  type FeedbackSignal,
+  type FeedbackType,
+  type FeedbackContext
+} from "./feedbackLoop";
+import {
+  addHardNegative,
+  getConfusionPairs,
+  boostHardNegatives,
+  processCorrectionsToHardNegatives,
+  getHardNegativeStats
+} from "./hardNegatives";
+import {
+  proposeNewAlias,
+  confirmAlias,
+  getAliasCandidates,
+  pruneStaleAliases,
+  processCorrectionsToAliases,
+  getAliasStats
+} from "./aliasExpander";
+import {
+  recordIntentOutcome,
+  getProductMetrics,
+  getSliceMetrics,
+  getRouteLatencyMetrics,
+  recordCorrection as recordProductCorrection,
+  recordClarificationResolution,
+  resetProductMetrics,
+  getMetricsWindow,
+  type ProductMetricsSnapshot,
+  type OutcomeMetadata,
+  type Channel,
+  type DeviceType,
+  type SliceType,
+  type SliceMetrics,
+  type Alert as ProductAlert,
+  type IntentMetricsData,
+  type LocaleMetrics,
+  type ChannelMetrics
+} from "./productMetrics";
+import {
+  checkSliceAlerts,
+  getActiveAlerts,
+  getAllAlerts,
+  acknowledgeAlert,
+  configureAlertThresholds,
+  getAlertThresholds,
+  setBaseline,
+  getBaseline,
+  clearAlerts,
+  resetAlertSystem,
+  getAlertSummary,
+  type AlertSeverity,
+  type AlertThresholds,
+  type SliceAlertConfig,
+  type AlertSummary
+} from "./sliceAlerts";
+import {
+  recordCalibrationDrift,
+  getCalibrationDriftMetrics
+} from "./telemetry";
 
 export interface RouterConfig {
   enableCache: boolean;
+  enableSemanticCache: boolean;
   enableKNN: boolean;
+  enableSemanticKNN: boolean;
   enableLLMFallback: boolean;
   enableMultiIntent: boolean;
+  enableConformal: boolean;
   fallbackThreshold: number;
   maxRetries: number;
   timeout: number;
@@ -42,15 +141,112 @@ export interface RouterConfig {
 
 const DEFAULT_CONFIG: RouterConfig = {
   enableCache: true,
+  enableSemanticCache: true,
   enableKNN: true,
+  enableSemanticKNN: true,
   enableLLMFallback: true,
   enableMultiIntent: true,
+  enableConformal: true,
   fallbackThreshold: 0.80,
   maxRetries: 2,
   timeout: 15000
 };
 
 let currentConfig: RouterConfig = { ...DEFAULT_CONFIG };
+
+let embeddingIndexInitPromise: Promise<void> | null = null;
+let embeddingIndexInitialized = false;
+
+type IntentRoutedCallback = (result: IntentResult, originalText: string) => void;
+type CorrectionReceivedCallback = (signal: FeedbackSignal) => void;
+
+const intentRoutedCallbacks: IntentRoutedCallback[] = [];
+const correctionReceivedCallbacks: CorrectionReceivedCallback[] = [];
+
+export function onIntentRouted(callback: IntentRoutedCallback): () => void {
+  intentRoutedCallbacks.push(callback);
+  return () => {
+    const index = intentRoutedCallbacks.indexOf(callback);
+    if (index > -1) intentRoutedCallbacks.splice(index, 1);
+  };
+}
+
+export function onCorrectionReceived(callback: CorrectionReceivedCallback): () => void {
+  correctionReceivedCallbacks.push(callback);
+  return () => {
+    const index = correctionReceivedCallbacks.indexOf(callback);
+    if (index > -1) correctionReceivedCallbacks.splice(index, 1);
+  };
+}
+
+function notifyIntentRouted(result: IntentResult, originalText: string): void {
+  for (const callback of intentRoutedCallbacks) {
+    try {
+      callback(result, originalText);
+    } catch (error) {
+      logStructured("error", "Intent routed callback error", {
+        error: (error as Error).message
+      });
+    }
+  }
+}
+
+function notifyCorrectionReceived(signal: FeedbackSignal): void {
+  for (const callback of correctionReceivedCallbacks) {
+    try {
+      callback(signal);
+    } catch (error) {
+      logStructured("error", "Correction received callback error", {
+        error: (error as Error).message
+      });
+    }
+  }
+}
+
+export function recordIntentCorrection(
+  originalText: string,
+  originalIntent: IntentType,
+  correctedIntent: IntentType,
+  locale: SupportedLocale,
+  sessionId?: string
+): FeedbackSignal {
+  const signal = recordCorrection(
+    originalText,
+    originalIntent,
+    correctedIntent,
+    locale,
+    sessionId
+  );
+
+  addHardNegative(originalText, originalIntent, correctedIntent, locale);
+  proposeNewAlias(correctedIntent, originalText, locale, signal.id);
+  notifyCorrectionReceived(signal);
+
+  return signal;
+}
+
+async function ensureEmbeddingIndexInitialized(): Promise<void> {
+  if (embeddingIndexInitialized) return;
+  
+  if (embeddingIndexInitPromise) {
+    return embeddingIndexInitPromise;
+  }
+  
+  embeddingIndexInitPromise = (async () => {
+    try {
+      logStructured("info", "Lazy-loading semantic embedding index", {});
+      await initializeEmbeddingIndex();
+      embeddingIndexInitialized = true;
+      logStructured("info", "Semantic embedding index initialized successfully", {});
+    } catch (error: any) {
+      logStructured("error", "Failed to initialize semantic embedding index", {
+        error: error.message
+      });
+    }
+  })();
+  
+  return embeddingIndexInitPromise;
+}
 
 export function configure(config: Partial<RouterConfig>): void {
   currentConfig = { ...currentConfig, ...config };
@@ -116,6 +312,10 @@ export async function routeIntent(
   const ctx = startTrace("routeIntent", { text_length: text.length });
 
   try {
+    if (effectiveConfig.enableSemanticKNN && !embeddingIndexInitialized) {
+      ensureEmbeddingIndexInitialized().catch(() => {});
+    }
+
     const langResult = detectLanguage(text);
     const locale = langResult.locale;
 
@@ -175,14 +375,77 @@ export async function routeIntent(
     });
 
     let knnResult: KNNResult | null = null;
+    let queryEmbedding: number[] | undefined;
+    
     if (effectiveConfig.enableKNN) {
-      knnResult = knnMatch(text);
+      const useSemanticKNN = effectiveConfig.enableSemanticKNN && isSemanticIndexReady();
+      
+      if (useSemanticKNN) {
+        knnResult = await knnMatch(text, {
+          useSemantic: true,
+          k: 20,
+          fallbackToTFIDF: true
+        });
+        
+        queryEmbedding = knnResult.embedding;
+        
+        if (effectiveConfig.enableSemanticCache && queryEmbedding) {
+          const semanticCacheHit = getSemanticCacheHit(queryEmbedding);
+          if (semanticCacheHit) {
+            logStructured("info", "Semantic cache hit", {
+              similarity: semanticCacheHit.similarity,
+              intent: semanticCacheHit.result.intent
+            });
+            
+            const result: IntentResult = {
+              ...semanticCacheHit.result,
+              processing_time_ms: Date.now() - startTime,
+              cache_hit: true,
+              router_version: ROUTER_VERSION
+            };
+            
+            endTrace(ctx, result, true);
+            return result;
+          }
+        }
+      } else {
+        knnResult = knnMatchSync(text, 5);
+      }
       
       logStructured("info", "KNN match complete", {
         intent: knnResult.intent,
         confidence: knnResult.confidence,
+        method: knnResult.method,
         top_match_similarity: knnResult.top_matches[0]?.similarity || 0
       });
+    }
+
+    const ALL_INTENTS: IntentType[] = [
+      "CREATE_PRESENTATION",
+      "CREATE_DOCUMENT",
+      "CREATE_SPREADSHEET",
+      "SUMMARIZE",
+      "TRANSLATE",
+      "SEARCH_WEB",
+      "ANALYZE_DOCUMENT",
+      "CHAT_GENERAL",
+      "NEED_CLARIFICATION"
+    ];
+    
+    const intentScores: Record<IntentType, number> = {} as Record<IntentType, number>;
+    for (const intent of ALL_INTENTS) {
+      if (intent === ruleResult.intent) {
+        intentScores[intent] = ruleResult.confidence;
+      } else {
+        intentScores[intent] = Math.random() * 0.1;
+      }
+    }
+    
+    if (knnResult) {
+      intentScores[knnResult.intent] = Math.max(
+        intentScores[knnResult.intent] || 0, 
+        knnResult.confidence
+      );
     }
 
     const calibrationInput = {
@@ -191,7 +454,8 @@ export async function routeIntent(
       rule_patterns_matched: ruleResult.matched_patterns.length,
       has_creation_verb: ruleResult.has_creation_verb,
       text_length: text.length,
-      language_confidence: langResult.confidence
+      language_confidence: langResult.confidence,
+      intent_scores: intentScores
     };
 
     const calibrated = calibrate(calibrationInput, DEFAULT_CALIBRATION);
@@ -200,7 +464,10 @@ export async function routeIntent(
       raw_combined: calibrated.raw_combined,
       calibrated: calibrated.calibrated_confidence,
       adjustment: calibrated.adjustment_applied,
-      should_fallback: calibrated.should_fallback
+      should_fallback: calibrated.should_fallback,
+      confidence_zone: calibrated.confidence_zone,
+      prediction_set_size: calibrated.conformal_prediction_set?.intents.length,
+      calibration_drift_detected: calibrated.calibration_drift_detected
     });
 
     let finalIntent = ruleResult.intent;
@@ -208,16 +475,52 @@ export async function routeIntent(
     let fallbackUsed: "none" | "knn" | "llm" = "none";
     let reasoning: string | undefined;
     let slots = extractSlots(normalized, text);
+    let conformalZone: ConfidenceZone | undefined = calibrated.confidence_zone;
+    let predictionSetSize = calibrated.conformal_prediction_set?.intents.length || 1;
 
-    if (knnResult && knnResult.confidence > ruleResult.confidence) {
-      finalIntent = knnResult.intent;
-      fallbackUsed = "knn";
+    if (effectiveConfig.enableConformal && calibrated.conformal_prediction_set) {
+      const conformalResult = calibrateWithConformal(intentScores, locale);
+      conformalZone = conformalResult.predictionSet.zone;
+      predictionSetSize = conformalResult.predictionSet.intents.length;
+      
+      logStructured("info", "Conformal prediction applied", {
+        zone: conformalZone,
+        prediction_set_size: predictionSetSize,
+        selected_intent: conformalResult.selectedIntent,
+        should_clarify: conformalResult.shouldClarify,
+        drift_detected: conformalResult.driftDetected
+      });
+      
+      if (conformalZone === "HIGH_CONFIDENCE") {
+        finalIntent = conformalResult.selectedIntent;
+      } else if (conformalZone === "MEDIUM_CONFIDENCE") {
+        if (knnResult && knnResult.confidence > ruleResult.confidence) {
+          finalIntent = knnResult.intent;
+          fallbackUsed = "knn";
+        } else {
+          finalIntent = conformalResult.selectedIntent;
+        }
+      }
     }
 
-    if (calibrated.should_fallback && effectiveConfig.enableLLMFallback) {
+    if (knnResult && knnResult.confidence > ruleResult.confidence && !effectiveConfig.enableConformal) {
+      finalIntent = knnResult.intent;
+      fallbackUsed = "knn";
+      
+      if (knnResult.method === "semantic_knn") {
+        finalConfidence = Math.max(finalConfidence, knnResult.confidence * 0.95);
+      }
+    }
+
+    const shouldUseLLMFallback = effectiveConfig.enableConformal 
+      ? (conformalZone === "LOW_CONFIDENCE" && effectiveConfig.enableLLMFallback)
+      : (calibrated.should_fallback && effectiveConfig.enableLLMFallback);
+
+    if (shouldUseLLMFallback) {
       logStructured("info", "Triggering LLM fallback", {
         calibrated_confidence: calibrated.calibrated_confidence,
-        threshold: effectiveConfig.fallbackThreshold
+        threshold: effectiveConfig.fallbackThreshold,
+        conformal_zone: conformalZone
       });
 
       try {
@@ -254,7 +557,12 @@ export async function routeIntent(
     }
 
     let clarificationQuestion: string | undefined;
-    if (finalConfidence < 0.50 || finalIntent === "CHAT_GENERAL") {
+    
+    if (effectiveConfig.enableConformal && conformalZone === "LOW_CONFIDENCE") {
+      finalIntent = "NEED_CLARIFICATION";
+      const conformalClarification = calibrateWithConformal(intentScores, locale);
+      clarificationQuestion = conformalClarification.clarificationQuestion;
+    } else if (finalConfidence < 0.50 || finalIntent === "CHAT_GENERAL") {
       if (ruleResult.has_creation_verb && !ruleResult.output_format) {
         finalIntent = "NEED_CLARIFICATION";
         clarificationQuestion = generateClarificationQuestion(ruleResult, locale);
@@ -285,6 +593,12 @@ export async function routeIntent(
       setCached(normalized, ROUTER_VERSION, validatedResult);
     }
 
+    if (effectiveConfig.enableSemanticCache && queryEmbedding) {
+      setSemanticCache(queryEmbedding, validatedResult);
+    }
+
+    notifyIntentRouted(validatedResult, text);
+
     endTrace(ctx, validatedResult, true);
     return validatedResult;
 
@@ -314,12 +628,128 @@ export async function routeIntent(
   }
 }
 
+export async function initializeRouter(): Promise<void> {
+  logStructured("info", "Initializing Intent Router v2.0", {});
+  
+  try {
+    await ensureEmbeddingIndexInitialized();
+    logStructured("info", "Intent Router initialized successfully", {
+      semantic_index_ready: isSemanticIndexReady()
+    });
+  } catch (error: any) {
+    logStructured("warn", "Intent Router initialized with degraded capabilities", {
+      error: error.message,
+      semantic_index_ready: false
+    });
+  }
+}
+
+export function getRouterStatus(): {
+  version: string;
+  semantic_index_ready: boolean;
+  config: RouterConfig;
+  cache_stats: ReturnType<typeof getCacheStats>;
+  semantic_cache_stats: ReturnType<typeof getSemanticCacheStats>;
+  circuit_breaker: ReturnType<typeof getCircuitBreakerStats>;
+  conformal_stats: ReturnType<typeof getConformalStats> | null;
+  calibration_status: ReturnType<typeof getCalibrationStatus>;
+} {
+  return {
+    version: ROUTER_VERSION,
+    semantic_index_ready: isSemanticIndexReady(),
+    config: currentConfig,
+    cache_stats: getCacheStats(),
+    semantic_cache_stats: getSemanticCacheStats(),
+    circuit_breaker: getCircuitBreakerStats(),
+    conformal_stats: currentConfig.enableConformal ? getConformalStats() : null,
+    calibration_status: getCalibrationStatus()
+  };
+}
+
+export type HealthStatus = "HEALTHY" | "DEGRADED" | "UNHEALTHY";
+
+export interface RouterHealth {
+  status: HealthStatus;
+  version: string;
+  uptime_seconds: number;
+  metrics_summary: {
+    total_requests: number;
+    success_rate: number;
+    error_rate: number;
+    p95_latency_ms: number;
+    fallback_rate: number;
+    unknown_rate: number;
+  };
+  active_alerts: ProductAlert[];
+  alert_summary: AlertSummary;
+  degraded_components: string[];
+  last_check: Date;
+}
+
+const startTime = Date.now();
+
+export function getRouterHealth(): RouterHealth {
+  const alerts = checkSliceAlerts();
+  const activeAlerts = getActiveAlerts();
+  const alertSummary = getAlertSummary();
+  const metrics = getMetricsSnapshot();
+  const productMetrics = getProductMetrics(activeAlerts);
+  
+  const degradedComponents: string[] = [];
+  let status: HealthStatus = "HEALTHY";
+  
+  if (!isSemanticIndexReady()) {
+    degradedComponents.push("semantic_embeddings");
+  }
+  
+  const circuitBreaker = getCircuitBreakerStats();
+  if (circuitBreaker.state === "OPEN") {
+    degradedComponents.push("llm_fallback");
+  }
+  
+  if (alertSummary.by_severity.CRITICAL > 0) {
+    status = "UNHEALTHY";
+  } else if (alertSummary.by_severity.WARNING > 0 || degradedComponents.length > 0) {
+    status = "DEGRADED";
+  }
+  
+  if (metrics.error_rate > 0.10) {
+    status = "UNHEALTHY";
+  } else if (metrics.error_rate > 0.05) {
+    if (status === "HEALTHY") {
+      status = "DEGRADED";
+    }
+  }
+  
+  const uptimeSeconds = Math.floor((Date.now() - startTime) / 1000);
+  
+  return {
+    status,
+    version: ROUTER_VERSION,
+    uptime_seconds: uptimeSeconds,
+    metrics_summary: {
+      total_requests: metrics.total_requests,
+      success_rate: productMetrics.overall.success_rate,
+      error_rate: metrics.error_rate,
+      p95_latency_ms: metrics.p95_latency_ms,
+      fallback_rate: productMetrics.overall.fallback_rate,
+      unknown_rate: productMetrics.overall.unknown_rate
+    },
+    active_alerts: activeAlerts,
+    alert_summary: alertSummary,
+    degraded_components: degradedComponents,
+    last_check: new Date()
+  };
+}
+
 export {
   ROUTER_VERSION,
   getMetricsSnapshot,
   getCacheStats,
+  getSemanticCacheStats,
   invalidateCache,
   getCircuitBreakerStats,
+  isSemanticIndexReady,
   type IntentResult,
   type MultiIntentResult,
   type UnifiedIntentResult
@@ -328,7 +758,166 @@ export {
 export { preprocess } from "./preprocess";
 export { detectLanguage, isCodeSwitching } from "./langDetect";
 export { ruleBasedMatch, extractSlots } from "./ruleMatcher";
-export { knnMatch } from "./embeddingMatcher";
-export { calibrate, computeConfusionMatrix } from "./confidenceCalibrator";
+export { knnMatch, knnMatchSync } from "./embeddingMatcher";
+export { 
+  calibrate, 
+  computeConfusionMatrix, 
+  calibrateWithConformal, 
+  getCalibrationStatus,
+  configureCal 
+} from "./confidenceCalibrator";
+export {
+  calibrateConformalPredictor,
+  getConformalPredictionSet,
+  getConfidenceZone,
+  getConformalStats,
+  initializeConformalPredictor,
+  recordCoverageOutcome,
+  isDriftDetected,
+  type CalibrationExample,
+  type ConformalPredictionSet,
+  type ConfidenceZone,
+  type ConformalStats
+} from "./conformalPredictor";
 export { llmFallback } from "./fallbackManager";
-export { detectMultiIntent, buildExecutionPlan, generateDisambiguationQuestion } from "./multiIntent";
+export { 
+  detectMultiIntent, 
+  buildExecutionPlan, 
+  buildEnhancedExecutionPlan,
+  generateDisambiguationQuestion,
+  mergeSlots,
+  inheritSlotsForStep,
+  getExecutableSteps,
+  validateMultiIntentPlan,
+  type ExecutionPlan,
+  type IntentInput,
+  type EnhancedMultiIntentPlan,
+  type MultiIntentDetectionResult
+} from "./multiIntent";
+export {
+  createExecutionPlan,
+  validatePlanConstraints,
+  getStepDependencies,
+  getDefaultConstraints,
+  getParallelGroups,
+  canExecuteInParallel,
+  getStepOutput,
+  serializeExecutionPlan,
+  deserializeExecutionPlan,
+  type PlanStep,
+  type StepConstraints,
+  type PlanConstraints,
+  type ValidationResult
+} from "./intentPlanner";
+export { 
+  initializeEmbeddingIndex, 
+  semanticKNNMatch, 
+  addExampleToIndex, 
+  getIndexStats 
+} from "./semanticEmbeddings";
+export { 
+  getSemanticCacheHit, 
+  setSemanticCache, 
+  clearSemanticCache 
+} from "./semanticCache";
+export {
+  recordFeedback,
+  recordCorrection,
+  recordRephrase,
+  recordFormatChange,
+  recordEarlyStop,
+  recordClarificationResult,
+  getFeedbackBatch,
+  processFeedbackBatch,
+  getFeedbackStats,
+  getAllFeedback,
+  clearFeedbackStore,
+  registerFeedbackProcessor,
+  startCleanupTimer,
+  stopCleanupTimer,
+  type FeedbackSignal,
+  type FeedbackType,
+  type FeedbackContext,
+  type ProcessedBatchResult
+} from "./feedbackLoop";
+export {
+  addHardNegative,
+  getConfusionPairs,
+  getTopConfusionPairs,
+  getConfusionCountBetween,
+  boostHardNegatives,
+  decayHardNegativeWeights,
+  getHardNegatives,
+  getHardNegativesForIntent,
+  getHardNegativeStats,
+  processCorrectionsToHardNegatives,
+  clearHardNegatives,
+  exportHardNegatives,
+  importHardNegatives,
+  getEmbeddingsForBoosting,
+  type HardNegative,
+  type ConfusionPair
+} from "./hardNegatives";
+export {
+  proposeNewAlias,
+  confirmAlias,
+  rejectAlias,
+  getAliasCandidates,
+  getPendingCandidates,
+  getConfirmedAliasesForIntent,
+  getAllConfirmedAliases,
+  pruneStaleAliases,
+  processCorrectionsToAliases,
+  processRephrasesToAliases,
+  getAliasStats,
+  clearAliasStore,
+  exportAliasCandidates,
+  exportConfirmedAliases,
+  importAliasCandidates,
+  type AliasCandidate,
+  type ConfirmedAlias
+} from "./aliasExpander";
+
+export {
+  recordIntentOutcome,
+  getProductMetrics,
+  getSliceMetrics,
+  getRouteLatencyMetrics,
+  recordClarificationResolution,
+  resetProductMetrics,
+  getMetricsWindow,
+  type ProductMetricsSnapshot,
+  type OutcomeMetadata,
+  type Channel,
+  type DeviceType,
+  type SliceType,
+  type SliceMetrics,
+  type Alert as ProductAlert,
+  type IntentMetricsData,
+  type LocaleMetrics,
+  type ChannelMetrics
+} from "./productMetrics";
+
+export {
+  checkSliceAlerts,
+  getActiveAlerts,
+  getAllAlerts,
+  acknowledgeAlert,
+  configureAlertThresholds,
+  getAlertThresholds,
+  setBaseline,
+  getBaseline,
+  clearAlerts,
+  resetAlertSystem,
+  getAlertSummary,
+  type AlertSeverity,
+  type AlertThresholds,
+  type SliceAlertConfig,
+  type AlertSummary
+} from "./sliceAlerts";
+
+export {
+  recordCalibrationDrift,
+  getCalibrationDriftMetrics,
+  type RouteLatencyMetrics
+} from "./telemetry";

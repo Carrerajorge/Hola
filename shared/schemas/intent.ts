@@ -99,7 +99,7 @@ export type MultiIntentResult = z.infer<typeof MultiIntentResultSchema>;
 export type IntentResult = z.infer<typeof IntentResultSchema>;
 export type UnifiedIntentResult = z.infer<typeof UnifiedIntentResultSchema>;
 
-export const SupportedLocales = ["es", "en", "pt", "fr", "de", "it"] as const;
+export const SupportedLocales = ["es", "en", "pt", "fr", "de", "it", "ar", "hi", "ja", "ko", "zh", "ru", "tr", "id"] as const;
 export type SupportedLocale = typeof SupportedLocales[number];
 
 export interface IntentMetrics {
@@ -138,3 +138,42 @@ export const DEFAULT_CALIBRATION: CalibrationConfig = {
   min_threshold: 0.50,
   fallback_threshold: 0.80
 };
+
+export const StepConstraintsSchema = z.object({
+  max_output_size: z.number(),
+  allowed_formats: z.array(OutputFormatSchema),
+  timeout_ms: z.number(),
+  requires_document_source: z.boolean().optional(),
+  requires_web_source: z.boolean().optional()
+});
+
+export const PlanConstraintsSchema = z.object({
+  max_total_duration_ms: z.number(),
+  max_parallel_steps: z.number(),
+  allow_partial_failure: z.boolean()
+});
+
+export const FullPlanStepSchema = z.object({
+  id: z.string(),
+  intent: IntentTypeSchema,
+  slots: z.record(z.unknown()),
+  output_format: OutputFormatSchema,
+  constraints: StepConstraintsSchema,
+  depends_on: z.array(z.string()),
+  inherits_from: z.string().optional()
+});
+
+export const ExecutionPlanSchema = z.object({
+  id: z.string(),
+  steps: z.array(FullPlanStepSchema),
+  execution_order: z.array(z.array(z.string())),
+  estimated_duration_ms: z.number(),
+  constraints: PlanConstraintsSchema,
+  is_valid: z.boolean(),
+  validation_errors: z.array(z.string())
+});
+
+export type StepConstraints = z.infer<typeof StepConstraintsSchema>;
+export type PlanConstraints = z.infer<typeof PlanConstraintsSchema>;
+export type FullPlanStep = z.infer<typeof FullPlanStepSchema>;
+export type ExecutionPlanType = z.infer<typeof ExecutionPlanSchema>;

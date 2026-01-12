@@ -1,5 +1,12 @@
 import { trace, SpanStatusCode, context, SpanKind } from "@opentelemetry/api";
 import type { IntentType, SupportedLocale, IntentResult } from "../../../shared/schemas/intent";
+import { 
+  recordIntentOutcome as recordProductOutcome,
+  getRouteLatencyMetrics,
+  type Channel,
+  type DeviceType,
+  type OutcomeMetadata
+} from "./productMetrics";
 
 const tracer = trace.getTracer("intent-router", "2.0.0");
 
@@ -25,6 +32,21 @@ interface IntentMetricsStore {
   by_fallback: Record<string, number>;
   errors: number;
   degraded_fallbacks: number;
+  route_latencies: {
+    rule_only: LatencyBucket;
+    semantic: LatencyBucket;
+    llm: LatencyBucket;
+  };
+  calibration_drift: {
+    expected_confidence_sum: number;
+    actual_confidence_sum: number;
+    sample_count: number;
+    drift_alerts: number;
+  };
+}
+
+function createEmptyLatencyBucket(): LatencyBucket {
+  return { count: 0, sum: 0, values: [] };
 }
 
 const metrics: IntentMetricsStore = {
@@ -52,7 +74,18 @@ const metrics: IntentMetricsStore = {
   by_locale: {},
   by_fallback: { none: 0, knn: 0, llm: 0, degraded: 0 },
   errors: 0,
-  degraded_fallbacks: 0
+  degraded_fallbacks: 0,
+  route_latencies: {
+    rule_only: createEmptyLatencyBucket(),
+    semantic: createEmptyLatencyBucket(),
+    llm: createEmptyLatencyBucket()
+  },
+  calibration_drift: {
+    expected_confidence_sum: 0,
+    actual_confidence_sum: 0,
+    sample_count: 0,
+    drift_alerts: 0
+  }
 };
 
 const MAX_LATENCY_SAMPLES = 1000;
@@ -65,6 +98,60 @@ function recordLatency(ms: number): void {
     metrics.latencies.values.shift();
   }
   metrics.latencies.values.push(ms);
+}
+
+function recordRouteLatency(route: "rule_only" | "semantic" | "llm", ms: number): void {
+  const bucket = metrics.route_latencies[route];
+  bucket.count++;
+  bucket.sum += ms;
+  
+  if (bucket.values.length >= MAX_LATENCY_SAMPLES) {
+    bucket.values.shift();
+  }
+  bucket.values.push(ms);
+}
+
+export function recordCalibrationDrift(expectedConfidence: number, actualSuccess: boolean): void {
+  metrics.calibration_drift.sample_count++;
+  metrics.calibration_drift.expected_confidence_sum += expectedConfidence;
+  metrics.calibration_drift.actual_confidence_sum += actualSuccess ? 1 : 0;
+  
+  const sampleCount = metrics.calibration_drift.sample_count;
+  if (sampleCount >= 100) {
+    const expectedRate = metrics.calibration_drift.expected_confidence_sum / sampleCount;
+    const actualRate = metrics.calibration_drift.actual_confidence_sum / sampleCount;
+    const drift = Math.abs(expectedRate - actualRate);
+    
+    if (drift > 0.1) {
+      metrics.calibration_drift.drift_alerts++;
+      logStructured("warn", "Calibration drift detected", {
+        expected_rate: expectedRate,
+        actual_rate: actualRate,
+        drift,
+        sample_count: sampleCount
+      });
+    }
+  }
+}
+
+export function getCalibrationDriftMetrics(): {
+  expected_rate: number;
+  actual_rate: number;
+  drift: number;
+  sample_count: number;
+  drift_alerts: number;
+} {
+  const sampleCount = metrics.calibration_drift.sample_count || 1;
+  const expectedRate = metrics.calibration_drift.expected_confidence_sum / sampleCount;
+  const actualRate = metrics.calibration_drift.actual_confidence_sum / sampleCount;
+  
+  return {
+    expected_rate: expectedRate,
+    actual_rate: actualRate,
+    drift: Math.abs(expectedRate - actualRate),
+    sample_count: metrics.calibration_drift.sample_count,
+    drift_alerts: metrics.calibration_drift.drift_alerts
+  };
 }
 
 function computePercentile(values: number[], p: number): number {
@@ -102,10 +189,17 @@ export function startTrace(
   };
 }
 
+export interface EndTraceOptions {
+  channel?: Channel;
+  device_type?: DeviceType;
+  session_id?: string;
+}
+
 export function endTrace(
   ctx: TelemetryContext,
   result: IntentResult,
-  success: boolean = true
+  success: boolean = true,
+  options: EndTraceOptions = {}
 ): void {
   const duration = Date.now() - ctx.start_time;
   recordLatency(duration);
@@ -123,12 +217,19 @@ export function endTrace(
   const fallback = result.fallback_used || "none";
   metrics.by_fallback[fallback] = (metrics.by_fallback[fallback] || 0) + 1;
 
+  let routeType: "rule-only" | "semantic" | "llm" = "rule-only";
   if (fallback === "none") {
     metrics.rule_only++;
+    recordRouteLatency("rule_only", duration);
+    routeType = "rule-only";
   } else if (fallback === "knn") {
     metrics.knn_fallbacks++;
+    recordRouteLatency("semantic", duration);
+    routeType = "semantic";
   } else if (fallback === "llm") {
     metrics.llm_fallbacks++;
+    recordRouteLatency("llm", duration);
+    routeType = "llm";
   }
 
   if (result.intent === "NEED_CLARIFICATION") {
@@ -140,6 +241,19 @@ export function endTrace(
       (metrics.by_locale[result.language_detected] || 0) + 1;
   }
 
+  const locale = (result.language_detected || "en") as SupportedLocale;
+  const productMetadata: OutcomeMetadata = {
+    locale,
+    channel: options.channel || "web",
+    device_type: options.device_type || "unknown",
+    session_id: options.session_id,
+    fallback_used: fallback,
+    latency_ms: duration,
+    route_type: routeType
+  };
+  
+  recordProductOutcome(result.intent, success, productMetadata, result.normalized_text);
+
   const span = trace.getSpan(context.active());
   if (span) {
     span.setAttributes({
@@ -147,7 +261,10 @@ export function endTrace(
       "intent_router.confidence": result.confidence,
       "intent_router.fallback_used": fallback,
       "intent_router.cache_hit": result.cache_hit || false,
-      "intent_router.duration_ms": duration
+      "intent_router.duration_ms": duration,
+      "intent_router.route_type": routeType,
+      "intent_router.channel": options.channel || "web",
+      "intent_router.device_type": options.device_type || "unknown"
     });
 
     if (success) {
@@ -184,6 +301,14 @@ export function recordDegradedFallback(): void {
   metrics.by_fallback.degraded = (metrics.by_fallback.degraded || 0) + 1;
 }
 
+export interface RouteLatencyMetrics {
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  avg_ms: number;
+  count: number;
+}
+
 export interface MetricsSnapshot {
   total_requests: number;
   cache_hit_rate: number;
@@ -199,10 +324,33 @@ export interface MetricsSnapshot {
   error_rate: number;
   by_intent: Record<IntentType, number>;
   by_locale: Record<string, number>;
+  route_latencies: {
+    rule_only: RouteLatencyMetrics;
+    semantic: RouteLatencyMetrics;
+    llm: RouteLatencyMetrics;
+  };
+  calibration_drift: {
+    expected_rate: number;
+    actual_rate: number;
+    drift: number;
+    sample_count: number;
+    drift_alerts: number;
+  };
+}
+
+function computeRouteLatencyMetrics(bucket: LatencyBucket): RouteLatencyMetrics {
+  return {
+    p50_ms: computePercentile(bucket.values, 50),
+    p95_ms: computePercentile(bucket.values, 95),
+    p99_ms: computePercentile(bucket.values, 99),
+    avg_ms: bucket.count > 0 ? bucket.sum / bucket.count : 0,
+    count: bucket.count
+  };
 }
 
 export function getMetricsSnapshot(): MetricsSnapshot {
   const total = metrics.total_requests || 1;
+  const driftMetrics = getCalibrationDriftMetrics();
 
   return {
     total_requests: metrics.total_requests,
@@ -220,7 +368,13 @@ export function getMetricsSnapshot(): MetricsSnapshot {
     clarification_rate: metrics.clarification_requests / total,
     error_rate: metrics.errors / total,
     by_intent: { ...metrics.by_intent },
-    by_locale: { ...metrics.by_locale }
+    by_locale: { ...metrics.by_locale },
+    route_latencies: {
+      rule_only: computeRouteLatencyMetrics(metrics.route_latencies.rule_only),
+      semantic: computeRouteLatencyMetrics(metrics.route_latencies.semantic),
+      llm: computeRouteLatencyMetrics(metrics.route_latencies.llm)
+    },
+    calibration_drift: driftMetrics
   };
 }
 
@@ -244,6 +398,19 @@ export function resetMetrics(): void {
   
   metrics.by_locale = {};
   metrics.by_fallback = { none: 0, knn: 0, llm: 0, degraded: 0 };
+  
+  metrics.route_latencies = {
+    rule_only: createEmptyLatencyBucket(),
+    semantic: createEmptyLatencyBucket(),
+    llm: createEmptyLatencyBucket()
+  };
+  
+  metrics.calibration_drift = {
+    expected_confidence_sum: 0,
+    actual_confidence_sum: 0,
+    sample_count: 0,
+    drift_alerts: 0
+  };
 }
 
 export function logStructured(

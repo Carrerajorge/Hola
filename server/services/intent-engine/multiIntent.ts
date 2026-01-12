@@ -6,6 +6,15 @@ import type {
   PlanStep,
   MultiIntentResult
 } from "../../../shared/schemas/intent";
+import {
+  createExecutionPlan,
+  validatePlanConstraints,
+  getStepDependencies,
+  serializeExecutionPlan,
+  type ExecutionPlan,
+  type IntentInput,
+  type PlanStep as FullPlanStep
+} from "./intentPlanner";
 
 const MULTI_INTENT_PATTERNS: Array<{
   pattern: RegExp;
@@ -46,6 +55,13 @@ export interface MultiIntentDetectionResult {
   separatorType: "and" | "then" | "list" | "implicit" | null;
   segments: string[];
   requiresSequentialExecution: boolean;
+}
+
+export interface EnhancedMultiIntentPlan {
+  executionPlan: ExecutionPlan;
+  serializedPlan: Record<string, unknown>;
+  legacyPlan: MultiIntentResult["plan"];
+  slotInheritanceMap: Map<string, string>;
 }
 
 export function detectMultiIntent(normalizedText: string): MultiIntentDetectionResult {
@@ -96,6 +112,64 @@ export function detectMultiIntent(normalizedText: string): MultiIntentDetectionR
   };
 }
 
+export function buildEnhancedExecutionPlan(
+  intents: SingleIntentResult[],
+  options: {
+    isSequential?: boolean;
+    sharedSlots?: Slots;
+  } = {}
+): EnhancedMultiIntentPlan {
+  const { isSequential = false, sharedSlots = {} } = options;
+
+  const intentInputs: IntentInput[] = intents.map(intent => ({
+    intent: intent.intent,
+    output_format: intent.output_format,
+    slots: intent.slots,
+    confidence: intent.confidence
+  }));
+
+  const executionPlan = createExecutionPlan(intentInputs, sharedSlots, {
+    isSequential,
+    validateConstraints: true
+  });
+
+  const slotInheritanceMap = new Map<string, string>();
+  for (const step of executionPlan.steps) {
+    if (step.inherits_from) {
+      slotInheritanceMap.set(step.id, step.inherits_from);
+    }
+  }
+
+  const legacyPlan = convertToLegacyPlan(executionPlan);
+
+  return {
+    executionPlan,
+    serializedPlan: serializeExecutionPlan(executionPlan),
+    legacyPlan,
+    slotInheritanceMap
+  };
+}
+
+function convertToLegacyPlan(plan: ExecutionPlan): MultiIntentResult["plan"] {
+  const steps: PlanStep[] = plan.steps.map((step, index) => ({
+    step_id: index + 1,
+    intent: step.intent,
+    output_format: step.output_format,
+    slots: step.slots as Slots,
+    depends_on: step.depends_on.map(depId => {
+      const depIndex = plan.steps.findIndex(s => s.id === depId);
+      return depIndex + 1;
+    }).filter(id => id > 0)
+  }));
+
+  const execution_order = plan.execution_order.flat().map(stepId => {
+    const index = plan.steps.findIndex(s => s.id === stepId);
+    return index + 1;
+  });
+
+  return { steps, execution_order };
+}
+
 export function buildExecutionPlan(
   intents: SingleIntentResult[]
 ): MultiIntentResult["plan"] {
@@ -103,38 +177,8 @@ export function buildExecutionPlan(
     return { steps: [], execution_order: [] };
   }
 
-  const steps: PlanStep[] = [];
-  const dependencies = new Map<number, number[]>();
-
-  for (let i = 0; i < intents.length; i++) {
-    const intent = intents[i];
-    const step: PlanStep = {
-      step_id: i + 1,
-      intent: intent.intent,
-      output_format: intent.output_format,
-      slots: intent.slots,
-      depends_on: []
-    };
-
-    if (intent.intent === "CREATE_PRESENTATION" || 
-        intent.intent === "CREATE_DOCUMENT" || 
-        intent.intent === "CREATE_SPREADSHEET") {
-      
-      for (let j = 0; j < i; j++) {
-        if (intents[j].intent === "SEARCH_WEB" || intents[j].intent === "ANALYZE_DOCUMENT") {
-          step.depends_on = step.depends_on || [];
-          step.depends_on.push(j + 1);
-        }
-      }
-    }
-
-    steps.push(step);
-    dependencies.set(i + 1, step.depends_on || []);
-  }
-
-  const execution_order = topologicalSort(steps.length, dependencies);
-
-  return { steps, execution_order };
+  const enhanced = buildEnhancedExecutionPlan(intents);
+  return enhanced.legacyPlan;
 }
 
 function topologicalSort(n: number, deps: Map<number, number[]>): number[] {
@@ -245,3 +289,63 @@ export function mergeSlots(slotsArray: Slots[]): Slots {
 
   return merged;
 }
+
+export function inheritSlotsForStep(
+  stepId: string,
+  plan: ExecutionPlan
+): Record<string, unknown> {
+  const step = plan.steps.find(s => s.id === stepId);
+  if (!step) return {};
+
+  const inheritedSlots: Record<string, unknown> = {};
+
+  for (const depId of step.depends_on) {
+    const depStep = plan.steps.find(s => s.id === depId);
+    if (depStep) {
+      for (const [key, value] of Object.entries(depStep.slots)) {
+        if (value !== undefined && inheritedSlots[key] === undefined) {
+          inheritedSlots[key] = value;
+        }
+      }
+    }
+  }
+
+  for (const [key, value] of Object.entries(step.slots)) {
+    if (value !== undefined) {
+      inheritedSlots[key] = value;
+    }
+  }
+
+  return inheritedSlots;
+}
+
+export function getExecutableSteps(
+  plan: ExecutionPlan,
+  completedSteps: Set<string>
+): string[] {
+  const executable: string[] = [];
+
+  for (const step of plan.steps) {
+    if (completedSteps.has(step.id)) continue;
+
+    const allDepsCompleted = step.depends_on.every(depId => completedSteps.has(depId));
+    if (allDepsCompleted) {
+      executable.push(step.id);
+    }
+  }
+
+  return executable;
+}
+
+export function validateMultiIntentPlan(
+  plan: ExecutionPlan
+): { isValid: boolean; errors: string[] } {
+  const validation = validatePlanConstraints(plan);
+  return {
+    isValid: validation.is_valid,
+    errors: [...validation.errors, ...validation.warnings]
+  };
+}
+
+export { getStepDependencies, createExecutionPlan, validatePlanConstraints };
+export type { ExecutionPlan, IntentInput, EnhancedMultiIntentPlan };

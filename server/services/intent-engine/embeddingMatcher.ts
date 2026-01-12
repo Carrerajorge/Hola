@@ -1,4 +1,13 @@
 import type { IntentType } from "../../../shared/schemas/intent";
+import {
+  initializeEmbeddingIndex,
+  semanticKNNMatch,
+  isSemanticIndexReady,
+  addExampleToIndex,
+  generateEmbedding,
+  type SemanticKNNResult
+} from "./semanticEmbeddings";
+import { logStructured } from "./telemetry";
 
 const INTENT_EXAMPLES: Record<IntentType, string[]> = {
   CREATE_PRESENTATION: [
@@ -218,12 +227,26 @@ export interface KNNResult {
   top_matches: Array<{
     intent: IntentType;
     similarity: number;
-    example_index: number;
+    example_index?: number;
+    text?: string;
   }>;
-  method: "tfidf_knn";
+  method: "tfidf_knn" | "semantic_knn";
+  embedding?: number[];
 }
 
-export function knnMatch(
+export interface KNNMatchOptions {
+  useSemantic?: boolean;
+  k?: number;
+  fallbackToTFIDF?: boolean;
+}
+
+const DEFAULT_KNN_OPTIONS: KNNMatchOptions = {
+  useSemantic: true,
+  k: 20,
+  fallbackToTFIDF: true
+};
+
+export function tfidfKnnMatch(
   text: string,
   k: number = 5
 ): KNNResult {
@@ -283,6 +306,62 @@ export function knnMatch(
   };
 }
 
+export async function knnMatch(
+  text: string,
+  options: KNNMatchOptions = {}
+): Promise<KNNResult> {
+  const opts = { ...DEFAULT_KNN_OPTIONS, ...options };
+  
+  if (opts.useSemantic && isSemanticIndexReady()) {
+    try {
+      const semanticResult = await semanticKNNMatch(text, opts.k);
+      
+      if (semanticResult) {
+        logStructured("info", "Semantic KNN match successful", {
+          intent: semanticResult.intent,
+          confidence: semanticResult.confidence,
+          top_similarity: semanticResult.top_matches[0]?.similarity || 0
+        });
+        
+        return {
+          intent: semanticResult.intent,
+          confidence: semanticResult.confidence,
+          top_matches: semanticResult.top_matches.slice(0, 5),
+          method: "semantic_knn",
+          embedding: semanticResult.embedding
+        };
+      }
+    } catch (error: any) {
+      logStructured("warn", "Semantic KNN match failed, falling back to TF-IDF", {
+        error: error.message
+      });
+    }
+  }
+  
+  if (opts.fallbackToTFIDF) {
+    logStructured("info", "Using TF-IDF KNN fallback", {
+      semantic_available: isSemanticIndexReady(),
+      use_semantic_requested: opts.useSemantic
+    });
+    
+    return tfidfKnnMatch(text, Math.min(opts.k || 5, 10));
+  }
+  
+  return {
+    intent: "CHAT_GENERAL",
+    confidence: 0.30,
+    top_matches: [],
+    method: "tfidf_knn"
+  };
+}
+
+export function knnMatchSync(
+  text: string,
+  k: number = 5
+): KNNResult {
+  return tfidfKnnMatch(text, k);
+}
+
 export function getExampleCount(): number {
   return Object.values(INTENT_EXAMPLES).reduce((acc, arr) => acc + arr.length, 0);
 }
@@ -295,3 +374,28 @@ export function addExample(intent: IntentType, example: string): void {
     documentFrequency.clear();
   }
 }
+
+export async function addExampleWithEmbedding(
+  intent: IntentType, 
+  example: string
+): Promise<void> {
+  addExample(intent, example);
+  
+  if (isSemanticIndexReady()) {
+    try {
+      const embedding = await generateEmbedding(example);
+      addExampleToIndex(intent, example, embedding);
+    } catch (error: any) {
+      logStructured("warn", "Failed to add example to semantic index", {
+        intent,
+        error: error.message
+      });
+    }
+  }
+}
+
+export { 
+  initializeEmbeddingIndex, 
+  isSemanticIndexReady,
+  type SemanticKNNResult 
+};

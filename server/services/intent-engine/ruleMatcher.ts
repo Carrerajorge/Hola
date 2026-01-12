@@ -210,6 +210,286 @@ const INTENT_ALIASES: Record<SupportedLocale, Record<IntentType, string[]>> = {
       "per favore", "aiuto"
     ],
     NEED_CLARIFICATION: []
+  },
+  ar: {
+    CREATE_PRESENTATION: [
+      "عرض تقديمي", "عرض", "تقديم", "شرائح", "باوربوينت", "بوربوينت",
+      "إنشاء عرض", "صنع عرض", "تصميم عرض", "إعداد عرض تقديمي"
+    ],
+    CREATE_DOCUMENT: [
+      "مستند", "وثيقة", "ملف", "تقرير", "مقال", "إنشاء مستند",
+      "كتابة مستند", "إعداد تقرير", "وورد", "محرر"
+    ],
+    CREATE_SPREADSHEET: [
+      "جدول", "جدول بيانات", "إكسل", "ورقة عمل", "حسابات",
+      "إنشاء جدول", "عمل جدول", "ورقة حساب"
+    ],
+    SUMMARIZE: [
+      "ملخص", "تلخيص", "لخص", "خلاصة", "اختصار", "اختصر",
+      "النقاط الرئيسية", "أهم النقاط", "موجز"
+    ],
+    TRANSLATE: [
+      "ترجم", "ترجمة", "ترجم إلى", "بالعربية", "بالإنجليزية",
+      "حول إلى", "نقل إلى لغة"
+    ],
+    SEARCH_WEB: [
+      "بحث", "ابحث", "بحث في الإنترنت", "جوجل", "استكشف",
+      "ابحث عن", "جد معلومات", "بحث ويب"
+    ],
+    ANALYZE_DOCUMENT: [
+      "تحليل", "حلل", "راجع", "مراجعة", "تقييم", "قيم",
+      "فحص", "افحص", "دراسة", "ادرس"
+    ],
+    CHAT_GENERAL: [
+      "مرحبا", "أهلا", "شكرا", "نعم", "لا", "حسنا",
+      "صباح الخير", "مساء الخير", "من فضلك", "مساعدة"
+    ],
+    NEED_CLARIFICATION: []
+  },
+  hi: {
+    CREATE_PRESENTATION: [
+      "प्रस्तुति", "प्रेजेंटेशन", "स्लाइड", "स्लाइड्स", "पावरपॉइंट",
+      "प्रस्तुति बनाएं", "स्लाइड बनाओ", "पीपीटी"
+    ],
+    CREATE_DOCUMENT: [
+      "दस्तावेज़", "डॉक्यूमेंट", "रिपोर्ट", "लेख", "फ़ाइल",
+      "दस्तावेज़ बनाएं", "रिपोर्ट लिखें", "वर्ड"
+    ],
+    CREATE_SPREADSHEET: [
+      "स्प्रेडशीट", "एक्सेल", "तालिका", "शीट", "डेटा शीट",
+      "एक्सेल बनाएं", "तालिका बनाओ", "गणना पत्रक"
+    ],
+    SUMMARIZE: [
+      "सारांश", "संक्षेप", "सार", "मुख्य बिंदु", "संक्षिप्त करें",
+      "छोटा करें", "महत्वपूर्ण बिंदु"
+    ],
+    TRANSLATE: [
+      "अनुवाद", "अनुवाद करें", "हिंदी में", "अंग्रेजी में",
+      "भाषा बदलें", "रूपांतरण"
+    ],
+    SEARCH_WEB: [
+      "खोज", "खोजें", "इंटरनेट पर खोजें", "गूगल", "जानकारी ढूंढें",
+      "वेब खोज", "ऑनलाइन खोजें"
+    ],
+    ANALYZE_DOCUMENT: [
+      "विश्लेषण", "विश्लेषण करें", "समीक्षा", "समीक्षा करें",
+      "मूल्यांकन", "जांच करें", "परीक्षण"
+    ],
+    CHAT_GENERAL: [
+      "नमस्ते", "हैलो", "धन्यवाद", "हां", "नहीं", "ठीक है",
+      "शुभ प्रभात", "कृपया", "मदद"
+    ],
+    NEED_CLARIFICATION: []
+  },
+  ja: {
+    CREATE_PRESENTATION: [
+      "プレゼン", "プレゼンテーション", "スライド", "パワーポイント", "パワポ",
+      "プレゼン作成", "スライド作って", "発表資料", "ppt作成"
+    ],
+    CREATE_DOCUMENT: [
+      "ドキュメント", "文書", "レポート", "報告書", "ワード",
+      "文書作成", "レポート作成", "資料作成", "書類"
+    ],
+    CREATE_SPREADSHEET: [
+      "スプレッドシート", "エクセル", "表", "表計算", "シート",
+      "エクセル作成", "表作成", "データシート"
+    ],
+    SUMMARIZE: [
+      "要約", "まとめ", "まとめて", "要点", "サマリー",
+      "簡潔に", "ポイント", "概要"
+    ],
+    TRANSLATE: [
+      "翻訳", "訳して", "日本語に", "英語に", "翻訳して",
+      "言語変換", "通訳"
+    ],
+    SEARCH_WEB: [
+      "検索", "調べて", "ググって", "ウェブ検索", "ネット検索",
+      "情報を探して", "調査"
+    ],
+    ANALYZE_DOCUMENT: [
+      "分析", "分析して", "レビュー", "評価", "評価して",
+      "検討", "検証", "チェック"
+    ],
+    CHAT_GENERAL: [
+      "こんにちは", "おはよう", "ありがとう", "はい", "いいえ",
+      "よろしく", "助けて", "お願いします"
+    ],
+    NEED_CLARIFICATION: []
+  },
+  ko: {
+    CREATE_PRESENTATION: [
+      "프레젠테이션", "슬라이드", "파워포인트", "ppt", "발표자료",
+      "프레젠테이션 만들어", "슬라이드 작성", "발표"
+    ],
+    CREATE_DOCUMENT: [
+      "문서", "도큐먼트", "보고서", "리포트", "워드",
+      "문서 작성", "문서 만들어", "보고서 작성"
+    ],
+    CREATE_SPREADSHEET: [
+      "스프레드시트", "엑셀", "표", "시트", "데이터시트",
+      "엑셀 만들어", "표 작성", "계산표"
+    ],
+    SUMMARIZE: [
+      "요약", "정리", "요약해", "핵심", "포인트",
+      "간략히", "요점", "개요"
+    ],
+    TRANSLATE: [
+      "번역", "번역해", "한국어로", "영어로", "언어 변환",
+      "통역", "번역하다"
+    ],
+    SEARCH_WEB: [
+      "검색", "찾아봐", "구글", "웹검색", "인터넷 검색",
+      "정보 찾기", "조사"
+    ],
+    ANALYZE_DOCUMENT: [
+      "분석", "분석해", "리뷰", "평가", "검토",
+      "검증", "체크"
+    ],
+    CHAT_GENERAL: [
+      "안녕하세요", "안녕", "감사합니다", "네", "아니요",
+      "좋아요", "도와주세요", "부탁해요"
+    ],
+    NEED_CLARIFICATION: []
+  },
+  zh: {
+    CREATE_PRESENTATION: [
+      "演示", "幻灯片", "ppt", "演示文稿", "报告", "展示",
+      "创建演示", "制作幻灯片", "做ppt", "演示制作"
+    ],
+    CREATE_DOCUMENT: [
+      "文档", "文件", "报告", "word", "文章",
+      "创建文档", "写文档", "制作文件", "撰写"
+    ],
+    CREATE_SPREADSHEET: [
+      "电子表格", "表格", "excel", "工作表", "数据表",
+      "创建表格", "制作excel", "做表格"
+    ],
+    SUMMARIZE: [
+      "摘要", "总结", "概要", "要点", "归纳",
+      "简述", "概括", "精简"
+    ],
+    TRANSLATE: [
+      "翻译", "译成", "中文", "英文", "翻成",
+      "转换语言", "翻译成"
+    ],
+    SEARCH_WEB: [
+      "搜索", "查找", "百度", "谷歌", "网上搜索",
+      "查询", "找信息", "搜一下"
+    ],
+    ANALYZE_DOCUMENT: [
+      "分析", "评估", "审查", "检查", "评价",
+      "研究", "考察", "鉴定"
+    ],
+    CHAT_GENERAL: [
+      "你好", "嗨", "谢谢", "是", "不是", "好的",
+      "早上好", "请", "帮忙"
+    ],
+    NEED_CLARIFICATION: []
+  },
+  ru: {
+    CREATE_PRESENTATION: [
+      "презентация", "слайды", "powerpoint", "ppt", "слайд",
+      "создать презентацию", "сделать презентацию", "подготовить презентацию"
+    ],
+    CREATE_DOCUMENT: [
+      "документ", "файл", "отчет", "доклад", "word",
+      "создать документ", "написать документ", "подготовить отчет"
+    ],
+    CREATE_SPREADSHEET: [
+      "таблица", "excel", "электронная таблица", "spreadsheet",
+      "создать таблицу", "сделать excel", "табличка"
+    ],
+    SUMMARIZE: [
+      "резюме", "итог", "краткое содержание", "суть", "выжимка",
+      "подытожить", "кратко", "основные моменты"
+    ],
+    TRANSLATE: [
+      "перевод", "переводить", "перевести", "на русский", "на английский",
+      "переведи", "перевод текста"
+    ],
+    SEARCH_WEB: [
+      "поиск", "искать", "найти", "гугл", "яндекс",
+      "найди информацию", "поищи", "интернет поиск"
+    ],
+    ANALYZE_DOCUMENT: [
+      "анализ", "анализировать", "проанализировать", "оценка", "оценить",
+      "рассмотреть", "изучить", "проверить"
+    ],
+    CHAT_GENERAL: [
+      "привет", "здравствуйте", "спасибо", "да", "нет", "хорошо",
+      "доброе утро", "пожалуйста", "помощь"
+    ],
+    NEED_CLARIFICATION: []
+  },
+  tr: {
+    CREATE_PRESENTATION: [
+      "sunum", "slayt", "powerpoint", "ppt", "slaytlar",
+      "sunum oluştur", "sunum hazırla", "slayt yap"
+    ],
+    CREATE_DOCUMENT: [
+      "belge", "dosya", "rapor", "word", "döküman",
+      "belge oluştur", "döküman hazırla", "rapor yaz"
+    ],
+    CREATE_SPREADSHEET: [
+      "tablo", "excel", "elektronik tablo", "spreadsheet",
+      "tablo oluştur", "excel yap", "hesap tablosu"
+    ],
+    SUMMARIZE: [
+      "özet", "özetle", "kısaca", "ana noktalar", "öz",
+      "kısa özet", "temel noktalar"
+    ],
+    TRANSLATE: [
+      "çeviri", "çevir", "tercüme", "türkçeye", "ingilizceye",
+      "çevirmek", "dil değiştir"
+    ],
+    SEARCH_WEB: [
+      "arama", "ara", "google", "internette ara", "bul",
+      "bilgi bul", "web araması"
+    ],
+    ANALYZE_DOCUMENT: [
+      "analiz", "analiz et", "değerlendir", "incele", "gözden geçir",
+      "kontrol et", "inceleme"
+    ],
+    CHAT_GENERAL: [
+      "merhaba", "selam", "teşekkürler", "evet", "hayır", "tamam",
+      "günaydın", "lütfen", "yardım"
+    ],
+    NEED_CLARIFICATION: []
+  },
+  id: {
+    CREATE_PRESENTATION: [
+      "presentasi", "slide", "powerpoint", "ppt", "tayangan",
+      "buat presentasi", "membuat presentasi", "siapkan slide"
+    ],
+    CREATE_DOCUMENT: [
+      "dokumen", "berkas", "laporan", "word", "file",
+      "buat dokumen", "tulis dokumen", "buat laporan"
+    ],
+    CREATE_SPREADSHEET: [
+      "spreadsheet", "tabel", "excel", "lembar kerja",
+      "buat tabel", "buat excel", "lembar data"
+    ],
+    SUMMARIZE: [
+      "ringkasan", "ringkas", "rangkuman", "intisari", "poin utama",
+      "singkat", "inti"
+    ],
+    TRANSLATE: [
+      "terjemahan", "terjemahkan", "ke bahasa indonesia", "ke bahasa inggris",
+      "alih bahasa", "ubah bahasa"
+    ],
+    SEARCH_WEB: [
+      "pencarian", "cari", "google", "telusuri", "cari di internet",
+      "temukan informasi", "web search"
+    ],
+    ANALYZE_DOCUMENT: [
+      "analisis", "analisa", "tinjau", "evaluasi", "periksa",
+      "kaji", "telaah"
+    ],
+    CHAT_GENERAL: [
+      "halo", "hai", "terima kasih", "ya", "tidak", "oke",
+      "selamat pagi", "tolong", "bantuan"
+    ],
+    NEED_CLARIFICATION: []
   }
 };
 
@@ -240,13 +520,56 @@ const CREATION_VERBS: Record<SupportedLocale, string[]> = {
   it: [
     "creare", "crea", "generare", "genera", "fare", "fai",
     "costruire", "elaborare", "preparare", "sviluppare", "scrivere"
+  ],
+  ar: [
+    "إنشاء", "أنشئ", "توليد", "ولد", "صنع", "اصنع",
+    "إعداد", "أعد", "تحضير", "حضر", "كتابة", "اكتب"
+  ],
+  hi: [
+    "बनाएं", "बनाओ", "तैयार करें", "लिखें", "लिखो",
+    "उत्पन्न करें", "निर्माण", "रचना"
+  ],
+  ja: [
+    "作成", "作って", "作る", "生成", "作成して", "準備",
+    "書いて", "書く", "用意して", "用意"
+  ],
+  ko: [
+    "만들기", "만들어", "생성", "작성", "작성해", "준비",
+    "써줘", "쓰기", "제작"
+  ],
+  zh: [
+    "创建", "制作", "生成", "做", "写", "准备",
+    "建立", "编写", "撰写"
+  ],
+  ru: [
+    "создать", "создай", "сделать", "сделай", "генерировать", "подготовить",
+    "написать", "напиши", "разработать"
+  ],
+  tr: [
+    "oluştur", "oluşturmak", "yap", "yapmak", "hazırla", "hazırlamak",
+    "yaz", "yazmak", "üret"
+  ],
+  id: [
+    "buat", "buatkan", "membuat", "hasilkan", "siapkan", "menyiapkan",
+    "tulis", "menulis", "kembangkan"
   ]
 };
 
 const FORMAT_KEYWORDS: Record<NonNullable<OutputFormat>, string[]> = {
-  pptx: ["pptx", "ppt", "powerpoint", "power point", "presentacion", "presentación", "presentation", "slides", "diapositivas", "folien", "apresentacao", "diapositive"],
-  docx: ["docx", "doc", "word", "documento", "document", "informe", "reporte", "report", "dokument", "relatorio"],
-  xlsx: ["xlsx", "xls", "excel", "spreadsheet", "hoja de calculo", "tabla", "planilla", "tabelle", "tableur", "foglio"],
+  pptx: [
+    "pptx", "ppt", "powerpoint", "power point", "presentacion", "presentación",
+    "presentation", "slides", "diapositivas", "folien", "apresentacao", "diapositive",
+    "عرض تقديمي", "प्रस्तुति", "プレゼン", "프레젠테이션", "演示", "презентация", "sunum", "presentasi"
+  ],
+  docx: [
+    "docx", "doc", "word", "documento", "document", "informe", "reporte", "report",
+    "dokument", "relatorio", "مستند", "दस्तावेज़", "ドキュメント", "문서", "文档", "документ", "belge", "dokumen"
+  ],
+  xlsx: [
+    "xlsx", "xls", "excel", "spreadsheet", "hoja de calculo", "tabla", "planilla",
+    "tabelle", "tableur", "foglio", "جدول", "स्प्रेडशीट", "スプレッドシート", "스프레드시트",
+    "电子表格", "таблица", "tablo", "spreadsheet"
+  ],
   pdf: ["pdf", "portable document", "exportar pdf"],
   txt: ["txt", "texto plano", "plain text", "text file"],
   csv: ["csv", "comma separated", "valores separados"],
@@ -254,12 +577,30 @@ const FORMAT_KEYWORDS: Record<NonNullable<OutputFormat>, string[]> = {
 };
 
 const AUDIENCE_KEYWORDS: Record<string, string[]> = {
-  executives: ["ejecutivos", "directivos", "ceo", "cfo", "c-level", "junta directiva", "board", "executives", "leadership", "dirigeants", "führungskräfte"],
-  technical: ["tecnicos", "técnicos", "ingenieros", "developers", "programadores", "technical", "engineering", "technique", "technisch"],
-  general: ["general", "publico general", "público general", "everyone", "todos", "audiencia general", "grand public", "allgemein"],
-  academic: ["academico", "académico", "estudiantes", "students", "universidad", "university", "academic", "research", "académique", "akademisch"],
-  clients: ["clientes", "customers", "clients", "compradores", "buyers", "clienti", "kunden"],
-  investors: ["inversores", "inversionistas", "investors", "stakeholders", "accionistas", "investisseurs", "investoren"]
+  executives: [
+    "ejecutivos", "directivos", "ceo", "cfo", "c-level", "junta directiva", "board",
+    "executives", "leadership", "dirigeants", "führungskräfte", "руководство", "yöneticiler"
+  ],
+  technical: [
+    "tecnicos", "técnicos", "ingenieros", "developers", "programadores", "technical",
+    "engineering", "technique", "technisch", "技术", "技術", "개발자", "технический", "teknik"
+  ],
+  general: [
+    "general", "publico general", "público general", "everyone", "todos", "audiencia general",
+    "grand public", "allgemein", "一般", "일반", "общий", "genel", "umum"
+  ],
+  academic: [
+    "academico", "académico", "estudiantes", "students", "universidad", "university",
+    "academic", "research", "académique", "akademisch", "学术", "学術", "학술", "академический", "akademik"
+  ],
+  clients: [
+    "clientes", "customers", "clients", "compradores", "buyers", "clienti", "kunden",
+    "العملاء", "客户", "고객", "клиенты", "müşteriler", "pelanggan"
+  ],
+  investors: [
+    "inversores", "inversionistas", "investors", "stakeholders", "accionistas",
+    "investisseurs", "investoren", "المستثمرين", "投资者", "투자자", "инвесторы", "yatırımcılar"
+  ]
 };
 
 function levenshteinDistance(a: string, b: string): number {
@@ -313,9 +654,16 @@ export interface RuleMatchResult {
   has_creation_verb: boolean;
 }
 
+const NON_LATIN_LOCALES: SupportedLocale[] = ["ar", "hi", "ja", "ko", "zh", "ru"];
+
 function hasCreationVerb(normalizedText: string, locale: SupportedLocale): boolean {
-  const verbs = [...CREATION_VERBS[locale], ...CREATION_VERBS.en];
+  const verbs = [...(CREATION_VERBS[locale] || []), ...CREATION_VERBS.en];
+  const isNonLatin = NON_LATIN_LOCALES.includes(locale);
+  
   return verbs.some(verb => {
+    if (isNonLatin) {
+      return normalizedText.includes(verb.toLowerCase());
+    }
     const pattern = new RegExp(`\\b${verb}\\b`, "i");
     return pattern.test(normalizedText);
   });
@@ -336,9 +684,9 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
   const slots: Slots = {};
   
   const lengthPatterns: Array<{ pattern: RegExp; value: "short" | "medium" | "long" }> = [
-    { pattern: /\b(breve|corto|corta|short|brief|rapido|rápido|conciso|kurz|court|breve)\b/i, value: "short" },
-    { pattern: /\b(medio|mediano|mediana|medium|moderate|normal|mittel|moyen)\b/i, value: "medium" },
-    { pattern: /\b(largo|larga|long|extenso|extensa|detallado|detallada|completo|completa|exhaustivo|lang|détaillé|lungo)\b/i, value: "long" }
+    { pattern: /\b(breve|corto|corta|short|brief|rapido|rápido|conciso|kurz|court|breve|قصير|संक्षिप्त|短い|짧은|短|краткий|kısa|singkat)\b/i, value: "short" },
+    { pattern: /\b(medio|mediano|mediana|medium|moderate|normal|mittel|moyen|متوسط|मध्यम|中程度|중간|中等|средний|orta|sedang)\b/i, value: "medium" },
+    { pattern: /\b(largo|larga|long|extenso|extensa|detallado|detallada|completo|completa|exhaustivo|lang|détaillé|lungo|طويل|विस्तृत|長い|긴|长|подробный|uzun|panjang)\b/i, value: "long" }
   ];
   
   for (const { pattern, value } of lengthPatterns) {
@@ -358,30 +706,30 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
     if (slots.audience) break;
   }
   
-  const slidesPattern = /(\d+)\s*(?:diapositivas?|slides?|paginas?|páginas?|hojas?|folien?|diapositive?)/i;
+  const slidesPattern = /(\d+)\s*(?:diapositivas?|slides?|paginas?|páginas?|hojas?|folien?|diapositive?|شرائح?|स्लाइड|スライド|슬라이드|张|слайд|slayt|slide)/i;
   const slidesMatch = normalizedText.match(slidesPattern);
   if (slidesMatch) {
     slots.num_slides = parseInt(slidesMatch[1], 10);
   }
   
-  if (/\b(con\s*)?imagenes?\b|\b(with\s*)?images?\b|\b(incluir?\s*)?fotos?\b|\billustrat|\bbilder\b|\bimmagini\b/i.test(normalizedText)) {
+  if (/\b(con\s*)?imagenes?\b|\b(with\s*)?images?\b|\b(incluir?\s*)?fotos?\b|\billustrat|\bbilder\b|\bimmagini\b|\bصور\b|\bचित्र\b|\b画像\b|\b이미지\b|\b图片\b|\bизображения\b|\bresim\b|\bgambar\b/i.test(normalizedText)) {
     slots.include_images = true;
   }
   
-  if (/\b(sin\s*)?imagenes?\b|\b(no\s*)?images?\b|\btext\s*only\b|\bsolo\s*texto\b|\bkeine\s*bilder\b/i.test(normalizedText)) {
+  if (/\b(sin\s*)?imagenes?\b|\b(no\s*)?images?\b|\btext\s*only\b|\bsolo\s*texto\b|\bkeine\s*bilder\b|\bبدون صور\b|\bबिना चित्र\b|\b画像なし\b|\b이미지 없이\b|\b无图片\b|\bбез изображений\b|\bresimsiz\b|\btanpa gambar\b/i.test(normalizedText)) {
     slots.include_images = false;
   }
   
-  if (/\bbullet\s*points?\b|\bviñetas?\b|\bpuntos?\b|\blista\b|\bitemized\b|\baufzaehlung\b|\bpuce\b/i.test(normalizedText)) {
+  if (/\bbullet\s*points?\b|\bviñetas?\b|\bpuntos?\b|\blista\b|\bitemized\b|\baufzaehlung\b|\bpuce\b|\bنقاط\b|\bबिंदु\b|\b箇条書き\b|\b글머리\b|\b要点\b|\bпункты\b|\bmaddeler\b|\bpoin\b/i.test(normalizedText)) {
     slots.bullet_points = true;
   }
   
   const stylePatterns: Array<{ pattern: RegExp; style: string }> = [
-    { pattern: /\b(profesional|professional|formal|corporativo|corporate|business|formell|formel)\b/i, style: "professional" },
-    { pattern: /\b(creativo|creative|moderno|modern|innovador|kreativ|créatif)\b/i, style: "creative" },
-    { pattern: /\b(minimalista|minimal|simple|clean|limpio|schlicht)\b/i, style: "minimal" },
-    { pattern: /\b(academico|académico|academic|científico|scientific|research|wissenschaftlich|académique)\b/i, style: "academic" },
-    { pattern: /\b(casual|informal|friendly|amigable|locker)\b/i, style: "casual" }
+    { pattern: /\b(profesional|professional|formal|corporativo|corporate|business|formell|formel|رسمي|औपचारिक|フォーマル|공식|正式|формальный|resmi|formal)\b/i, style: "professional" },
+    { pattern: /\b(creativo|creative|moderno|modern|innovador|kreativ|créatif|إبداعي|रचनात्मक|クリエイティブ|창의적|创意|креативный|yaratıcı|kreatif)\b/i, style: "creative" },
+    { pattern: /\b(minimalista|minimal|simple|clean|limpio|schlicht|بسيط|सरल|シンプル|심플|简约|минималистичный|minimalist|sederhana)\b/i, style: "minimal" },
+    { pattern: /\b(academico|académico|academic|científico|scientific|research|wissenschaftlich|académique|أكاديمي|शैक्षिक|学術|학술|学术|академический|akademik)\b/i, style: "academic" },
+    { pattern: /\b(casual|informal|friendly|amigable|locker|غير رسمي|अनौपचारिक|カジュアル|캐주얼|休闲|неформальный|rahat|santai)\b/i, style: "casual" }
   ];
   
   for (const { pattern, style } of stylePatterns) {
@@ -392,7 +740,7 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
   }
   
   const topicPatterns = [
-    /(?:sobre|about|acerca\s+de|regarding|tema|topic|de|sur|über|su)\s+["']?([^"'\n,\.]{3,50})["']?/i,
+    /(?:sobre|about|acerca\s+de|regarding|tema|topic|de|sur|über|su|عن|के बारे में|について|에 대해|关于|о|hakkında|tentang)\s+["']?([^"'\n,\.]{3,50})["']?/i,
     /(?:presentacion|documento|excel|informe|reporte|resumen|presentation|document|report)\s+(?:de|sobre|about|sur|über)\s+["']?([^"'\n,\.]{3,50})["']?/i
   ];
   
@@ -405,7 +753,7 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
   }
   
   const titlePatterns = [
-    /(?:titulo|title|titulado|titled|llamado|called|intitulé|betitelt)\s*[:\s]+["']?([^"'\n]{3,80})["']?/i
+    /(?:titulo|title|titulado|titled|llamado|called|intitulé|betitelt|عنوان|शीर्षक|タイトル|제목|标题|заголовок|başlık|judul)\s*[:\s]+["']?([^"'\n]{3,80})["']?/i
   ];
   
   for (const pattern of titlePatterns) {
@@ -417,6 +765,27 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
   }
   
   return slots;
+}
+
+function charBigramOverlap(text: string, pattern: string): number {
+  if (pattern.length < 2) {
+    return text.includes(pattern) ? 1.0 : 0.0;
+  }
+  
+  const textBigrams = new Set<string>();
+  for (let i = 0; i < text.length - 1; i++) {
+    textBigrams.add(text.slice(i, i + 2));
+  }
+  
+  let matches = 0;
+  const patternBigramCount = Math.max(1, pattern.length - 1);
+  for (let i = 0; i < pattern.length - 1; i++) {
+    if (textBigrams.has(pattern.slice(i, i + 2))) {
+      matches++;
+    }
+  }
+  
+  return matches / patternBigramCount;
 }
 
 export function ruleBasedMatch(
@@ -435,6 +804,7 @@ export function ruleBasedMatch(
     NEED_CLARIFICATION: { score: 0, patterns: [] }
   };
   
+  const isNonLatin = NON_LATIN_LOCALES.includes(locale);
   const words = normalizedText.split(/\s+/);
   
   const localeAliases = INTENT_ALIASES[locale] || INTENT_ALIASES.es;
@@ -445,9 +815,17 @@ export function ruleBasedMatch(
     const uniqueAliases = [...new Set(allAliases)];
     
     for (const alias of uniqueAliases) {
-      if (normalizedText.includes(alias.toLowerCase())) {
+      const aliasLower = alias.toLowerCase();
+      
+      if (normalizedText.includes(aliasLower)) {
         scores[intent].score += 2;
         scores[intent].patterns.push(alias);
+      } else if (isNonLatin) {
+        const overlap = charBigramOverlap(normalizedText, aliasLower);
+        if (overlap >= 0.70) {
+          scores[intent].score += overlap * 2;
+          scores[intent].patterns.push(`[bigram:${alias}(${overlap.toFixed(2)})]`);
+        }
       } else {
         for (const word of words) {
           const { match, similarity } = fuzzyMatch(word, alias, 0.80);
@@ -526,14 +904,19 @@ export function ruleBasedMatch(
 }
 
 export function getAliasCount(): Record<SupportedLocale, number> {
-  const counts: Record<SupportedLocale, number> = { es: 0, en: 0, pt: 0, fr: 0, de: 0, it: 0 };
+  const counts: Record<SupportedLocale, number> = {
+    es: 0, en: 0, pt: 0, fr: 0, de: 0, it: 0,
+    ar: 0, hi: 0, ja: 0, ko: 0, zh: 0, ru: 0, tr: 0, id: 0
+  };
   
   for (const locale of Object.keys(counts) as SupportedLocale[]) {
     const localeAliases = INTENT_ALIASES[locale];
-    counts[locale] = Object.values(localeAliases).reduce(
-      (acc, arr) => acc + arr.length,
-      0
-    );
+    if (localeAliases) {
+      counts[locale] = Object.values(localeAliases).reduce(
+        (acc, arr) => acc + arr.length,
+        0
+      );
+    }
   }
   
   return counts;

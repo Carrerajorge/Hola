@@ -373,6 +373,226 @@ export const EVALUATION_DATASET: EvaluationExample[] = [
     expected_format: null,
     tags: ["chat", "english", "thanks"],
     difficulty: "easy"
+  },
+  {
+    id: "ar_ppt_01",
+    text: "أنشئ عرض تقديمي عن الذكاء الاصطناعي",
+    locale: "ar",
+    expected_intent: "CREATE_PRESENTATION",
+    expected_format: "pptx",
+    expected_slots: { topic: "الذكاء الاصطناعي" },
+    tags: ["arabic", "presentation", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ar_doc_01",
+    text: "اكتب مستند عن المشروع الجديد",
+    locale: "ar",
+    expected_intent: "CREATE_DOCUMENT",
+    expected_format: "docx",
+    expected_slots: { topic: "المشروع الجديد" },
+    tags: ["arabic", "document", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ar_sum_01",
+    text: "لخص هذا المستند من فضلك",
+    locale: "ar",
+    expected_intent: "SUMMARIZE",
+    expected_format: null,
+    tags: ["arabic", "summarize", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "hi_ppt_01",
+    text: "कृत्रिम बुद्धिमत्ता के बारे में प्रस्तुति बनाएं",
+    locale: "hi",
+    expected_intent: "CREATE_PRESENTATION",
+    expected_format: "pptx",
+    expected_slots: { topic: "कृत्रिम बुद्धिमत्ता" },
+    tags: ["hindi", "presentation", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "hi_doc_01",
+    text: "प्रोजेक्ट के बारे में दस्तावेज़ बनाओ",
+    locale: "hi",
+    expected_intent: "CREATE_DOCUMENT",
+    expected_format: "docx",
+    tags: ["hindi", "document", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "hi_trans_01",
+    text: "इसे अंग्रेजी में अनुवाद करें",
+    locale: "hi",
+    expected_intent: "TRANSLATE",
+    expected_format: null,
+    tags: ["hindi", "translate", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ja_ppt_01",
+    text: "AIについてのプレゼンを作成してください",
+    locale: "ja",
+    expected_intent: "CREATE_PRESENTATION",
+    expected_format: "pptx",
+    expected_slots: { topic: "AI" },
+    tags: ["japanese", "presentation", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ja_doc_01",
+    text: "プロジェクトについてのドキュメントを作って",
+    locale: "ja",
+    expected_intent: "CREATE_DOCUMENT",
+    expected_format: "docx",
+    tags: ["japanese", "document", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ja_sum_01",
+    text: "この文書を要約して",
+    locale: "ja",
+    expected_intent: "SUMMARIZE",
+    expected_format: null,
+    tags: ["japanese", "summarize", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ko_ppt_01",
+    text: "인공지능에 대한 프레젠테이션을 만들어주세요",
+    locale: "ko",
+    expected_intent: "CREATE_PRESENTATION",
+    expected_format: "pptx",
+    tags: ["korean", "presentation", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ko_xls_01",
+    text: "판매 데이터로 스프레드시트 만들어줘",
+    locale: "ko",
+    expected_intent: "CREATE_SPREADSHEET",
+    expected_format: "xlsx",
+    tags: ["korean", "spreadsheet", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ko_trans_01",
+    text: "이것을 영어로 번역해주세요",
+    locale: "ko",
+    expected_intent: "TRANSLATE",
+    expected_format: null,
+    tags: ["korean", "translate", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "zh_ppt_01",
+    text: "创建一个关于人工智能的演示文稿",
+    locale: "zh",
+    expected_intent: "CREATE_PRESENTATION",
+    expected_format: "pptx",
+    tags: ["chinese", "presentation", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "zh_doc_01",
+    text: "写一份关于项目的文档",
+    locale: "zh",
+    expected_intent: "CREATE_DOCUMENT",
+    expected_format: "docx",
+    tags: ["chinese", "document", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "zh_sum_01",
+    text: "总结这个文档",
+    locale: "zh",
+    expected_intent: "SUMMARIZE",
+    expected_format: null,
+    tags: ["chinese", "summarize", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ru_ppt_01",
+    text: "Создай презентацию про искусственный интеллект",
+    locale: "ru",
+    expected_intent: "CREATE_PRESENTATION",
+    expected_format: "pptx",
+    tags: ["russian", "presentation", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ru_doc_01",
+    text: "Напиши документ о проекте",
+    locale: "ru",
+    expected_intent: "CREATE_DOCUMENT",
+    expected_format: "docx",
+    tags: ["russian", "document", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "ru_search_01",
+    text: "Найди информацию о рыночных тенденциях",
+    locale: "ru",
+    expected_intent: "SEARCH_WEB",
+    expected_format: null,
+    tags: ["russian", "search", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "tr_ppt_01",
+    text: "Yapay zeka hakkında bir sunum oluştur",
+    locale: "tr",
+    expected_intent: "CREATE_PRESENTATION",
+    expected_format: "pptx",
+    tags: ["turkish", "presentation", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "tr_doc_01",
+    text: "Proje hakkında bir belge hazırla",
+    locale: "tr",
+    expected_intent: "CREATE_DOCUMENT",
+    expected_format: "docx",
+    tags: ["turkish", "document", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "tr_trans_01",
+    text: "Bunu İngilizceye çevir",
+    locale: "tr",
+    expected_intent: "TRANSLATE",
+    expected_format: null,
+    tags: ["turkish", "translate", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "id_ppt_01",
+    text: "Buat presentasi tentang kecerdasan buatan",
+    locale: "id",
+    expected_intent: "CREATE_PRESENTATION",
+    expected_format: "pptx",
+    tags: ["indonesian", "presentation", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "id_doc_01",
+    text: "Tulis dokumen tentang proyek",
+    locale: "id",
+    expected_intent: "CREATE_DOCUMENT",
+    expected_format: "docx",
+    tags: ["indonesian", "document", "basic"],
+    difficulty: "easy"
+  },
+  {
+    id: "id_sum_01",
+    text: "Ringkas dokumen ini",
+    locale: "id",
+    expected_intent: "SUMMARIZE",
+    expected_format: null,
+    tags: ["indonesian", "summarize", "basic"],
+    difficulty: "easy"
   }
 ];
 

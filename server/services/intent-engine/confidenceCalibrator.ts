@@ -1,4 +1,16 @@
-import type { CalibrationConfig, DEFAULT_CALIBRATION } from "../../../shared/schemas/intent";
+import type { CalibrationConfig, IntentType } from "../../../shared/schemas/intent";
+import {
+  getConformalPredictionSet,
+  getConfidenceZone,
+  getConformalStats,
+  isDriftDetected,
+  isConformalCalibrated,
+  initializeConformalPredictor,
+  selectTopIntent,
+  generateClarificationFromSet,
+  type ConformalPredictionSet,
+  type ConfidenceZone
+} from "./conformalPredictor";
 
 export interface CalibrationInput {
   rule_confidence: number;
@@ -7,6 +19,7 @@ export interface CalibrationInput {
   has_creation_verb: boolean;
   text_length: number;
   language_confidence: number;
+  intent_scores?: Record<IntentType, number>;
 }
 
 export interface CalibrationOutput {
@@ -14,6 +27,37 @@ export interface CalibrationOutput {
   raw_combined: number;
   adjustment_applied: string;
   should_fallback: boolean;
+  conformal_prediction_set?: ConformalPredictionSet;
+  confidence_zone?: ConfidenceZone;
+  calibration_drift_detected?: boolean;
+}
+
+export interface CalibratorConfig {
+  useConformal: boolean;
+  fallbackToIsotonic: boolean;
+}
+
+const DEFAULT_CALIBRATOR_CONFIG: CalibratorConfig = {
+  useConformal: true,
+  fallbackToIsotonic: true
+};
+
+let calibratorConfig = { ...DEFAULT_CALIBRATOR_CONFIG };
+let conformalInitialized = false;
+
+export function configureCal(config: Partial<CalibratorConfig>): void {
+  calibratorConfig = { ...calibratorConfig, ...config };
+}
+
+export function getCalibratorConfig(): CalibratorConfig {
+  return { ...calibratorConfig };
+}
+
+function ensureConformalInitialized(): void {
+  if (!conformalInitialized && calibratorConfig.useConformal) {
+    initializeConformalPredictor();
+    conformalInitialized = true;
+  }
 }
 
 function temperatureScale(logit: number, temperature: number): number {
@@ -89,11 +133,72 @@ export function calibrate(
   
   const shouldFallback = calibrated < config.fallback_threshold;
   
+  let conformalPredictionSet: ConformalPredictionSet | undefined;
+  let confidenceZone: ConfidenceZone | undefined;
+  let calibrationDriftDetected = false;
+  
+  if (calibratorConfig.useConformal && input.intent_scores) {
+    ensureConformalInitialized();
+    
+    if (isConformalCalibrated()) {
+      conformalPredictionSet = getConformalPredictionSet(input.intent_scores);
+      confidenceZone = conformalPredictionSet.zone;
+      calibrationDriftDetected = isDriftDetected();
+    }
+  }
+  
   return {
     calibrated_confidence: Math.max(config.min_threshold, Math.min(0.99, calibrated)),
     raw_combined: combinedRaw,
     adjustment_applied: adjustmentReason,
-    should_fallback: shouldFallback
+    should_fallback: shouldFallback,
+    conformal_prediction_set: conformalPredictionSet,
+    confidence_zone: confidenceZone,
+    calibration_drift_detected: calibrationDriftDetected
+  };
+}
+
+export function calibrateWithConformal(
+  intentScores: Record<IntentType, number>,
+  locale: string = "en"
+): {
+  predictionSet: ConformalPredictionSet;
+  selectedIntent: IntentType;
+  shouldClarify: boolean;
+  clarificationQuestion: string;
+  driftDetected: boolean;
+} {
+  ensureConformalInitialized();
+  
+  const predictionSet = getConformalPredictionSet(intentScores);
+  const selectedIntent = selectTopIntent(predictionSet);
+  const shouldClarify = predictionSet.zone === "LOW_CONFIDENCE" || selectedIntent === "NEED_CLARIFICATION";
+  const clarificationQuestion = shouldClarify ? generateClarificationFromSet(predictionSet, locale) : "";
+  const driftDetected = isDriftDetected();
+  
+  return {
+    predictionSet,
+    selectedIntent,
+    shouldClarify,
+    clarificationQuestion,
+    driftDetected
+  };
+}
+
+export function getCalibrationStatus(): {
+  conformal_enabled: boolean;
+  conformal_calibrated: boolean;
+  conformal_stats: ReturnType<typeof getConformalStats> | null;
+  drift_detected: boolean;
+} {
+  const conformalEnabled = calibratorConfig.useConformal;
+  const conformalCalibrated = isConformalCalibrated();
+  
+  return {
+    conformal_enabled: conformalEnabled,
+    conformal_calibrated: conformalCalibrated,
+    conformal_stats: conformalCalibrated ? getConformalStats() : null,
+    drift_detected: conformalCalibrated ? isDriftDetected() : false
   };
 }
 
