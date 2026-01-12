@@ -23,7 +23,7 @@ export interface WosSearchResult {
   searchTime: number;
 }
 
-const WOS_API_BASE = "https://api.clarivate.com/apis/wos-starter/v1";
+const WOS_API_BASE = "https://wos-api.clarivate.com/api/wos";
 
 export async function searchWos(
   query: string,
@@ -46,26 +46,23 @@ export async function searchWos(
   console.log(`[WoS] Original query: "${query}"`);
   console.log(`[WoS] Translated query: "${translatedQuery}"`);
 
-  let searchQuery = translatedQuery;
+  let searchQuery = `TS=(${translatedQuery})`;
   
+  if (startYear && endYear) {
+    searchQuery += ` AND PY=(${startYear}-${endYear})`;
+  }
+
   const params = new URLSearchParams({
-    q: searchQuery,
-    limit: String(Math.min(maxResults, 50)),
-    page: "1",
-    sortField: "TC",
-    sortOrder: "desc",
+    databaseId: "WOS",
+    usrQuery: searchQuery,
+    count: String(Math.min(maxResults, 100)),
+    firstRecord: "1",
   });
 
-  if (startYear && endYear) {
-    params.set("publishTimeSpan", `${startYear}-01-01+${endYear}-12-31`);
-  }
-
-  if (documentType) {
-    params.set("docType", documentType);
-  }
+  console.log(`[WoS] Search URL: ${WOS_API_BASE}?${params}`);
 
   try {
-    const response = await fetch(`${WOS_API_BASE}/documents?${params}`, {
+    const response = await fetch(`${WOS_API_BASE}?${params}`, {
       headers: {
         "X-ApiKey": apiKey,
         "Accept": "application/json",
@@ -80,32 +77,74 @@ export async function searchWos(
 
     const data = await response.json();
     const searchTime = Date.now() - startTime;
+    
+    console.log(`[WoS] Response structure:`, JSON.stringify(data).substring(0, 500));
 
-    const articles: WosArticle[] = (data.hits || []).map((hit: any, index: number) => {
-      const source = hit.source || {};
+    const records = data.Data?.Records?.records?.REC || [];
+    const queryResult = data.QueryResult || {};
+    
+    const articles: WosArticle[] = records.map((rec: any, index: number) => {
+      const staticData = rec.static_data || {};
+      const summary = staticData.summary || {};
+      const fullRecordMeta = staticData.fullrecord_metadata || {};
+      const dynamicData = rec.dynamic_data || {};
+      
+      const titles = summary.titles?.title || [];
+      const title = titles.find((t: any) => t.type === "item")?.content || 
+                    titles[0]?.content || "No title";
+      
+      const pubInfo = summary.pub_info || {};
+      const year = pubInfo.pubyear || pubInfo.sortdate?.substring(0, 4) || new Date().getFullYear();
+      
+      const sourceTitle = summary.titles?.title?.find((t: any) => t.type === "source")?.content || "";
+      
+      const names = summary.names?.name || [];
+      const authors = names
+        .filter((n: any) => n.role === "author")
+        .map((n: any) => n.full_name || n.display_name || `${n.last_name}, ${n.first_name}`)
+        .filter(Boolean);
+      
+      const abstracts = fullRecordMeta.abstracts?.abstract?.abstract_text?.p || [];
+      const abstract = Array.isArray(abstracts) ? abstracts.join(" ") : (abstracts || "");
+      
+      const keywords = fullRecordMeta.keywords?.keyword?.map((k: any) => k.content || k) || [];
+      
+      const identifiers = dynamicData.cluster_related?.identifiers?.identifier || [];
+      const doi = identifiers.find((id: any) => id.type === "doi")?.value || 
+                  identifiers.find((id: any) => id.type === "xref_doi")?.value || "";
+      
+      const citationCount = dynamicData.citation_related?.tc_list?.silo_tc?.local_count || 0;
+      
+      const addresses = fullRecordMeta.addresses?.address_name || [];
+      const affiliations = addresses.map((addr: any) => 
+        addr.address_spec?.full_address || addr.address_spec?.organizations?.organization?.[0]?.content || ""
+      ).filter(Boolean);
+      
+      const uid = rec.UID || `wos-${index}`;
       
       return {
-        id: hit.uid || `wos-${index}`,
-        title: source.title?.[0] || hit.title || "No title",
-        authors: extractAuthors(source),
-        year: parseInt(source.publishYear) || new Date().getFullYear(),
-        journal: source.sourceTitle?.[0] || source.publisherName || "Unknown Journal",
-        abstract: source.abstract?.[0] || "",
-        keywords: source.keywords || source.keywordsPlus || [],
-        doi: source.doi?.[0] || extractDoi(source.identifiers),
-        citationCount: source.citedByCount || hit.citedByCount || 0,
-        affiliations: extractAffiliations(source),
-        wosUrl: `https://www.webofscience.com/wos/woscc/full-record/${hit.uid}`,
-        documentType: source.docType?.[0] || "Article",
-        language: source.languages?.[0] || "English",
+        id: uid,
+        title,
+        authors,
+        year: parseInt(String(year), 10),
+        journal: sourceTitle,
+        abstract,
+        keywords,
+        doi,
+        citationCount: parseInt(String(citationCount), 10) || 0,
+        affiliations,
+        wosUrl: `https://www.webofscience.com/wos/woscc/full-record/${uid}`,
+        documentType: pubInfo.pubtype || "Article",
+        language: fullRecordMeta.languages?.language?.content || "English",
       };
     });
 
-    console.log(`[WoS] Found ${articles.length} articles from ${data.metadata?.total || 0} total in ${searchTime}ms`);
+    const totalResults = queryResult.RecordsFound || records.length;
+    console.log(`[WoS] Found ${articles.length} articles from ${totalResults} total in ${searchTime}ms`);
 
     return {
       articles,
-      totalResults: data.metadata?.total || articles.length,
+      totalResults,
       query: translatedQuery,
       searchTime,
     };
