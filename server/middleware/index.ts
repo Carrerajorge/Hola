@@ -13,3 +13,24 @@ export { pareRateLimiter, clearPareRateLimitStores, getPareRateLimitStats } from
 export { pareQuotaGuard, getQuotaConfig, type QuotaConfig, type QuotaViolation } from './pareQuotaGuard';
 
 export { pareAnalyzeSchemaValidator, pareChatSchemaValidator, createSchemaValidator, type SchemaValidationError, type PareContextWithValidation } from './pareSchemaValidator';
+
+export { 
+  responseCache, 
+  cacheEndpoint, 
+  noCacheEndpoint, 
+  privateCacheEndpoint, 
+  clearResponseCache, 
+  getResponseCacheStats, 
+  resetResponseCacheStats,
+  type ResponseCacheOptions 
+} from './responseCache';
+
+export { 
+  compression, 
+  gzipOnly, 
+  brotliOnly, 
+  conditionalCompression, 
+  getCompressionStats, 
+  resetCompressionStats,
+  type CompressionOptions 
+} from './compression';

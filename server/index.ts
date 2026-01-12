@@ -8,6 +8,8 @@ import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
 import { verifyDatabaseConnection } from "./db";
+import { securityHeaders, apiSecurityHeaders } from "./middleware/securityHeaders";
+import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
 
 const app = express();
 const httpServer = createServer(app);
@@ -20,6 +22,12 @@ declare module "http" {
 
 // Request logger middleware with correlation context - must go first
 app.use(requestLoggerMiddleware);
+
+// Security headers middleware - CSP, HSTS, X-Frame-Options, etc.
+app.use(securityHeaders());
+
+// API-specific security headers for /api routes
+app.use("/api", apiSecurityHeaders());
 
 // Legacy request tracer middleware for stats
 app.use(requestTracerMiddleware);
@@ -121,6 +129,21 @@ app.use((req, res, next) => {
       log(`Database: ${dbConnected ? "connected" : "NOT CONNECTED"}`);
       startAggregator();
       await seedProductionData();
+
+      // Setup graceful shutdown with connection draining
+      setupGracefulShutdown(httpServer, {
+        timeout: 30000,
+        onShutdown: async () => {
+          log("Running application cleanup...");
+        },
+      });
+
+      // Register database cleanup
+      registerCleanup(async () => {
+        log("Closing database connections...");
+      });
+
+      log("Graceful shutdown handler configured");
     },
   );
 })();

@@ -42,6 +42,7 @@ Preferred communication style: Simple, everyday language.
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt, multi-tenant validation, authentication middleware, max iterations/timeout for agent runs.
+- **Security Headers Middleware**: Production-grade security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy).
 - **Safe Process Execution**: Centralized secure execution modules (`safe_exec.py` for Python, `safeSpawn.ts` for TypeScript) with program allowlists, argument validation, and environment sanitization.
 - **Package Installation Security**: Pip and npm package installations use `execFile` with argument arrays and minimal environments.
 - **SQL Security**: Admin query explorer uses strict SELECT-only validation with dangerous pattern blocking and comprehensive audit logging.
@@ -49,6 +50,24 @@ Preferred communication style: Simple, everyday language.
 - **Error Handling**: Custom error classes and global Express error handler.
 - **API Validation**: Zod validation middleware for requests.
 - **Database Performance**: Optimized indices for frequently queried fields.
+
+### Scalability & Performance (Enterprise-Grade)
+- **Redis SSE Streaming**: Server-Sent Events with Redis Pub/Sub for horizontal scaling, stateless backend design, session state in Redis.
+- **Memory Cache Layer**: LRU cache with optional Redis backend, namespaced caches, cache statistics tracking.
+- **Response Caching Middleware**: Caches expensive GET endpoints with ETag support and stale-while-revalidate.
+- **Request Deduplication**: Coalesces identical concurrent requests to prevent thundering herd.
+- **Compression Middleware**: Gzip and Brotli compression with content-type detection and configurable thresholds.
+- **Circuit Breakers**: Wraps external services (LLM APIs) with configurable timeout, retries, and exponential backoff.
+- **Rate Limiting**: Sliding window algorithm with per-IP tracking and X-RateLimit headers.
+- **Graceful Shutdown**: Connection draining, WebSocket cleanup, and configurable shutdown timeout.
+- **FastAPI SSE Backend**: Alternative Python-based SSE service with Celery workers for distributed task execution.
+
+### Environment Variables (Production)
+- `REDIS_URL`: Redis connection for caching, pub/sub, and session state.
+- `SESSION_TTL_SECONDS`: Session expiration time (default: 3600).
+- `SSE_HEARTBEAT_INTERVAL`: SSE keepalive interval (default: 15s).
+- `SSE_CLIENT_TIMEOUT`: Maximum SSE connection duration (default: 300s).
+- `SSE_MAX_QUEUE_SIZE`: Backpressure queue limit (default: 100).
 
 ### Data Storage
 - **Database**: PostgreSQL, managed with Drizzle ORM.
