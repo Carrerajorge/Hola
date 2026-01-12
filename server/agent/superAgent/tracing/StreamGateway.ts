@@ -202,6 +202,10 @@ export class StreamGateway {
     return this.runBuses.get(runId);
   }
 
+  publish(runId: string, event: TraceEvent): void {
+    this.broadcastToRun(runId, event);
+  }
+
   getStats(): {
     totalClients: number;
     activeRuns: number;

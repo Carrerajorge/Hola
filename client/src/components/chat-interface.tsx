@@ -3202,8 +3202,16 @@ export function ChatInterface({
         
         // Capture run ID from response header for Live Execution Console
         const runId = response.headers.get("X-Run-ID");
+        console.log("[Super Agent] Response headers:", {
+          runId,
+          allHeaders: Array.from(response.headers.entries()),
+          exposeHeaders: response.headers.get("Access-Control-Expose-Headers"),
+        });
         if (runId) {
+          console.log("[Super Agent] Setting activeRunId:", runId);
           setActiveRunId(runId);
+        } else {
+          console.warn("[Super Agent] X-Run-ID header not found in response");
         }
         
         const reader = response.body?.getReader();
