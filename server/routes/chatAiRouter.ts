@@ -1304,10 +1304,12 @@ ${systemContent}`;
       }
       
       // Build rich document context from DocumentSemanticModel
-      const buildDocumentStructureSummary = (doc: DocumentSemanticModel): string => {
+      // NOTE: Do NOT include fileName in LLM context to prevent model from repeating it
+      const buildDocumentStructureSummary = (doc: DocumentSemanticModel, docIndex: number): string => {
         const meta = doc.documentMeta;
         const parts: string[] = [];
-        parts.push(`📄 ${meta.fileName} (${meta.documentType})`);
+        const docLabel = documentModels.length === 1 ? 'El documento' : `Documento ${docIndex + 1}`;
+        parts.push(`📄 ${docLabel} (${meta.documentType})`);
         if (doc.sheets && doc.sheets.length > 0) {
           parts.push(`  Sheets: ${doc.sheets.length} (${doc.sheets.map(s => s.name).join(', ')})`);
         }
@@ -1359,9 +1361,9 @@ ${systemContent}`;
       };
       
       // Build comprehensive context for each document
-      const documentContexts = documentModels.map(doc => {
+      const documentContexts = documentModels.map((doc, idx) => {
         return [
-          buildDocumentStructureSummary(doc),
+          buildDocumentStructureSummary(doc, idx),
           buildSheetsSummary(doc),
           buildMetricsSummary(doc),
           buildAnomaliesSummary(doc),
@@ -1369,29 +1371,31 @@ ${systemContent}`;
         ].filter(Boolean).join('\n');
       });
       
-      // Build citation format examples
-      const citationFormats = documentModels.map(doc => {
+      // Build citation format examples - use generic labels instead of filenames
+      const citationFormats = documentModels.map((doc, idx) => {
         const meta = doc.documentMeta;
+        const docRef = documentModels.length === 1 ? 'documento' : `doc${idx + 1}`;
         switch(meta.documentType) {
           case 'excel': 
           case 'csv':
-            return `[doc:${meta.fileName} sheet:SheetName!A1:Z100]`;
+            return `[${docRef} sheet:NombreHoja!A1:Z100]`;
           case 'pdf': 
-            return `[doc:${meta.fileName} p:1]`;
+            return `[${docRef} p:1]`;
           case 'word': 
-            return `[doc:${meta.fileName} section:Title]`;
+            return `[${docRef} section:Título]`;
           default: 
-            return `[doc:${meta.fileName}]`;
+            return `[${docRef}]`;
         }
       });
       
-      // Build the combined document text from sections
-      const documentText = documentModels.map(doc => {
+      // Build the combined document text from sections - NO filename in LLM context
+      const documentText = documentModels.map((doc, idx) => {
         const sectionContent = doc.sections.map(section => {
           const content = section.content || '';
           return `[${section.type}${section.title ? ': ' + section.title : ''}] ${content}`;
         }).join('\n');
-        return `--- ${doc.documentMeta.fileName} ---\n${sectionContent}`;
+        const docLabel = documentModels.length === 1 ? 'DOCUMENTO' : `DOCUMENTO ${idx + 1}`;
+        return `--- ${docLabel} ---\n${sectionContent}`;
       }).join('\n\n');
       
       // Build system prompt for document analysis with structured output request
@@ -1400,16 +1404,22 @@ ${systemContent}`;
 MODO: DATA_MODE (análisis de documentos)
 PROHIBIDO: Generar imágenes, crear artefactos, inventar datos, usar fuentes externas
 
+REGLA IMPORTANTE SOBRE NOMBRES DE ARCHIVOS:
+- NUNCA menciones nombres de archivos, extensiones (.pdf, .docx, .xlsx, .png, etc.) ni rutas
+- Refiérete siempre como "el documento", "este documento" o "los documentos"
+- NO uses encabezados como "RESPUESTA AL ANÁLISIS DEL DOCUMENTO X" o "Análisis de archivo.pdf"
+- Comienza directamente con el análisis sin mencionar el nombre del archivo
+
 INSTRUCCIONES CRÍTICAS:
 1. ANALIZA exclusivamente el contenido de los documentos adjuntos
 2. Responde basándote SOLO en el contenido real extraído
-3. Para cada afirmación, INCLUYE la cita del documento fuente
+3. Para cada afirmación, INCLUYE la cita del documento fuente usando referencias genéricas
 4. Si algo no está en los documentos, indica que "no se encontró en los documentos"
 
 FORMATOS DE CITAS (usa estos exactamente):
 ${citationFormats.join('\n')}
 
-DOCUMENTOS PROCESADOS: ${documentModels.length}/${resolvedAttachments.length}
+DOCUMENTOS PROCESADOS: ${documentModels.length}
 
 ESTRUCTURA DE LOS DOCUMENTOS:
 ${documentContexts.join('\n\n')}
