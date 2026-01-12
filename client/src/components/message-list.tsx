@@ -2475,7 +2475,30 @@ export function MessageList({
           </motion.div>
         )}
 
-        {aiState !== "idle" && !streamingContent && variant === "default" && (
+        {/* Super Agent Live Execution Console - ALWAYS show when activeRunId exists (virtualized) */}
+        {activeRunId && variant === "default" && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${virtualizer.getTotalSize()}px)`,
+            }}
+          >
+            <LiveExecutionConsole 
+              runId={activeRunId}
+              onComplete={onRunComplete}
+              className="flex-1"
+            />
+          </motion.div>
+        )}
+
+        {/* Regular thinking/responding spinner - only when no Super Agent active (virtualized) */}
+        {aiState !== "idle" && !streamingContent && variant === "default" && !activeRunId && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
