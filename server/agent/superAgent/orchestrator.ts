@@ -15,6 +15,35 @@ import { deepDiveSources, DeepDiveProgress, ExtractedContent } from "./deepDiveP
 import { createXlsx, createDocx, storeArtifactMeta, packCitations, XlsxSpec, DocxSpec } from "./artifactTools";
 import { evaluateQualityGate, shouldRetry, formatGateReport } from "./qualityGate";
 import { searchScopus, scopusArticlesToSourceSignals, isScopusConfigured, ScopusArticle } from "./scopusClient";
+import { searchWos, WosArticle } from "./wosClient";
+
+function isWosConfigured(): boolean {
+  return !!process.env.WOS_API_KEY;
+}
+
+function wosArticlesToSourceSignals(articles: WosArticle[]): SourceSignal[] {
+  return articles.map((article, index) => ({
+    id: article.id || `wos-${index}`,
+    url: article.wosUrl,
+    title: article.title,
+    snippet: article.abstract?.substring(0, 300) || "",
+    source: "wos" as const,
+    rank: index + 1,
+    timestamp: Date.now(),
+    metadata: {
+      authors: article.authors,
+      year: article.year,
+      journal: article.journal,
+      abstract: article.abstract,
+      keywords: article.keywords,
+      doi: article.doi,
+      citations: article.citationCount,
+      affiliations: article.affiliations,
+      documentType: article.documentType,
+      language: article.language,
+    },
+  }));
+}
 
 export interface OrchestratorConfig {
   maxIterations: number;
@@ -187,9 +216,132 @@ export class SuperAgentOrchestrator extends EventEmitter {
     const researchDecision = shouldResearch(prompt);
     const targetCount = this.state.contract.requirements.min_sources || 100;
     
-    if (this.isScientificArticleRequest(prompt) && isScopusConfigured()) {
-      await this.executeSignalsWithScopus(prompt, targetCount);
+    const isScientific = this.isScientificArticleRequest(prompt);
+    const hasScopus = isScopusConfigured();
+    const hasWos = isWosConfigured();
+    
+    if (isScientific && (hasScopus || hasWos)) {
+      await this.executeSignalsWithAcademicDatabases(prompt, targetCount, hasScopus, hasWos);
     } else {
+      await this.executeSignalsWithWebSearch(researchDecision, targetCount);
+    }
+  }
+
+  private async executeSignalsWithAcademicDatabases(
+    prompt: string, 
+    targetCount: number,
+    useScopus: boolean,
+    useWos: boolean
+  ): Promise<void> {
+    if (!this.state) return;
+    
+    const searchTopic = this.extractSearchTopic(prompt);
+    const yearRange = this.extractYearRange(prompt);
+    const sourcesPerDb = Math.ceil(targetCount / (useScopus && useWos ? 2 : 1));
+    
+    const sources: string[] = [];
+    if (useScopus) sources.push("Scopus");
+    if (useWos) sources.push("Web of Science");
+    
+    this.emitSSE("tool_call", {
+      id: "tc_signals",
+      tool: "search_academic_parallel",
+      input: { query: searchTopic, target: targetCount, yearRange, sources },
+    });
+
+    this.emitSSE("progress", {
+      phase: "signals",
+      status: "searching_academic",
+      message: `Buscando artículos científicos en ${sources.join(" y ")}: "${searchTopic}"`,
+    });
+
+    const allSignals: SourceSignal[] = [];
+    let totalInDatabase = 0;
+    let searchTime = 0;
+    const errors: string[] = [];
+
+    const searchPromises: Promise<void>[] = [];
+
+    if (useScopus) {
+      searchPromises.push(
+        searchScopus(searchTopic, {
+          maxResults: Math.min(sourcesPerDb, 100),
+          startYear: yearRange.start,
+          endYear: yearRange.end,
+        })
+        .then(result => {
+          const signals = scopusArticlesToSourceSignals(result.articles);
+          for (const signal of signals) {
+            this.emitSSE("source_signal", signal);
+          }
+          allSignals.push(...signals);
+          totalInDatabase += result.totalResults;
+          searchTime = Math.max(searchTime, result.searchTime);
+        })
+        .catch(err => {
+          console.error(`[Scopus] Error: ${err.message}`);
+          errors.push(`Scopus: ${err.message}`);
+        })
+      );
+    }
+
+    if (useWos) {
+      searchPromises.push(
+        searchWos(searchTopic, {
+          maxResults: Math.min(sourcesPerDb, 50),
+          startYear: yearRange.start,
+          endYear: yearRange.end,
+        })
+        .then(result => {
+          const signals = wosArticlesToSourceSignals(result.articles);
+          for (const signal of signals) {
+            this.emitSSE("source_signal", signal);
+          }
+          allSignals.push(...signals);
+          totalInDatabase += result.totalResults;
+          searchTime = Math.max(searchTime, result.searchTime);
+        })
+        .catch(err => {
+          console.error(`[WoS] Error: ${err.message}`);
+          errors.push(`WoS: ${err.message}`);
+        })
+      );
+    }
+
+    await Promise.all(searchPromises);
+
+    this.state.sources = allSignals;
+    this.state.sources_count = allSignals.length;
+
+    this.emitSSE("progress", {
+      phase: "signals",
+      status: "completed",
+      collected: allSignals.length,
+      target: targetCount,
+      source: sources.join("+"),
+    });
+
+    this.emitSSE("tool_result", {
+      tool_call_id: "tc_signals",
+      success: allSignals.length > 0,
+      output: {
+        collected: allSignals.length,
+        target: targetCount,
+        source: sources.join("+"),
+        total_in_database: totalInDatabase,
+        duration_ms: searchTime,
+        errors: errors.length > 0 ? errors : undefined,
+      },
+    });
+
+    this.state.tool_results.push({
+      tool_call_id: "tc_signals",
+      success: allSignals.length > 0,
+      output: { collected: allSignals.length, source: sources.join("+") },
+    });
+
+    if (allSignals.length === 0 && errors.length > 0) {
+      const researchDecision = shouldResearch(prompt);
       await this.executeSignalsWithWebSearch(researchDecision, targetCount);
     }
   }
