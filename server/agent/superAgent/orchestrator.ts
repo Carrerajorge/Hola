@@ -14,6 +14,7 @@ import { collectSignals, SignalsProgress } from "./signalsPipeline";
 import { deepDiveSources, DeepDiveProgress, ExtractedContent } from "./deepDivePipeline";
 import { createXlsx, createDocx, storeArtifactMeta, packCitations, XlsxSpec, DocxSpec } from "./artifactTools";
 import { evaluateQualityGate, shouldRetry, formatGateReport } from "./qualityGate";
+import { searchScopus, scopusArticlesToSourceSignals, isScopusConfigured, ScopusArticle } from "./scopusClient";
 
 export interface OrchestratorConfig {
   maxIterations: number;
@@ -153,18 +154,125 @@ export class SuperAgentOrchestrator extends EventEmitter {
     }
   }
 
+  private isScientificArticleRequest(prompt: string): boolean {
+    const patterns = [
+      /\b(artículos?|articulos?)\s*(científicos?|cientificos?|académicos?|academicos?)\b/i,
+      /\b(papers?|publications?|research\s+articles?)\b/i,
+      /\b(scopus|web\s*of\s*science|wos|pubmed|scholar)\b/i,
+      /\b(revisión\s+sistemática|systematic\s+review)\b/i,
+      /\b(literatura\s+científica|scientific\s+literature)\b/i,
+    ];
+    return patterns.some(p => p.test(prompt));
+  }
+
+  private extractYearRange(prompt: string): { start?: number; end?: number } {
+    const match = prompt.match(/(?:del|from)\s+(\d{4})\s+(?:al|to|hasta)\s+(\d{4})/i);
+    if (match) {
+      return { start: parseInt(match[1], 10), end: parseInt(match[2], 10) };
+    }
+    const singleYear = prompt.match(/\b(20\d{2})\b/);
+    if (singleYear) {
+      return { start: parseInt(singleYear[1], 10) - 2, end: parseInt(singleYear[1], 10) };
+    }
+    return {};
+  }
+
   private async executeSignalsPhase(): Promise<void> {
     if (!this.state) return;
     
     this.state.phase = "signals";
     this.emitSSE("progress", { phase: "signals", status: "starting" });
     
-    const researchDecision = shouldResearch(this.state.contract.original_prompt);
+    const prompt = this.state.contract.original_prompt;
+    const researchDecision = shouldResearch(prompt);
+    const targetCount = this.state.contract.requirements.min_sources || 100;
+    
+    if (this.isScientificArticleRequest(prompt) && isScopusConfigured()) {
+      await this.executeSignalsWithScopus(prompt, targetCount);
+    } else {
+      await this.executeSignalsWithWebSearch(researchDecision, targetCount);
+    }
+  }
+
+  private async executeSignalsWithScopus(prompt: string, targetCount: number): Promise<void> {
+    if (!this.state) return;
+    
+    const searchTopic = this.extractSearchTopic(prompt);
+    const yearRange = this.extractYearRange(prompt);
+    
+    this.emitSSE("tool_call", {
+      id: "tc_signals",
+      tool: "search_scopus",
+      input: { query: searchTopic, target: targetCount, yearRange },
+    });
+
+    this.emitSSE("progress", {
+      phase: "signals",
+      status: "searching_scopus",
+      message: `Buscando artículos científicos en Scopus: "${searchTopic}"`,
+    });
+
+    try {
+      const result = await searchScopus(searchTopic, {
+        maxResults: Math.min(targetCount, 100),
+        startYear: yearRange.start,
+        endYear: yearRange.end,
+      });
+
+      const signals = scopusArticlesToSourceSignals(result.articles);
+      
+      for (const signal of signals) {
+        this.emitSSE("source_signal", signal);
+      }
+
+      this.state.sources = signals;
+      this.state.sources_count = signals.length;
+
+      this.emitSSE("progress", {
+        phase: "signals",
+        status: "completed",
+        collected: signals.length,
+        target: targetCount,
+        source: "scopus",
+      });
+
+      this.emitSSE("tool_result", {
+        tool_call_id: "tc_signals",
+        success: signals.length > 0,
+        output: {
+          collected: signals.length,
+          target: targetCount,
+          source: "scopus",
+          total_in_database: result.totalResults,
+          duration_ms: result.searchTime,
+        },
+      });
+
+      this.state.tool_results.push({
+        tool_call_id: "tc_signals",
+        success: signals.length > 0,
+        output: { collected: signals.length, source: "scopus" },
+      });
+
+    } catch (error: any) {
+      console.error(`[Scopus] Error: ${error.message}`);
+      this.emitSSE("progress", {
+        phase: "signals",
+        status: "scopus_error",
+        message: `Error en Scopus: ${error.message}. Usando búsqueda web alternativa.`,
+      });
+      
+      const researchDecision = shouldResearch(prompt);
+      await this.executeSignalsWithWebSearch(researchDecision, targetCount);
+    }
+  }
+
+  private async executeSignalsWithWebSearch(researchDecision: any, targetCount: number): Promise<void> {
+    if (!this.state) return;
+    
     const queries = researchDecision.searchQueries.length > 0
       ? researchDecision.searchQueries
       : [this.extractSearchTopic(this.state.contract.original_prompt)];
-    
-    const targetCount = this.state.contract.requirements.min_sources || 100;
     
     this.emitSSE("tool_call", {
       id: "tc_signals",
@@ -362,10 +470,18 @@ export class SuperAgentOrchestrator extends EventEmitter {
     return null;
   }
 
+  private hasScopusData(sources: SourceSignal[]): boolean {
+    return sources.some(s => (s as any).scopusData);
+  }
+
   private buildXlsxSpec(): XlsxSpec {
     const sources = this.state?.sources || [];
     const deepSources = this.state?.deep_sources || [];
     const prompt = this.state?.contract.original_prompt || "";
+    
+    if (this.hasScopusData(sources)) {
+      return this.buildScopusXlsxSpec(sources, prompt);
+    }
     
     const requestedColumns = this.extractRequestedColumns(prompt);
     
@@ -445,6 +561,77 @@ export class SuperAgentOrchestrator extends EventEmitter {
         },
       ],
     };
+  }
+
+  private buildScopusXlsxSpec(sources: SourceSignal[], prompt: string): XlsxSpec {
+    const requestedColumns = this.extractRequestedColumns(prompt);
+    const defaultColumns = ["#", "Authors", "Title", "Year", "Journal", "Abstract", "Keywords", "Language", "Document Type", "DOI", "Citations", "Affiliations", "Scopus URL"];
+    const columns = requestedColumns && requestedColumns.length > 0 ? requestedColumns : defaultColumns;
+    
+    const dataRows = sources.slice(0, 100).map((s, i) => {
+      const scopusData = (s as any).scopusData as ScopusArticle | undefined;
+      
+      return columns.map(col => {
+        const colLower = col.toLowerCase();
+        
+        if (colLower === "#" || colLower === "no" || colLower === "número") return (i + 1).toString();
+        if (colLower === "title" || colLower === "titulo" || colLower === "título") return scopusData?.title || s.title;
+        if (colLower === "authors" || colLower === "autores" || colLower === "author") return scopusData?.authors?.join("; ") || "";
+        if (colLower === "year" || colLower === "año") return scopusData?.year || "";
+        if (colLower === "journal" || colLower === "revista") return scopusData?.journal || s.domain;
+        if (colLower === "abstract" || colLower === "resumen") return scopusData?.abstract || s.snippet || "";
+        if (colLower === "keywords" || colLower === "palabras") return scopusData?.keywords?.join("; ") || "";
+        if (colLower === "language" || colLower === "idioma") return scopusData?.language || "";
+        if (colLower === "document" || colLower === "type" || colLower === "tipo") return scopusData?.documentType || "Article";
+        if (colLower === "doi") return scopusData?.doi || "";
+        if (colLower === "citations" || colLower === "citas" || colLower === "citedby") return scopusData?.citationCount?.toString() || "";
+        if (colLower === "affiliations" || colLower === "afiliaciones" || colLower === "affiliation") return scopusData?.affiliations?.join("; ") || "";
+        if (colLower === "city" || colLower === "ciudad") return this.extractCityFromAffiliations(scopusData?.affiliations);
+        if (colLower === "country" || colLower === "pais" || colLower === "país") return this.extractCountryFromAffiliations(scopusData?.affiliations);
+        if (colLower === "scopus") return scopusData ? "Yes" : "";
+        if (colLower === "wos" || colLower === "webofscience") return "";
+        if (colLower === "url" || colLower === "link" || colLower.includes("scopus")) return scopusData?.url || s.url;
+        return "";
+      });
+    });
+    
+    return {
+      title: this.extractResearchTitle(prompt),
+      sheets: [
+        {
+          name: "Scientific Articles",
+          headers: columns,
+          data: dataRows,
+          summary: {
+            "Total Articles": sources.length,
+            "Source": "Scopus Database",
+            "Generated At": new Date().toISOString(),
+            "Search Query": prompt.substring(0, 100),
+          },
+        },
+      ],
+    };
+  }
+
+  private extractCityFromAffiliations(affiliations?: string[]): string {
+    if (!affiliations || affiliations.length === 0) return "";
+    const cityPatterns = /,\s*([A-Z][a-zA-Z\s]+),\s*[A-Z]{2,}/;
+    for (const aff of affiliations) {
+      const match = aff.match(cityPatterns);
+      if (match) return match[1].trim();
+    }
+    return "";
+  }
+
+  private extractCountryFromAffiliations(affiliations?: string[]): string {
+    if (!affiliations || affiliations.length === 0) return "";
+    const countries = ["USA", "United States", "UK", "United Kingdom", "China", "Germany", "France", "Spain", "Mexico", "Brazil", "India", "Japan", "Australia", "Canada", "Italy", "Netherlands", "South Korea", "Colombia", "Chile", "Argentina", "Peru"];
+    for (const aff of affiliations) {
+      for (const country of countries) {
+        if (aff.toLowerCase().includes(country.toLowerCase())) return country;
+      }
+    }
+    return "";
   }
 
   private extractResearchTitle(prompt: string): string {
