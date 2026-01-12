@@ -1,5 +1,5 @@
 import { AcademicCandidate } from "./openAlexClient";
-import { lookupDOI, verifyDOI } from "./crossrefClient";
+import { lookupDOI, verifyDOI, VerifyDOIResult } from "./crossrefClient";
 import { doiCache } from "./academicPipeline";
 
 const RELEVANCE_THRESHOLD = 0.72;
@@ -164,6 +164,7 @@ export interface VerificationResult {
   titleMatch: number;
   finalUrl: string;
   reason: string;
+  crossrefData?: VerifyDOIResult;
 }
 
 function titleSimilarity(a: string, b: string): number {
@@ -264,6 +265,7 @@ export async function verifyCandidate(
     titleMatch: similarity,
     finalUrl: doiResult.url,
     reason: "Verified successfully",
+    crossrefData: doiResult,
   };
 }
 
@@ -295,6 +297,32 @@ export async function verifyBatch(
       candidate.verified = true;
       candidate.verificationStatus = "verified";
       candidate.landingUrl = result.finalUrl || candidate.landingUrl;
+      
+      if (result.crossrefData) {
+        const cr = result.crossrefData;
+        if ((!candidate.city || candidate.city === "Unknown") && cr.city && cr.city !== "Unknown") {
+          candidate.city = cr.city;
+        }
+        if ((!candidate.country || candidate.country === "Unknown") && cr.country && cr.country !== "Unknown") {
+          candidate.country = cr.country;
+        }
+        if ((!candidate.year || candidate.year === 0) && cr.year && cr.year > 0) {
+          candidate.year = cr.year;
+        }
+        if (candidate.authors.length === 0 && cr.authors && cr.authors.length > 0) {
+          candidate.authors = cr.authors;
+        }
+        if ((!candidate.journal || candidate.journal === "Unknown") && cr.journal && cr.journal !== "Unknown") {
+          candidate.journal = cr.journal;
+        }
+        if ((!candidate.abstract || candidate.abstract === "Unknown" || candidate.abstract === "") && cr.abstract) {
+          candidate.abstract = cr.abstract;
+        }
+        if (candidate.keywords.length === 0 && cr.keywords && cr.keywords.length > 0) {
+          candidate.keywords = cr.keywords;
+        }
+      }
+      
       verified.push(candidate);
     } else {
       candidate.verificationStatus = "failed";
@@ -468,22 +496,80 @@ export function runCriticGuard(
   };
 }
 
+function isValidValue(val: string | undefined | null): boolean {
+  if (!val) return false;
+  const lower = val.toLowerCase().trim();
+  return lower !== "" && lower !== "unknown" && lower !== "n/a" && lower !== "null" && lower !== "undefined";
+}
+
+function mergeCandidate(existing: AcademicCandidate, incoming: AcademicCandidate): AcademicCandidate {
+  const merged: AcademicCandidate = { ...existing };
+  
+  if (!isValidValue(existing.city) && isValidValue(incoming.city)) {
+    merged.city = incoming.city;
+  }
+  if (!isValidValue(existing.country) && isValidValue(incoming.country)) {
+    merged.country = incoming.country;
+  }
+  if ((!existing.year || existing.year === 0) && incoming.year && incoming.year > 0) {
+    merged.year = incoming.year;
+  }
+  if (existing.authors.length === 0 && incoming.authors.length > 0) {
+    merged.authors = incoming.authors;
+  }
+  if (!isValidValue(existing.abstract) && isValidValue(incoming.abstract)) {
+    merged.abstract = incoming.abstract;
+  }
+  if (!isValidValue(existing.journal) && isValidValue(incoming.journal)) {
+    merged.journal = incoming.journal;
+  }
+  if (existing.keywords.length === 0 && incoming.keywords.length > 0) {
+    merged.keywords = incoming.keywords;
+  }
+  if (!isValidValue(existing.language) && isValidValue(incoming.language)) {
+    merged.language = incoming.language;
+  }
+  if (!isValidValue(existing.documentType) && isValidValue(incoming.documentType)) {
+    merged.documentType = incoming.documentType;
+  }
+  if (!isValidValue(existing.doi) && isValidValue(incoming.doi)) {
+    merged.doi = incoming.doi;
+  }
+  if (!isValidValue(existing.landingUrl) && isValidValue(incoming.landingUrl)) {
+    merged.landingUrl = incoming.landingUrl;
+  }
+  
+  console.log(`[Dedup] Merged duplicate: city=${merged.city}, country=${merged.country}, year=${merged.year}, authors=${merged.authors.length}`);
+  
+  return merged;
+}
+
 export function deduplicateCandidates(candidates: AcademicCandidate[]): AcademicCandidate[] {
-  const seenDois = new Set<string>();
-  const seenTitles = new Set<string>();
+  const doiMap = new Map<string, number>();
+  const titleMap = new Map<string, number>();
   const result: AcademicCandidate[] = [];
 
   for (const candidate of candidates) {
     const doiKey = candidate.doi?.toLowerCase() || "";
     const titleKey = candidate.title.toLowerCase().replace(/[^\w]/g, "").substring(0, 50);
     
-    if (doiKey && seenDois.has(doiKey)) continue;
-    if (seenTitles.has(titleKey)) continue;
+    let existingIndex = -1;
+    if (doiKey && doiMap.has(doiKey)) {
+      existingIndex = doiMap.get(doiKey)!;
+    } else if (titleMap.has(titleKey)) {
+      existingIndex = titleMap.get(titleKey)!;
+    }
     
-    if (doiKey) seenDois.add(doiKey);
-    seenTitles.add(titleKey);
-    result.push(candidate);
+    if (existingIndex >= 0) {
+      result[existingIndex] = mergeCandidate(result[existingIndex], candidate);
+    } else {
+      const newIndex = result.length;
+      if (doiKey) doiMap.set(doiKey, newIndex);
+      titleMap.set(titleKey, newIndex);
+      result.push(candidate);
+    }
   }
 
+  console.log(`[Dedup] Deduplicated ${candidates.length} -> ${result.length} candidates`);
   return result;
 }

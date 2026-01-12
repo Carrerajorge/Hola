@@ -298,7 +298,20 @@ export async function searchCrossRef(
   }
 }
 
-export async function verifyDOI(doi: string): Promise<{ valid: boolean; url: string; title: string }> {
+export interface VerifyDOIResult {
+  valid: boolean;
+  url: string;
+  title: string;
+  city?: string;
+  country?: string;
+  year?: number;
+  authors?: string[];
+  journal?: string;
+  abstract?: string;
+  keywords?: string[];
+}
+
+export async function verifyDOI(doi: string): Promise<VerifyDOIResult> {
   const metadata = await lookupDOI(doi);
   
   if (!metadata) {
@@ -309,5 +322,12 @@ export async function verifyDOI(doi: string): Promise<{ valid: boolean; url: str
     valid: true,
     url: metadata.url,
     title: metadata.title,
+    city: metadata.city,
+    country: metadata.country,
+    year: metadata.year,
+    authors: metadata.authors,
+    journal: metadata.journal,
+    abstract: metadata.abstract,
+    keywords: metadata.keywords,
   };
 }
