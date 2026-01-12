@@ -42,7 +42,10 @@ import wordPipelineRoutes from "./routes/wordPipelineRoutes";
 import redisSSERouter from "./routes/redisSSERouter";
 import superAgentRouter from "./routes/superAgentRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
-import { initializeEventStore } from "./agent/superAgent/tracing/EventStore";
+import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
+import type { ExecutionEvent } from "@shared/executionProtocol";
+import { getStreamGateway } from "./agent/superAgent/tracing/StreamGateway";
+import type { TraceEmitter } from "./agent/superAgent/tracing/TraceEmitter";
 import { initializeRedisSSE } from "./lib/redisSSE";
 import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
@@ -140,6 +143,382 @@ export async function registerRoutes(
   app.use("/api/sse", redisSSERouter);
   app.use("/api", superAgentRouter);
   app.use("/api", createRunController());
+
+  // ===== Run Detail Endpoints =====
+  
+  // GET /api/runs/:runId - Get current run state
+  app.get("/api/runs/:runId", (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const gateway = getStreamGateway();
+      const traceBus = gateway.getRunBus(runId);
+      
+      if (!traceBus) {
+        return res.status(404).json({
+          success: false,
+          error: "Run not found",
+          run_id: runId,
+        });
+      }
+      
+      const emitter = traceBus as TraceEmitter;
+      const metrics = emitter.getMetrics();
+      const toolCalls = emitter.getToolCallsArray();
+      const artifacts = emitter.getArtifactsArray();
+      
+      const completedSteps = toolCalls.filter(tc => tc.status === "completed").length;
+      const runningSteps = toolCalls.filter(tc => tc.status === "running" || tc.status === "streaming").length;
+      
+      let status: "pending" | "running" | "completed" | "failed" = "pending";
+      if (runningSteps > 0) {
+        status = "running";
+      } else if (metrics.failedToolCalls > 0 && metrics.completedToolCalls === 0) {
+        status = "failed";
+      } else if (metrics.totalToolCalls > 0 && metrics.completedToolCalls === metrics.totalToolCalls) {
+        status = "completed";
+      } else if (metrics.totalToolCalls > 0) {
+        status = "running";
+      }
+      
+      const progress = metrics.totalToolCalls > 0 
+        ? Math.round((metrics.completedToolCalls / metrics.totalToolCalls) * 100)
+        : 0;
+      
+      res.json({
+        success: true,
+        run_id: runId,
+        status,
+        progress,
+        metrics: {
+          total_tool_calls: metrics.totalToolCalls,
+          completed_tool_calls: metrics.completedToolCalls,
+          failed_tool_calls: metrics.failedToolCalls,
+          total_artifacts: metrics.totalArtifacts,
+          ready_artifacts: metrics.readyArtifacts,
+        },
+        counts: {
+          steps: metrics.totalToolCalls,
+          tool_calls: metrics.totalToolCalls,
+          artifacts: metrics.totalArtifacts,
+        },
+      });
+    } catch (error: any) {
+      console.error("[RunDetail] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get run details",
+      });
+    }
+  });
+
+  // GET /api/runs/:runId/calls - List all tool calls for a run
+  app.get("/api/runs/:runId/calls", (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const gateway = getStreamGateway();
+      const traceBus = gateway.getRunBus(runId);
+      
+      if (!traceBus) {
+        return res.status(404).json({
+          success: false,
+          error: "Run not found",
+          run_id: runId,
+        });
+      }
+      
+      const emitter = traceBus as TraceEmitter;
+      const toolCalls = emitter.getToolCallsArray();
+      
+      res.json({
+        success: true,
+        run_id: runId,
+        count: toolCalls.length,
+        calls: toolCalls,
+      });
+    } catch (error: any) {
+      console.error("[RunCalls] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get tool calls",
+      });
+    }
+  });
+
+  // GET /api/runs/:runId/calls/:callId - Get specific tool call details
+  app.get("/api/runs/:runId/calls/:callId", (req: Request, res: Response) => {
+    try {
+      const { runId, callId } = req.params;
+      const gateway = getStreamGateway();
+      const traceBus = gateway.getRunBus(runId);
+      
+      if (!traceBus) {
+        return res.status(404).json({
+          success: false,
+          error: "Run not found",
+          run_id: runId,
+        });
+      }
+      
+      const emitter = traceBus as TraceEmitter;
+      const toolCall = emitter.getToolCall(callId);
+      
+      if (!toolCall) {
+        return res.status(404).json({
+          success: false,
+          error: "Tool call not found",
+          run_id: runId,
+          call_id: callId,
+        });
+      }
+      
+      res.json({
+        success: true,
+        run_id: runId,
+        call: toolCall,
+      });
+    } catch (error: any) {
+      console.error("[RunCallDetail] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get tool call details",
+      });
+    }
+  });
+
+  // GET /api/runs/:runId/artifacts - List all artifacts for a run
+  app.get("/api/runs/:runId/artifacts", (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const gateway = getStreamGateway();
+      const traceBus = gateway.getRunBus(runId);
+      
+      if (!traceBus) {
+        return res.status(404).json({
+          success: false,
+          error: "Run not found",
+          run_id: runId,
+        });
+      }
+      
+      const emitter = traceBus as TraceEmitter;
+      const artifacts = emitter.getArtifactsArray();
+      
+      res.json({
+        success: true,
+        run_id: runId,
+        count: artifacts.length,
+        artifacts,
+      });
+    } catch (error: any) {
+      console.error("[RunArtifacts] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get artifacts",
+      });
+    }
+  });
+
+  // GET /api/runs/:runId/artifacts/:artifactId - Get specific artifact details
+  app.get("/api/runs/:runId/artifacts/:artifactId", (req: Request, res: Response) => {
+    try {
+      const { runId, artifactId } = req.params;
+      const gateway = getStreamGateway();
+      const traceBus = gateway.getRunBus(runId);
+      
+      if (!traceBus) {
+        return res.status(404).json({
+          success: false,
+          error: "Run not found",
+          run_id: runId,
+        });
+      }
+      
+      const emitter = traceBus as TraceEmitter;
+      const artifact = emitter.getArtifact(artifactId);
+      
+      if (!artifact) {
+        return res.status(404).json({
+          success: false,
+          error: "Artifact not found",
+          run_id: runId,
+          artifact_id: artifactId,
+        });
+      }
+      
+      res.json({
+        success: true,
+        run_id: runId,
+        artifact,
+        download_url: artifact.download_url || null,
+      });
+    } catch (error: any) {
+      console.error("[RunArtifactDetail] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get artifact details",
+      });
+    }
+  });
+
+  // GET /api/runs/:runId/stream - SSE endpoint for real-time execution events
+  app.get("/api/runs/:runId/stream", (req: Request, res: Response) => {
+    const { runId } = req.params;
+    const lastEventId = req.headers["last-event-id"] 
+      ? parseInt(req.headers["last-event-id"] as string, 10) 
+      : 0;
+    
+    const gateway = getStreamGateway();
+    const traceBus = gateway.getRunBus(runId);
+    
+    if (!traceBus) {
+      return res.status(404).json({
+        success: false,
+        error: "Run not found",
+        run_id: runId,
+      });
+    }
+    
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    
+    let seq = lastEventId;
+    let closed = false;
+    
+    const sendEvent = (eventType: string, data: any, eventSeq?: number) => {
+      if (closed) return;
+      try {
+        const eventId = eventSeq ?? ++seq;
+        res.write(`id: ${eventId}\n`);
+        res.write(`event: ${eventType}\n`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      } catch (e) {
+        console.error("[RunStream] Write error:", e);
+      }
+    };
+    
+    sendEvent("connected", {
+      run_id: runId,
+      message: "Connected to execution stream",
+      ts: Date.now(),
+    });
+    
+    const executionEventHandler = (event: ExecutionEvent) => {
+      if (closed) return;
+      sendEvent(event.type, event, event.seq);
+    };
+    
+    const traceEventHandler = (event: any) => {
+      if (closed) return;
+      const execEvent: ExecutionEvent = {
+        schema_version: "v1",
+        run_id: event.run_id || runId,
+        seq: event.seq || ++seq,
+        ts: event.ts || Date.now(),
+        type: mapTraceEventType(event.event_type),
+        payload: buildPayloadFromTraceEvent(event),
+      };
+      sendEvent(execEvent.type, execEvent, execEvent.seq);
+    };
+    
+    const emitter = traceBus as TraceEmitter;
+    
+    if (emitter.listenerCount && emitter.listenerCount("execution_event") >= 0) {
+      emitter.on("execution_event", executionEventHandler);
+    }
+    emitter.on("trace", traceEventHandler);
+    
+    const heartbeatInterval = setInterval(() => {
+      if (closed) return;
+      sendEvent("heartbeat", {
+        run_id: runId,
+        ts: Date.now(),
+      });
+    }, 800);
+    
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(heartbeatInterval);
+      emitter.off("execution_event", executionEventHandler);
+      emitter.off("trace", traceEventHandler);
+      console.log(`[RunStream] Client disconnected from run ${runId}`);
+    };
+    
+    req.on("close", cleanup);
+    req.on("error", cleanup);
+    res.on("close", cleanup);
+    res.on("error", cleanup);
+  });
+
+  // GET /api/runs/:runId/events - Polling endpoint for execution events
+  app.get("/api/runs/:runId/events", async (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const after = parseInt(req.query.after as string, 10) || 0;
+      const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 1000);
+      
+      const gateway = getStreamGateway();
+      const traceBus = gateway.getRunBus(runId);
+      
+      if (!traceBus) {
+        const eventStore = getEventStore();
+        const storedEvents = await eventStore.getEvents(runId, after, limit);
+        
+        if (storedEvents.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: "Run not found",
+            run_id: runId,
+          });
+        }
+        
+        const events: ExecutionEvent[] = storedEvents.map(traceEvent => ({
+          schema_version: "v1",
+          run_id: traceEvent.run_id,
+          seq: traceEvent.seq,
+          ts: traceEvent.ts,
+          type: mapTraceEventType(traceEvent.event_type),
+          payload: buildPayloadFromTraceEvent(traceEvent),
+        }));
+        
+        return res.json({
+          success: true,
+          run_id: runId,
+          events,
+          count: events.length,
+          last_seq: events.length > 0 ? events[events.length - 1].seq : after,
+        });
+      }
+      
+      const eventStore = getEventStore();
+      const storedEvents = await eventStore.getEvents(runId, after, limit);
+      
+      const events: ExecutionEvent[] = storedEvents.map(traceEvent => ({
+        schema_version: "v1",
+        run_id: traceEvent.run_id,
+        seq: traceEvent.seq,
+        ts: traceEvent.ts,
+        type: mapTraceEventType(traceEvent.event_type),
+        payload: buildPayloadFromTraceEvent(traceEvent),
+      }));
+      
+      res.json({
+        success: true,
+        run_id: runId,
+        events,
+        count: events.length,
+        last_seq: events.length > 0 ? events[events.length - 1].seq : after,
+      });
+    } catch (error: any) {
+      console.error("[RunEvents] Error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get run events",
+      });
+    }
+  });
 
   initializeEventStore().catch(console.error);
   

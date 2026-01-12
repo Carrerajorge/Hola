@@ -106,6 +106,9 @@ import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
+import { UniversalExecutionConsole } from "./universal-execution-console";
+import { ExecutionStreamClient, FlatRunState } from "@/lib/executionStreamClient";
+import { LiveExecutionConsole } from "./live-execution-console";
 
 function AvatarWithFallback({ 
   src, 
@@ -1011,6 +1014,51 @@ export function ChatInterface({
   const setUiPhase = setUiPhaseProp || setUiPhaseLocal;
   
   const uiPhaseTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Execution stream client for UniversalExecutionConsole
+  const [executionClient, setExecutionClient] = useState<ExecutionStreamClient | null>(null);
+  const [executionRunState, setExecutionRunState] = useState<FlatRunState | null>(null);
+  
+  // Connect/disconnect ExecutionStreamClient based on uiPhase and activeRunId
+  useEffect(() => {
+    // Only connect when in console phase with an active run
+    if (uiPhase === 'console' && activeRunId) {
+      console.log('[ExecutionConsole] Creating client for run:', activeRunId);
+      const client = new ExecutionStreamClient(activeRunId);
+      
+      // Subscribe to state updates
+      const unsubscribe = client.subscribe((state) => {
+        setExecutionRunState(state);
+        
+        // Trigger completion when run finishes
+        if (state.status === 'completed') {
+          console.log('[uiPhase] ExecutionStreamClient run completed, transitioning to done');
+          setUiPhase('done');
+        }
+      });
+      
+      // Connect to the stream
+      client.connect();
+      setExecutionClient(client);
+      
+      // Cleanup on unmount or when dependencies change
+      return () => {
+        console.log('[ExecutionConsole] Destroying client for run:', activeRunId);
+        unsubscribe();
+        client.destroy();
+        setExecutionClient(null);
+        setExecutionRunState(null);
+      };
+    } else {
+      // Clean up if we're not in console phase or don't have a run
+      if (executionClient) {
+        console.log('[ExecutionConsole] Cleaning up client (phase changed or no run)');
+        executionClient.destroy();
+        setExecutionClient(null);
+        setExecutionRunState(null);
+      }
+    }
+  }, [uiPhase, activeRunId]);
   
   // Optimistic messages - shown immediately before they appear in props
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
@@ -5202,6 +5250,23 @@ IMPORTANTE:
                 </MarkdownErrorBoundary>
                 <span className="typing-cursor">|</span>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
+        {uiPhase === 'console' && activeRunId && (
+          <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+            {executionRunState ? (
+              <UniversalExecutionConsole 
+                runState={executionRunState as any}
+                className="mb-4"
+              />
+            ) : (
+              <LiveExecutionConsole 
+                runId={activeRunId}
+                forceShow={true}
+              />
             )}
           </div>
         )}

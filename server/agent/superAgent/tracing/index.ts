@@ -5,3 +5,4 @@ export * from "./StreamGateway";
 export * from "./ProgressModel";
 export * from "./ContractGuard";
 export * from "./RunController";
+export * from "./TraceEmitter";
