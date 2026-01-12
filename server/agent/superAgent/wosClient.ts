@@ -23,7 +23,7 @@ export interface WosSearchResult {
   searchTime: number;
 }
 
-const WOS_API_BASE = "https://wos-api.clarivate.com/api/wos";
+const WOS_STARTER_API_BASE = "https://api.clarivate.com/apis/wos-starter/v1";
 
 export async function searchWos(
   query: string,
@@ -53,16 +53,17 @@ export async function searchWos(
   }
 
   const params = new URLSearchParams({
-    databaseId: "WOS",
-    usrQuery: searchQuery,
-    count: String(Math.min(maxResults, 100)),
-    firstRecord: "1",
+    db: "WOS",
+    q: searchQuery,
+    limit: String(Math.min(maxResults, 50)),
+    page: "1",
   });
 
-  console.log(`[WoS] Search URL: ${WOS_API_BASE}?${params}`);
+  const searchUrl = `${WOS_STARTER_API_BASE}/documents?${params}`;
+  console.log(`[WoS] Search URL: ${searchUrl}`);
 
   try {
-    const response = await fetch(`${WOS_API_BASE}?${params}`, {
+    const response = await fetch(searchUrl, {
       headers: {
         "X-ApiKey": apiKey,
         "Accept": "application/json",
@@ -80,66 +81,55 @@ export async function searchWos(
     
     console.log(`[WoS] Response structure:`, JSON.stringify(data).substring(0, 500));
 
-    const records = data.Data?.Records?.records?.REC || [];
-    const queryResult = data.QueryResult || {};
+    const hits = data.hits || [];
+    const metadata = data.metadata || {};
     
-    const articles: WosArticle[] = records.map((rec: any, index: number) => {
-      const staticData = rec.static_data || {};
-      const summary = staticData.summary || {};
-      const fullRecordMeta = staticData.fullrecord_metadata || {};
-      const dynamicData = rec.dynamic_data || {};
+    const articles: WosArticle[] = hits.map((hit: any, index: number) => {
+      const source = hit.source || {};
+      const names = source.names || {};
+      const identifiers = source.identifiers || {};
+      const links = source.links || {};
       
-      const titles = summary.titles?.title || [];
-      const title = titles.find((t: any) => t.type === "item")?.content || 
-                    titles[0]?.content || "No title";
+      const title = source.title || "No title";
+      const year = source.publishYear || source.sortDate?.substring(0, 4) || new Date().getFullYear();
+      const journal = source.sourceTitle || "";
       
-      const pubInfo = summary.pub_info || {};
-      const year = pubInfo.pubyear || pubInfo.sortdate?.substring(0, 4) || new Date().getFullYear();
-      
-      const sourceTitle = summary.titles?.title?.find((t: any) => t.type === "source")?.content || "";
-      
-      const names = summary.names?.name || [];
-      const authors = names
-        .filter((n: any) => n.role === "author")
-        .map((n: any) => n.full_name || n.display_name || `${n.last_name}, ${n.first_name}`)
-        .filter(Boolean);
-      
-      const abstracts = fullRecordMeta.abstracts?.abstract?.abstract_text?.p || [];
-      const abstract = Array.isArray(abstracts) ? abstracts.join(" ") : (abstracts || "");
-      
-      const keywords = fullRecordMeta.keywords?.keyword?.map((k: any) => k.content || k) || [];
-      
-      const identifiers = dynamicData.cluster_related?.identifiers?.identifier || [];
-      const doi = identifiers.find((id: any) => id.type === "doi")?.value || 
-                  identifiers.find((id: any) => id.type === "xref_doi")?.value || "";
-      
-      const citationCount = dynamicData.citation_related?.tc_list?.silo_tc?.local_count || 0;
-      
-      const addresses = fullRecordMeta.addresses?.address_name || [];
-      const affiliations = addresses.map((addr: any) => 
-        addr.address_spec?.full_address || addr.address_spec?.organizations?.organization?.[0]?.content || ""
+      const authors = (names.authors || []).map((a: any) => 
+        a.displayName || a.wosStandard || `${a.lastName || ''}, ${a.firstName || ''}`.trim()
       ).filter(Boolean);
       
-      const uid = rec.UID || `wos-${index}`;
+      const abstract = source.abstract || "";
+      
+      const keywords = source.keywords?.authorKeywords || source.keywordsPlus || [];
+      
+      const doi = identifiers.doi || "";
+      const citationCount = source.timesCited || 0;
+      
+      const affiliations = (source.affiliations || []).map((aff: any) => 
+        aff.organizationEnhanced || aff.organizationName || ""
+      ).filter(Boolean);
+      
+      const uid = hit.uid || source.uid || `wos-${index}`;
+      const wosUrl = links.record || `https://www.webofscience.com/wos/woscc/full-record/${uid}`;
       
       return {
         id: uid,
         title,
         authors,
         year: parseInt(String(year), 10),
-        journal: sourceTitle,
+        journal,
         abstract,
-        keywords,
+        keywords: Array.isArray(keywords) ? keywords : [],
         doi,
         citationCount: parseInt(String(citationCount), 10) || 0,
         affiliations,
-        wosUrl: `https://www.webofscience.com/wos/woscc/full-record/${uid}`,
-        documentType: pubInfo.pubtype || "Article",
-        language: fullRecordMeta.languages?.language?.content || "English",
+        wosUrl,
+        documentType: source.docType || source.documentType || "Article",
+        language: source.language || "English",
       };
     });
 
-    const totalResults = queryResult.RecordsFound || records.length;
+    const totalResults = metadata.total || hits.length;
     console.log(`[WoS] Found ${articles.length} articles from ${totalResults} total in ${searchTime}ms`);
 
     return {
@@ -152,38 +142,6 @@ export async function searchWos(
     console.error("[WoS] Search error:", error);
     throw error;
   }
-}
-
-function extractAuthors(source: any): string[] {
-  if (source.author && Array.isArray(source.author)) {
-    return source.author.map((a: any) => {
-      if (typeof a === "string") return a;
-      return a.displayName || a.lastName || "Unknown Author";
-    });
-  }
-  if (source.names?.authors) {
-    return source.names.authors.map((a: any) => a.displayName || a.wosStandard || "Unknown");
-  }
-  return [];
-}
-
-function extractDoi(identifiers: any): string {
-  if (!identifiers) return "";
-  if (Array.isArray(identifiers)) {
-    const doiId = identifiers.find((id: any) => id.type === "doi");
-    return doiId?.value || "";
-  }
-  return identifiers.doi || "";
-}
-
-function extractAffiliations(source: any): string[] {
-  if (source.affiliations && Array.isArray(source.affiliations)) {
-    return source.affiliations.map((aff: any) => {
-      if (typeof aff === "string") return aff;
-      return aff.organizationName || aff.name || "";
-    }).filter(Boolean);
-  }
-  return [];
 }
 
 export function formatWosForExcel(articles: WosArticle[]): any[] {
