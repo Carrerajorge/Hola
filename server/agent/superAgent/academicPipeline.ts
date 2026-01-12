@@ -169,7 +169,7 @@ export async function runAcademicPipeline(
   emitter.emit("pipeline_phase", { phase: "verification", status: "starting" });
 
   const toVerify = relevant.slice(0, Math.min(relevant.length, cfg.targetCount * 2));
-  const verified = await verifyBatch(toVerify, cfg.verificationConcurrency);
+  const verified = await verifyBatch(toVerify, cfg.verificationConcurrency, cfg.yearStart, cfg.yearEnd);
   console.log(`[AcademicPipeline] After verification: ${verified.length}`);
 
   emitter.emit("pipeline_phase", { 

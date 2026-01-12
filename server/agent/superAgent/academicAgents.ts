@@ -56,24 +56,34 @@ export function checkRelevance(candidate: AcademicCandidate): RelevanceResult {
     }
   }
 
-  const score = Math.min(1.0, 0.6 + 0.08 * Math.min(5, count));
-  
   const hasAbstract = candidate.abstract && candidate.abstract.length > 100;
+  
+  const baseScore = 0.6 + 0.08 * Math.min(5, count);
+  const abstractPenalty = hasAbstract ? 0 : 0.2;
+  const score = Math.min(1.0, baseScore - abstractPenalty);
+  
   if (!hasAbstract) {
     return {
       passed: false,
-      score: score * 0.5,
+      score,
       reason: "Abstract too short or missing",
       matchedGroups,
     };
   }
 
+  if (score < RELEVANCE_THRESHOLD) {
+    return {
+      passed: false,
+      score,
+      reason: `Score too low: ${score.toFixed(2)} < ${RELEVANCE_THRESHOLD}`,
+      matchedGroups,
+    };
+  }
+
   return {
-    passed: score >= RELEVANCE_THRESHOLD,
+    passed: true,
     score,
-    reason: score >= RELEVANCE_THRESHOLD 
-      ? `Relevant (score: ${score.toFixed(2)})` 
-      : `Score too low: ${score.toFixed(2)} < ${RELEVANCE_THRESHOLD}`,
+    reason: `Relevant (score: ${score.toFixed(2)})`,
     matchedGroups,
   };
 }
@@ -138,7 +148,11 @@ function titleSimilarity(a: string, b: string): number {
   return intersection / union;
 }
 
-export async function verifyCandidate(candidate: AcademicCandidate): Promise<VerificationResult> {
+export async function verifyCandidate(
+  candidate: AcademicCandidate,
+  yearStart: number = 2020,
+  yearEnd: number = 2025
+): Promise<VerificationResult> {
   if (!candidate.doi) {
     return {
       verified: false,
@@ -147,6 +161,17 @@ export async function verifyCandidate(candidate: AcademicCandidate): Promise<Ver
       titleMatch: 0,
       finalUrl: "",
       reason: "No DOI available",
+    };
+  }
+
+  if (candidate.year && (candidate.year < yearStart || candidate.year > yearEnd)) {
+    return {
+      verified: false,
+      doiValid: false,
+      urlAccessible: false,
+      titleMatch: 0,
+      finalUrl: "",
+      reason: `Year ${candidate.year} outside valid range ${yearStart}-${yearEnd}`,
     };
   }
 
@@ -188,9 +213,11 @@ export async function verifyCandidate(candidate: AcademicCandidate): Promise<Ver
 
 export async function verifyBatch(
   candidates: AcademicCandidate[],
-  maxConcurrency: number = 5
+  maxConcurrency: number = 5,
+  yearStart: number = 2020,
+  yearEnd: number = 2025
 ): Promise<AcademicCandidate[]> {
-  console.log(`[LinkVerifierAgent] Verifying ${candidates.length} candidates...`);
+  console.log(`[LinkVerifierAgent] Verifying ${candidates.length} candidates (years ${yearStart}-${yearEnd})...`);
   
   const verified: AcademicCandidate[] = [];
   const failed: { title: string; reason: string }[] = [];
@@ -200,7 +227,7 @@ export async function verifyBatch(
     
     const results = await Promise.all(
       batch.map(async (candidate) => {
-        const result = await verifyCandidate(candidate);
+        const result = await verifyCandidate(candidate, yearStart, yearEnd);
         return { candidate, result };
       })
     );
@@ -313,8 +340,9 @@ export function runCriticGuard(
   let duplicatesRemoved = 0;
 
   for (const candidate of verified) {
-    const doiKey = candidate.doi?.toLowerCase() || "";
-    const titleKey = candidate.title.toLowerCase().substring(0, 50);
+    const doiKey = candidate.doi?.toLowerCase().trim() || "";
+    const normalizedTitle = candidate.title.toLowerCase().replace(/[^\w]/g, "").substring(0, 50);
+    const titleKey = normalizedTitle;
     
     if (doiKey && seenDois.has(doiKey)) {
       duplicatesRemoved++;
@@ -345,16 +373,22 @@ export function runCriticGuard(
     issues.push(`${inYearRange.length - withDoi.length} articles missing DOI`);
   }
 
-  const finalCount = withDoi.length;
+  const withRelevance = withDoi.filter(c => c.relevanceScore >= RELEVANCE_THRESHOLD);
+  if (withRelevance.length < withDoi.length) {
+    issues.push(`${withDoi.length - withRelevance.length} articles below relevance threshold`);
+  }
+
+  const finalCount = withRelevance.length;
+  const MIN_VERIFIED_THRESHOLD = 50;
   
-  if (finalCount < targetCount) {
-    blockers.push(`Only ${finalCount} verified articles (need ${targetCount})`);
+  if (finalCount < MIN_VERIFIED_THRESHOLD) {
+    blockers.push(`Only ${finalCount} verified articles (minimum required: ${MIN_VERIFIED_THRESHOLD})`);
   }
 
   const passed = blockers.length === 0;
 
   console.log(`[CriticGuardAgent] Result: ${passed ? "PASSED" : "BLOCKED"}`);
-  console.log(`[CriticGuardAgent] Final count: ${finalCount}/${targetCount}`);
+  console.log(`[CriticGuardAgent] Final count: ${finalCount}/${MIN_VERIFIED_THRESHOLD} (target: ${targetCount})`);
   
   if (issues.length > 0) {
     console.log(`[CriticGuardAgent] Issues: ${issues.join("; ")}`);
@@ -366,7 +400,7 @@ export function runCriticGuard(
   return {
     passed,
     totalVerified: finalCount,
-    targetCount,
+    targetCount: MIN_VERIFIED_THRESHOLD,
     duplicatesRemoved,
     issues,
     blockers,
