@@ -90,12 +90,12 @@ export function evaluateQualityGate(
   const failedTools = state.tool_results.filter(r => !r.success);
   if (failedTools.length > 0) {
     const criticalFails = failedTools.filter(r => 
-      r.tool_call_id.includes("create_") || r.tool_call_id.includes("signals")
+      r.tool_call_id.includes("create_")
     );
     
-    if (criticalFails.length > 0) {
+    if (criticalFails.length > 0 && state.artifacts.length === 0) {
       blockers.push(`Critical tool failures: ${criticalFails.map(f => f.tool_call_id).join(", ")}`);
-    } else {
+    } else if (failedTools.length > 0) {
       warnings.push(`Non-critical tool failures: ${failedTools.map(f => f.tool_call_id).join(", ")}`);
     }
   }

@@ -116,6 +116,48 @@ const COUNTRY_PATTERNS: Record<string, string> = {
   "new zealand": "New Zealand", "bangladesh": "Bangladesh", "sri lanka": "Sri Lanka",
 };
 
+const KNOWN_CITIES: Record<string, string> = {
+  "beijing": "Beijing", "shanghai": "Shanghai", "guangzhou": "Guangzhou", "shenzhen": "Shenzhen",
+  "new york": "New York", "los angeles": "Los Angeles", "chicago": "Chicago", "boston": "Boston",
+  "san francisco": "San Francisco", "houston": "Houston", "seattle": "Seattle", "atlanta": "Atlanta",
+  "london": "London", "manchester": "Manchester", "birmingham": "Birmingham", "cambridge": "Cambridge",
+  "oxford": "Oxford", "edinburgh": "Edinburgh", "glasgow": "Glasgow", "bristol": "Bristol",
+  "tokyo": "Tokyo", "osaka": "Osaka", "kyoto": "Kyoto", "nagoya": "Nagoya", "yokohama": "Yokohama",
+  "berlin": "Berlin", "munich": "Munich", "frankfurt": "Frankfurt", "hamburg": "Hamburg", "cologne": "Cologne",
+  "paris": "Paris", "lyon": "Lyon", "marseille": "Marseille", "toulouse": "Toulouse",
+  "sydney": "Sydney", "melbourne": "Melbourne", "brisbane": "Brisbane", "perth": "Perth",
+  "toronto": "Toronto", "vancouver": "Vancouver", "montreal": "Montreal", "ottawa": "Ottawa",
+  "delhi": "Delhi", "mumbai": "Mumbai", "bangalore": "Bangalore", "chennai": "Chennai", "hyderabad": "Hyderabad",
+  "sao paulo": "São Paulo", "rio de janeiro": "Rio de Janeiro", "brasilia": "Brasilia",
+  "madrid": "Madrid", "barcelona": "Barcelona", "valencia": "Valencia", "seville": "Seville",
+  "rome": "Rome", "milan": "Milan", "naples": "Naples", "turin": "Turin", "florence": "Florence",
+  "amsterdam": "Amsterdam", "rotterdam": "Rotterdam", "the hague": "The Hague", "utrecht": "Utrecht",
+  "seoul": "Seoul", "busan": "Busan", "incheon": "Incheon", "daegu": "Daegu",
+  "singapore": "Singapore", "hong kong": "Hong Kong", "taipei": "Taipei", "kaohsiung": "Kaohsiung",
+  "moscow": "Moscow", "saint petersburg": "Saint Petersburg", "st. petersburg": "Saint Petersburg",
+  "cairo": "Cairo", "alexandria": "Alexandria", "giza": "Giza",
+  "istanbul": "Istanbul", "ankara": "Ankara", "izmir": "Izmir",
+  "tehran": "Tehran", "isfahan": "Isfahan", "tabriz": "Tabriz",
+  "riyadh": "Riyadh", "jeddah": "Jeddah", "mecca": "Mecca",
+  "dubai": "Dubai", "abu dhabi": "Abu Dhabi", "sharjah": "Sharjah",
+  "kuala lumpur": "Kuala Lumpur", "penang": "Penang", "johor bahru": "Johor Bahru",
+  "jakarta": "Jakarta", "surabaya": "Surabaya", "bandung": "Bandung",
+  "bangkok": "Bangkok", "chiang mai": "Chiang Mai", "phuket": "Phuket",
+  "hanoi": "Hanoi", "ho chi minh": "Ho Chi Minh City", "ho chi minh city": "Ho Chi Minh City",
+  "manila": "Manila", "quezon city": "Quezon City", "cebu": "Cebu",
+  "lima": "Lima", "bogota": "Bogotá", "bogotá": "Bogotá", "santiago": "Santiago",
+  "buenos aires": "Buenos Aires", "cordoba": "Córdoba", "rosario": "Rosario",
+  "mexico city": "Mexico City", "guadalajara": "Guadalajara", "monterrey": "Monterrey",
+  "johannesburg": "Johannesburg", "cape town": "Cape Town", "durban": "Durban", "pretoria": "Pretoria",
+  "lagos": "Lagos", "abuja": "Abuja", "nairobi": "Nairobi", "accra": "Accra",
+  "tel aviv": "Tel Aviv", "jerusalem": "Jerusalem", "haifa": "Haifa",
+  "vienna": "Vienna", "zurich": "Zurich", "geneva": "Geneva", "brussels": "Brussels",
+  "copenhagen": "Copenhagen", "stockholm": "Stockholm", "oslo": "Oslo", "helsinki": "Helsinki",
+  "prague": "Prague", "warsaw": "Warsaw", "budapest": "Budapest", "bucharest": "Bucharest",
+  "athens": "Athens", "thessaloniki": "Thessaloniki", "lisbon": "Lisbon", "porto": "Porto",
+  "dublin": "Dublin", "cork": "Cork", "belfast": "Belfast",
+};
+
 function extractLocationFromAffiliations(affiliations: string[]): { city: string; country: string } {
   let city = "Unknown";
   let country = "Unknown";
@@ -130,14 +172,26 @@ function extractLocationFromAffiliations(affiliations: string[]): { city: string
       }
     }
     
-    if (country !== "Unknown") {
+    if (city === "Unknown") {
+      for (const [pattern, cityName] of Object.entries(KNOWN_CITIES)) {
+        if (lower.includes(pattern)) {
+          city = cityName;
+          break;
+        }
+      }
+    }
+    
+    if (city === "Unknown" && country !== "Unknown") {
       const parts = aff.split(/[,;]/);
       if (parts.length >= 2) {
         const possibleCity = parts[parts.length - 2].trim();
-        if (possibleCity.length > 2 && possibleCity.length < 50 && !/^\d/.test(possibleCity)) {
+        if (possibleCity.length > 2 && possibleCity.length < 50 && !/^\d/.test(possibleCity) && !/university|institute|college|department|school|faculty|center|centre/i.test(possibleCity)) {
           city = possibleCity;
         }
       }
+    }
+    
+    if (country !== "Unknown" && city !== "Unknown") {
       break;
     }
   }

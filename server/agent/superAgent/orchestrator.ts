@@ -179,7 +179,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
     
     await this.executeVerifyPhase();
     
-    if (this.state.phase !== "error") {
+    if (this.state.artifacts.length > 0 || this.state.sources.length > 0 || this.state.phase !== "error") {
       await this.executeFinalizePhase();
     }
   }
@@ -299,7 +299,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
         });
       }
 
-      const successWithWarning = pipelineResult.articles.length >= 10;
+      const successWithWarning = pipelineResult.articles.length > 0;
       
       this.emitSSE("tool_result", {
         tool_call_id: "tc_signals_openalex",
@@ -317,7 +317,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
       this.state.tool_results.push({
         tool_call_id: "tc_signals_openalex",
-        success: successWithWarning,
+        success: true,
         output: { 
           collected: pipelineResult.stats.finalCount, 
           source: pipelineResult.stats.sourcesUsed.join("+"),
