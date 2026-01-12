@@ -1,0 +1,140 @@
+import { z } from "zod";
+
+export const ROUTER_VERSION = "2.0.0";
+
+export const IntentTypeSchema = z.enum([
+  "CREATE_PRESENTATION",
+  "CREATE_DOCUMENT",
+  "CREATE_SPREADSHEET",
+  "SUMMARIZE",
+  "TRANSLATE",
+  "SEARCH_WEB",
+  "ANALYZE_DOCUMENT",
+  "CHAT_GENERAL",
+  "NEED_CLARIFICATION"
+]);
+
+export const OutputFormatSchema = z.enum([
+  "pptx",
+  "docx",
+  "xlsx",
+  "pdf",
+  "txt",
+  "csv",
+  "html"
+]).nullable();
+
+export const LengthSchema = z.enum(["short", "medium", "long"]).nullable();
+
+export const SlotsSchema = z.object({
+  topic: z.string().optional(),
+  title: z.string().optional(),
+  language: z.string().optional(),
+  length: LengthSchema.optional(),
+  audience: z.string().optional(),
+  style: z.string().optional(),
+  bullet_points: z.boolean().optional(),
+  include_images: z.boolean().optional(),
+  source_language: z.string().optional(),
+  target_language: z.string().optional(),
+  num_slides: z.number().optional(),
+  template: z.string().optional()
+});
+
+export const SingleIntentResultSchema = z.object({
+  intent: IntentTypeSchema,
+  output_format: OutputFormatSchema,
+  slots: SlotsSchema,
+  confidence: z.number().min(0).max(1),
+  raw_confidence: z.number().min(0).max(1).optional(),
+  normalized_text: z.string(),
+  clarification_question: z.string().optional(),
+  matched_patterns: z.array(z.string()).optional(),
+  reasoning: z.string().optional(),
+  fallback_used: z.enum(["none", "knn", "llm"]).optional(),
+  language_detected: z.string().optional()
+});
+
+export const PlanStepSchema = z.object({
+  step_id: z.number(),
+  intent: IntentTypeSchema,
+  output_format: OutputFormatSchema,
+  slots: SlotsSchema,
+  depends_on: z.array(z.number()).optional()
+});
+
+export const MultiIntentResultSchema = z.object({
+  type: z.literal("multi"),
+  intents: z.array(SingleIntentResultSchema),
+  plan: z.object({
+    steps: z.array(PlanStepSchema),
+    execution_order: z.array(z.number())
+  }).optional(),
+  aggregated_confidence: z.number().min(0).max(1),
+  normalized_text: z.string(),
+  router_version: z.string(),
+  language_detected: z.string().optional(),
+  processing_time_ms: z.number().optional(),
+  cache_hit: z.boolean().optional()
+});
+
+export const IntentResultSchema = SingleIntentResultSchema.extend({
+  type: z.literal("single").optional(),
+  router_version: z.string().optional(),
+  processing_time_ms: z.number().optional(),
+  cache_hit: z.boolean().optional()
+});
+
+export const UnifiedIntentResultSchema = z.union([
+  IntentResultSchema,
+  MultiIntentResultSchema
+]);
+
+export type IntentType = z.infer<typeof IntentTypeSchema>;
+export type OutputFormat = z.infer<typeof OutputFormatSchema>;
+export type Slots = z.infer<typeof SlotsSchema>;
+export type SingleIntentResult = z.infer<typeof SingleIntentResultSchema>;
+export type PlanStep = z.infer<typeof PlanStepSchema>;
+export type MultiIntentResult = z.infer<typeof MultiIntentResultSchema>;
+export type IntentResult = z.infer<typeof IntentResultSchema>;
+export type UnifiedIntentResult = z.infer<typeof UnifiedIntentResultSchema>;
+
+export const SupportedLocales = ["es", "en", "pt", "fr", "de", "it"] as const;
+export type SupportedLocale = typeof SupportedLocales[number];
+
+export interface IntentMetrics {
+  total_requests: number;
+  cache_hits: number;
+  cache_misses: number;
+  rule_only_classifications: number;
+  knn_fallbacks: number;
+  llm_fallbacks: number;
+  clarification_requests: number;
+  unknown_intents: number;
+  avg_confidence: number;
+  p50_latency_ms: number;
+  p95_latency_ms: number;
+  p99_latency_ms: number;
+  by_intent: Record<IntentType, number>;
+  by_locale: Record<string, number>;
+}
+
+export interface CalibrationConfig {
+  temperature: number;
+  isotonic_bins: number[];
+  isotonic_values: number[];
+  rule_weight: number;
+  knn_weight: number;
+  min_threshold: number;
+  fallback_threshold: number;
+}
+
+export const DEFAULT_CALIBRATION: CalibrationConfig = {
+  temperature: 1.0,
+  isotonic_bins: [0, 0.3, 0.5, 0.7, 0.85, 0.95, 1.0],
+  isotonic_values: [0.1, 0.35, 0.55, 0.72, 0.88, 0.97, 1.0],
+  rule_weight: 0.6,
+  knn_weight: 0.4,
+  min_threshold: 0.50,
+  fallback_threshold: 0.80
+};
