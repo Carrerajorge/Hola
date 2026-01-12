@@ -402,24 +402,6 @@ function TablePreview({ table }: { table: Table }) {
   );
 }
 
-function TablesSection({ tables }: { tables: Table[] }) {
-  if (!tables || tables.length === 0) return null;
-
-  const standaloneTables = tables.filter((t) => !t.sheetName);
-  if (standaloneTables.length === 0) return null;
-
-  return (
-    <div className="space-y-4" data-testid="tables-section">
-      <h3 className="text-lg font-semibold flex items-center gap-2">
-        <TableIcon className="h-5 w-5 text-primary" />
-        Tables
-      </h3>
-      {standaloneTables.map((table) => (
-        <TablePreview key={table.id} table={table} />
-      ))}
-    </div>
-  );
-}
 
 function AnomaliesSection({ anomalies }: { anomalies: Anomaly[] }) {
   if (!anomalies || anomalies.length === 0) return null;
@@ -554,15 +536,13 @@ export function DocumentAnalysisResults({
       >
         <InsightsSection insights={insights} />
 
-        {hasSheets ? (
+        {hasSheets && (
           <SheetTabs
             sheets={documentModel.sheets}
             tables={documentModel.tables}
             activeSheet={activeSheet}
             onSheetChange={setActiveSheet}
           />
-        ) : (
-          <TablesSection tables={documentModel.tables} />
         )}
 
         <MetricsGrid metrics={documentModel.metrics} onMetricClick={handleMetricClick} />

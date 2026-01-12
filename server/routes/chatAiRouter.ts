@@ -1454,6 +1454,65 @@ TU RESPUESTA DEBE INCLUIR:
         answerText += chunk.content;
       }
       
+      // POST-PROCESS: Remove any filename references the model might have included
+      // Collect all filenames from processed documents
+      const allFilenames = batchResult.stats
+        .filter(s => s.status === 'success')
+        .map(s => s.filename);
+      
+      // Build regex patterns for filename sanitization
+      const sanitizeFilenameReferences = (text: string, filenames: string[]): string => {
+        let sanitized = text;
+        
+        // For each filename, replace occurrences with "el documento"
+        for (const filename of filenames) {
+          // Escape special regex characters in filename
+          const escapedFilename = filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          
+          // Match filename with or without quotes, with various prefixes
+          const patterns = [
+            // "filename.pdf" or 'filename.pdf'
+            new RegExp(`["']${escapedFilename}["']`, 'gi'),
+            // Análisis del documento "filename.pdf":
+            new RegExp(`(Análisis|Análisis del documento|Document analysis|RESPUESTA AL ANÁLISIS DEL DOCUMENTO)\\s*["']?${escapedFilename}["']?:?`, 'gi'),
+            // [doc:filename.pdf] style citations
+            new RegExp(`\\[doc:${escapedFilename}[^\\]]*\\]`, 'gi'),
+            // Just the filename
+            new RegExp(`\\b${escapedFilename}\\b`, 'gi'),
+          ];
+          
+          for (const pattern of patterns) {
+            sanitized = sanitized.replace(pattern, (match) => {
+              // For citation-style matches, use generic citation
+              if (match.startsWith('[doc:')) {
+                return documentModels.length === 1 ? '[documento]' : '[doc1]';
+              }
+              // For header-style matches, remove entirely
+              if (match.match(/^(Análisis|Document|RESPUESTA)/i)) {
+                return '';
+              }
+              // Otherwise replace with "el documento"
+              return 'el documento';
+            });
+          }
+        }
+        
+        // Also sanitize any remaining file extension patterns
+        // Match patterns like ".pdf", ".docx", ".xlsx" not part of citations
+        sanitized = sanitized.replace(/(?<![[\w])(\w+)\.(pdf|docx|xlsx|pptx|csv|txt|png|jpg|jpeg)(?![)\]])/gi, 'el documento');
+        
+        // Clean up any double spaces or trailing colons left after removal
+        sanitized = sanitized.replace(/\s{2,}/g, ' ').replace(/^\s*:\s*/gm, '');
+        
+        return sanitized;
+      };
+      
+      // Apply sanitization unless user explicitly asked for filename
+      const userAskedForFilename = /\b(nombre|filename|archivo|file)\b.*\b(cual|cuál|which|what)\b|\b(cual|cuál|which|what)\b.*\b(nombre|filename|archivo|file)\b/i.test(userQuery);
+      if (!userAskedForFilename) {
+        answerText = sanitizeFilenameReferences(answerText, allFilenames);
+      }
+      
       // Parse response for per-doc findings and citations
       const citations: string[] = [];
       const citationRegex = /\[doc:([^\]]+)\]/g;
