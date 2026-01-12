@@ -992,10 +992,39 @@ export function ChatInterface({
     }
   }, [messages, optimisticMessages.length]);
   
-  // Clear optimistic messages when chatId changes
+  // Track previous chatId for optimistic message cleanup - separate from the stream reset tracking
+  const prevChatIdForOptimisticRef = useRef<string | null | undefined>(undefined);
+  
+  // Clear optimistic messages only when switching between existing chats
+  // NOT when transitioning from null to a new pending chat (which happens during message send)
   useEffect(() => {
-    setOptimisticMessages([]);
-  }, [chatId]);
+    const prevChatId = prevChatIdForOptimisticRef.current;
+    const isInitialRender = prevChatId === undefined;
+    const isNewChatCreation = prevChatId === null && chatId?.startsWith('pending-');
+    const isSameChatTransition = prevChatId?.startsWith('pending-') && chatId && !chatId.startsWith('pending-');
+    
+    console.log("[ChatInterface] optimistic chatId effect:", { 
+      prevChatId, 
+      chatId, 
+      isInitialRender, 
+      isNewChatCreation, 
+      isSameChatTransition 
+    });
+    
+    // Only clear optimistic messages when:
+    // 1. Not initial render
+    // 2. Not transitioning from null to pending (new chat creation)
+    // 3. Not transitioning from pending to confirmed chatId (same chat)
+    if (!isInitialRender && !isNewChatCreation && !isSameChatTransition) {
+      // This is a real chat switch - clear optimistic messages
+      console.log("[ChatInterface] Clearing optimistic messages (real chat switch)");
+      setOptimisticMessages([]);
+    } else {
+      console.log("[ChatInterface] Keeping optimistic messages");
+    }
+    
+    prevChatIdForOptimisticRef.current = chatId;
+  }, [chatId]); // Only depend on chatId - don't run effect on every optimistic message change
   
   // Use the store-based polling hook for the active agent run (only when valid messageId exists)
   useAgentPolling(currentAgentMessageId);
@@ -2915,6 +2944,8 @@ export function ChatInterface({
         } else {
           // Show error when agent run fails to start
           console.error("[Agent Mode] Failed to start run, result is null");
+          // Remove the optimistic message since the agent failed to start
+          setOptimisticMessages(prev => prev.filter(m => m.id !== userMessage.id));
           toast({ 
             title: "Error", 
             description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.", 
@@ -2923,6 +2954,8 @@ export function ChatInterface({
         }
       } catch (error) {
         console.error("Failed to start agent run:", error);
+        // Remove the optimistic message since the agent failed to start
+        setOptimisticMessages(prev => prev.filter(m => m.id !== userMessage.id));
         toast({ title: "Error", description: "Error al iniciar el agente", variant: "destructive" });
       }
       return;
@@ -3214,7 +3247,11 @@ export function ChatInterface({
     // CRITICAL: Add user message to UI IMMEDIATELY (optimistic update)
     // This ensures the user sees their message with attachments right away,
     // before any async operations like document analysis begin
-    setOptimisticMessages(prev => [...prev, userMsg]);
+    console.log("[handleSubmit] Adding optimistic message, current count:", optimisticMessages.length);
+    setOptimisticMessages(prev => {
+      console.log("[handleSubmit] setOptimisticMessages: prev count:", prev.length, "adding:", userMsg.id);
+      return [...prev, userMsg];
+    });
     
     // DATA_MODE: Pre-check if we have document attachments that need analysis
     // This must happen BEFORE onSendMessage to avoid race conditions with chat navigation

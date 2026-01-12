@@ -187,7 +187,8 @@ export default function Home() {
 
   const handleNewChat = () => {
     // Create a new chat with fresh state
-    const newKey = `new-chat-${Date.now()}`;
+    // Don't set a temporary key here - we'll use the stableKey from createChat
+    // This ensures chatInterfaceKey remains stable during pending→real chat transitions
     
     // DO NOT reset aiState - let background streaming complete naturally
     // The aiStateChatId check prevents the indicator from showing on the new chat
@@ -197,7 +198,7 @@ export default function Home() {
     // Clear chat references
     setActiveChatId(null);
     setIsNewChatMode(true);
-    setNewChatStableKey(newKey);
+    setNewChatStableKey(null);
     pendingChatIdRef.current = null;
     
     // Close any open dialogs
@@ -211,8 +212,10 @@ export default function Home() {
   const handleSendNewChatMessage = useCallback((message: Message) => {
     const { pendingId, stableKey } = createChat();
     pendingChatIdRef.current = pendingId;
-    // Keep the new chat stable key to prevent component remount
-    setNewChatStableKey(prev => prev || stableKey);
+    // CRITICAL: Use the stableKey from createChat to ensure chatInterfaceKey
+    // matches activeChat.stableKey after backend confirms. This prevents
+    // component remount when newChatStableKey is cleared during navigation.
+    setNewChatStableKey(stableKey);
     setIsNewChatMode(false);
     addMessage(pendingId, message);
   }, [createChat, addMessage]);
