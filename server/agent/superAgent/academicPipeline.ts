@@ -377,24 +377,36 @@ async function exportToExcel(articles: AcademicCandidate[], topic: string, warni
     "Scopus",
     "WOS",
     "Access_URL",
+    "Source",
   ];
 
-  const data: any[][] = articles.map((article) => [
-    article.authors.length > 0 ? article.authors.join("; ") : "Unknown",
-    article.title || "Unknown",
-    article.year || "Unknown",
-    article.journal || "Unknown",
-    (article.abstract || "Unknown").substring(0, 2000),
-    article.keywords.length > 0 ? article.keywords.join("; ") : "Unknown",
-    article.language || "Unknown",
-    article.documentType || "Article",
-    article.doi || "Unknown",
-    article.city || "Unknown",
-    article.country || "Unknown",
-    article.source === "scopus" ? "Yes" : "Unknown",
-    "Unknown",
-    article.doi ? `https://doi.org/${article.doi}` : (article.landingUrl || "Unknown"),
-  ]);
+  const data: any[][] = articles.map((article) => {
+    const authorsList = article.authors.length > 0 ? article.authors.join("; ") : "Unknown";
+    const keywordsList = article.keywords.length > 0 ? article.keywords.join("; ") : "Unknown";
+    const accessUrl = article.doi ? `https://doi.org/${article.doi}` : (article.landingUrl || "Unknown");
+    const sourceLabel = article.source === "openalex" ? "OpenAlex" : 
+                       article.source === "crossref" ? "CrossRef" : 
+                       article.source === "semanticscholar" ? "Semantic Scholar" : 
+                       article.source || "Unknown";
+    
+    return [
+      authorsList,
+      article.title || "Unknown",
+      article.year > 0 ? article.year : "Unknown",
+      article.journal || "Unknown",
+      (article.abstract || "Unknown").substring(0, 2000),
+      keywordsList,
+      article.language || "English",
+      article.documentType || "Article",
+      article.doi || "Unknown",
+      article.city || "Unknown",
+      article.country || "Unknown",
+      article.source === "scopus" ? "Yes" : "No",
+      "No",
+      accessUrl,
+      sourceLabel,
+    ];
+  });
 
   const safeTitle = topic
     .replace(/[^\w\s]/g, "")

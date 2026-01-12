@@ -318,11 +318,16 @@ export async function enrichMetadata(candidate: AcademicCandidate): Promise<Acad
   
   if (!metadata) return candidate;
 
+  const bestYear = (metadata.year && metadata.year > 0) ? metadata.year : candidate.year;
+  const bestCity = (metadata.city && metadata.city !== "Unknown") ? metadata.city : candidate.city;
+  const bestCountry = (metadata.country && metadata.country !== "Unknown") ? metadata.country : candidate.country;
+  const bestAuthors = metadata.authors.length > 0 ? metadata.authors : candidate.authors;
+
   return {
     ...candidate,
     title: metadata.title || candidate.title,
-    authors: metadata.authors.length > 0 ? metadata.authors : candidate.authors,
-    year: metadata.year || candidate.year,
+    authors: bestAuthors,
+    year: bestYear,
     journal: metadata.journal !== "Unknown" ? metadata.journal : candidate.journal,
     abstract: metadata.abstract || candidate.abstract,
     documentType: metadata.documentType || candidate.documentType,
@@ -330,8 +335,8 @@ export async function enrichMetadata(candidate: AcademicCandidate): Promise<Acad
     keywords: metadata.keywords.length > 0 ? metadata.keywords : candidate.keywords,
     citationCount: metadata.citationCount || candidate.citationCount,
     affiliations: metadata.affiliations.length > 0 ? metadata.affiliations : candidate.affiliations,
-    city: metadata.city !== "Unknown" ? metadata.city : candidate.city,
-    country: metadata.country !== "Unknown" ? metadata.country : candidate.country,
+    city: bestCity,
+    country: bestCountry,
   };
 }
 

@@ -82,11 +82,30 @@ function invertedIndexToText(inverted: Record<string, number[]> | null): string 
   return words.map(w => w[0]).join(" ");
 }
 
+const COUNTRY_CODES: Record<string, string> = {
+  "US": "United States", "GB": "United Kingdom", "UK": "United Kingdom",
+  "CN": "China", "DE": "Germany", "FR": "France", "JP": "Japan",
+  "BR": "Brazil", "IN": "India", "AU": "Australia", "CA": "Canada",
+  "IT": "Italy", "ES": "Spain", "MX": "Mexico", "NL": "Netherlands",
+  "KR": "South Korea", "IR": "Iran", "TR": "Turkey", "EG": "Egypt",
+  "SA": "Saudi Arabia", "MY": "Malaysia", "ID": "Indonesia", "TH": "Thailand",
+  "PT": "Portugal", "PL": "Poland", "RU": "Russia", "PK": "Pakistan",
+  "NG": "Nigeria", "ZA": "South Africa", "CO": "Colombia", "CL": "Chile",
+  "AR": "Argentina", "PE": "Peru", "VN": "Vietnam", "PH": "Philippines",
+  "TW": "Taiwan", "SG": "Singapore", "HK": "Hong Kong", "GR": "Greece",
+  "SE": "Sweden", "NO": "Norway", "DK": "Denmark", "FI": "Finland",
+  "BE": "Belgium", "CH": "Switzerland", "AT": "Austria", "CZ": "Czech Republic",
+  "HU": "Hungary", "RO": "Romania", "UA": "Ukraine", "IL": "Israel",
+  "IQ": "Iraq", "JO": "Jordan", "LB": "Lebanon", "MA": "Morocco",
+  "DZ": "Algeria", "TN": "Tunisia", "NZ": "New Zealand", "BD": "Bangladesh",
+  "LK": "Sri Lanka", "IE": "Ireland", "AE": "United Arab Emirates",
+};
+
 function extractCountryFromAffiliations(authorships: OpenAlexWork["authorships"]): string {
   for (const auth of authorships) {
     for (const inst of auth.institutions) {
       if (inst.country_code) {
-        return inst.country_code;
+        return COUNTRY_CODES[inst.country_code.toUpperCase()] || inst.country_code;
       }
     }
   }
