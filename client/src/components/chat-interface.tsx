@@ -5079,6 +5079,8 @@ IMPORTANTE:
                 onSuperAgentCancel={handleSuperAgentCancel}
                 onSuperAgentRetry={handleSuperAgentRetry}
                 onQuestionClick={(text) => setInput(text)}
+                activeRunId={null}
+                onRunComplete={undefined}
               />
 
               {/* Agent Observer - Show when agent is running */}
@@ -5338,6 +5340,8 @@ IMPORTANTE:
                   onSuperAgentCancel={handleSuperAgentCancel}
                   onSuperAgentRetry={handleSuperAgentRetry}
                   onQuestionClick={(text) => setInput(text)}
+                  activeRunId={null}
+                  onRunComplete={undefined}
                 />
                 <div ref={messagesEndRef} />
               </div>

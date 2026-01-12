@@ -109,9 +109,11 @@ export function createRunController(): Router {
 
   router.get("/runs/:runId/events", async (req: Request, res: Response) => {
     const { runId } = req.params;
-    const lastEventId = req.headers["last-event-id"] 
+    const fromQuery = req.query.from ? parseInt(req.query.from as string, 10) : 0;
+    const lastEventIdHeader = req.headers["last-event-id"] 
       ? parseInt(req.headers["last-event-id"] as string, 10) 
-      : (req.query.from ? parseInt(req.query.from as string, 10) : 0);
+      : 0;
+    const lastEventId = Math.max(fromQuery, lastEventIdHeader);
 
     const context = activeRuns.get(runId);
     
