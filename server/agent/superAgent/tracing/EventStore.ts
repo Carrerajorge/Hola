@@ -28,11 +28,11 @@ export class EventStore {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS trace_events (
         id SERIAL PRIMARY KEY,
-        run_id VARCHAR(36) NOT NULL,
+        run_id VARCHAR(64) NOT NULL,
         seq INTEGER NOT NULL,
-        trace_id VARCHAR(36) NOT NULL,
-        span_id VARCHAR(36) NOT NULL,
-        parent_span_id VARCHAR(36),
+        trace_id VARCHAR(64) NOT NULL,
+        span_id VARCHAR(64) NOT NULL,
+        parent_span_id VARCHAR(64),
         node_id VARCHAR(255) NOT NULL,
         attempt_id INTEGER DEFAULT 1,
         agent VARCHAR(100) NOT NULL,
