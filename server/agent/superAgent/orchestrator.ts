@@ -290,13 +290,16 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
       if (pipelineResult.artifact) {
         this.state.artifacts.push({
+          id: pipelineResult.artifact.id,
           type: "xlsx",
-          filename: pipelineResult.artifact.filename,
+          name: pipelineResult.artifact.name,
           path: pipelineResult.artifact.path,
           size: pipelineResult.artifact.size,
-          url: pipelineResult.artifact.url,
+          download_url: pipelineResult.artifact.downloadUrl,
           created_at: Date.now(),
         });
+        
+        this.emitSSE("artifact", pipelineResult.artifact);
       }
 
       const successWithWarning = pipelineResult.articles.length > 0;

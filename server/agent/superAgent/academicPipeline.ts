@@ -318,7 +318,7 @@ export async function runAcademicPipeline(
   
   try {
     artifact = await exportToExcel(finalArticles, topic, warnings);
-    console.log(`[AcademicPipeline] Excel generated: ${artifact.filename}`);
+    console.log(`[AcademicPipeline] Excel generated: ${artifact.name}`);
   } catch (error: any) {
     console.error(`[AcademicPipeline] Export error: ${error.message}`);
     warnings.push(`Export failed: ${error.message}`);
