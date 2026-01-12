@@ -984,6 +984,9 @@ export function ChatInterface({
   // Track the current agent message ID for this chat session
   const [currentAgentMessageId, setCurrentAgentMessageId] = useState<string | null>(null);
   
+  // Track active run ID for Live Execution Console
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  
   // Optimistic messages - shown immediately before they appear in props
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   
@@ -3197,6 +3200,12 @@ export function ChatInterface({
           throw new Error(`Super Agent request failed: ${response.status}`);
         }
         
+        // Capture run ID from response header for Live Execution Console
+        const runId = response.headers.get("X-Run-ID");
+        if (runId) {
+          setActiveRunId(runId);
+        }
+        
         const reader = response.body?.getReader();
         if (!reader) {
           throw new Error("No response body reader");
@@ -3315,6 +3324,7 @@ export function ChatInterface({
           onSendMessage(finalAssistantMessage);
           
           completeRun(superAgentMessageId, finalResult);
+          setActiveRunId(null);
         }
         
       } catch (error) {
@@ -3338,6 +3348,7 @@ export function ChatInterface({
           prev.map(m => m.id === superAgentMessageId ? errorMessage : m)
         );
         onSendMessage(errorMessage);
+        setActiveRunId(null);
       }
       
       setAiState("idle");
@@ -5079,8 +5090,8 @@ IMPORTANTE:
                 onSuperAgentCancel={handleSuperAgentCancel}
                 onSuperAgentRetry={handleSuperAgentRetry}
                 onQuestionClick={(text) => setInput(text)}
-                activeRunId={null}
-                onRunComplete={undefined}
+                activeRunId={activeRunId}
+                onRunComplete={() => setActiveRunId(null)}
               />
 
               {/* Agent Observer - Show when agent is running */}
@@ -5340,8 +5351,8 @@ IMPORTANTE:
                   onSuperAgentCancel={handleSuperAgentCancel}
                   onSuperAgentRetry={handleSuperAgentRetry}
                   onQuestionClick={(text) => setInput(text)}
-                  activeRunId={null}
-                  onRunComplete={undefined}
+                  activeRunId={activeRunId}
+                  onRunComplete={() => setActiveRunId(null)}
                 />
                 <div ref={messagesEndRef} />
               </div>

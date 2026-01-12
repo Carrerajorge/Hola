@@ -5,6 +5,9 @@ import { createSuperAgent, SSEEvent } from "../agent/superAgent";
 import { getArtifact, getArtifactMeta, listArtifacts } from "../agent/superAgent/artifactTools";
 import { parsePromptToContract, validateContract } from "../agent/superAgent/contractRouter";
 import { shouldResearch } from "../agent/superAgent/researchPolicy";
+import { TraceBus } from "../agent/superAgent/tracing/TraceBus";
+import { getStreamGateway } from "../agent/superAgent/tracing/StreamGateway";
+import { getEventStore } from "../agent/superAgent/tracing/EventStore";
 import { createClient } from "redis";
 import { promises as fs } from "fs";
 
@@ -46,11 +49,28 @@ router.post("/super/stream", async (req: Request, res: Response) => {
   try {
     const { prompt, session_id, options } = ChatRequestSchema.parse(req.body);
     const sessionId = session_id || randomUUID();
+    const runId = `run_${randomUUID()}`;
+    
+    const traceBus = new TraceBus(runId);
+    const gateway = getStreamGateway();
+    
+    const eventStore = getEventStore();
+    
+    traceBus.on("trace", async (event) => {
+      gateway.publish(runId, event);
+      try {
+        await eventStore.append(event);
+      } catch (e) {
+        console.warn("[SuperAgent] Failed to persist trace event:", e);
+      }
+    });
     
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Session-ID", sessionId);
+    res.setHeader("X-Run-ID", runId);
+    res.setHeader("Access-Control-Expose-Headers", "X-Run-ID, X-Session-ID");
     res.flushHeaders();
     
     const sendSSE = (event: SSEEvent) => {
@@ -76,9 +96,97 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     });
     
     let redisAvailable = redisClient?.isReady ?? false;
+    let articlesCollected = 0;
+    let articlesVerified = 0;
+    let currentPhase: "planning" | "signals" | "verification" | "export" | "completed" = "planning";
+    let runCompleted = false;
+    
+    traceBus.runStarted("SuperAgent", `Starting research: ${prompt.substring(0, 100)}...`);
+    traceBus.phaseStarted("SuperAgent", "planning", "Analyzing research request");
     
     agent.on("sse", async (event: SSEEvent) => {
       sendSSE(event);
+      
+      switch (event.event_type) {
+        case "contract":
+          if (currentPhase === "planning") {
+            traceBus.phaseCompleted("SuperAgent", "planning", "Contract established");
+            traceBus.phaseStarted("SuperAgent", "signals", "Collecting sources from academic databases");
+            currentPhase = "signals";
+          }
+          break;
+        case "source":
+          articlesCollected++;
+          if (event.data?.doi) {
+            traceBus.sourceCollected(
+              "SuperAgent",
+              event.data.doi,
+              event.data.title || "Untitled",
+              event.data.relevance || 0.8
+            );
+          }
+          traceBus.toolProgress("SuperAgent", `Collected ${articlesCollected} sources`, 
+            Math.min(40, (articlesCollected / 50) * 40),
+            { articles_collected: articlesCollected }
+          );
+          break;
+        case "verify":
+          if (currentPhase === "signals") {
+            traceBus.phaseCompleted("SuperAgent", "signals", `Collected ${articlesCollected} sources`);
+            traceBus.phaseStarted("SuperAgent", "verification", "Verifying source quality");
+            currentPhase = "verification";
+          }
+          break;
+        case "source_verified":
+          articlesVerified++;
+          if (event.data?.doi) {
+            traceBus.sourceVerified("SuperAgent", event.data.doi, event.data.title_similarity || 0.9);
+          }
+          traceBus.toolProgress("SuperAgent", `Verified ${articlesVerified} sources`,
+            40 + Math.min(40, (articlesVerified / 50) * 40),
+            { articles_verified: articlesVerified, articles_accepted: articlesVerified }
+          );
+          break;
+        case "artifact":
+          if (currentPhase === "verification") {
+            traceBus.phaseCompleted("SuperAgent", "verification", `Verified ${articlesVerified} sources`);
+            traceBus.phaseStarted("SuperAgent", "export", "Generating Excel file");
+            currentPhase = "export";
+          }
+          traceBus.artifactCreated(
+            "SuperAgent", 
+            event.data?.type || "xlsx",
+            event.data?.name || "output.xlsx", 
+            event.data?.url || `/api/super/artifacts/${event.data?.id}/download`
+          );
+          break;
+        case "final":
+          if (!runCompleted) {
+            if (currentPhase === "export") {
+              traceBus.phaseCompleted("SuperAgent", "export", "Excel file generated");
+            }
+            traceBus.runCompleted("SuperAgent", "Research completed successfully", {
+              articles_collected: articlesCollected,
+              articles_verified: articlesVerified,
+              articles_accepted: articlesVerified,
+            });
+            currentPhase = "completed";
+            runCompleted = true;
+          }
+          break;
+        case "error":
+          if (!runCompleted) {
+            traceBus.runFailed("SuperAgent", event.data?.message || "Unknown error", {
+              error_code: "EXECUTION_ERROR",
+              fail_reason: event.data?.message,
+            });
+            runCompleted = true;
+          }
+          break;
+        case "heartbeat":
+          traceBus.heartbeat();
+          break;
+      }
       
       if (redisAvailable && redisClient) {
         try {
@@ -99,6 +207,7 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     
     req.on("close", () => {
       console.log(`[SuperAgent] Client disconnected: ${sessionId}`);
+      traceBus.destroy();
       if (redisClient?.isReady) {
         redisClient.quit().catch(() => {});
       }
@@ -114,7 +223,13 @@ router.post("/super/stream", async (req: Request, res: Response) => {
         data: { message: error.message, recoverable: false },
         session_id: sessionId,
       });
+      traceBus.runFailed("SuperAgent", error.message, {
+        error_code: "EXECUTION_ERROR",
+        fail_reason: error.message,
+      });
     }
+    
+    traceBus.destroy();
     
     if (redisClient?.isReady) {
       await redisClient.quit();
