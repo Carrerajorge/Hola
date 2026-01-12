@@ -2337,6 +2337,9 @@ export function MessageList({
   const internalParentRef = useRef<HTMLDivElement>(null);
   const scrollRef = parentRef || internalParentRef;
 
+  // Debug: Log activeRunId and variant for troubleshooting
+  console.log('[MessageList] Render check:', { activeRunId, variant, aiState, streamingContent: !!streamingContent });
+
   const shouldVirtualize = enableVirtualization && messages.length > VIRTUALIZATION_THRESHOLD && variant === "default";
 
   const virtualizer = useVirtualizer({
