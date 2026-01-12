@@ -109,8 +109,8 @@ export class SignalsPipeline extends EventEmitter {
       const results = await Promise.allSettled(
         batch.map(async (query, idx) => {
           try {
-            const searchResults = await searchWeb(query, this.config.resultsPerQuery);
-            return { query, results: searchResults, queryIndex: queriesCompleted + idx };
+            const searchResponse = await searchWeb(query, this.config.resultsPerQuery);
+            return { query, results: searchResponse.results || [], queryIndex: queriesCompleted + idx };
           } catch (error: any) {
             this.errors.push(`Query "${query}": ${error.message}`);
             return { query, results: [], queryIndex: queriesCompleted + idx };
@@ -119,19 +119,20 @@ export class SignalsPipeline extends EventEmitter {
       );
 
       for (const result of results) {
-        if (result.status === "fulfilled" && result.value.results) {
+        if (result.status === "fulfilled" && Array.isArray(result.value.results)) {
           for (const item of result.value.results) {
             if (this.signals.size >= this.config.targetCount) break;
 
-            const normalizedUrl = this.normalizeUrl(item.url || item.link || "");
+            const itemUrl = item.url || "";
+            const normalizedUrl = this.normalizeUrl(itemUrl);
             
             if (!this.signals.has(normalizedUrl) && normalizedUrl.startsWith("http")) {
               const signal: SourceSignal = {
                 id: randomUUID(),
-                url: item.url || item.link,
+                url: itemUrl,
                 title: item.title || "Untitled",
-                snippet: item.snippet || item.description || "",
-                domain: this.extractDomain(item.url || item.link || ""),
+                snippet: item.snippet || "",
+                domain: this.extractDomain(itemUrl),
                 score: this.calculateScore(item, result.value.queryIndex),
                 fetched: false,
               };

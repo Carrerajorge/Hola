@@ -75,10 +75,12 @@ router.post("/super/stream", async (req: Request, res: Response) => {
       enforceContract: options?.enforce_min_sources ?? true,
     });
     
+    let redisAvailable = redisClient?.isReady ?? false;
+    
     agent.on("sse", async (event: SSEEvent) => {
       sendSSE(event);
       
-      if (redisClient?.isReady) {
+      if (redisAvailable && redisClient) {
         try {
           const streamKey = `super:stream:${sessionId}`;
           await redisClient.xAdd(streamKey, "*", {
@@ -90,7 +92,7 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           
           await redisClient.expire(streamKey, 3600);
         } catch (e) {
-          console.warn("[SuperAgent] Failed to persist to Redis:", e);
+          redisAvailable = false;
         }
       }
     });
@@ -171,7 +173,7 @@ router.get("/super/stream/:sessionId/replay", async (req: Request, res: Response
   }
 });
 
-router.get("/artifacts", async (req: Request, res: Response) => {
+router.get("/super/artifacts", async (req: Request, res: Response) => {
   try {
     const artifacts = listArtifacts();
     res.json({ artifacts });
@@ -180,7 +182,7 @@ router.get("/artifacts", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/artifacts/:id", async (req: Request, res: Response) => {
+router.get("/super/artifacts/:id", async (req: Request, res: Response) => {
   try {
     const meta = getArtifactMeta(req.params.id);
     if (!meta) {
@@ -192,7 +194,7 @@ router.get("/artifacts/:id", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/artifacts/:id/download", async (req: Request, res: Response) => {
+router.get("/super/artifacts/:id/download", async (req: Request, res: Response) => {
   try {
     const artifact = await getArtifact(req.params.id);
     if (!artifact) {

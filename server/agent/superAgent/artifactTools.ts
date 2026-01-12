@@ -127,7 +127,7 @@ export async function createXlsx(spec: XlsxSpec): Promise<ArtifactMeta> {
     type: "xlsx",
     name: filename,
     path: filepath,
-    downloadUrl: `/api/artifacts/${id}/download`,
+    downloadUrl: `/api/super/artifacts/${id}/download`,
     size: stats.size,
     createdAt: Date.now(),
   };
@@ -244,7 +244,7 @@ export async function createDocx(spec: DocxSpec): Promise<ArtifactMeta> {
     type: "docx",
     name: filename,
     path: filepath,
-    downloadUrl: `/api/artifacts/${id}/download`,
+    downloadUrl: `/api/super/artifacts/${id}/download`,
     size: stats.size,
     createdAt: Date.now(),
   };

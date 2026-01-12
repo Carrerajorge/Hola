@@ -159,9 +159,10 @@ export class SuperAgentOrchestrator extends EventEmitter {
     this.state.phase = "signals";
     this.emitSSE("progress", { phase: "signals", status: "starting" });
     
-    const queries = this.state.contract.parsed_entities.length > 0
-      ? this.state.contract.parsed_entities
-      : [this.state.contract.original_prompt.substring(0, 100)];
+    const researchDecision = shouldResearch(this.state.contract.original_prompt);
+    const queries = researchDecision.searchQueries.length > 0
+      ? researchDecision.searchQueries
+      : [this.extractSearchTopic(this.state.contract.original_prompt)];
     
     const targetCount = this.state.contract.requirements.min_sources || 100;
     
@@ -564,6 +565,33 @@ export class SuperAgentOrchestrator extends EventEmitter {
     }
     
     return parts.join("");
+  }
+
+  private extractSearchTopic(prompt: string): string {
+    const stopWords = new Set([
+      "dame", "give", "quiero", "want", "necesito", "need", "crea", "create",
+      "genera", "generate", "busca", "search", "investiga", "research",
+      "información", "information", "sobre", "about", "con", "with",
+      "me", "un", "una", "el", "la", "los", "las", "de", "del", "y", "and",
+      "fuentes", "sources", "referencias", "mínimo", "minimum", "favor", "por"
+    ]);
+    
+    const cleaned = prompt
+      .replace(/\s*\d+\s*(fuentes?|sources?|referencias?).*$/i, "")
+      .replace(/^(dame|give me|quiero|want|necesito|need|crea|create|genera|generate|busca|search|investiga|research)\s+/i, "")
+      .replace(/\s+(información|information)\s+(sobre|about|de|del)\s+/gi, " ")
+      .trim();
+    
+    const words = cleaned.split(/\s+/).filter(word => {
+      const lowerWord = word.toLowerCase().replace(/[.,!?:;]/g, "");
+      return lowerWord.length > 2 && !stopWords.has(lowerWord);
+    });
+    
+    if (words.length >= 2) {
+      return words.join(" ").substring(0, 100);
+    }
+    
+    return cleaned.substring(0, 100) || prompt.substring(0, 100);
   }
 
   getState(): ExecutionState | null {

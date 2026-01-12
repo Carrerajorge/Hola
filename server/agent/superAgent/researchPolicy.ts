@@ -72,21 +72,64 @@ export function extractSearchQueries(prompt: string): string[] {
   const aboutPattern = /(?:sobre|about|acerca de|regarding)\s+([^,.!?]+)/gi;
   let match;
   while ((match = aboutPattern.exec(prompt)) !== null) {
-    queries.push(match[1].trim());
-  }
-  
-  if (queries.length === 0) {
-    const cleaned = prompt
-      .replace(/^(dame|give me|quiero|want|necesito|need|crea|create|genera|generate|busca|search|investiga|research)\s*/i, '')
+    const extracted = match[1]
       .replace(/\s*(con|with)\s*\d+\s*(fuentes?|sources?|referencias?).*$/i, '')
+      .replace(/\s+(y|and)\s+(crea|genera|create|generate).*$/i, '')
       .trim();
-    
-    if (cleaned.length > 5 && cleaned.length < 200) {
-      queries.push(cleaned);
+    if (extracted.length > 3) {
+      queries.push(extracted);
     }
   }
   
-  return queries.slice(0, 5);
+  if (queries.length === 0) {
+    const topicPatterns = [
+      /(?:investiga|research|busca|search|encuentra|find)\s+(?:el|la|los|las|the)?\s*([^,.!?]+?)(?:\s+(?:y|and)\s+(?:crea|genera|create|generate)|$)/i,
+      /(?:dame|give me)\s+(?:información|information|datos|data)\s+(?:sobre|about|de|del)\s+([^,.!?]+)/i,
+    ];
+    
+    for (const pattern of topicPatterns) {
+      const topicMatch = prompt.match(pattern);
+      if (topicMatch && topicMatch[1]) {
+        const topic = topicMatch[1]
+          .replace(/\s*\d+\s*(fuentes?|sources?|referencias?).*$/i, '')
+          .replace(/\s*(con|with)\s*\d+.*$/i, '')
+          .trim();
+        if (topic.length > 3) {
+          queries.push(topic);
+          break;
+        }
+      }
+    }
+  }
+  
+  if (queries.length === 0) {
+    const stopWords = new Set([
+      "dame", "give", "quiero", "want", "necesito", "need", "crea", "create",
+      "genera", "generate", "busca", "search", "investiga", "research",
+      "información", "information", "me", "un", "una", "el", "la", "los", "las",
+      "de", "del", "y", "and", "fuentes", "sources", "referencias", "mínimo",
+      "minimum", "favor", "por", "con", "with", "excel", "word", "documento"
+    ]);
+    
+    let cleaned = prompt
+      .replace(/^(dame|give me|quiero|want|necesito|need|crea|create|genera|generate|busca|search|investiga|research)\s+/i, '')
+      .replace(/\s+(información|information)\s+(sobre|about|de|del)\s+/gi, ' ')
+      .replace(/\s*\d+\s*(fuentes?|sources?|referencias?).*$/i, '')
+      .replace(/\s*(con|with)\s*\d+.*$/i, '')
+      .replace(/\s+(y|and)\s+(crea|genera|create|generate).*$/i, '')
+      .trim();
+    
+    const words = cleaned.split(/\s+/).filter(word => {
+      const lowerWord = word.toLowerCase().replace(/[.,!?:;]/g, "");
+      return lowerWord.length > 2 && !stopWords.has(lowerWord);
+    });
+    
+    if (words.length >= 1) {
+      queries.push(words.join(" "));
+    }
+  }
+  
+  return queries.filter(q => q.length > 2).slice(0, 5);
 }
 
 export function shouldResearch(prompt: string): ResearchDecision {
