@@ -24,6 +24,11 @@ const RESEARCH_TRIGGERS = [
   /\b(análisis|analysis|estudio|study|informe|report)\b/i,
   /\b(\d+\s*(fuentes?|sources?|referencias?))\b/i,
   /\b(mínimo|mínimas?|at least|minimum)\s*\d+/i,
+  /\b(artículos?|articulos?|papers?)\s*(científicos?|cientificos?|académicos?|academicos?)?\b/i,
+  /\b(scopus|web of science|wos|pubmed|scholar)\b/i,
+  /\b(revisión sistemática|revision sistematica|systematic review)\b/i,
+  /\b(literatura científica|scientific literature)\b/i,
+  /\b(\d+)\s*(artículos?|articulos?|papers?)\b/i,
 ];
 
 const EXTERNAL_DATA_TRIGGERS = [
@@ -41,7 +46,7 @@ const NO_RESEARCH_PATTERNS = [
   /\b(solo|only|únicamente)\s*(formato|format|estilo|style)\b/i,
 ];
 
-const SOURCE_COUNT_PATTERN = /(\d+)\s*(fuentes?|sources?|referencias?|references?)/i;
+const SOURCE_COUNT_PATTERN = /(\d+)\s*(fuentes?|sources?|referencias?|references?|artículos?|articulos?|papers?)/i;
 const MIN_PATTERN = /mínimo\s*(\d+)|at least\s*(\d+)|minimum\s*(\d+)/i;
 
 export function extractSourceRequirement(prompt: string): number {

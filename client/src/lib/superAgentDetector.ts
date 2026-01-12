@@ -49,6 +49,18 @@ const RESEARCH_KEYWORDS_ES = [
   "super agente",
   "superagente",
   "modo investigación",
+  "artículos científicos",
+  "articulos cientificos",
+  "papers científicos",
+  "papers cientificos",
+  "artículos académicos",
+  "articulos academicos",
+  "literatura científica",
+  "revisión sistemática",
+  "revision sistematica",
+  "scopus",
+  "web of science",
+  "wos",
 ];
 
 const RESEARCH_KEYWORDS_EN = [

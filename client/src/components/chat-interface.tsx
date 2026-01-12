@@ -3181,14 +3181,15 @@ export function ChatInterface({
       setAiState("thinking");
       
       try {
-        const response = await fetch("/api/super-agent/stream", {
+        const response = await fetch("/api/super/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: userInput,
-            chatId: chatId || "",
-            messageId: superAgentMessageId,
-            enforceMinSources: true,
+            session_id: superAgentMessageId,
+            options: {
+              enforce_min_sources: true,
+            },
           }),
         });
         
@@ -3204,6 +3205,7 @@ export function ChatInterface({
         const decoder = new TextDecoder();
         let buffer = "";
         let finalResult: SuperAgentFinal | null = null;
+        let currentEventType = "";
         
         while (true) {
           const { done, value } = await reader.read();
@@ -3214,14 +3216,15 @@ export function ChatInterface({
           buffer = lines.pop() || "";
           
           for (const line of lines) {
-            if (line.startsWith("data: ")) {
+            if (line.startsWith("event: ")) {
+              currentEventType = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
               const jsonStr = line.slice(6);
               if (jsonStr === "[DONE]") continue;
               
               try {
-                const event = JSON.parse(jsonStr);
-                const eventType = event.type;
-                const eventData = event.data;
+                const eventData = JSON.parse(jsonStr);
+                const eventType = currentEventType || eventData.type;
                 
                 // Update store based on event type
                 const currentState = useSuperAgentStore.getState().runs[superAgentMessageId];
