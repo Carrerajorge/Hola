@@ -2608,70 +2608,72 @@ export function MessageList({
         </motion.div>
       )}
 
-      {aiState !== "idle" && !streamingContent && variant === "default" && (
-        activeRunId ? (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
-          >
-            <LiveExecutionConsole 
-              runId={activeRunId}
-              onComplete={onRunComplete}
-              className="flex-1"
-            />
-          </motion.div>
-        ) : (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
-          >
-            <div className="flex items-center gap-3 py-3 px-5 text-sm text-muted-foreground bg-gradient-to-r from-muted/40 to-muted/20 rounded-2xl border border-border/30 shadow-sm">
-              <div className="flex gap-1.5">
-                <motion.span
-                  className="w-2.5 h-2.5 bg-primary rounded-full"
-                  animate={{ 
-                    scale: [1, 1.2, 1],
-                    opacity: [0.5, 1, 0.5] 
-                  }}
-                  transition={{ 
-                    duration: 1,
-                    repeat: Infinity,
-                    delay: 0 
-                  }}
-                />
-                <motion.span
-                  className="w-2.5 h-2.5 bg-primary rounded-full"
-                  animate={{ 
-                    scale: [1, 1.2, 1],
-                    opacity: [0.5, 1, 0.5] 
-                  }}
-                  transition={{ 
-                    duration: 1,
-                    repeat: Infinity,
-                    delay: 0.2 
-                  }}
-                />
-                <motion.span
-                  className="w-2.5 h-2.5 bg-primary rounded-full"
-                  animate={{ 
-                    scale: [1, 1.2, 1],
-                    opacity: [0.5, 1, 0.5] 
-                  }}
-                  transition={{ 
-                    duration: 1,
-                    repeat: Infinity,
-                    delay: 0.4 
-                  }}
-                />
-              </div>
-              <span className="font-medium text-foreground/80">
-                {aiState === "thinking" ? "Pensando..." : "Escribiendo..."}
-              </span>
+      {/* Super Agent Live Execution Console - ALWAYS show when activeRunId exists */}
+      {activeRunId && variant === "default" && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
+        >
+          <LiveExecutionConsole 
+            runId={activeRunId}
+            onComplete={onRunComplete}
+            className="flex-1"
+          />
+        </motion.div>
+      )}
+
+      {/* Regular thinking/responding spinner - only when no Super Agent active */}
+      {aiState !== "idle" && !streamingContent && variant === "default" && !activeRunId && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
+        >
+          <div className="flex items-center gap-3 py-3 px-5 text-sm text-muted-foreground bg-gradient-to-r from-muted/40 to-muted/20 rounded-2xl border border-border/30 shadow-sm">
+            <div className="flex gap-1.5">
+              <motion.span
+                className="w-2.5 h-2.5 bg-primary rounded-full"
+                animate={{ 
+                  scale: [1, 1.2, 1],
+                  opacity: [0.5, 1, 0.5] 
+                }}
+                transition={{ 
+                  duration: 1,
+                  repeat: Infinity,
+                  delay: 0 
+                }}
+              />
+              <motion.span
+                className="w-2.5 h-2.5 bg-primary rounded-full"
+                animate={{ 
+                  scale: [1, 1.2, 1],
+                  opacity: [0.5, 1, 0.5] 
+                }}
+                transition={{ 
+                  duration: 1,
+                  repeat: Infinity,
+                  delay: 0.2 
+                }}
+              />
+              <motion.span
+                className="w-2.5 h-2.5 bg-primary rounded-full"
+                animate={{ 
+                  scale: [1, 1.2, 1],
+                  opacity: [0.5, 1, 0.5] 
+                }}
+                transition={{ 
+                  duration: 1,
+                  repeat: Infinity,
+                  delay: 0.4 
+                }}
+              />
             </div>
-          </motion.div>
-        )
+            <span className="font-medium text-foreground/80">
+              {aiState === "thinking" ? "Pensando..." : "Escribiendo..."}
+            </span>
+          </div>
+        </motion.div>
       )}
     </>
   );
