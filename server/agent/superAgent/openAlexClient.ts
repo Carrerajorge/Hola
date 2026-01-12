@@ -101,12 +101,52 @@ const COUNTRY_CODES: Record<string, string> = {
   "LK": "Sri Lanka", "IE": "Ireland", "AE": "United Arab Emirates",
 };
 
+const COUNTRY_NAMES_PATTERN = /\b(United States|USA|U\.S\.A\.|United Kingdom|UK|England|China|P\.R\. China|Germany|France|Japan|Brazil|Brasil|India|Australia|Canada|Italy|Italia|Spain|España|Mexico|México|Netherlands|South Korea|Korea|Iran|Turkey|Egypt|Saudi Arabia|Malaysia|Indonesia|Thailand|Portugal|Poland|Russia|Pakistan|Nigeria|South Africa|Colombia|Chile|Argentina|Peru|Vietnam|Philippines|Taiwan|Singapore|Hong Kong|Greece|Sweden|Norway|Denmark|Finland|Belgium|Switzerland|Austria|Czech Republic|Czechia|Hungary|Romania|Ukraine|Israel|Iraq|Jordan|Lebanon|Morocco|Algeria|Tunisia|New Zealand|Bangladesh|Sri Lanka|Ireland|United Arab Emirates|UAE)\b/i;
+
+function extractCountryFromText(text: string): string {
+  const match = text.match(COUNTRY_NAMES_PATTERN);
+  if (match) {
+    const found = match[1].toLowerCase();
+    if (found === "usa" || found === "u.s.a." || found === "united states") return "United States";
+    if (found === "uk" || found === "england" || found === "united kingdom") return "United Kingdom";
+    if (found === "p.r. china") return "China";
+    if (found === "brasil") return "Brazil";
+    if (found === "italia") return "Italy";
+    if (found === "españa") return "Spain";
+    if (found === "méxico") return "Mexico";
+    if (found === "korea" || found === "south korea") return "South Korea";
+    if (found === "czechia") return "Czech Republic";
+    if (found === "uae") return "United Arab Emirates";
+    return match[1];
+  }
+  return "";
+}
+
+function extractCityFromText(text: string): string {
+  const parts = text.split(/[,;]/);
+  if (parts.length >= 2) {
+    const possibleCity = parts[parts.length - 2].trim();
+    if (possibleCity.length > 2 && possibleCity.length < 40 && !/^\d/.test(possibleCity) && !/university|institute|college|department|school|faculty|center|centre/i.test(possibleCity)) {
+      return possibleCity;
+    }
+  }
+  return "";
+}
+
 function extractCountryFromAffiliations(authorships: OpenAlexWork["authorships"]): string {
   for (const auth of authorships) {
     for (const inst of auth.institutions) {
       if (inst.country_code) {
         return COUNTRY_CODES[inst.country_code.toUpperCase()] || inst.country_code;
       }
+      const fromText = extractCountryFromText(inst.display_name);
+      if (fromText) return fromText;
+    }
+  }
+  for (const auth of authorships) {
+    for (const inst of auth.institutions) {
+      const fromText = extractCountryFromText(inst.display_name);
+      if (fromText) return fromText;
     }
   }
   return "Unknown";
@@ -118,6 +158,12 @@ function extractCityFromAffiliations(authorships: OpenAlexWork["authorships"]): 
       if (inst.city) {
         return inst.city;
       }
+    }
+  }
+  for (const auth of authorships) {
+    for (const inst of auth.institutions) {
+      const fromText = extractCityFromText(inst.display_name);
+      if (fromText) return fromText;
     }
   }
   return "Unknown";

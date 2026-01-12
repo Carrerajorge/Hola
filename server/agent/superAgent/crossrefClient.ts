@@ -1,7 +1,9 @@
 import { AcademicCandidate } from "./openAlexClient";
 
 const CROSSREF_WORKS_BASE = "https://api.crossref.org/works";
-const RATE_LIMIT_MS = 100;
+const RATE_LIMIT_MS = 200;
+const MAX_RETRIES = 3;
+const BACKOFF_BASE_MS = 1000;
 
 let lastRequestTime = 0;
 
@@ -12,6 +14,21 @@ async function rateLimit(): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_MS - elapsed));
   }
   lastRequestTime = Date.now();
+}
+
+async function fetchWithRetry(url: string, options: RequestInit, retries = MAX_RETRIES): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    await rateLimit();
+    const response = await fetch(url, options);
+    if (response.status === 429 && attempt < retries) {
+      const waitTime = BACKOFF_BASE_MS * Math.pow(2, attempt);
+      console.log(`[CrossRef] Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}/${retries}`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      continue;
+    }
+    return response;
+  }
+  throw new Error("Max retries exceeded");
 }
 
 export interface CrossRefWork {
@@ -129,15 +146,13 @@ function extractLocationFromAffiliations(affiliations: string[]): { city: string
 }
 
 export async function lookupDOI(doi: string): Promise<CrossRefMetadata | null> {
-  await rateLimit();
-
   const cleanDoi = doi.replace(/^https?:\/\/doi\.org\//, "");
   const url = `${CROSSREF_WORKS_BASE}/${encodeURIComponent(cleanDoi)}`;
   
   console.log(`[CrossRef] Looking up DOI: ${cleanDoi}`);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         "Accept": "application/json",
         "User-Agent": "IliaGPT/1.0 (mailto:research@iliagpt.com)",
@@ -145,7 +160,9 @@ export async function lookupDOI(doi: string): Promise<CrossRefMetadata | null> {
     });
 
     if (!response.ok) {
-      console.error(`[CrossRef] DOI lookup failed: ${response.status}`);
+      if (response.status !== 429) {
+        console.error(`[CrossRef] DOI lookup failed: ${response.status}`);
+      }
       return null;
     }
 

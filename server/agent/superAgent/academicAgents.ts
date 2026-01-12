@@ -269,7 +269,7 @@ export async function verifyCandidate(
 
 export async function verifyBatch(
   candidates: AcademicCandidate[],
-  maxConcurrency: number = 8,
+  maxConcurrency: number = 5,
   yearStart: number = 2020,
   yearEnd: number = 2025
 ): Promise<AcademicCandidate[]> {
@@ -364,7 +364,7 @@ export async function enrichBatch(candidates: AcademicCandidate[]): Promise<Acad
   for (const candidate of candidates) {
     const result = await enrichMetadata(candidate);
     enriched.push(result);
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 300));
   }
 
   return enriched;

@@ -380,6 +380,11 @@ async function exportToExcel(articles: AcademicCandidate[], topic: string, warni
     "Source",
   ];
 
+  let cityCount = 0;
+  let countryCount = 0;
+  let yearCount = 0;
+  let authorsCount = 0;
+
   const data: any[][] = articles.map((article) => {
     const authorsList = article.authors.length > 0 ? article.authors.join("; ") : "Unknown";
     const keywordsList = article.keywords.length > 0 ? article.keywords.join("; ") : "Unknown";
@@ -388,25 +393,36 @@ async function exportToExcel(articles: AcademicCandidate[], topic: string, warni
                        article.source === "crossref" ? "CrossRef" : 
                        article.source === "semanticscholar" ? "Semantic Scholar" : 
                        article.source || "Unknown";
+
+    const cityVal = article.city && article.city !== "Unknown" ? article.city : "Unknown";
+    const countryVal = article.country && article.country !== "Unknown" ? article.country : "Unknown";
+    const yearVal = article.year > 0 ? article.year : "Unknown";
+    
+    if (cityVal !== "Unknown") cityCount++;
+    if (countryVal !== "Unknown") countryCount++;
+    if (yearVal !== "Unknown") yearCount++;
+    if (article.authors.length > 0) authorsCount++;
     
     return [
       authorsList,
       article.title || "Unknown",
-      article.year > 0 ? article.year : "Unknown",
+      yearVal,
       article.journal || "Unknown",
       (article.abstract || "Unknown").substring(0, 2000),
       keywordsList,
       article.language || "English",
       article.documentType || "Article",
       article.doi || "Unknown",
-      article.city || "Unknown",
-      article.country || "Unknown",
+      cityVal,
+      countryVal,
       article.source === "scopus" ? "Yes" : "No",
       "No",
       accessUrl,
       sourceLabel,
     ];
   });
+
+  console.log(`[AcademicPipeline] Excel field stats: City=${cityCount}/${articles.length}, Country=${countryCount}/${articles.length}, Year=${yearCount}/${articles.length}, Authors=${authorsCount}/${articles.length}`);
 
   const safeTitle = topic
     .replace(/[^\w\s]/g, "")
