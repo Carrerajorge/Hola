@@ -20,6 +20,7 @@ import { agentEventBus } from "../agent/eventBus";
 import { createUnifiedRun, hydrateSessionState, emitTraceEvent } from "../agent/unifiedChatHandler";
 import type { UnifiedChatRequest, UnifiedChatContext } from "../agent/unifiedChatHandler";
 import { createRequestSpec, AttachmentSpecSchema } from "../agent/requestSpec";
+import { routeIntent, type IntentResult } from "../services/intentRouter";
 import type { z } from "zod";
 
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
@@ -476,6 +477,17 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
       const userMessageText = lastUserMessage?.content || '';
 
+      // Run Intent Router FIRST for NLU-based intent classification
+      let intentResult: IntentResult | null = null;
+      if (userMessageText) {
+        try {
+          intentResult = await routeIntent(userMessageText);
+          console.log(`[Stream] IntentRouter: intent=${intentResult.intent}, confidence=${intentResult.confidence.toFixed(2)}, format=${intentResult.output_format || 'none'}`);
+        } catch (intentError) {
+          console.error('[Stream] IntentRouter error:', intentError);
+        }
+      }
+
       // Resolve storagePaths for all attachments first (before PARE routing)
       // This ensures PARE has valid paths for routing decisions
       const resolvedAttachments: any[] = [];
@@ -582,7 +594,32 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         res.setHeader("X-Primary-Agent", unifiedContext.requestSpec.primaryAgent);
         res.setHeader("X-Agentic-Mode", String(unifiedContext.isAgenticMode));
       }
+      if (intentResult) {
+        res.setHeader("X-NLU-Intent", intentResult.intent);
+        res.setHeader("X-NLU-Confidence", String(intentResult.confidence.toFixed(2)));
+        res.setHeader("X-NLU-Format", intentResult.output_format || "none");
+      }
       res.flushHeaders();
+
+      // Emit NLU intent result as SSE event for frontend visibility
+      if (intentResult) {
+        writeSse(res, "intent", {
+          intent: intentResult.intent,
+          confidence: intentResult.confidence,
+          output_format: intentResult.output_format,
+          slots: intentResult.slots,
+          matched_patterns: intentResult.matched_patterns
+        });
+        
+        // If clarification needed, emit immediately so UI can prompt user
+        if (intentResult.intent === 'NEED_CLARIFICATION' && intentResult.clarification_question) {
+          writeSse(res, "clarification", {
+            question: intentResult.clarification_question,
+            confidence: intentResult.confidence
+          });
+          console.log(`[Stream] Emitted clarification request: "${intentResult.clarification_question}"`);
+        }
+      }
 
       req.on("close", () => {
         isConnectionClosed = true;
