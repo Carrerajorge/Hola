@@ -1,32 +1,26 @@
-"""FastAPI SSE Backend for IliaGPT - Production-ready with Redis and Celery."""
+"""FastAPI SSE Backend for Agent Tracing - Production-ready with Redis Streams."""
+import asyncio
 import time
 import uuid
-from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
+
+from pathlib import Path
 
 from fastapi import FastAPI, Request, Query, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import structlog
 
 from .config import get_settings, Settings
-from .redis_client import (
-    redis_manager,
-    get_session_manager,
-    get_event_publisher,
-    SessionManager,
-    EventPublisher
-)
-from .schemas import (
-    ChatRequest,
-    SessionState,
-    HealthResponse,
-    ErrorResponse
-)
-from .sse import create_sse_response
-from .rate_limiter import RateLimitMiddleware, RateLimiter
-from .celery_app import celery_app
+from .redis_client import redis_manager
+from .routes import stream_router, chat_router, health_router, metrics_router
+from .session import get_session_manager, SessionManager
+from .observability import get_telemetry, get_prometheus_metrics
+from .middleware import RateLimitMiddleware, AuthMiddleware, RequestIDMiddleware
+from .circuit_breaker import get_circuit_registry, get_redis_circuit, get_celery_circuit
+from .backpressure import get_backpressure_manager
 
 structlog.configure(
     processors=[
@@ -53,8 +47,19 @@ START_TIME = time.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan management."""
-    logger.info("application_starting")
+    """
+    Application lifespan management.
+    
+    Handles startup and shutdown of:
+    - Redis connection pools
+    - Background tasks
+    """
+    logger.info("application_starting", version="1.0.0")
+    
+    telemetry = get_telemetry()
+    telemetry.setup()
+    telemetry.instrument_redis()
+    logger.info("telemetry_initialized")
     
     try:
         await redis_manager.initialize()
@@ -66,17 +71,28 @@ async def lifespan(app: FastAPI):
     
     logger.info("application_shutting_down")
     await redis_manager.close()
+    logger.info("application_stopped")
 
 
 def create_app() -> FastAPI:
-    """Create and configure the FastAPI application."""
+    """
+    Create and configure the FastAPI application.
+    
+    Sets up:
+    - CORS middleware for cross-origin requests
+    - Request ID middleware for tracing
+    - Route modules for different functionality
+    """
     settings = get_settings()
     
     app = FastAPI(
         title=settings.app_name,
         version="1.0.0",
-        description="Scalable SSE streaming backend for IliaGPT with Redis state and Celery workers",
-        lifespan=lifespan
+        description="Production-grade SSE streaming backend for agent tracing with Redis Streams",
+        lifespan=lifespan,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json"
     )
     
     app.add_middleware(
@@ -85,13 +101,32 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[
+            "X-Request-ID",
+            "Last-Event-ID",
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "X-RateLimit-Reset",
+            "Retry-After"
+        ]
     )
     
-    app.add_middleware(
-        RateLimitMiddleware,
-        limiter=RateLimiter(),
-        exclude_paths=["/health", "/ready", "/metrics", "/docs", "/openapi.json"]
-    )
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(AuthMiddleware)
+    app.add_middleware(RequestIDMiddleware)
+    
+    app.include_router(health_router)
+    app.include_router(stream_router)
+    app.include_router(chat_router)
+    app.include_router(metrics_router)
+    
+    static_dir = Path(__file__).parent.parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
+        logger.info("static_files_mounted", path=str(static_dir))
+    
+    telemetry = get_telemetry()
+    telemetry.instrument_fastapi(app)
     
     return app
 
@@ -99,159 +134,87 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content=ErrorResponse(
-            error=exc.detail,
-            request_id=getattr(request.state, "request_id", None)
-        ).model_dump()
-    )
-
-
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
+    """
+    Add unique request ID to each request for tracing.
+    
+    Uses X-Request-ID header if provided, otherwise generates UUID.
+    Request ID is available via request.state.request_id.
+    """
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.request_id = request_id
+    
+    start_time = time.time()
+    
     response = await call_next(request)
+    
+    duration_ms = (time.time() - start_time) * 1000
     response.headers["X-Request-ID"] = request_id
+    response.headers["X-Response-Time"] = f"{duration_ms:.2f}ms"
+    
+    if request.url.path not in ["/healthz", "/readyz", "/docs", "/openapi.json"]:
+        logger.info(
+            "request_completed",
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=round(duration_ms, 2)
+        )
+    
     return response
 
 
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def health_check():
-    """Liveness probe - is the service running?"""
-    import concurrent.futures
-    
-    redis_ok = False
-    celery_ok = False
-    
-    try:
-        client = await redis_manager.get_client()
-        await client.ping()
-        redis_ok = True
-    except Exception:
-        pass
-    
-    def check_celery_sync():
-        """Check Celery in a thread to avoid blocking the event loop."""
-        try:
-            from .celery_app import celery_app
-            inspect = celery_app.control.inspect()
-            ping_result = inspect.ping()
-            return ping_result is not None and len(ping_result) > 0
-        except Exception:
-            return False
-    
-    try:
-        loop = asyncio.get_event_loop()
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            celery_ok = await asyncio.wait_for(
-                loop.run_in_executor(pool, check_celery_sync),
-                timeout=3.0
-            )
-    except asyncio.TimeoutError:
-        celery_ok = False
-    except Exception:
-        celery_ok = False
-    
-    status = "healthy" if redis_ok else "unhealthy"
-    if redis_ok and not celery_ok:
-        status = "degraded"
-    
-    return HealthResponse(
-        status=status,
-        version="1.0.0",
-        redis=redis_ok,
-        celery=celery_ok,
-        uptime_seconds=time.time() - START_TIME
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions with consistent error format."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail,
+            "status_code": exc.status_code,
+            "request_id": getattr(request.state, "request_id", None)
+        }
     )
 
 
-@app.get("/ready", tags=["Health"])
-async def readiness_check():
-    """Readiness probe - is the service ready to accept traffic?"""
-    try:
-        client = await redis_manager.get_client()
-        await client.ping()
-        return {"status": "ready"}
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Not ready: {str(e)}")
-
-
-@app.get("/chat/stream", tags=["Chat"])
-async def chat_stream(
-    request: Request,
-    session_id: str = Query(..., description="Session ID for the chat"),
-    session_manager: SessionManager = Depends(get_session_manager)
-):
-    """
-    Stream chat events via SSE.
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle unexpected exceptions with logging."""
+    request_id = getattr(request.state, "request_id", None)
     
-    Returns text/event-stream with:
-    - connected: Initial connection confirmation
-    - trace: Intermediate processing events
-    - final: Final result
-    - error: Error events
-    - heartbeat: Keep-alive pings
-    """
-    session = await session_manager.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    logger.info("sse_connection_opened", session_id=session_id)
-    
-    return create_sse_response(session_id, request)
-
-
-@app.post("/chat/start", tags=["Chat"])
-async def start_chat(
-    chat_request: ChatRequest,
-    session_id: Optional[str] = Query(None, description="Existing session ID or new one will be created"),
-    session_manager: SessionManager = Depends(get_session_manager),
-    event_publisher: EventPublisher = Depends(get_event_publisher)
-):
-    """
-    Start a new chat message processing.
-    
-    Creates or updates session and queues the agent task for processing.
-    Returns session_id to use for streaming events.
-    """
-    if not session_id:
-        session_id = str(uuid.uuid4())
-    
-    session_state = SessionState(
-        session_id=session_id,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-        status="processing",
-        context=chat_request.context or {}
+    logger.exception(
+        "unhandled_exception",
+        request_id=request_id,
+        path=request.url.path,
+        error=str(exc)
     )
     
-    await session_manager.set(session_id, session_state.model_dump(mode="json"))
-    
-    from .workers.agent_tasks import execute_agent
-    task = execute_agent.delay(
-        session_id=session_id,
-        message=chat_request.message,
-        context=chat_request.context,
-        model=chat_request.model
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "request_id": request_id
+        }
     )
-    
-    await session_manager.update(session_id, {"task_id": task.id})
-    
-    logger.info(
-        "chat_started",
-        session_id=session_id,
-        task_id=task.id,
-        message_length=len(chat_request.message)
-    )
-    
+
+
+@app.get("/", tags=["Root"])
+async def root():
+    """Root endpoint with API information."""
     return {
-        "session_id": session_id,
-        "task_id": task.id,
-        "stream_url": f"/chat/stream?session_id={session_id}"
+        "service": "Agent Tracing SSE API",
+        "version": "1.0.0",
+        "uptime_seconds": round(time.time() - START_TIME, 2),
+        "endpoints": {
+            "stream": "GET /chat/stream?session_id=...&prompt=...",
+            "chat": "POST /chat",
+            "health": "GET /healthz",
+            "ready": "GET /readyz",
+            "docs": "GET /docs",
+            "test_client": "GET /static/index.html"
+        }
     }
 
 
@@ -282,14 +245,55 @@ async def delete_session(
 
 @app.get("/metrics", tags=["Monitoring"])
 async def get_metrics():
-    """Prometheus-compatible metrics endpoint."""
+    """
+    Prometheus-compatible metrics endpoint.
+    
+    Returns basic service metrics for monitoring.
+    """
     uptime = time.time() - START_TIME
+    
+    backpressure = get_backpressure_manager()
+    circuit_registry = get_circuit_registry()
     
     return {
         "uptime_seconds": uptime,
-        "service": "iliagpt-sse",
-        "version": "1.0.0"
+        "service": "agent-tracing-sse",
+        "version": "1.0.0",
+        "start_time": START_TIME,
+        "backpressure": backpressure.get_metrics(),
+        "circuit_breakers": circuit_registry.get_all_status()
     }
+
+
+@app.get("/circuit-breakers", tags=["Monitoring"])
+async def get_circuit_breakers():
+    """Get status of all circuit breakers."""
+    redis_cb = get_redis_circuit()
+    celery_cb = get_celery_circuit()
+    
+    return {
+        "redis": redis_cb.get_status(),
+        "celery": celery_cb.get_status()
+    }
+
+
+@app.post("/circuit-breakers/{name}/reset", tags=["Monitoring"])
+async def reset_circuit_breaker(name: str):
+    """Reset a specific circuit breaker to closed state."""
+    if name == "redis":
+        await get_redis_circuit().reset()
+    elif name == "celery":
+        await get_celery_circuit().reset()
+    else:
+        raise HTTPException(status_code=404, detail=f"Circuit breaker '{name}' not found")
+    
+    return {"reset": True, "name": name}
+
+
+@app.get("/backpressure", tags=["Monitoring"])
+async def get_backpressure_status():
+    """Get backpressure metrics for all SSE connections."""
+    return get_backpressure_manager().get_metrics()
 
 
 if __name__ == "__main__":

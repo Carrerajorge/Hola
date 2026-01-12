@@ -9,7 +9,7 @@ worker_class = "uvicorn.workers.UvicornWorker"
 worker_connections = 1000
 
 timeout = 120
-keepalive = 5
+keepalive = 65
 graceful_timeout = 30
 
 max_requests = 1000
@@ -38,3 +38,19 @@ def worker_int(worker):
 def worker_abort(worker):
     """Called when a worker receives SIGABRT."""
     worker.log.info("Worker received ABRT signal")
+
+def pre_fork(server, worker):
+    """Called just before a worker is forked."""
+    pass
+
+def post_fork(server, worker):
+    """Called just after a worker has been forked."""
+    pass
+
+def pre_exec(server):
+    """Called just before a new master process is forked."""
+    pass
+
+def child_exit(server, worker):
+    """Called in the master process when a worker exits."""
+    pass
