@@ -51,6 +51,8 @@ export interface CrossRefMetadata {
   url: string;
   publisher: string;
   affiliations: string[];
+  city: string;
+  country: string;
 }
 
 function extractYear(work: CrossRefWork): number {
@@ -69,6 +71,61 @@ function cleanAbstract(abstract: string | undefined): string {
     .replace(/<[^>]+>/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const COUNTRY_PATTERNS: Record<string, string> = {
+  "usa": "United States", "u.s.a.": "United States", "united states": "United States",
+  "uk": "United Kingdom", "u.k.": "United Kingdom", "united kingdom": "United Kingdom", "england": "United Kingdom",
+  "china": "China", "p.r. china": "China", "pr china": "China",
+  "germany": "Germany", "deutschland": "Germany",
+  "france": "France", "japan": "Japan", "brazil": "Brazil", "brasil": "Brazil",
+  "india": "India", "australia": "Australia", "canada": "Canada",
+  "italy": "Italy", "italia": "Italy", "spain": "Spain", "españa": "Spain",
+  "mexico": "Mexico", "méxico": "Mexico", "netherlands": "Netherlands",
+  "south korea": "South Korea", "korea": "South Korea", "republic of korea": "South Korea",
+  "iran": "Iran", "turkey": "Turkey", "egypt": "Egypt", "saudi arabia": "Saudi Arabia",
+  "malaysia": "Malaysia", "indonesia": "Indonesia", "thailand": "Thailand",
+  "portugal": "Portugal", "poland": "Poland", "russia": "Russia",
+  "pakistan": "Pakistan", "nigeria": "Nigeria", "south africa": "South Africa",
+  "colombia": "Colombia", "chile": "Chile", "argentina": "Argentina", "peru": "Peru",
+  "vietnam": "Vietnam", "philippines": "Philippines", "taiwan": "Taiwan",
+  "singapore": "Singapore", "hong kong": "Hong Kong", "greece": "Greece",
+  "sweden": "Sweden", "norway": "Norway", "denmark": "Denmark", "finland": "Finland",
+  "belgium": "Belgium", "switzerland": "Switzerland", "austria": "Austria",
+  "czech republic": "Czech Republic", "czechia": "Czech Republic",
+  "hungary": "Hungary", "romania": "Romania", "ukraine": "Ukraine",
+  "israel": "Israel", "iraq": "Iraq", "jordan": "Jordan", "lebanon": "Lebanon",
+  "morocco": "Morocco", "algeria": "Algeria", "tunisia": "Tunisia",
+  "new zealand": "New Zealand", "bangladesh": "Bangladesh", "sri lanka": "Sri Lanka",
+};
+
+function extractLocationFromAffiliations(affiliations: string[]): { city: string; country: string } {
+  let city = "Unknown";
+  let country = "Unknown";
+
+  for (const aff of affiliations) {
+    const lower = aff.toLowerCase();
+    
+    for (const [pattern, countryName] of Object.entries(COUNTRY_PATTERNS)) {
+      if (lower.includes(pattern)) {
+        country = countryName;
+        break;
+      }
+    }
+    
+    if (country !== "Unknown") {
+      const parts = aff.split(/[,;]/);
+      if (parts.length >= 2) {
+        const possibleCity = parts[parts.length - 2].trim();
+        if (possibleCity.length > 2 && possibleCity.length < 50 && !/^\d/.test(possibleCity)) {
+          city = possibleCity;
+        }
+      }
+      break;
+    }
+  }
+
+  return { city, country };
 }
 
 export async function lookupDOI(doi: string): Promise<CrossRefMetadata | null> {
@@ -99,7 +156,9 @@ export async function lookupDOI(doi: string): Promise<CrossRefMetadata | null> {
 
     const authors = (work.author || []).map(a => {
       if (a.name) return a.name;
-      return [a.family, a.given].filter(Boolean).join(", ");
+      const given = a.given || "";
+      const family = a.family || "";
+      return [given, family].filter(Boolean).join(" ").trim();
     }).filter(Boolean);
 
     const affiliations: string[] = [];
@@ -110,6 +169,8 @@ export async function lookupDOI(doi: string): Promise<CrossRefMetadata | null> {
         }
       }
     }
+
+    const { city, country } = extractLocationFromAffiliations(affiliations);
 
     return {
       doi: work.DOI,
@@ -125,6 +186,8 @@ export async function lookupDOI(doi: string): Promise<CrossRefMetadata | null> {
       url: work.URL || `https://doi.org/${work.DOI}`,
       publisher: "CrossRef",
       affiliations,
+      city,
+      country,
     };
   } catch (error: any) {
     console.error(`[CrossRef] Lookup error: ${error.message}`);

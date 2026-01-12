@@ -330,6 +330,8 @@ export async function enrichMetadata(candidate: AcademicCandidate): Promise<Acad
     keywords: metadata.keywords.length > 0 ? metadata.keywords : candidate.keywords,
     citationCount: metadata.citationCount || candidate.citationCount,
     affiliations: metadata.affiliations.length > 0 ? metadata.affiliations : candidate.affiliations,
+    city: metadata.city !== "Unknown" ? metadata.city : candidate.city,
+    country: metadata.country !== "Unknown" ? metadata.country : candidate.country,
   };
 }
 
