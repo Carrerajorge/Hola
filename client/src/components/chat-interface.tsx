@@ -87,7 +87,10 @@ import { detectFormIntent, extractMentionFromPrompt } from "@/lib/formIntentDete
 import { markdownToTipTap } from "@/lib/markdownToHtml";
 import { detectGmailIntent } from "@/lib/gmailIntentDetector";
 import { shouldAutoActivateAgent } from "@/lib/complexityDetector";
+import { shouldUseSuperAgent } from "@/lib/superAgentDetector";
 import { useAgentStore, useAgentRun, type AgentRunState } from "@/stores/agent-store";
+import { useSuperAgentStore } from "@/stores/super-agent-store";
+import { useSuperAgentStream, type SuperAgentState, type SuperAgentArtifact, type SuperAgentFinal } from "@/hooks/use-super-agent";
 import { useStartAgentRun, useCancelAgentRun, useAgentPolling, abortPendingAgentStart } from "@/hooks/use-agent-polling";
 import { useStreamingStore } from "@/stores/streamingStore";
 import { DocumentPreviewPanel, type DocumentPreviewArtifact } from "@/components/document-preview-panel";
@@ -2316,6 +2319,25 @@ export function ChatInterface({
     }));
   }, []);
 
+  const handleSuperAgentCancel = useCallback((messageId: string) => {
+    const { updateState } = useSuperAgentStore.getState();
+    updateState(messageId, {
+      error: "Cancelado por el usuario",
+      phase: "error",
+      isRunning: false,
+    });
+    toast({ title: "Cancelado", description: "La investigación ha sido cancelada" });
+  }, [toast]);
+
+  const handleSuperAgentRetry = useCallback((messageId: string) => {
+    const run = useSuperAgentStore.getState().runs[messageId];
+    if (run?.contract?.original_prompt) {
+      useSuperAgentStore.getState().clearRun(messageId);
+      setInput(run.contract.original_prompt);
+      toast({ title: "Reintentar", description: "Envía el mensaje de nuevo para reintentar" });
+    }
+  }, [toast]);
+
   useEffect(() => {
     const handleRetryAgentRun = async (event: CustomEvent<{ messageId: string; userMessage: string }>) => {
       const { messageId, userMessage } = event.detail;
@@ -3101,6 +3123,218 @@ export function ChatInterface({
           userMessageId: userMsgId,
         };
         onSendMessage(errorMsg);
+      }
+      
+      setAiState("idle");
+      setAiProcessSteps([]);
+      return;
+    }
+    
+    // Check if this is a Super Agent research request with sources
+    const superAgentCheck = shouldUseSuperAgent(input);
+    if (superAgentCheck.use) {
+      console.log("[handleSubmit] Super Agent detected:", superAgentCheck.reason);
+      
+      const userInput = input;
+      const superAgentMessageId = `super-agent-${Date.now()}`;
+      
+      // Clear input immediately
+      setInput("");
+      if (chatId) {
+        clearDraft(chatId);
+      }
+      setUploadedFiles([]);
+      
+      // Create user message
+      const userMsgId = Date.now().toString();
+      const userMessage: Message = {
+        id: userMsgId,
+        role: "user",
+        content: userInput,
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+      };
+      
+      // Show user message immediately
+      setOptimisticMessages(prev => [...prev, userMessage]);
+      onSendMessage(userMessage);
+      
+      // Create assistant message placeholder for Super Agent display
+      const assistantMessage: Message = {
+        id: superAgentMessageId,
+        role: "assistant",
+        content: "",
+        timestamp: new Date(),
+        requestId: generateRequestId(),
+        userMessageId: userMsgId,
+        isThinking: true,
+      };
+      
+      // Add assistant message that will show SuperAgentDisplay
+      setOptimisticMessages(prev => [...prev, assistantMessage]);
+      
+      // Start Super Agent run in store
+      const { startRun, updateState, completeRun } = useSuperAgentStore.getState();
+      startRun(superAgentMessageId);
+      
+      // Set up SSE stream by making POST request
+      setAiState("thinking");
+      
+      try {
+        const response = await fetch("/api/super-agent/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: userInput,
+            chatId: chatId || "",
+            messageId: superAgentMessageId,
+            enforceMinSources: true,
+          }),
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Super Agent request failed: ${response.status}`);
+        }
+        
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("No response body reader");
+        }
+        
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let finalResult: SuperAgentFinal | null = null;
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const jsonStr = line.slice(6);
+              if (jsonStr === "[DONE]") continue;
+              
+              try {
+                const event = JSON.parse(jsonStr);
+                const eventType = event.type;
+                const eventData = event.data;
+                
+                // Update store based on event type
+                const currentState = useSuperAgentStore.getState().runs[superAgentMessageId];
+                if (currentState) {
+                  let updates: Partial<SuperAgentState> = {};
+                  
+                  switch (eventType) {
+                    case "contract":
+                      updates = {
+                        contract: eventData,
+                        sourcesTarget: eventData.requirements?.min_sources || 100,
+                        phase: "planning",
+                      };
+                      break;
+                    case "progress":
+                      updates = {
+                        phase: eventData.phase || currentState.phase,
+                        progress: eventData,
+                      };
+                      break;
+                    case "source_signal":
+                      const existingIdx = currentState.sources.findIndex(s => s.id === eventData.id);
+                      if (existingIdx >= 0) {
+                        const newSources = [...currentState.sources];
+                        newSources[existingIdx] = eventData;
+                        updates = { sources: newSources };
+                      } else {
+                        updates = { sources: [...currentState.sources, eventData] };
+                      }
+                      break;
+                    case "source_deep":
+                      const deepIdx = currentState.sources.findIndex(s => s.id === eventData.id);
+                      if (deepIdx >= 0) {
+                        const newSources = [...currentState.sources];
+                        newSources[deepIdx] = { ...newSources[deepIdx], ...eventData, fetched: true };
+                        updates = { sources: newSources };
+                      }
+                      break;
+                    case "artifact":
+                      updates = { artifacts: [...currentState.artifacts, eventData] };
+                      break;
+                    case "verify":
+                      updates = { verify: eventData, phase: "verifying" };
+                      break;
+                    case "final":
+                      finalResult = eventData;
+                      updates = {
+                        final: eventData,
+                        phase: "completed",
+                        isRunning: false,
+                      };
+                      break;
+                    case "error":
+                      updates = {
+                        error: eventData.message || "Error en Super Agent",
+                        phase: "error",
+                        isRunning: false,
+                      };
+                      break;
+                  }
+                  
+                  if (Object.keys(updates).length > 0) {
+                    updateState(superAgentMessageId, updates);
+                  }
+                }
+              } catch (parseError) {
+                console.warn("[Super Agent] Failed to parse SSE event:", parseError);
+              }
+            }
+          }
+        }
+        
+        // Stream completed - update assistant message with final content
+        if (finalResult) {
+          const finalAssistantMessage: Message = {
+            id: superAgentMessageId,
+            role: "assistant",
+            content: finalResult.response,
+            timestamp: new Date(),
+            requestId: generateRequestId(),
+            userMessageId: userMsgId,
+          };
+          
+          // Update optimistic message
+          setOptimisticMessages(prev => 
+            prev.map(m => m.id === superAgentMessageId ? finalAssistantMessage : m)
+          );
+          onSendMessage(finalAssistantMessage);
+          
+          completeRun(superAgentMessageId, finalResult);
+        }
+        
+      } catch (error) {
+        console.error("[Super Agent] Stream error:", error);
+        updateState(superAgentMessageId, {
+          error: error instanceof Error ? error.message : "Error de conexión",
+          phase: "error",
+          isRunning: false,
+        });
+        
+        const errorMessage: Message = {
+          id: superAgentMessageId,
+          role: "assistant",
+          content: "Error al procesar la investigación. Por favor, intenta de nuevo.",
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: userMsgId,
+        };
+        
+        setOptimisticMessages(prev => 
+          prev.map(m => m.id === superAgentMessageId ? errorMessage : m)
+        );
+        onSendMessage(errorMessage);
       }
       
       setAiState("idle");
@@ -4839,6 +5073,9 @@ IMPORTANTE:
                 onAgentCancel={handleAgentCancel}
                 onAgentRetry={handleAgentRetry}
                 onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
+                onSuperAgentCancel={handleSuperAgentCancel}
+                onSuperAgentRetry={handleSuperAgentRetry}
+                onQuestionClick={(text) => setInput(text)}
               />
 
               {/* Agent Observer - Show when agent is running */}
@@ -5095,6 +5332,9 @@ IMPORTANTE:
                   onAgentCancel={handleAgentCancel}
                   onAgentRetry={handleAgentRetry}
                   onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
+                  onSuperAgentCancel={handleSuperAgentCancel}
+                  onSuperAgentRetry={handleSuperAgentRetry}
+                  onQuestionClick={(text) => setInput(text)}
                 />
                 <div ref={messagesEndRef} />
               </div>

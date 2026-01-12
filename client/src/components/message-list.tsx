@@ -84,6 +84,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { AgentStepsDisplay, type AgentArtifact } from "@/components/agent-steps-display";
 import { ArtifactViewer, type Artifact } from "@/components/artifact-viewer";
 import { NewsCards, SourcesList } from "@/components/news-cards";
+import { SuperAgentDisplay } from "@/components/super-agent-display";
+import { useSuperAgentRun } from "@/stores/super-agent-store";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -1596,6 +1598,8 @@ interface AssistantMessageProps {
   onAgentRetry?: (messageId: string, userMessage: string) => void;
   onAgentArtifactPreview?: (artifact: AgentArtifact) => void;
   onQuestionClick?: (question: string) => void;
+  onSuperAgentCancel?: (messageId: string) => void;
+  onSuperAgentRetry?: (messageId: string) => void;
 }
 
 const AssistantMessage = memo(function AssistantMessage({
@@ -1625,9 +1629,12 @@ const AssistantMessage = memo(function AssistantMessage({
   onAgentCancel,
   onAgentRetry,
   onAgentArtifactPreview,
-  onQuestionClick
+  onQuestionClick,
+  onSuperAgentCancel,
+  onSuperAgentRetry
 }: AssistantMessageProps) {
   const [sourcesPanelOpen, setSourcesPanelOpen] = useState(false);
+  const superAgentState = useSuperAgentRun(message.id);
 
   const parsedContent = useMemo(() => {
     if (!message.content || message.isThinking) {
@@ -1687,6 +1694,15 @@ const AssistantMessage = memo(function AssistantMessage({
           onCancel={onAgentCancel ? () => onAgentCancel(message.id, message.agentRun!.runId || "") : undefined}
           onRetry={onAgentRetry ? () => onAgentRetry(message.id, message.agentRun?.userMessage || "") : undefined}
           onArtifactPreview={onAgentArtifactPreview}
+        />
+      )}
+
+      {/* Super Agent display - show research progress with sources */}
+      {superAgentState && (
+        <SuperAgentDisplay
+          state={superAgentState}
+          onRetry={onSuperAgentRetry ? () => onSuperAgentRetry(message.id) : undefined}
+          onCancel={onSuperAgentCancel ? () => onSuperAgentCancel(message.id) : undefined}
         />
       )}
 
@@ -2081,6 +2097,8 @@ interface MessageItemProps {
   onAgentCancel?: (messageId: string, runId: string) => void;
   onAgentRetry?: (messageId: string, userMessage: string) => void;
   onAgentArtifactPreview?: (artifact: AgentArtifact) => void;
+  onSuperAgentCancel?: (messageId: string) => void;
+  onSuperAgentRetry?: (messageId: string) => void;
   onQuestionClick?: (question: string) => void;
 }
 
@@ -2118,6 +2136,8 @@ const MessageItem = memo(function MessageItem({
   onAgentCancel,
   onAgentRetry,
   onAgentArtifactPreview,
+  onSuperAgentCancel,
+  onSuperAgentRetry,
   onQuestionClick
 }: MessageItemProps) {
   return (
@@ -2194,6 +2214,8 @@ const MessageItem = memo(function MessageItem({
             onAgentRetry={onAgentRetry}
             onAgentArtifactPreview={onAgentArtifactPreview}
             onQuestionClick={onQuestionClick}
+            onSuperAgentCancel={onSuperAgentCancel}
+            onSuperAgentRetry={onSuperAgentRetry}
           />
         )}
       </div>
@@ -2259,6 +2281,9 @@ export interface MessageListProps {
   onAgentCancel?: (messageId: string, runId: string) => void;
   onAgentRetry?: (messageId: string, userMessage: string) => void;
   onAgentArtifactPreview?: (artifact: AgentArtifact) => void;
+  onSuperAgentCancel?: (messageId: string) => void;
+  onSuperAgentRetry?: (messageId: string) => void;
+  onQuestionClick?: (question: string) => void;
 }
 
 const VIRTUALIZATION_THRESHOLD = 50;
@@ -2299,7 +2324,10 @@ export function MessageList({
   enableVirtualization = true,
   onAgentCancel,
   onAgentRetry,
-  onAgentArtifactPreview
+  onAgentArtifactPreview,
+  onSuperAgentCancel,
+  onSuperAgentRetry,
+  onQuestionClick
 }: MessageListProps) {
   const internalParentRef = useRef<HTMLDivElement>(null);
   const scrollRef = parentRef || internalParentRef;
@@ -2384,7 +2412,10 @@ export function MessageList({
                 setEditContent={setEditContent}
                 onAgentCancel={onAgentCancel}
                 onAgentRetry={onAgentRetry}
-                onQuestionClick={onSelectSuggestedReply}
+                onAgentArtifactPreview={onAgentArtifactPreview}
+                onSuperAgentCancel={onSuperAgentCancel}
+                onSuperAgentRetry={onSuperAgentRetry}
+                onQuestionClick={onQuestionClick}
               />
             </div>
           );
@@ -2535,7 +2566,10 @@ export function MessageList({
           setEditContent={setEditContent}
           onAgentCancel={onAgentCancel}
           onAgentRetry={onAgentRetry}
-          onQuestionClick={onSelectSuggestedReply}
+          onAgentArtifactPreview={onAgentArtifactPreview}
+          onSuperAgentCancel={onSuperAgentCancel}
+          onSuperAgentRetry={onSuperAgentRetry}
+          onQuestionClick={onQuestionClick}
         />
       ))}
 
