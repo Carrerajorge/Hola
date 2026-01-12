@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { randomUUID } from "crypto";
-import { TraceBus, createTraceBus } from "./TraceBus";
+import { TraceEmitter, createTraceEmitter } from "./TraceEmitter";
 import { getStreamGateway } from "./StreamGateway";
 import { getEventStore, initializeEventStore } from "./EventStore";
 import { ProgressModel, createProgressModel } from "./ProgressModel";
@@ -8,6 +8,7 @@ import { ContractGuard, createContractGuard } from "./ContractGuard";
 import { runAcademicPipeline, candidatesToSourceSignals } from "../academicPipeline";
 import { AcademicCandidate } from "../openAlexClient";
 import { EventEmitter } from "events";
+import type { Plan, Step, Artifact } from "../../../../shared/executionProtocol";
 
 interface RunRequest {
   prompt: string;
@@ -18,7 +19,7 @@ interface RunRequest {
 
 interface RunContext {
   runId: string;
-  traceBus: TraceBus;
+  emitter: TraceEmitter;
   progressModel: ProgressModel;
   contractGuard: ContractGuard;
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
@@ -44,13 +45,13 @@ export function createRunController(): Router {
       await initializeEventStore();
 
       const runId = randomUUID();
-      const traceBus = createTraceBus(runId);
-      const progressModel = createProgressModel(traceBus, targetCount);
-      const contractGuard = createContractGuard(traceBus);
+      const emitter = createTraceEmitter(runId);
+      const progressModel = createProgressModel(emitter, targetCount);
+      const contractGuard = createContractGuard(emitter);
 
       const context: RunContext = {
         runId,
-        traceBus,
+        emitter,
         progressModel,
         contractGuard,
         status: "pending",
@@ -61,7 +62,7 @@ export function createRunController(): Router {
       activeRuns.set(runId, context);
 
       const gateway = getStreamGateway();
-      gateway.registerRun(runId, traceBus);
+      gateway.registerRun(runId, emitter);
 
       executeRun(context, prompt, { targetCount, yearStart, yearEnd }).catch(console.error);
 
@@ -156,9 +157,7 @@ export function createRunController(): Router {
     }
 
     context.status = "cancelled";
-    context.traceBus.runFailed("RunController", "Run cancelled by user", {
-      error_code: "CANCELLED",
-    });
+    context.emitter.emitRunFailed("Run cancelled by user", "CANCELLED", false);
 
     res.json({ run_id: runId, status: "cancelled" });
   });
@@ -183,38 +182,94 @@ async function executeRun(
   prompt: string,
   options: { targetCount: number; yearStart: number; yearEnd: number }
 ): Promise<void> {
-  const { traceBus, progressModel, contractGuard } = context;
+  const { emitter, progressModel, contractGuard } = context;
+  const artifactId = `artifact_${context.runId}_xlsx`;
+
+  const steps: Step[] = [
+    { id: 's1', title: 'Planificar consultas', kind: 'plan', status: 'pending' },
+    { id: 's2', title: 'Buscar en fuentes académicas', kind: 'research', status: 'pending' },
+    { id: 's3', title: 'Verificar DOI/URL', kind: 'validate', status: 'pending' },
+    { id: 's4', title: 'Exportar Excel (.xlsx)', kind: 'generate', status: 'pending' },
+  ];
+
+  const updateStepStatus = (stepId: string, status: Step['status'], progress?: number) => {
+    const step = steps.find(s => s.id === stepId);
+    if (step) {
+      step.status = status;
+      if (progress !== undefined) step.progress = progress;
+      if (status === 'running') {
+        step.started_at = Date.now();
+        emitter.emitStepStarted(step);
+      } else if (status === 'completed') {
+        step.completed_at = Date.now();
+        step.progress = 100;
+        emitter.emitStepCompleted(step);
+      }
+    }
+  };
 
   try {
     context.status = "running";
-    traceBus.runStarted("Orchestrator", `Starting academic search: ${prompt.substring(0, 100)}...`);
-
-    progressModel.setPhase("planning");
-    traceBus.phaseStarted("Planner", "planning", "Analyzing search query");
-
+    
     const searchTopic = extractSearchTopic(prompt);
     
-    traceBus.phaseCompleted("Planner", "planning", `Search topic: ${searchTopic}`);
+    emitter.emitRunStarted(
+      "academic_search",
+      `Starting academic search: ${prompt.substring(0, 100)}...`,
+      60000,
+      { targetCount: options.targetCount, yearStart: options.yearStart, yearEnd: options.yearEnd }
+    );
 
+    const plan: Plan = {
+      plan_id: `plan_${context.runId}`,
+      title: `Búsqueda académica: ${searchTopic}`,
+      description: `Objetivo: ${options.targetCount} artículos (${options.yearStart}-${options.yearEnd})`,
+      steps: steps.map(s => ({ ...s })),
+      total_steps: 4,
+      estimated_duration_ms: 60000,
+    };
+    plan.steps[0].status = 'running';
+    emitter.emitPlanCreated(plan);
+
+    const artifact: Artifact = {
+      artifact_id: artifactId,
+      kind: 'excel',
+      filename: 'articles.xlsx',
+      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      status: 'declared',
+    };
+    emitter.emitArtifactDeclared(artifact, 's4');
+
+    progressModel.setPhase("planning");
+    updateStepStatus('s1', 'running');
+    
+    emitter.emitStepProgress('s1', 50, `Analyzing query: ${searchTopic}`);
+    
+    updateStepStatus('s1', 'completed');
+    
     progressModel.setPhase("signals");
-    traceBus.phaseStarted("SearchAgent", "signals", "Searching academic databases");
+    updateStepStatus('s2', 'running');
 
     const pipelineEmitter = new EventEmitter();
+    let searchProgress = 0;
 
     pipelineEmitter.on("pipeline_phase", (data: any) => {
       if (data.phase === "search") {
-        traceBus.toolProgress("SearchAgent", `Searching: ${data.query || "..."}`, 20, {
-          articles_collected: data.collected || 0,
-        });
+        searchProgress = Math.min(searchProgress + 10, 80);
+        emitter.emitStepProgress('s2', searchProgress, `Searching: ${data.query || "..."}`, data.collected || 0, options.targetCount);
       } else if (data.phase === "verification") {
+        updateStepStatus('s2', 'completed');
         progressModel.setPhase("verification");
-        traceBus.phaseStarted("VerificationAgent", "verification", "Verifying DOIs via CrossRef");
+        updateStepStatus('s3', 'running');
+        emitter.emitStepProgress('s3', 20, "Verifying DOIs via CrossRef");
       } else if (data.phase === "enrichment") {
+        emitter.emitStepProgress('s3', 60, "Enriching metadata");
         progressModel.setPhase("enrichment");
-        traceBus.phaseStarted("EnrichmentAgent", "enrichment", "Enriching metadata");
       } else if (data.phase === "export") {
+        updateStepStatus('s3', 'completed');
         progressModel.setPhase("export");
-        traceBus.phaseStarted("ExportAgent", "export", "Generating Excel file");
+        updateStepStatus('s4', 'running');
+        emitter.emitArtifactProgress(artifactId, 10, { message: "Starting Excel generation" });
       }
 
       if (data.collected) {
@@ -222,6 +277,7 @@ async function executeRun(
       }
       if (data.verified) {
         progressModel.addVerified(data.verified);
+        emitter.emitStepProgress('s3', 40 + Math.min(data.verified * 2, 40), `Verified ${data.verified} DOIs`);
       }
     });
 
@@ -232,12 +288,14 @@ async function executeRun(
       maxSearchIterations: 4,
     });
 
-    traceBus.phaseCompleted("SearchAgent", "signals", `Found ${result.articles.length} articles`);
+    if (steps.find(s => s.id === 's2')?.status !== 'completed') {
+      updateStepStatus('s2', 'completed');
+    }
 
     for (const article of result.articles) {
       progressModel.addAccepted(1);
       if (article.doi) {
-        traceBus.sourceVerified("VerificationAgent", article.doi, 1.0);
+        emitter.sourceVerified("VerificationAgent", article.doi, 1.0);
       }
     }
 
@@ -245,15 +303,38 @@ async function executeRun(
 
     if (!validation.valid) {
       for (const violation of validation.violations.filter(v => v.severity === "error")) {
-        traceBus.contractViolation("ContractGuard", violation.reason, {
+        emitter.contractViolation("ContractGuard", violation.reason, {
           missing_fields: [violation.field],
         });
       }
     }
 
     if (result.artifact) {
+      emitter.emitArtifactProgress(artifactId, 50, { 
+        rowsWritten: result.articles.length / 2, 
+        message: "Writing article data" 
+      });
+      
+      emitter.emitArtifactProgress(artifactId, 90, { 
+        rowsWritten: result.articles.length, 
+        message: "Finalizing Excel file" 
+      });
+
       progressModel.setExportStage(100);
-      traceBus.artifactCreated("ExportAgent", "xlsx", result.artifact.name, result.artifact.downloadUrl);
+      
+      const readyArtifact: Artifact = {
+        artifact_id: artifactId,
+        kind: 'excel',
+        filename: result.artifact.name,
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        status: 'ready',
+        rows_count: result.articles.length,
+        download_url: result.artifact.downloadUrl,
+        progress: 100,
+        created_at: Date.now(),
+      };
+      emitter.emitArtifactReady(readyArtifact);
+      
       context.artifacts.push({
         id: result.artifact.id,
         type: "xlsx",
@@ -262,20 +343,14 @@ async function executeRun(
       });
     }
 
+    updateStepStatus('s4', 'completed');
+
     progressModel.setPhase("finalization");
-    traceBus.phaseStarted("Finalizer", "finalization", "Completing run");
 
     context.status = "completed";
     context.completedAt = Date.now();
 
-    traceBus.runCompleted("Orchestrator", `Completed with ${result.articles.length} articles`, {
-      articles_collected: result.stats.totalFetched,
-      articles_verified: result.stats.verifiedCount,
-      articles_accepted: result.stats.finalCount,
-      latency_ms: result.stats.durationMs,
-    });
-
-    traceBus.phaseCompleted("Finalizer", "finalization", "Run complete");
+    emitter.emitRunCompleted(4, 4, `Completed with ${result.articles.length} articles`);
 
   } catch (error: any) {
     console.error("[RunController] Execution error:", error);
@@ -283,10 +358,7 @@ async function executeRun(
     context.error = error.message;
     context.completedAt = Date.now();
 
-    traceBus.runFailed("Orchestrator", error.message, {
-      error_code: "EXECUTION_ERROR",
-      stacktrace_redacted: error.stack?.split("\n").slice(0, 5).join("\n"),
-    });
+    emitter.emitRunFailed(error.message, "EXECUTION_ERROR", false);
   } finally {
     setTimeout(() => {
       const gateway = getStreamGateway();

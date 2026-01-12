@@ -43,7 +43,8 @@ import redisSSERouter from "./routes/redisSSERouter";
 import superAgentRouter from "./routes/superAgentRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
-import type { ExecutionEvent } from "@shared/executionProtocol";
+import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
+import type { TraceEvent } from "./agent/superAgent/tracing/types";
 import { getStreamGateway } from "./agent/superAgent/tracing/StreamGateway";
 import type { TraceEmitter } from "./agent/superAgent/tracing/TraceEmitter";
 import { initializeRedisSSE } from "./lib/redisSSE";
@@ -71,6 +72,131 @@ import fs from "fs";
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
 const fileStatusClients: Map<string, Set<WebSocket>> = new Map();
+
+function mapTraceEventType(eventType: string): ExecutionEventType {
+  const mapping: Record<string, ExecutionEventType> = {
+    run_started: "run_started",
+    run_completed: "run_completed",
+    run_failed: "run_failed",
+    phase_started: "step_started",
+    phase_completed: "step_completed",
+    phase_failed: "step_failed",
+    tool_start: "tool_call_started",
+    tool_progress: "tool_call_progress",
+    tool_stdout_chunk: "tool_call_chunk",
+    tool_end: "tool_call_completed",
+    tool_error: "tool_call_failed",
+    checkpoint: "info",
+    contract_violation: "warning",
+    heartbeat: "heartbeat",
+    retry_scheduled: "tool_call_retry",
+    fallback_activated: "warning",
+    source_collected: "info",
+    source_verified: "info",
+    source_rejected: "warning",
+    artifact_created: "artifact_ready",
+    progress_update: "step_progress",
+  };
+  return mapping[eventType] || "info";
+}
+
+function buildPayloadFromTraceEvent(event: TraceEvent): ExecutionEvent["payload"] {
+  const basePayload = {
+    message: event.message,
+    agent: event.agent,
+    phase: event.phase,
+    status: event.status,
+    progress: event.progress,
+    ...(event.metrics || {}),
+    ...(event.evidence || {}),
+  };
+
+  switch (event.event_type) {
+    case "run_started":
+      return {
+        request_type: "research",
+        request_summary: event.message,
+        metadata: event.evidence,
+      };
+    case "run_completed":
+      return {
+        duration_ms: event.metrics?.latency_ms || 0,
+        total_steps: event.metrics?.articles_verified || 0,
+        completed_steps: event.metrics?.articles_accepted || 0,
+        artifacts_count: 0,
+        summary: event.message,
+      };
+    case "run_failed":
+      return {
+        error: event.message,
+        error_code: event.evidence?.error_code,
+        recoverable: false,
+      };
+    case "phase_started":
+    case "phase_completed":
+    case "phase_failed":
+      return {
+        step: {
+          id: event.span_id,
+          title: event.message,
+          kind: "execute" as const,
+          status: event.status === "success" ? "completed" : event.status === "failed" ? "failed" : "running",
+          progress: event.progress,
+        },
+      };
+    case "tool_start":
+    case "tool_end":
+    case "tool_error":
+      return {
+        call: {
+          call_id: event.span_id,
+          tool: event.node_id,
+          summary: event.message,
+          status: event.status === "success" ? "completed" : event.status === "failed" ? "failed" : "running",
+          latency_ms: event.metrics?.latency_ms,
+        },
+      };
+    case "tool_progress":
+      return {
+        call_id: event.span_id,
+        progress: event.progress || 0,
+        message: event.message,
+      };
+    case "tool_stdout_chunk":
+      return {
+        call_id: event.span_id,
+        chunk: event.message,
+      };
+    case "artifact_created":
+      return {
+        artifact: {
+          artifact_id: event.span_id,
+          kind: "excel" as const,
+          filename: event.message.replace(/^Created \w+: /, ""),
+          mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          status: "ready" as const,
+          download_url: event.evidence?.final_url,
+        },
+      };
+    case "heartbeat":
+      return {
+        uptime_ms: Date.now() - event.ts,
+      };
+    case "progress_update":
+      return {
+        step_id: event.span_id,
+        progress: event.progress || 0,
+        message: event.message,
+        items_processed: event.metrics?.articles_collected,
+        items_total: event.metrics?.articles_verified,
+      };
+    default:
+      return {
+        message: event.message,
+        details: { ...event.metrics, ...event.evidence },
+      };
+  }
+}
 
 export async function registerRoutes(
   httpServer: Server,
