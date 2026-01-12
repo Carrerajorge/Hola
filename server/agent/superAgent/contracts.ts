@@ -123,7 +123,9 @@ export const SSEEventTypeSchema = z.enum([
   "final",
   "error",
   "heartbeat",
-  "progress"
+  "progress",
+  "search_progress",
+  "artifact_generating"
 ]);
 
 export type SSEEventType = z.infer<typeof SSEEventTypeSchema>;

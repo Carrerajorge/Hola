@@ -118,7 +118,18 @@ export class SuperAgentOrchestrator extends EventEmitter {
         }
       }
       
-      this.emitSSE("contract", contract);
+      const isAcademicSearch = this.isScientificArticleRequest(prompt);
+      const run_title = isAcademicSearch 
+        ? "Búsqueda académica"
+        : contract.intent === "create_docx" || contract.intent === "create_xlsx"
+          ? `Creando ${contract.requirements?.must_create?.[0] || "documento"}`
+          : "Procesando solicitud";
+
+      this.emitSSE("contract", { 
+        ...contract,
+        run_title,
+        target: contract.requirements?.min_sources || 50,
+      });
       
       this.state = ExecutionStateSchema.parse({
         contract,
@@ -134,9 +145,17 @@ export class SuperAgentOrchestrator extends EventEmitter {
         started_at: Date.now(),
       });
       
+      const yearRange = this.extractYearRange(prompt);
       this.emitSSE("plan", {
+        run_title,
+        target: contract.requirements?.min_sources || 50,
         steps: contract.plan,
         requirements: contract.requirements,
+        rules: {
+          yearStart: yearRange.start || 2020,
+          yearEnd: yearRange.end || 2025,
+          output: contract.requirements?.must_create?.[0] || "xlsx",
+        },
       });
       
       await this.executePhases();
@@ -254,6 +273,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
     try {
       const pipelineEmitter = new EventEmitter();
+      let pipelineSearchCount = 0;
       
       pipelineEmitter.on("pipeline_phase", (data) => {
         this.emitSSE("progress", {
@@ -261,6 +281,15 @@ export class SuperAgentOrchestrator extends EventEmitter {
           status: data.phase,
           ...data,
         });
+        if (data.phase === "search" || data.phase === "fetching" || data.phase === "verifying") {
+          pipelineSearchCount++;
+          this.emitSSE("search_progress", {
+            queries_current: pipelineSearchCount,
+            queries_total: data.totalIterations || 4,
+            pages_searched: data.pagesSearched || pipelineSearchCount,
+            candidates_found: data.candidatesFound || 0,
+          });
+        }
       });
 
       pipelineResult = await runAcademicPipeline(searchTopic, pipelineEmitter, {
@@ -381,6 +410,8 @@ export class SuperAgentOrchestrator extends EventEmitter {
     let totalInDatabase = 0;
     let searchTime = 0;
     const errors: string[] = [];
+    let queriesCurrent = 0;
+    const queriesTotal = (useScopus ? 1 : 0) + (useWos ? 1 : 0);
 
     const searchPromises: Promise<void>[] = [];
 
@@ -392,6 +423,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
           endYear: yearRange.end,
         })
         .then(result => {
+          queriesCurrent++;
           const signals = scopusArticlesToSourceSignals(result.articles);
           for (const signal of signals) {
             this.emitSSE("source_signal", signal);
@@ -399,6 +431,12 @@ export class SuperAgentOrchestrator extends EventEmitter {
           allSignals.push(...signals);
           totalInDatabase += result.totalResults;
           searchTime = Math.max(searchTime, result.searchTime);
+          this.emitSSE("search_progress", {
+            queries_current: queriesCurrent,
+            queries_total: queriesTotal,
+            pages_searched: queriesCurrent,
+            candidates_found: allSignals.length,
+          });
         })
         .catch(err => {
           console.error(`[Scopus] Error: ${err.message}`);
@@ -415,6 +453,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
           endYear: yearRange.end,
         })
         .then(result => {
+          queriesCurrent++;
           const signals = wosArticlesToSourceSignals(result.articles);
           for (const signal of signals) {
             this.emitSSE("source_signal", signal);
@@ -422,6 +461,12 @@ export class SuperAgentOrchestrator extends EventEmitter {
           allSignals.push(...signals);
           totalInDatabase += result.totalResults;
           searchTime = Math.max(searchTime, result.searchTime);
+          this.emitSSE("search_progress", {
+            queries_current: queriesCurrent,
+            queries_total: queriesTotal,
+            pages_searched: queriesCurrent,
+            candidates_found: allSignals.length,
+          });
         })
         .catch(err => {
           console.error(`[WoS] Error: ${err.message}`);
@@ -554,13 +599,23 @@ export class SuperAgentOrchestrator extends EventEmitter {
       input: { queries, target: targetCount },
     });
     
+    let queriesCurrent = 0;
+    const queriesTotal = queries.length;
+    
     const result = await collectSignals(
       queries,
       targetCount,
       (progress: SignalsProgress) => {
+        queriesCurrent = progress.queriesExecuted || queriesCurrent;
         this.emitSSE("progress", {
           phase: "signals",
           ...progress,
+        });
+        this.emitSSE("search_progress", {
+          queries_current: queriesCurrent,
+          queries_total: queriesTotal,
+          pages_searched: progress.pagesSearched || queriesCurrent,
+          candidates_found: progress.collected || 0,
         });
       },
       (signal: SourceSignal) => {
@@ -665,6 +720,10 @@ export class SuperAgentOrchestrator extends EventEmitter {
       
       try {
         if (docType === "xlsx") {
+          this.emitSSE("artifact_generating", {
+            artifact_type: "xlsx",
+            filename: "articles.xlsx",
+          });
           const spec = this.buildXlsxSpec();
           const artifact = await createXlsx(spec);
           storeArtifactMeta(artifact);
@@ -690,6 +749,10 @@ export class SuperAgentOrchestrator extends EventEmitter {
           });
           
         } else if (docType === "docx") {
+          this.emitSSE("artifact_generating", {
+            artifact_type: "docx",
+            filename: "document.docx",
+          });
           const spec = this.buildDocxSpec();
           const artifact = await createDocx(spec);
           storeArtifactMeta(artifact);
