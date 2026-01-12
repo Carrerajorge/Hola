@@ -36,7 +36,6 @@ import { RecordingPanel } from "@/components/recording-panel";
 import { useConnectedSources } from "@/hooks/use-connected-sources";
 import { useCommandHistory } from "@/hooks/use-command-history";
 import { VirtualComputer } from "@/components/virtual-computer";
-import { useToolSuggestions } from "@/components/tool-catalog";
 import { getFileTheme } from "@/lib/fileTypeTheme";
 import "@/components/ui/glass-effects.css";
 
@@ -195,7 +194,6 @@ export function Composer({
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
-  const [showToolSuggestions, setShowToolSuggestions] = useState(true);
   const [recentTemplates, setRecentTemplates] = useState<string[]>([]);
 
   const quickActionTemplates = [
@@ -266,7 +264,6 @@ export function Composer({
     localStorage.setItem("recentQuickTemplates", JSON.stringify(newRecent));
   }, [setInput, textareaRef, recentTemplates]);
 
-  const toolSuggestions = useToolSuggestions(input);
   const { connectedSources, getSourceActive, setSourceActive } = useConnectedSources();
   const { addToHistory, navigateUp, navigateDown, resetNavigation } = useCommandHistory();
 
@@ -983,36 +980,6 @@ export function Composer({
           </div>
         )}
 
-        {showToolSuggestions && toolSuggestions.length > 0 && (
-          <div className="mb-2 animate-in fade-in duration-150" data-testid="tool-suggestions-container">
-            <div className="flex items-center gap-1.5 mb-1">
-              <Wand2 className="h-3 w-3 text-muted-foreground" />
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Suggested Tools</span>
-              <button 
-                onClick={() => setShowToolSuggestions(false)}
-                className="ml-auto text-muted-foreground/60 hover:text-muted-foreground p-0.5 rounded transition-colors"
-                data-testid="button-dismiss-tool-suggestions"
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {toolSuggestions.map((tool) => (
-                <button
-                  key={tool.name}
-                  onClick={() => {
-                    window.dispatchEvent(new CustomEvent("tool-selected", { detail: { tool } }));
-                  }}
-                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors"
-                  data-testid={`tool-suggestion-${tool.name}`}
-                >
-                  <Wand2 className="h-3 w-3" />
-                  <span>{tool.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
         <div className="flex flex-col relative">
           <Textarea
