@@ -40,6 +40,7 @@ import { createLangGraphRouter } from "./routes/langGraphRouter";
 import { createRegistryRouter } from "./routes/registryRouter";
 import wordPipelineRoutes from "./routes/wordPipelineRoutes";
 import redisSSERouter from "./routes/redisSSERouter";
+import superAgentRouter from "./routes/superAgentRoutes";
 import { initializeRedisSSE } from "./lib/redisSSE";
 import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
@@ -135,6 +136,7 @@ export async function registerRoutes(
   app.use("/api", createRegistryRouter());
   app.use("/api/word-pipeline", wordPipelineRoutes);
   app.use("/api/sse", redisSSERouter);
+  app.use("/api", superAgentRouter);
 
   initializeRedisSSE().then(() => {
     console.log("[RedisSSE] Initialized");
