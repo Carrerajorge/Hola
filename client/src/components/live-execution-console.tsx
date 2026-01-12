@@ -145,8 +145,9 @@ export function LiveExecutionConsole({
 }: LiveExecutionConsoleProps) {
   const [state, setState] = useState<RunStreamState | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [narration, setNarration] = useState<NarrationState | null>(null);
+  const [narrationText, setNarrationText] = useState<string>("");
   const narrationAgentRef = useRef<NarrationAgent | null>(null);
+  const processedEventsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     console.log('[LiveExecutionConsole] Mounted with runId=', runId);
@@ -158,18 +159,32 @@ export function LiveExecutionConsole({
     console.log(`[LiveExecutionConsole] Connecting to run: ${runId}`);
     const streamClient = new RunStreamClient(runId);
 
-    if (!narrationAgentRef.current) {
-      narrationAgentRef.current = new NarrationAgent();
-    }
+    narrationAgentRef.current = new NarrationAgent();
+    processedEventsRef.current = new Set();
+    setNarrationText("Iniciando agente de búsqueda…");
 
     const unsubscribe = streamClient.subscribe((newState) => {
       console.log(`[LiveExecutionConsole] State update:`, newState.connectionMode, newState.phase, newState.status);
       setState(newState);
       
+      // Process only new events
       for (const event of newState.events) {
+        const eventKey = `${event.run_id}-${event.seq}`;
+        if (processedEventsRef.current.has(eventKey)) continue;
+        processedEventsRef.current.add(eventKey);
+        
         const newNarration = narrationAgentRef.current!.processEvent(event);
-        if (newNarration.currentNarration !== narration?.currentNarration) {
-          setNarration(newNarration);
+        if (newNarration.currentNarration) {
+          setNarrationText(newNarration.currentNarration);
+          console.log(`[NarrationAgent] ${newNarration.phase}: ${newNarration.currentNarration}`);
+        }
+      }
+      
+      // Also generate narration from state if no events yet
+      if (newState.events.length === 0 || processedEventsRef.current.size === 0) {
+        const stateNarration = generateNarrationFromState(newState);
+        if (stateNarration) {
+          setNarrationText(stateNarration);
         }
       }
       
@@ -190,6 +205,46 @@ export function LiveExecutionConsole({
       streamClient.destroy();
     };
   }, [runId, onComplete, onError]);
+
+  // Generate narration directly from RunStreamState when events are missing
+  function generateNarrationFromState(s: RunStreamState): string {
+    const { phase, target, queries_current, queries_total, candidates_found, metrics, rules } = s;
+    
+    switch (phase) {
+      case "planning":
+        if (rules?.yearStart || rules?.yearEnd || target > 0) {
+          return `Estoy preparando el plan: años ${rules?.yearStart || "?"}-${rules?.yearEnd || "?"}, objetivo ${target} artículos.`;
+        }
+        return "Planificando búsqueda…";
+      
+      case "signals":
+        if (queries_current > 0 || candidates_found > 0) {
+          return `Buscando artículos: consulta ${queries_current}/${queries_total || "?"}, encontrados ${candidates_found} candidatos.`;
+        }
+        return "Buscando artículos en fuentes académicas…";
+      
+      case "verification":
+        if (metrics.articles_verified > 0) {
+          return `Verificando enlaces/DOI: ${metrics.articles_verified} verificados, ${metrics.articles_accepted} aceptados.`;
+        }
+        return "Verificando enlaces y DOIs…";
+      
+      case "enrichment":
+        return "Enriqueciendo metadatos de artículos…";
+      
+      case "export":
+        if (metrics.articles_accepted > 0) {
+          return `Generando Excel con ${metrics.articles_accepted} artículos…`;
+        }
+        return "Generando archivo Excel…";
+      
+      case "finalization":
+        return `Finalizando: ${metrics.articles_accepted}/${target} artículos exportados.`;
+      
+      default:
+        return "Procesando solicitud…";
+    }
+  }
 
   if (!runId) {
     return null;
@@ -229,13 +284,13 @@ export function LiveExecutionConsole({
         className
       )}
     >
-      {narration && narration.currentNarration && (
-        <div className="px-4 py-2 bg-primary/10 border-b border-primary/20">
-          <div className="flex items-center gap-2">
-            <MessageSquare className="w-4 h-4 text-primary" />
-            <span className="text-sm text-primary font-medium">Qué estoy haciendo ahora</span>
+      {narrationText && (
+        <div className="px-4 py-3 bg-primary/10 border-b border-primary/20">
+          <div className="flex items-center gap-2 mb-1">
+            <MessageSquare className="w-4 h-4 text-primary animate-pulse" />
+            <span className="text-xs text-primary/80 font-medium uppercase tracking-wide">Qué estoy haciendo ahora</span>
           </div>
-          <p className="text-sm mt-1">{narration.currentNarration}</p>
+          <p className="text-sm font-medium text-foreground">{narrationText}</p>
         </div>
       )}
       <div className="p-3 space-y-2.5">

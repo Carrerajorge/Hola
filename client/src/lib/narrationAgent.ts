@@ -116,62 +116,53 @@ function generateNarration(phase: string, metrics: NarrationMetrics): string {
   switch (phase) {
     case "planning":
       if (metrics.providers.length > 0 || metrics.target > 0) {
-        return interpolateTemplate(NARRATION_TEMPLATES.planning, {
-          providers: metrics.providers,
-          yearStart: metrics.yearStart,
-          yearEnd: metrics.yearEnd,
-          target: metrics.target,
-        });
+        const providers = metrics.providers.length > 0 ? metrics.providers.join(", ") : "OpenAlex, CrossRef, Semantic Scholar";
+        return `Estoy preparando el plan: fuentes=${providers}, años=${metrics.yearStart || 2020}-${metrics.yearEnd || 2025}, objetivo=${metrics.target || 50} artículos.`;
       }
-      return PHASE_FALLBACKS.planning;
+      return "Planificando búsqueda académica…";
 
     case "signals":
-      if (metrics.currentProvider || metrics.queryIdx > 0) {
-        return interpolateTemplate(NARRATION_TEMPLATES.search, {
-          provider: metrics.currentProvider,
-          queryIdx: metrics.queryIdx,
-          queryTotal: metrics.queryTotal,
-          page: metrics.page,
-          found: metrics.foundInQuery,
-          candidatesTotal: metrics.candidatesTotal,
-        });
+      // Always show something meaningful in search phase
+      if (metrics.currentProvider) {
+        return `Buscando en ${metrics.currentProvider}: consulta ${metrics.queryIdx || 1}/${metrics.queryTotal || "?"}, página ${metrics.page || 1}; encontrados +${metrics.foundInQuery || 0} (total ${metrics.candidatesTotal || 0}).`;
       }
-      return PHASE_FALLBACKS.signals;
+      if (metrics.candidatesTotal > 0) {
+        return `Buscando artículos: encontrados ${metrics.candidatesTotal} candidatos hasta ahora.`;
+      }
+      return "Buscando artículos en fuentes académicas…";
 
     case "verification":
-      if (metrics.checked > 0) {
-        return interpolateTemplate(NARRATION_TEMPLATES.verify, {
-          checked: metrics.checked,
-          ok: metrics.ok,
-          dead: metrics.dead,
-        });
+      if (metrics.checked > 0 || metrics.ok > 0) {
+        return `Verificando enlaces/DOI (HTTP 200 + coincidencia de título): ${metrics.checked} revisados, ${metrics.ok} válidos, ${metrics.dead} caídos.`;
       }
-      return PHASE_FALLBACKS.verification;
+      return "Verificando enlaces y DOIs…";
 
     case "enrichment":
-      return PHASE_FALLBACKS.enrichment;
+      if (metrics.accepted > 0) {
+        return `Enriqueciendo metadatos: ${metrics.accepted} artículos aceptados.`;
+      }
+      return "Enriqueciendo metadatos de artículos…";
 
     case "export":
-      if (metrics.columnsCount > 0 || metrics.rowsWritten > 0) {
-        return interpolateTemplate(NARRATION_TEMPLATES.export, {
-          columnsCount: metrics.columnsCount,
-          rowsWritten: metrics.rowsWritten,
-          target: metrics.target,
-        });
+      if (metrics.rowsWritten > 0 || metrics.columnsCount > 0) {
+        return `Generando Excel (.xlsx) con ${metrics.columnsCount || 15} columnas: escribiendo fila ${metrics.rowsWritten}/${metrics.target || "?"}…`;
       }
-      return PHASE_FALLBACKS.export;
+      if (metrics.filename) {
+        return `Generando archivo ${metrics.filename}…`;
+      }
+      return "Generando archivo Excel…";
 
     case "finalization":
       if (metrics.filename) {
-        return interpolateTemplate(NARRATION_TEMPLATES.complete, {
-          filename: metrics.filename,
-          rejectedTotal: metrics.rejectedTotal,
-        });
+        return `Listo: exporté ${metrics.filename} y reporte de descartes (${metrics.rejectedTotal} descartados).`;
       }
-      return PHASE_FALLBACKS.finalization;
+      if (metrics.accepted > 0) {
+        return `Finalizando: ${metrics.accepted} artículos exportados.`;
+      }
+      return "Finalizando exportación…";
 
     default:
-      return PHASE_FALLBACKS[phase] || "";
+      return PHASE_FALLBACKS[phase] || "Procesando solicitud…";
   }
 }
 
@@ -180,11 +171,17 @@ function extractMetricsFromEvent(
   currentMetrics: NarrationMetrics
 ): Partial<NarrationMetrics> {
   const updates: Partial<NarrationMetrics> = {};
+  const anyEvent = event as any;
 
   switch (event.event_type) {
     case "run_started":
       if (event.evidence?.target !== undefined) {
         updates.target = event.evidence.target;
+      }
+      // Extract from message if available
+      if (event.message) {
+        const targetMatch = event.message.match(/objetivo[:\s]+(\d+)/i);
+        if (targetMatch) updates.target = parseInt(targetMatch[1], 10);
       }
       break;
 
@@ -204,6 +201,24 @@ function extractMetricsFromEvent(
       break;
 
     case "search_progress":
+      // Extract provider from agent name or message
+      if (event.agent) {
+        const agentLower = event.agent.toLowerCase();
+        if (agentLower.includes("openalex")) updates.currentProvider = "OpenAlex";
+        else if (agentLower.includes("crossref")) updates.currentProvider = "CrossRef";
+        else if (agentLower.includes("semantic")) updates.currentProvider = "Semantic Scholar";
+        else if (agentLower.includes("scopus")) updates.currentProvider = "Scopus";
+        else if (agentLower.includes("wos")) updates.currentProvider = "Web of Science";
+      }
+      // Also check message for provider hints
+      if (event.message) {
+        const msgLower = event.message.toLowerCase();
+        if (msgLower.includes("openalex")) updates.currentProvider = "OpenAlex";
+        else if (msgLower.includes("crossref")) updates.currentProvider = "CrossRef";
+        else if (msgLower.includes("semantic scholar")) updates.currentProvider = "Semantic Scholar";
+      }
+      // Extract from metrics or custom fields
+      if (anyEvent.provider) updates.currentProvider = anyEvent.provider;
       if (event.metrics?.queries_current !== undefined) {
         updates.queryIdx = event.metrics.queries_current;
       }
@@ -214,7 +229,8 @@ function extractMetricsFromEvent(
         updates.page = event.metrics.pages_searched;
       }
       if (event.metrics?.candidates_found !== undefined) {
-        updates.foundInQuery = event.metrics.candidates_found - currentMetrics.candidatesTotal;
+        const prevTotal = currentMetrics.candidatesTotal || 0;
+        updates.foundInQuery = Math.max(0, event.metrics.candidates_found - prevTotal);
         updates.candidatesTotal = event.metrics.candidates_found;
       }
       break;
@@ -275,8 +291,20 @@ function extractMetricsFromEvent(
       break;
 
     case "source_collected":
+      // Extract provider from agent or message
+      if (event.agent) {
+        const agentLower = event.agent.toLowerCase();
+        if (agentLower.includes("openalex")) updates.currentProvider = "OpenAlex";
+        else if (agentLower.includes("crossref")) updates.currentProvider = "CrossRef";
+        else if (agentLower.includes("semantic")) updates.currentProvider = "Semantic Scholar";
+      }
       if (event.metrics?.candidates_found !== undefined) {
         updates.candidatesTotal = event.metrics.candidates_found;
+      }
+      if (event.metrics?.articles_collected !== undefined) {
+        const prevTotal = currentMetrics.candidatesTotal || 0;
+        updates.foundInQuery = Math.max(0, event.metrics.articles_collected - prevTotal);
+        updates.candidatesTotal = event.metrics.articles_collected;
       }
       break;
 
@@ -293,6 +321,25 @@ function extractMetricsFromEvent(
       }
       updates.dead = (currentMetrics.dead || 0) + 1;
       updates.checked = (currentMetrics.checked || 0) + 1;
+      break;
+    
+    // Handle step_started events to get phase info
+    case "step_started":
+    case "phase_started":
+      // These update phase through the phase field, not metrics
+      break;
+
+    // Handle generic progress events
+    case "progress_update":
+      if (event.metrics?.candidates_found !== undefined) {
+        updates.candidatesTotal = event.metrics.candidates_found;
+      }
+      if (event.metrics?.articles_verified !== undefined) {
+        updates.ok = event.metrics.articles_verified;
+      }
+      if (event.metrics?.articles_accepted !== undefined) {
+        updates.accepted = event.metrics.articles_accepted;
+      }
       break;
   }
 
