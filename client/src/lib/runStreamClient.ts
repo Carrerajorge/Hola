@@ -23,6 +23,11 @@ export interface TraceEvent {
     articles_collected?: number;
     articles_verified?: number;
     articles_accepted?: number;
+    queries_current?: number;
+    queries_total?: number;
+    pages_searched?: number;
+    candidates_found?: number;
+    reject_count?: number;
   };
   evidence?: {
     doi?: string;
@@ -34,6 +39,12 @@ export interface TraceEvent {
     error_code?: string;
     stacktrace_redacted?: string;
     missing_fields?: string[];
+    run_title?: string;
+    target?: number;
+    year_start?: number;
+    year_end?: number;
+    regions?: string[];
+    output_format?: string;
   };
   ts: number;
 }
@@ -72,6 +83,7 @@ export interface RunStreamState {
     type: string;
     name: string;
     url: string;
+    generating?: boolean;
   }>;
   violations: Array<{
     field: string;
@@ -81,6 +93,19 @@ export interface RunStreamState {
   connected: boolean;
   connectionMode: ConnectionMode;
   error?: string;
+  run_title: string;
+  target: number;
+  queries_current: number;
+  queries_total: number;
+  pages_searched: number;
+  candidates_found: number;
+  reject_count: number;
+  rules?: {
+    yearStart?: number;
+    yearEnd?: number;
+    regions?: string[];
+    output?: string;
+  };
 }
 
 type RunStreamListener = (state: RunStreamState) => void;
@@ -127,6 +152,13 @@ export class RunStreamClient {
       lastHeartbeat: Date.now(),
       connected: false,
       connectionMode: "connecting",
+      run_title: "Procesando solicitud",
+      target: 0,
+      queries_current: 0,
+      queries_total: 0,
+      pages_searched: 0,
+      candidates_found: 0,
+      reject_count: 0,
     };
   }
 
@@ -196,7 +228,8 @@ export class RunStreamClient {
       "checkpoint", "contract_violation", "heartbeat", "connected",
       "retry_scheduled", "fallback_activated",
       "source_collected", "source_verified", "source_rejected",
-      "artifact_created", "progress_update",
+      "artifact_created", "artifact_generating", "progress_update",
+      "plan_created", "search_progress",
     ];
 
     for (const type of eventTypes) {
@@ -264,6 +297,14 @@ export class RunStreamClient {
         if (data.metrics) this.updateMetrics(data.metrics);
         if (data.artifacts) this.state.artifacts = data.artifacts;
         if (data.error) this.state.error = data.error;
+        if (data.run_title) this.state.run_title = data.run_title;
+        if (data.target !== undefined) this.state.target = data.target;
+        if (data.queries_current !== undefined) this.state.queries_current = data.queries_current;
+        if (data.queries_total !== undefined) this.state.queries_total = data.queries_total;
+        if (data.pages_searched !== undefined) this.state.pages_searched = data.pages_searched;
+        if (data.candidates_found !== undefined) this.state.candidates_found = data.candidates_found;
+        if (data.reject_count !== undefined) this.state.reject_count = data.reject_count;
+        if (data.rules) this.state.rules = data.rules;
         
         this.state.lastHeartbeat = Date.now();
         this.emit();
@@ -303,6 +344,36 @@ export class RunStreamClient {
       case "run_started":
         this.state.status = "running";
         this.state.phase = event.phase || "planning";
+        if (event.evidence?.run_title) {
+          this.state.run_title = event.evidence.run_title;
+        }
+        if (event.evidence?.target !== undefined) {
+          this.state.target = event.evidence.target;
+        }
+        if (event.evidence?.year_start || event.evidence?.year_end || event.evidence?.regions || event.evidence?.output_format) {
+          this.state.rules = {
+            yearStart: event.evidence.year_start,
+            yearEnd: event.evidence.year_end,
+            regions: event.evidence.regions,
+            output: event.evidence.output_format || "xlsx",
+          };
+        }
+        break;
+
+      case "plan_created":
+        if (event.evidence?.target !== undefined) {
+          this.state.target = event.evidence.target;
+        }
+        if (event.evidence?.run_title) {
+          this.state.run_title = event.evidence.run_title;
+        }
+        if (event.evidence?.year_start || event.evidence?.year_end) {
+          this.state.rules = {
+            ...this.state.rules,
+            yearStart: event.evidence.year_start,
+            yearEnd: event.evidence.year_end,
+          };
+        }
         break;
 
       case "run_completed":
@@ -334,6 +405,23 @@ export class RunStreamClient {
         this.completeSpanNode(event);
         break;
 
+      case "search_progress":
+        if (event.metrics) {
+          if (event.metrics.queries_current !== undefined) {
+            this.state.queries_current = event.metrics.queries_current;
+          }
+          if (event.metrics.queries_total !== undefined) {
+            this.state.queries_total = event.metrics.queries_total;
+          }
+          if (event.metrics.pages_searched !== undefined) {
+            this.state.pages_searched = event.metrics.pages_searched;
+          }
+          if (event.metrics.candidates_found !== undefined) {
+            this.state.candidates_found = event.metrics.candidates_found;
+          }
+        }
+        break;
+
       case "progress_update":
         if (event.progress !== undefined) {
           this.state.progress = event.progress;
@@ -360,21 +448,53 @@ export class RunStreamClient {
         }
         break;
 
+      case "artifact_generating":
+        this.state.artifacts.push({
+          id: event.span_id,
+          type: "xlsx",
+          name: event.message || "Generando archivo...",
+          url: "",
+          generating: true,
+        });
+        break;
+
       case "artifact_created":
         if (event.evidence?.final_url) {
-          this.state.artifacts.push({
+          const existingIdx = this.state.artifacts.findIndex(a => a.id === event.span_id && a.generating);
+          const artifact = {
             id: event.span_id,
             type: "xlsx",
             name: event.message.replace("Created xlsx: ", ""),
             url: event.evidence.final_url,
-          });
+            generating: false,
+          };
+          if (existingIdx >= 0) {
+            this.state.artifacts[existingIdx] = artifact;
+          } else {
+            this.state.artifacts.push(artifact);
+          }
         }
         break;
 
       case "source_collected":
+        if (event.metrics) {
+          this.updateMetrics(event.metrics);
+          if (event.metrics.candidates_found !== undefined) {
+            this.state.candidates_found = event.metrics.candidates_found;
+          }
+        }
+        break;
+
       case "source_verified":
         if (event.metrics) {
           this.updateMetrics(event.metrics);
+        }
+        break;
+
+      case "source_rejected":
+        this.state.reject_count++;
+        if (event.metrics?.reject_count !== undefined) {
+          this.state.reject_count = event.metrics.reject_count;
         }
         break;
     }
@@ -393,6 +513,21 @@ export class RunStreamClient {
     }
     if (metrics.articles_accepted !== undefined) {
       this.state.metrics.articles_accepted = metrics.articles_accepted;
+    }
+    if (metrics.queries_current !== undefined) {
+      this.state.queries_current = metrics.queries_current;
+    }
+    if (metrics.queries_total !== undefined) {
+      this.state.queries_total = metrics.queries_total;
+    }
+    if (metrics.pages_searched !== undefined) {
+      this.state.pages_searched = metrics.pages_searched;
+    }
+    if (metrics.candidates_found !== undefined) {
+      this.state.candidates_found = metrics.candidates_found;
+    }
+    if (metrics.reject_count !== undefined) {
+      this.state.reject_count = metrics.reject_count;
     }
   }
 
