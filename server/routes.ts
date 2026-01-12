@@ -38,6 +38,7 @@ import { createAgentModeRouter } from "./routes/agentRoutes";
 import { createSandboxAgentRouter } from "./routes/sandboxAgentRouter";
 import { createLangGraphRouter } from "./routes/langGraphRouter";
 import { createRegistryRouter } from "./routes/registryRouter";
+import wordPipelineRoutes from "./routes/wordPipelineRoutes";
 import { initializeAgentSystem } from "./agent/registry";
 import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
 import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
@@ -130,6 +131,7 @@ export async function registerRoutes(
   app.use("/api", createSandboxAgentRouter());
   app.use("/api", createLangGraphRouter());
   app.use("/api", createRegistryRouter());
+  app.use("/api/word-pipeline", wordPipelineRoutes);
 
   initializeAgentSystem({ runSmokeTest: false }).then(result => {
     console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
