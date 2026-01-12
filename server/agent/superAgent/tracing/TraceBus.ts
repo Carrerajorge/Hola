@@ -305,6 +305,84 @@ export class TraceBus extends EventEmitter {
     this.publish(event);
   }
 
+  searchProgress(agent: string, data: {
+    provider: "openalex" | "crossref" | "semantic_scholar";
+    query_idx: number;
+    query_total: number;
+    page: number;
+    found: number;
+    candidates_total: number;
+  }): void {
+    const event = this.createEvent("search_progress", agent, 
+      `Search ${data.provider}: query ${data.query_idx}/${data.query_total}, found ${data.found}`, {
+      progress: (data.query_idx / data.query_total) * 100,
+      metrics: {
+        articles_collected: data.candidates_total,
+      },
+    });
+    this.publish(event);
+  }
+
+  filterProgress(agent: string, data: {
+    regions: string[];
+    geo_mismatch: number;
+    year_out_of_range: number;
+    duplicate: number;
+    low_relevance: number;
+  }): void {
+    const total = data.geo_mismatch + data.year_out_of_range + data.duplicate + data.low_relevance;
+    const event = this.createEvent("filter_progress", agent, 
+      `Filtering: ${total} removed (geo:${data.geo_mismatch}, year:${data.year_out_of_range}, dup:${data.duplicate}, rel:${data.low_relevance})`, {
+      evidence: {
+        fail_reason: `regions:${data.regions.join(",")};geo:${data.geo_mismatch};year:${data.year_out_of_range};dup:${data.duplicate};rel:${data.low_relevance}`,
+      },
+    });
+    this.publish(event);
+  }
+
+  verifyProgress(agent: string, data: {
+    checked: number;
+    ok: number;
+    dead: number;
+  }): void {
+    const event = this.createEvent("verify_progress", agent, 
+      `Verification: ${data.checked} checked, ${data.ok} ok, ${data.dead} dead`, {
+      metrics: {
+        articles_verified: data.ok,
+      },
+    });
+    this.publish(event);
+  }
+
+  acceptedProgress(agent: string, data: {
+    accepted: number;
+    target: number;
+  }): void {
+    const progress = (data.accepted / data.target) * 100;
+    const event = this.createEvent("accepted_progress", agent, 
+      `Accepted: ${data.accepted}/${data.target}`, {
+      progress: Math.min(progress, 100),
+      metrics: {
+        articles_accepted: data.accepted,
+      },
+    });
+    this.publish(event);
+  }
+
+  exportProgress(agent: string, data: {
+    columns_count: number;
+    rows_written: number;
+    target: number;
+  }): void {
+    const progress = (data.rows_written / data.target) * 100;
+    const event = this.createEvent("export_progress", agent, 
+      `Export: ${data.rows_written}/${data.target} rows (${data.columns_count} columns)`, {
+      progress: Math.min(progress, 100),
+      phase: "export",
+    });
+    this.publish(event);
+  }
+
   destroy(): void {
     if (this.flushTimer) {
       clearInterval(this.flushTimer);

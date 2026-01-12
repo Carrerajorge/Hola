@@ -159,6 +159,15 @@ export async function runAcademicPipeline(
       allCandidates.push(...openAlexResults);
       if (openAlexResults.length > 0) sourcesUsed.push("OpenAlex");
       console.log(`[AcademicPipeline] OpenAlex: ${openAlexResults.length} candidates`);
+      
+      emitter.emit("search_progress", {
+        provider: "openalex",
+        query_idx: 1,
+        query_total: 3,
+        page: 1,
+        found: openAlexResults.length,
+        candidates_total: allCandidates.length,
+      });
     } catch (error: any) {
       console.error(`[AcademicPipeline] OpenAlex error: ${error.message}`);
       warnings.push(`OpenAlex search failed: ${error.message}`);
@@ -173,6 +182,7 @@ export async function runAcademicPipeline(
 
     try {
       console.log(`[AcademicPipeline] Searching CrossRef...`);
+      let crossRefTotal = 0;
       for (const query of queries.slice(0, 5)) {
         const crossRefResults = await searchCrossRef(query, {
           yearStart: cfg.yearStart,
@@ -180,10 +190,20 @@ export async function runAcademicPipeline(
           maxResults: 50,
         });
         allCandidates.push(...crossRefResults);
+        crossRefTotal += crossRefResults.length;
         if (crossRefResults.length > 0 && !sourcesUsed.includes("CrossRef")) {
           sourcesUsed.push("CrossRef");
         }
       }
+      
+      emitter.emit("search_progress", {
+        provider: "crossref",
+        query_idx: 2,
+        query_total: 3,
+        page: 1,
+        found: crossRefTotal,
+        candidates_total: allCandidates.length,
+      });
     } catch (error: any) {
       console.error(`[AcademicPipeline] CrossRef error: ${error.message}`);
       warnings.push(`CrossRef search failed: ${error.message}`);
@@ -206,6 +226,15 @@ export async function runAcademicPipeline(
       allCandidates.push(...s2Results);
       if (s2Results.length > 0) sourcesUsed.push("SemanticScholar");
       console.log(`[AcademicPipeline] Semantic Scholar: ${s2Results.length} candidates`);
+      
+      emitter.emit("search_progress", {
+        provider: "semantic_scholar",
+        query_idx: 3,
+        query_total: 3,
+        page: 1,
+        found: s2Results.length,
+        candidates_total: allCandidates.length,
+      });
     } catch (error: any) {
       console.error(`[AcademicPipeline] Semantic Scholar error: ${error.message}`);
       warnings.push(`Semantic Scholar search failed: ${error.message}`);
@@ -222,13 +251,25 @@ export async function runAcademicPipeline(
 
     const deduplicated = deduplicateCandidates(allCandidates);
     console.log(`[AcademicPipeline] After deduplication: ${deduplicated.length}`);
+    
+    const duplicateCount = allCandidates.length - deduplicated.length;
 
     emitter.emit("pipeline_phase", { phase: "relevance", status: "starting" });
     
     const relevant = filterByRelevanceAgent(deduplicated);
     console.log(`[AcademicPipeline] After relevance filter: ${relevant.length}`);
     
-    failuresByReason["low_relevance"] = deduplicated.length - relevant.length;
+    const lowRelevanceCount = deduplicated.length - relevant.length;
+    failuresByReason["low_relevance"] = lowRelevanceCount;
+    failuresByReason["duplicate"] = duplicateCount;
+
+    emitter.emit("filter_progress", {
+      regions: ["LATAM", "España"],
+      geo_mismatch: 0,
+      year_out_of_range: 0,
+      duplicate: duplicateCount,
+      low_relevance: lowRelevanceCount,
+    });
 
     emitter.emit("pipeline_phase", { 
       phase: "relevance", 
@@ -254,7 +295,19 @@ export async function runAcademicPipeline(
       verifiedArticles.push(...newlyVerified);
       console.log(`[AcademicPipeline] Newly verified: ${newlyVerified.length}, Total verified: ${verifiedArticles.length}`);
       
-      failuresByReason["verification_failed"] = (failuresByReason["verification_failed"] || 0) + (toVerify.length - newlyVerified.length);
+      const deadCount = toVerify.length - newlyVerified.length;
+      failuresByReason["verification_failed"] = (failuresByReason["verification_failed"] || 0) + deadCount;
+      
+      emitter.emit("verify_progress", {
+        checked: toVerify.length,
+        ok: newlyVerified.length,
+        dead: deadCount,
+      });
+      
+      emitter.emit("accepted_progress", {
+        accepted: verifiedArticles.length,
+        target: cfg.targetCount,
+      });
     } catch (error: any) {
       console.error(`[AcademicPipeline] Verification error: ${error.message}`);
       warnings.push(`Verification batch failed: ${error.message}`);
@@ -317,8 +370,20 @@ export async function runAcademicPipeline(
   let artifact: ArtifactMeta | undefined;
   
   try {
+    emitter.emit("export_progress", {
+      columns_count: 15,
+      rows_written: 0,
+      target: finalArticles.length,
+    });
+    
     artifact = await exportToExcel(finalArticles, topic, warnings);
     console.log(`[AcademicPipeline] Excel generated: ${artifact.name}`);
+    
+    emitter.emit("export_progress", {
+      columns_count: 15,
+      rows_written: finalArticles.length,
+      target: finalArticles.length,
+    });
   } catch (error: any) {
     console.error(`[AcademicPipeline] Export error: ${error.message}`);
     warnings.push(`Export failed: ${error.message}`);

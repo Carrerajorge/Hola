@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   CheckCircle2, 
@@ -14,7 +14,8 @@ import {
   Zap,
   Settings2,
   FileText,
-  X as XIcon
+  X as XIcon,
+  MessageSquare
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,7 @@ import {
   TraceEvent
 } from "@/lib/runStreamClient";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { NarrationAgent, NarrationState } from "@/lib/narrationAgent";
 
 interface LiveExecutionConsoleProps {
   runId: string | null;
@@ -143,6 +145,8 @@ export function LiveExecutionConsole({
 }: LiveExecutionConsoleProps) {
   const [state, setState] = useState<RunStreamState | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [narration, setNarration] = useState<NarrationState | null>(null);
+  const narrationAgentRef = useRef<NarrationAgent | null>(null);
 
   useEffect(() => {
     console.log('[LiveExecutionConsole] Mounted with runId=', runId);
@@ -154,9 +158,20 @@ export function LiveExecutionConsole({
     console.log(`[LiveExecutionConsole] Connecting to run: ${runId}`);
     const streamClient = new RunStreamClient(runId);
 
+    if (!narrationAgentRef.current) {
+      narrationAgentRef.current = new NarrationAgent();
+    }
+
     const unsubscribe = streamClient.subscribe((newState) => {
       console.log(`[LiveExecutionConsole] State update:`, newState.connectionMode, newState.phase, newState.status);
       setState(newState);
+      
+      for (const event of newState.events) {
+        const newNarration = narrationAgentRef.current!.processEvent(event);
+        if (newNarration.currentNarration !== narration?.currentNarration) {
+          setNarration(newNarration);
+        }
+      }
       
       if (newState.status === "completed" && onComplete) {
         onComplete(newState.artifacts);
@@ -214,6 +229,15 @@ export function LiveExecutionConsole({
         className
       )}
     >
+      {narration && narration.currentNarration && (
+        <div className="px-4 py-2 bg-primary/10 border-b border-primary/20">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-primary" />
+            <span className="text-sm text-primary font-medium">Qué estoy haciendo ahora</span>
+          </div>
+          <p className="text-sm mt-1">{narration.currentNarration}</p>
+        </div>
+      )}
       <div className="p-3 space-y-2.5">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0 flex-1">

@@ -32,6 +32,11 @@ export const TraceEventSchema = z.object({
     "source_rejected",
     "artifact_created",
     "progress_update",
+    "search_progress",
+    "filter_progress",
+    "verify_progress",
+    "accepted_progress",
+    "export_progress",
   ]),
   phase: z.enum([
     "planning",
