@@ -459,9 +459,9 @@ export class SuperAgentOrchestrator extends EventEmitter {
       output: { collected: allSignals.length, source: sources.join("+") },
     });
 
-    if (allSignals.length === 0 && errors.length > 0) {
-      const researchDecision = shouldResearch(prompt);
-      await this.executeSignalsWithWebSearch(researchDecision, targetCount);
+    if (allSignals.length < targetCount) {
+      console.log(`[AcademicDatabases] Only found ${allSignals.length}/${targetCount} from Scopus/WoS, falling back to OpenAlex pipeline`);
+      await this.executeSignalsWithOpenAlex(prompt, targetCount);
     }
   }
 
