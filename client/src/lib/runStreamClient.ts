@@ -53,6 +53,8 @@ export interface SpanNode {
   phase?: string;
 }
 
+export type ConnectionMode = "connecting" | "sse_active" | "polling" | "failed";
+
 export interface RunStreamState {
   run_id: string;
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
@@ -77,6 +79,7 @@ export interface RunStreamState {
   }>;
   lastHeartbeat: number;
   connected: boolean;
+  connectionMode: ConnectionMode;
   error?: string;
 }
 
@@ -92,11 +95,18 @@ export class RunStreamClient {
   private listeners: Set<RunStreamListener> = new Set();
   private spanMap: Map<string, SpanNode> = new Map();
   
+  private sseOpenTimer: NodeJS.Timeout | null = null;
+  private firstEventTimer: NodeJS.Timeout | null = null;
+  private pollingInterval: NodeJS.Timeout | null = null;
+  private sseOpened: boolean = false;
+  private firstEventReceived: boolean = false;
+  
   private state: RunStreamState;
 
   constructor(runId: string) {
     this.runId = runId;
     this.state = this.createInitialState();
+    console.log(`[RunStreamClient] Created for run: ${runId}`);
   }
 
   private createInitialState(): RunStreamState {
@@ -116,10 +126,13 @@ export class RunStreamClient {
       violations: [],
       lastHeartbeat: Date.now(),
       connected: false,
+      connectionMode: "connecting",
     };
   }
 
   connect(): void {
+    console.log(`[RunStreamClient] Connecting to SSE for run: ${this.runId}`);
+    
     if (this.eventSource) {
       this.eventSource.close();
     }
@@ -128,21 +141,51 @@ export class RunStreamClient {
       ? `/api/runs/${this.runId}/events?from=${this.lastEventId}`
       : `/api/runs/${this.runId}/events`;
 
+    console.log(`[RunStreamClient] SSE URL: ${url}`);
     this.eventSource = new EventSource(url);
     
+    this.sseOpenTimer = setTimeout(() => {
+      if (!this.sseOpened) {
+        console.warn(`[RunStreamClient] SSE onopen timeout (2.5s), activating polling fallback`);
+        this.activatePollingFallback();
+      }
+    }, 2500);
+    
+    this.firstEventTimer = setTimeout(() => {
+      if (!this.firstEventReceived) {
+        console.warn(`[RunStreamClient] No events received within 3s, activating polling fallback`);
+        this.activatePollingFallback();
+      }
+    }, 3000);
+    
     this.eventSource.onopen = () => {
+      console.log(`[RunStreamClient] SSE onopen fired`);
+      this.sseOpened = true;
       this.state.connected = true;
+      this.state.connectionMode = "sse_active";
       this.reconnectAttempts = 0;
+      if (this.sseOpenTimer) {
+        clearTimeout(this.sseOpenTimer);
+        this.sseOpenTimer = null;
+      }
       this.emit();
     };
 
-    this.eventSource.onerror = () => {
+    this.eventSource.onerror = (e) => {
+      console.error(`[RunStreamClient] SSE onerror:`, e);
       this.state.connected = false;
       this.emit();
-      this.scheduleReconnect();
+      
+      if (!this.sseOpened && !this.pollingInterval) {
+        console.log(`[RunStreamClient] SSE failed before open, activating polling`);
+        this.activatePollingFallback();
+      } else if (this.state.connectionMode === "sse_active") {
+        this.scheduleReconnect();
+      }
     };
 
     this.eventSource.onmessage = (event) => {
+      this.markFirstEventReceived();
       this.handleEvent(JSON.parse(event.data));
     };
 
@@ -150,7 +193,7 @@ export class RunStreamClient {
       "run_started", "run_completed", "run_failed",
       "phase_started", "phase_completed", "phase_failed",
       "tool_start", "tool_progress", "tool_stdout_chunk", "tool_end", "tool_error",
-      "checkpoint", "contract_violation", "heartbeat",
+      "checkpoint", "contract_violation", "heartbeat", "connected",
       "retry_scheduled", "fallback_activated",
       "source_collected", "source_verified", "source_rejected",
       "artifact_created", "progress_update",
@@ -158,13 +201,86 @@ export class RunStreamClient {
 
     for (const type of eventTypes) {
       this.eventSource.addEventListener(type, (event: MessageEvent) => {
+        this.markFirstEventReceived();
         try {
           const data = JSON.parse(event.data);
+          console.log(`[RunStreamClient] Event received: ${type}`, data);
           this.handleEvent(data);
         } catch (e) {
           console.error("[RunStreamClient] Parse error:", e);
         }
       });
+    }
+  }
+  
+  private markFirstEventReceived(): void {
+    if (!this.firstEventReceived) {
+      console.log(`[RunStreamClient] First event received`);
+      this.firstEventReceived = true;
+      if (this.firstEventTimer) {
+        clearTimeout(this.firstEventTimer);
+        this.firstEventTimer = null;
+      }
+    }
+  }
+  
+  private activatePollingFallback(): void {
+    if (this.pollingInterval) return;
+    
+    console.log(`[RunStreamClient] Activating polling fallback for run: ${this.runId}`);
+    
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+    
+    if (this.sseOpenTimer) {
+      clearTimeout(this.sseOpenTimer);
+      this.sseOpenTimer = null;
+    }
+    if (this.firstEventTimer) {
+      clearTimeout(this.firstEventTimer);
+      this.firstEventTimer = null;
+    }
+    
+    this.state.connectionMode = "polling";
+    this.state.connected = true;
+    this.emit();
+    
+    this.pollStatus();
+    this.pollingInterval = setInterval(() => this.pollStatus(), 500);
+  }
+  
+  private async pollStatus(): Promise<void> {
+    try {
+      const response = await fetch(`/api/runs/${this.runId}/status`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`[RunStreamClient] Poll response:`, data);
+        
+        if (data.status) this.state.status = data.status;
+        if (data.phase) this.state.phase = data.phase;
+        if (data.progress !== undefined) this.state.progress = data.progress;
+        if (data.metrics) this.updateMetrics(data.metrics);
+        if (data.artifacts) this.state.artifacts = data.artifacts;
+        if (data.error) this.state.error = data.error;
+        
+        this.state.lastHeartbeat = Date.now();
+        this.emit();
+        
+        if (data.status === "completed" || data.status === "failed") {
+          this.stopPolling();
+        }
+      }
+    } catch (e) {
+      console.error(`[RunStreamClient] Poll error:`, e);
+    }
+  }
+  
+  private stopPolling(): void {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
     }
   }
 
@@ -361,8 +477,21 @@ export class RunStreamClient {
 
   destroy(): void {
     this.disconnect();
+    this.stopPolling();
+    if (this.sseOpenTimer) {
+      clearTimeout(this.sseOpenTimer);
+      this.sseOpenTimer = null;
+    }
+    if (this.firstEventTimer) {
+      clearTimeout(this.firstEventTimer);
+      this.firstEventTimer = null;
+    }
     this.listeners.clear();
     this.spanMap.clear();
+  }
+  
+  getConnectionMode(): ConnectionMode {
+    return this.state.connectionMode;
   }
 }
 

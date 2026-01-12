@@ -334,48 +334,105 @@ router.get("/super/artifacts/:id/download", async (req: Request, res: Response) 
   }
 });
 
+const runStatusCache = new Map<string, {
+  status: string;
+  phase: string;
+  progress: number;
+  metrics: { articles_collected: number; articles_verified: number; articles_accepted: number };
+  artifacts: Array<{ id: string; type: string; name: string; url: string }>;
+  error?: string;
+  lastUpdate: number;
+}>();
+
 router.get("/runs/:runId/events", async (req: Request, res: Response) => {
   const { runId } = req.params;
   const fromSeq = parseInt(req.query.from as string) || 0;
   
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.setHeader("Access-Control-Allow-Origin", "*");
+  
   res.flushHeaders();
   
   const gateway = getStreamGateway();
   let seq = fromSeq;
   let heartbeatInterval: NodeJS.Timeout | null = null;
   
-  const unsubscribe = gateway.subscribe(runId, (event) => {
+  const writeSSE = (eventType: string, data: any) => {
     seq++;
-    const sseEvent = {
-      ...event,
-      seq,
-    };
+    const payload = JSON.stringify({ ...data, seq, run_id: runId, ts: Date.now() });
     res.write(`id: ${seq}\n`);
-    res.write(`event: ${event.event_type}\n`);
-    res.write(`data: ${JSON.stringify(sseEvent)}\n\n`);
+    res.write(`event: ${eventType}\n`);
+    res.write(`data: ${payload}\n\n`);
+    if (typeof (res as any).flush === "function") {
+      (res as any).flush();
+    }
+  };
+  
+  writeSSE("connected", { connected: true, event_type: "connected" });
+  
+  writeSSE("run_started", { 
+    event_type: "run_started",
+    phase: "planning", 
+    message: "Research agent initialized",
+    agent: "SuperAgent",
+    status: "running"
   });
   
-  seq++;
-  res.write(`id: ${seq}\n`);
-  res.write(`event: connected\n`);
-  res.write(`data: ${JSON.stringify({ run_id: runId, seq, connected: true })}\n\n`);
+  const unsubscribe = gateway.subscribe(runId, (event) => {
+    writeSSE(event.event_type, event);
+    
+    const cached = runStatusCache.get(runId) || {
+      status: "running",
+      phase: "planning",
+      progress: 0,
+      metrics: { articles_collected: 0, articles_verified: 0, articles_accepted: 0 },
+      artifacts: [],
+      lastUpdate: Date.now(),
+    };
+    
+    if (event.phase) cached.phase = event.phase;
+    if (event.status) cached.status = event.status;
+    if (event.progress !== undefined) cached.progress = event.progress;
+    if (event.metrics) Object.assign(cached.metrics, event.metrics);
+    if (event.event_type === "run_completed") cached.status = "completed";
+    if (event.event_type === "run_failed") {
+      cached.status = "failed";
+      cached.error = event.message;
+    }
+    cached.lastUpdate = Date.now();
+    runStatusCache.set(runId, cached);
+  });
   
   heartbeatInterval = setInterval(() => {
-    seq++;
-    res.write(`id: ${seq}\n`);
-    res.write(`event: heartbeat\n`);
-    res.write(`data: ${JSON.stringify({ run_id: runId, seq, ts: Date.now() })}\n\n`);
-  }, 15000);
+    writeSSE("heartbeat", { event_type: "heartbeat", agent: "System" });
+  }, 800);
   
   req.on("close", () => {
     unsubscribe();
     if (heartbeatInterval) {
       clearInterval(heartbeatInterval);
     }
+  });
+});
+
+router.get("/runs/:runId/status", async (req: Request, res: Response) => {
+  const { runId } = req.params;
+  
+  const cached = runStatusCache.get(runId);
+  if (cached) {
+    return res.json(cached);
+  }
+  
+  res.json({
+    status: "pending",
+    phase: "idle",
+    progress: 0,
+    metrics: { articles_collected: 0, articles_verified: 0, articles_accepted: 0 },
+    artifacts: [],
+    error: null,
   });
 });
 

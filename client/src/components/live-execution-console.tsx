@@ -22,11 +22,13 @@ import {
   RunStreamClient, 
   RunStreamState, 
   TraceEvent, 
-  SpanNode 
+  SpanNode,
+  ConnectionMode
 } from "@/lib/runStreamClient";
 
 interface LiveExecutionConsoleProps {
   runId: string | null;
+  forceShow?: boolean;
   onComplete?: (artifacts: RunStreamState["artifacts"]) => void;
   onError?: (error: string) => void;
   className?: string;
@@ -175,7 +177,8 @@ function SpanTreeNode({ node, depth = 0 }: { node: SpanNode; depth?: number }) {
 }
 
 export function LiveExecutionConsole({ 
-  runId, 
+  runId,
+  forceShow = false,
   onComplete, 
   onError,
   className 
@@ -187,10 +190,12 @@ export function LiveExecutionConsole({
   useEffect(() => {
     if (!runId) return;
 
+    console.log(`[LiveExecutionConsole] Mounting for run: ${runId}`);
     const streamClient = new RunStreamClient(runId);
     setClient(streamClient);
 
     const unsubscribe = streamClient.subscribe((newState) => {
+      console.log(`[LiveExecutionConsole] State update:`, newState.connectionMode, newState.phase, newState.status);
       setState(newState);
       
       if (newState.status === "completed" && onComplete) {
@@ -205,6 +210,7 @@ export function LiveExecutionConsole({
     streamClient.connect();
 
     return () => {
+      console.log(`[LiveExecutionConsole] Unmounting for run: ${runId}`);
       unsubscribe();
       streamClient.destroy();
     };
@@ -221,7 +227,14 @@ export function LiveExecutionConsole({
     return null;
   }
 
-  if (!state) {
+  const connectionModeLabel = {
+    connecting: "Conectando a ejecución...",
+    sse_active: "Conectado (tiempo real)",
+    polling: "Conectado (polling)",
+    failed: "Error de conexión",
+  };
+
+  if (!state || state.connectionMode === "connecting") {
     return (
       <motion.div
         initial={{ opacity: 0, y: 10 }}
@@ -237,9 +250,14 @@ export function LiveExecutionConsole({
             <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping" />
           </div>
           <div>
-            <h3 className="font-semibold text-sm">Iniciando búsqueda académica</h3>
-            <p className="text-xs text-muted-foreground">Conectando con el agente de investigación...</p>
+            <h3 className="font-semibold text-sm">Ejecutando búsqueda académica</h3>
+            <p className="text-xs text-muted-foreground">
+              {state ? connectionModeLabel[state.connectionMode] : "Conectando a ejecución..."}
+            </p>
           </div>
+        </div>
+        <div className="mt-4">
+          <Progress value={5} className="h-1" />
         </div>
       </motion.div>
     );

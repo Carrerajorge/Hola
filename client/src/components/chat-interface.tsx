@@ -986,6 +986,9 @@ export function ChatInterface({
   
   // Track active run ID for Live Execution Console
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  // Grace window: force show LiveExecutionConsole after 2000ms
+  const [graceWindowPassed, setGraceWindowPassed] = useState(false);
+  const graceWindowTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Optimistic messages - shown immediately before they appear in props
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
@@ -3183,6 +3186,17 @@ export function ChatInterface({
       // Generate run ID on frontend to enable immediate LiveExecutionConsole display
       const frontendRunId = `run_${crypto.randomUUID()}`;
       console.log("[Super Agent] Starting with run_id:", frontendRunId);
+      
+      // Start grace window timer - force show LiveExecutionConsole after 2000ms
+      setGraceWindowPassed(false);
+      if (graceWindowTimerRef.current) {
+        clearTimeout(graceWindowTimerRef.current);
+      }
+      graceWindowTimerRef.current = setTimeout(() => {
+        console.log("[Super Agent] Grace window passed (2000ms) - forcing LiveExecutionConsole");
+        setGraceWindowPassed(true);
+      }, 2000);
+      
       setActiveRunId(frontendRunId);
       
       // Set up SSE stream by making POST request
@@ -5126,8 +5140,8 @@ IMPORTANTE:
           </div>
         )}
 
-        {/* Thinking/Responding State - only show if aiState belongs to current chat */}
-        {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && (
+        {/* Thinking/Responding State - only show if aiState belongs to current chat and no Super Agent active */}
+        {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && !activeRunId && (
           <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
             {/* Streaming Indicator with cancel button */}
             <StreamingIndicator
