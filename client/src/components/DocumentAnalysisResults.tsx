@@ -14,7 +14,6 @@ import {
   ExternalLink,
   Table as TableIcon,
   BarChart3,
-  MessageSquare,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -32,14 +31,11 @@ import type {
   Anomaly,
   Table,
   SheetSummary,
-  SuggestedQuestion,
 } from '../../../shared/schemas/documentSemanticModel';
 
 export interface DocumentAnalysisResultsProps {
   documentModel: DocumentSemanticModel;
   insights: Insight[];
-  suggestedQuestions: SuggestedQuestion[];
-  onQuestionClick: (question: string) => void;
 }
 
 const InsightTypeIcon = ({ type }: { type: Insight['type'] }) => {
@@ -476,44 +472,10 @@ function AnomaliesSection({ anomalies }: { anomalies: Anomaly[] }) {
   );
 }
 
-function SuggestedQuestionsSection({
-  questions,
-  onQuestionClick,
-}: {
-  questions: SuggestedQuestion[];
-  onQuestionClick: (question: string) => void;
-}) {
-  if (!questions || questions.length === 0) return null;
-
-  return (
-    <div data-testid="suggested-questions-section">
-      <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-        <MessageSquare className="h-5 w-5 text-primary" />
-        Suggested Questions
-      </h3>
-      <div className="flex flex-wrap gap-2">
-        {questions.map((q) => (
-          <Button
-            key={q.id}
-            variant="outline"
-            size="sm"
-            className="h-auto py-2 px-3 text-sm text-left whitespace-normal max-w-xs hover:bg-primary hover:text-primary-foreground transition-colors"
-            onClick={() => onQuestionClick(q.question)}
-            data-testid={`suggested-question-${q.id}`}
-          >
-            {q.question}
-          </Button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export function DocumentAnalysisResults({
   documentModel,
   insights,
-  suggestedQuestions,
-  onQuestionClick,
 }: DocumentAnalysisResultsProps) {
   const [activeSheet, setActiveSheet] = useState<string>(
     documentModel.sheets?.[0]?.name || ''
@@ -548,11 +510,6 @@ export function DocumentAnalysisResults({
         <MetricsGrid metrics={documentModel.metrics} onMetricClick={handleMetricClick} />
 
         <AnomaliesSection anomalies={documentModel.anomalies} />
-
-        <SuggestedQuestionsSection
-          questions={suggestedQuestions}
-          onQuestionClick={onQuestionClick}
-        />
       </div>
     </TooltipProvider>
   );
