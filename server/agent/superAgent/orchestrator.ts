@@ -16,7 +16,7 @@ import { createXlsx, createDocx, storeArtifactMeta, packCitations, XlsxSpec, Doc
 import { evaluateQualityGate, shouldRetry, formatGateReport } from "./qualityGate";
 import { searchScopus, scopusArticlesToSourceSignals, isScopusConfigured, ScopusArticle } from "./scopusClient";
 import { searchWos, WosArticle } from "./wosClient";
-import { runAcademicPipeline, candidatesToSourceSignals, PipelineResult } from "./academicPipeline";
+import { runAcademicPipeline, candidatesToSourceSignals, PipelineResult, PipelineConfig } from "./academicPipeline";
 
 function isWosConfigured(): boolean {
   return !!process.env.WOS_API_KEY;
@@ -250,6 +250,8 @@ export class SuperAgentOrchestrator extends EventEmitter {
       message: `Ejecutando pipeline multi-agente para: "${searchTopic}"`,
     });
 
+    let pipelineResult: PipelineResult | null = null;
+
     try {
       const pipelineEmitter = new EventEmitter();
       
@@ -261,13 +263,24 @@ export class SuperAgentOrchestrator extends EventEmitter {
         });
       });
 
-      const result = await runAcademicPipeline(searchTopic, pipelineEmitter, {
+      pipelineResult = await runAcademicPipeline(searchTopic, pipelineEmitter, {
         targetCount: Math.min(targetCount, 50),
         yearStart: yearRange.start || 2020,
         yearEnd: yearRange.end || 2025,
+        maxSearchIterations: 4,
       });
 
-      const signals = candidatesToSourceSignals(result.articles);
+    } catch (error: any) {
+      console.error(`[OpenAlex Pipeline] Error: ${error.message}`);
+      this.emitSSE("progress", {
+        phase: "signals",
+        status: "error",
+        error: error.message,
+      });
+    }
+
+    if (pipelineResult && pipelineResult.articles.length > 0) {
+      const signals = candidatesToSourceSignals(pipelineResult.articles);
       for (const signal of signals) {
         this.emitSSE("source_signal", signal);
       }
@@ -275,47 +288,57 @@ export class SuperAgentOrchestrator extends EventEmitter {
       this.state.sources = signals;
       this.state.sources_count = signals.length;
 
-      if (result.artifact) {
+      if (pipelineResult.artifact) {
         this.state.artifacts.push({
           type: "xlsx",
-          filename: result.artifact.filename,
-          path: result.artifact.path,
-          size: result.artifact.size,
-          url: result.artifact.url,
+          filename: pipelineResult.artifact.filename,
+          path: pipelineResult.artifact.path,
+          size: pipelineResult.artifact.size,
+          url: pipelineResult.artifact.url,
           created_at: Date.now(),
         });
       }
 
+      const successWithWarning = pipelineResult.articles.length >= 10;
+      
       this.emitSSE("tool_result", {
         tool_call_id: "tc_signals_openalex",
-        success: result.success,
+        success: successWithWarning,
         output: {
-          collected: result.stats.finalCount,
+          collected: pipelineResult.stats.finalCount,
           target: targetCount,
-          source: "OpenAlex+CrossRef",
-          verified: result.stats.verifiedCount,
-          duration_ms: result.stats.durationMs,
-          criticPassed: result.criticResult.passed,
+          source: pipelineResult.stats.sourcesUsed.join("+"),
+          verified: pipelineResult.stats.verifiedCount,
+          duration_ms: pipelineResult.stats.durationMs,
+          criticPassed: pipelineResult.criticResult.passed,
+          warnings: pipelineResult.warnings,
         },
       });
 
       this.state.tool_results.push({
         tool_call_id: "tc_signals_openalex",
-        success: result.success,
+        success: successWithWarning,
         output: { 
-          collected: result.stats.finalCount, 
-          source: "OpenAlex+CrossRef",
-          verified: result.stats.verifiedCount,
+          collected: pipelineResult.stats.finalCount, 
+          source: pipelineResult.stats.sourcesUsed.join("+"),
+          verified: pipelineResult.stats.verifiedCount,
+          warnings: pipelineResult.warnings,
         },
       });
 
-    } catch (error: any) {
-      console.error(`[OpenAlex Pipeline] Error: ${error.message}`);
+    } else {
+      console.log(`[OpenAlex Pipeline] No results, falling back to web search`);
       
       this.emitSSE("tool_result", {
         tool_call_id: "tc_signals_openalex",
         success: false,
-        error: error.message,
+        error: "No verified articles found from academic sources",
+      });
+
+      this.state.tool_results.push({
+        tool_call_id: "tc_signals_openalex",
+        success: false,
+        output: { error: "No verified articles found" },
       });
 
       const researchDecision = shouldResearch(prompt);
