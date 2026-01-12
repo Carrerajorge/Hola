@@ -60,7 +60,16 @@ Preferred communication style: Simple, everyday language.
 - **Circuit Breakers**: Wraps external services (LLM APIs) with configurable timeout, retries, and exponential backoff.
 - **Rate Limiting**: Sliding window algorithm with per-IP tracking and X-RateLimit headers.
 - **Graceful Shutdown**: Connection draining, WebSocket cleanup, and configurable shutdown timeout.
-- **FastAPI SSE Backend**: Alternative Python-based SSE service with Celery workers for distributed task execution.
+- **FastAPI SSE Backend**: Production-grade Python SSE microservice (`fastapi_sse/`) for agent tracing with:
+  - Redis Streams with consumer groups for durability, replay (Last-Event-ID), and at-least-once delivery
+  - Backpressure handling with bounded buffers, slow client detection, and write timeouts
+  - Token bucket rate limiting (IP/user/route) with Redis backend
+  - Optional API key/JWT authentication middleware
+  - Celery workers for decoupled agent execution publishing events to streams
+  - Circuit breakers for Redis and Celery with graceful degradation (POST /chat fallback)
+  - OpenTelemetry tracing/metrics with Prometheus exporter and structured logging
+  - Health endpoints (/healthz, /readyz, /metrics)
+  - Docker deployment (Dockerfile, docker-compose.yml with Redis + App + Workers + Flower)
 
 ### Environment Variables (Production)
 - `REDIS_URL`: Redis connection for caching, pub/sub, and session state.

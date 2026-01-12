@@ -1,4 +1,4 @@
-"""SSE streaming endpoint with Redis Streams consumer groups."""
+"""SSE streaming endpoint with Redis Streams consumer groups and backpressure."""
 import asyncio
 import json
 import time
@@ -10,6 +10,7 @@ import structlog
 
 from ..session import get_session_manager, SessionManager
 from ..redis_streams import get_streams_manager, RedisStreamsManager, StreamEvent
+from ..backpressure import get_backpressure_manager, BackpressureManager, BackpressureBuffer, SSEEvent
 from ..config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -51,49 +52,22 @@ class SSEFormatter:
         return "\n".join(lines)
 
 
-async def stream_events(
+async def _producer_task(
     session_id: str,
+    consumer_name: str,
+    buffer: BackpressureBuffer,
     request: Request,
     last_event_id: Optional[str],
     session_manager: SessionManager,
     streams_manager: RedisStreamsManager
-) -> AsyncIterator[str]:
-    """
-    Stream events from Redis Streams to SSE client.
-    
-    Features:
-    - Consumer group for reliable delivery
-    - Last-Event-ID support for replay/retry
-    - Heartbeat to keep connection alive
-    - Idle timeout to close stale connections
-    - Automatic acknowledgment and deduplication
-    
-    Args:
-        session_id: Session to stream events for
-        request: FastAPI request for disconnect detection
-        last_event_id: Last event ID from client for replay
-        session_manager: Session manager instance
-        streams_manager: Redis Streams manager instance
-        
-    Yields:
-        SSE formatted event strings
-    """
+) -> None:
+    """Background task that reads from Redis Streams and pushes to backpressure buffer."""
     settings = get_settings()
-    consumer_name = f"sse-{uuid.uuid4().hex[:8]}"
-    formatter = SSEFormatter()
-    
     start_time = time.time()
     last_activity = time.time()
-    events_sent = 0
+    events_pushed = 0
     
     try:
-        yield formatter.format("connected", {
-            "session_id": session_id,
-            "consumer": consumer_name,
-            "timestamp": time.time()
-        })
-        events_sent += 1
-        
         await streams_manager.ensure_consumer_group(session_id, consumer_name)
         
         async for event in streams_manager.iter_events(
@@ -101,82 +75,159 @@ async def stream_events(
             consumer_name,
             last_event_id=last_event_id
         ):
-            if await request.is_disconnected():
-                logger.info(
-                    "client_disconnected",
-                    session_id=session_id,
-                    events_sent=events_sent
-                )
+            if await request.is_disconnected() or buffer.is_closed:
                 break
             
             elapsed = time.time() - start_time
             idle_time = time.time() - last_activity
             
             if idle_time > settings.sse_idle_timeout_sec:
-                logger.info(
-                    "idle_timeout",
-                    session_id=session_id,
-                    idle_seconds=idle_time
-                )
-                yield formatter.format("timeout", {
-                    "reason": "idle_timeout",
-                    "idle_seconds": idle_time
-                })
+                buffer.push(SSEEvent(
+                    event_type="timeout",
+                    data=json.dumps({"reason": "idle_timeout", "idle_seconds": idle_time})
+                ))
                 break
             
             if event.event_type == "heartbeat":
-                yield formatter.format("heartbeat", {
-                    "ts": time.time(),
-                    "session_id": session_id,
-                    "events_sent": events_sent,
-                    "elapsed_seconds": elapsed
-                })
+                buffer.push(SSEEvent(
+                    event_type="heartbeat",
+                    data=json.dumps({
+                        "ts": time.time(),
+                        "session_id": session_id,
+                        "events_sent": events_pushed,
+                        "elapsed_seconds": elapsed
+                    })
+                ))
                 continue
             
             last_activity = time.time()
             
-            yield formatter.format(
-                event.event_type,
-                event.data,
+            success = buffer.push(SSEEvent(
+                event_type=event.event_type,
+                data=json.dumps(event.data) if isinstance(event.data, dict) else str(event.data),
                 event_id=event.event_id
-            )
-            events_sent += 1
+            ))
             
-            await session_manager.touch(session_id)
+            if success:
+                events_pushed += 1
+                await session_manager.touch(session_id)
             
             if event.event_type in ("final", "error"):
                 logger.info(
-                    "stream_completed",
+                    "producer_completed",
                     session_id=session_id,
                     event_type=event.event_type,
-                    events_sent=events_sent,
-                    duration=time.time() - start_time
+                    events_pushed=events_pushed
                 )
                 break
     
     except asyncio.CancelledError:
-        logger.info(
-            "stream_cancelled",
-            session_id=session_id,
-            events_sent=events_sent
-        )
+        logger.debug("producer_cancelled", session_id=session_id)
     except Exception as e:
-        logger.exception(
-            "stream_error",
-            session_id=session_id,
-            error=str(e)
-        )
-        yield formatter.format("error", {
-            "message": str(e),
-            "type": type(e).__name__
-        })
+        logger.exception("producer_error", session_id=session_id, error=str(e))
+        buffer.push(SSEEvent(
+            event_type="error",
+            data=json.dumps({"message": str(e), "type": type(e).__name__})
+        ))
     finally:
-        logger.debug(
-            "stream_closed",
-            session_id=session_id,
-            events_sent=events_sent,
-            duration=time.time() - start_time
-        )
+        buffer.close()
+
+
+async def stream_events(
+    session_id: str,
+    request: Request,
+    last_event_id: Optional[str],
+    session_manager: SessionManager,
+    streams_manager: RedisStreamsManager,
+    backpressure_mgr: BackpressureManager
+) -> AsyncIterator[str]:
+    """
+    Stream events from Redis Streams to SSE client with backpressure handling.
+    
+    Features:
+    - Consumer group for reliable delivery
+    - Last-Event-ID support for replay/retry
+    - Heartbeat to keep connection alive
+    - Idle timeout to close stale connections
+    - Backpressure with bounded buffer and write timeouts
+    - Slow client detection and graceful termination
+    
+    Args:
+        session_id: Session to stream events for
+        request: FastAPI request for disconnect detection
+        last_event_id: Last event ID from client for replay
+        session_manager: Session manager instance
+        streams_manager: Redis Streams manager instance
+        backpressure_mgr: Backpressure manager for buffer handling
+        
+    Yields:
+        SSE formatted event strings
+    """
+    consumer_name = f"sse-{uuid.uuid4().hex[:8]}"
+    connection_id = f"{session_id}:{consumer_name}"
+    formatter = SSEFormatter()
+    
+    start_time = time.time()
+    events_sent = 0
+    producer: Optional[asyncio.Task] = None
+    
+    async with backpressure_mgr.managed_buffer(connection_id) as buffer:
+        try:
+            yield formatter.format("connected", {
+                "session_id": session_id,
+                "consumer": consumer_name,
+                "timestamp": time.time(),
+                "backpressure_enabled": True
+            })
+            events_sent += 1
+            
+            producer = asyncio.create_task(
+                _producer_task(
+                    session_id=session_id,
+                    consumer_name=consumer_name,
+                    buffer=buffer,
+                    request=request,
+                    last_event_id=last_event_id,
+                    session_manager=session_manager,
+                    streams_manager=streams_manager
+                )
+            )
+            
+            async for event_str in buffer.iter_events():
+                if await request.is_disconnected():
+                    logger.info(
+                        "client_disconnected",
+                        session_id=session_id,
+                        events_sent=events_sent
+                    )
+                    break
+                
+                yield event_str
+                events_sent += 1
+        
+        except asyncio.CancelledError:
+            logger.info("stream_cancelled", session_id=session_id, events_sent=events_sent)
+        except Exception as e:
+            logger.exception("stream_error", session_id=session_id, error=str(e))
+            yield formatter.format("error", {
+                "message": str(e),
+                "type": type(e).__name__
+            })
+        finally:
+            if producer and not producer.done():
+                producer.cancel()
+                try:
+                    await producer
+                except asyncio.CancelledError:
+                    pass
+            
+            logger.debug(
+                "stream_closed",
+                session_id=session_id,
+                events_sent=events_sent,
+                duration=time.time() - start_time,
+                buffer_metrics=buffer.metrics.to_dict()
+            )
 
 
 @router.get("/chat/stream")
@@ -186,7 +237,8 @@ async def chat_stream(
     prompt: Optional[str] = Query(None, description="Optional prompt to start processing"),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID", description="Last received event ID for replay"),
     session_manager: SessionManager = Depends(get_session_manager),
-    streams_manager: RedisStreamsManager = Depends(get_streams_manager)
+    streams_manager: RedisStreamsManager = Depends(get_streams_manager),
+    backpressure_mgr: BackpressureManager = Depends(get_backpressure_manager)
 ):
     """
     Stream chat events via Server-Sent Events.
@@ -267,7 +319,8 @@ async def chat_stream(
             request=request,
             last_event_id=last_event_id,
             session_manager=session_manager,
-            streams_manager=streams_manager
+            streams_manager=streams_manager,
+            backpressure_mgr=backpressure_mgr
         ),
         media_type="text/event-stream",
         headers={
