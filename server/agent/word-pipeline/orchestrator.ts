@@ -104,6 +104,13 @@ export class WordAgentOrchestrator extends EventEmitter {
         this.state.currentStage = stageId;
         this.state.status = this.getStatusForStage(stageId);
 
+        if (stageId === "assembler") {
+          const claimVerificationResult = this.enforceClaimVerificationPolicy(emitEvent);
+          if (!claimVerificationResult.passed) {
+            throw new Error(`Claim verification policy failed: ${claimVerificationResult.reason}`);
+          }
+        }
+
         const stageResult = await this.executeStageWithResilience(
           stageId,
           stage,
@@ -507,6 +514,86 @@ export class WordAgentOrchestrator extends EventEmitter {
       gap.resolvedAt = new Date().toISOString();
       context.emitEvent({ eventType: "gap.resolved", data: gap });
     }
+  }
+
+  private enforceClaimVerificationPolicy(
+    emitEvent: (event: Omit<PipelineEvent, "runId" | "timestamp">) => void
+  ): { passed: boolean; reason?: string } {
+    if (!this.state) return { passed: false, reason: "No pipeline state" };
+    
+    const claims = this.state.claims;
+    const claimsRequiringCitation = claims.filter(c => c.requiresCitation);
+    const verifiedClaims = claimsRequiringCitation.filter(c => c.verified);
+    const unverifiedClaims = claimsRequiringCitation.filter(c => !c.verified);
+    
+    if (claimsRequiringCitation.length === 0) {
+      return { passed: true };
+    }
+    
+    const verificationRate = verifiedClaims.length / claimsRequiringCitation.length;
+    const minVerificationRate = this.config.minClaimVerificationRate || 0.5;
+    
+    emitEvent({
+      eventType: "stage.progress",
+      stageId: "assembler",
+      stageName: "Pre-Assembly Verification",
+      progress: 0,
+      message: `Claim verification: ${verifiedClaims.length}/${claimsRequiringCitation.length} (${(verificationRate * 100).toFixed(0)}%)`,
+    });
+    
+    if (verificationRate < minVerificationRate) {
+      for (const claim of unverifiedClaims.slice(0, 5)) {
+        this.state.gaps.push(GAPSchema.parse({
+          id: uuidv4(),
+          type: "unverified_claim",
+          missing: `Citation for: ${claim.text.slice(0, 100)}`,
+          question: `What source supports: "${claim.text.slice(0, 100)}"?`,
+          claimId: claim.id,
+          sectionId: claim.sectionId,
+          priority: "critical",
+          suggestedAction: "re_retrieve",
+        }));
+      }
+      
+      emitEvent({
+        eventType: "quality_gate.failed",
+        stageId: "pre_assembler_check",
+        stageName: "Claim Verification Policy",
+        data: {
+          gateId: "claim_verification_policy",
+          gateName: "Claim Verification Policy",
+          passed: false,
+          score: verificationRate,
+          threshold: minVerificationRate,
+          issues: [
+            { severity: "error", message: `${unverifiedClaims.length} claims require citations but lack verification` }
+          ],
+          checkedAt: new Date().toISOString(),
+        },
+      });
+      
+      return { 
+        passed: false, 
+        reason: `Verification rate ${(verificationRate * 100).toFixed(0)}% below minimum ${(minVerificationRate * 100).toFixed(0)}%. ${unverifiedClaims.length} claims unverified.`
+      };
+    }
+    
+    emitEvent({
+      eventType: "quality_gate.passed",
+      stageId: "pre_assembler_check",
+      stageName: "Claim Verification Policy",
+      data: {
+        gateId: "claim_verification_policy",
+        gateName: "Claim Verification Policy",
+        passed: true,
+        score: verificationRate,
+        threshold: minVerificationRate,
+        issues: [],
+        checkedAt: new Date().toISOString(),
+      },
+    });
+    
+    return { passed: true };
   }
 
   private canContinueAfterFailure(stageId: StageId): boolean {

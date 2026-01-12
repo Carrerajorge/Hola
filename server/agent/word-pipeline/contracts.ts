@@ -267,6 +267,7 @@ export const OrchestratorConfigSchema = z.object({
   enableSemanticCache: z.boolean().default(true),
   enableCircuitBreaker: z.boolean().default(true),
   fallbackToRules: z.boolean().default(true),
+  minClaimVerificationRate: z.number().min(0).max(1).default(0.5),
   sloTargets: z.object({
     p95LatencyMs: z.number().int().positive().default(30000),
     p99LatencyMs: z.number().int().positive().default(60000),
