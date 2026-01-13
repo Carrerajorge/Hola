@@ -66,6 +66,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
   private sessionId: string;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private eventCounter: number = 0;
+  private abortSignal?: AbortSignal;
 
   constructor(sessionId: string, config: Partial<OrchestratorConfig> = {}) {
     super();
@@ -105,9 +106,22 @@ export class SuperAgentOrchestrator extends EventEmitter {
     }
   }
 
-  async execute(prompt: string): Promise<ExecutionState> {
+  private checkAbort(): void {
+    if (this.abortSignal?.aborted) {
+      this.stopHeartbeat();
+      throw new Error("Ejecución cancelada por el usuario");
+    }
+  }
+
+  async execute(prompt: string, signal?: AbortSignal): Promise<ExecutionState> {
+    this.abortSignal = signal;
+    
     try {
       this.startHeartbeat();
+      
+      if (signal?.aborted) {
+        throw new Error("Ejecución cancelada por el usuario");
+      }
       
       let contract = parsePromptToContract(prompt);
       
@@ -188,17 +202,22 @@ export class SuperAgentOrchestrator extends EventEmitter {
     const researchDecision = shouldResearch(this.state.contract.original_prompt);
     
     if (researchDecision.shouldResearch || requirements.min_sources > 0) {
+      this.checkAbort();
       await this.executeSignalsPhase();
+      this.checkAbort();
       await this.executeDeepPhase();
     }
     
     if (requirements.must_create.length > 0) {
+      this.checkAbort();
       await this.executeCreatePhase();
     }
     
+    this.checkAbort();
     await this.executeVerifyPhase();
     
     if (this.state.artifacts.length > 0 || this.state.sources.length > 0 || this.state.phase !== "error") {
+      this.checkAbort();
       await this.executeFinalizePhase();
     }
   }
@@ -287,7 +306,6 @@ export class SuperAgentOrchestrator extends EventEmitter {
           ...data,
         });
         
-        // Track candidates from any phase that reports counts
         const candidateCount = data.count || data.totalCandidates || data.relevantCount || data.verifiedCount || data.enrichedCount || 0;
         
         if (data.phase === "search" && data.status !== "starting") {
@@ -307,6 +325,39 @@ export class SuperAgentOrchestrator extends EventEmitter {
             candidates_found: candidateCount,
           });
         }
+      });
+
+      pipelineEmitter.on("search_progress", (data) => {
+        this.emitSSE("search_progress", {
+          provider: data.provider || "OpenAlex",
+          queries_current: data.query_idx || pipelineSearchCount,
+          queries_total: data.query_total || 3,
+          pages_searched: data.page || 1,
+          candidates_found: data.candidates_total || 0,
+        });
+      });
+
+      pipelineEmitter.on("verify_progress", (data) => {
+        this.emitSSE("verify_progress", {
+          checked: data.checked || 0,
+          ok: data.ok || 0,
+          dead: data.dead || 0,
+        });
+      });
+
+      pipelineEmitter.on("accepted_progress", (data) => {
+        this.emitSSE("accepted_progress", {
+          accepted: data.accepted || 0,
+          target: data.target || targetCount,
+        });
+      });
+
+      pipelineEmitter.on("filter_progress", (data) => {
+        this.emitSSE("filter_progress", data);
+      });
+
+      pipelineEmitter.on("export_progress", (data) => {
+        this.emitSSE("export_progress", data);
       });
 
       pipelineResult = await runAcademicPipeline(searchTopic, pipelineEmitter, {

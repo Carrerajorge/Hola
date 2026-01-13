@@ -47,42 +47,41 @@ export interface PipelineResult {
   warnings: string[];
 }
 
-const ALL_SEARCH_QUERIES = [
-  `"recycled steel" concrete strength`,
-  `"recycled steel fibers" concrete compressive strength`,
-  `"scrap steel" concrete mechanical properties`,
-  `"recycled reinforcement" concrete tensile strength`,
-  `"steel fiber recycled" mortar strength`,
-  `"recycled steel aggregate" concrete strength`,
-  `"scrap metal" concrete flexural strength`,
-  `"acero reciclado" resistencia concreto`,
-  `steel fiber reinforced concrete mechanical`,
-  `recycled steel bar concrete durability`,
-  `steel slag concrete compressive`,
-  `waste steel fiber concrete strength`,
-  `"recycled steel" concrete "compressive strength"`,
-  `"steel fibers" recycled concrete mechanical properties`,
-  `"scrap steel" reinforced concrete strength`,
-  `"recycled reinforcement bars" concrete performance`,
-  `"steel fiber" sustainable concrete strength`,
-  `"recycled aggregate" steel concrete strength`,
-  `recycled steel wire concrete tensile`,
-  `steel manufacturing waste concrete`,
-  `industrial steel waste concrete reinforcement`,
-  `recycled steel shavings concrete mix`,
-  `post-consumer steel fiber concrete`,
-  `steel mill byproduct concrete strength`,
-];
-
 function buildSearchQueries(topic: string, iteration: number = 0): string[] {
-  const base = [...ALL_SEARCH_QUERIES];
+  const queries: string[] = [];
   
   const topicTerms = extractKeyTerms(topic);
-  if (topicTerms.length > 0) {
-    base.push(topicTerms.join(" "));
+  const topicClean = topic.trim();
+  
+  queries.push(topicClean);
+  
+  if (topicTerms.length >= 2) {
+    queries.push(`"${topicTerms.slice(0, 3).join(" ")}"`);
+    queries.push(topicTerms.join(" "));
+    
+    for (let i = 0; i < topicTerms.length - 1; i++) {
+      queries.push(`${topicTerms[i]} ${topicTerms[i + 1]}`);
+    }
   }
   
-  return [...new Set(base)];
+  const variations = [
+    topicClean,
+    `"${topicClean}"`,
+    topicTerms.length > 0 ? topicTerms.join(" AND ") : topicClean,
+  ];
+  
+  for (const v of variations) {
+    if (v && v.length > 3) {
+      queries.push(v);
+    }
+  }
+  
+  if (iteration > 0 && topicTerms.length > 2) {
+    const subset = topicTerms.slice(0, Math.max(2, topicTerms.length - iteration));
+    queries.push(subset.join(" "));
+  }
+  
+  return [...new Set(queries.filter(q => q && q.length > 3))];
 }
 
 function extractKeyTerms(topic: string): string[] {

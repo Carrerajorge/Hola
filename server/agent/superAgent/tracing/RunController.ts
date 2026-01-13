@@ -281,6 +281,54 @@ async function executeRun(
       }
     });
 
+    pipelineEmitter.on("search_progress", (data: any) => {
+      const { provider, query_idx, query_total, found, candidates_total } = data;
+      progressModel.addCollected(found);
+      emitter.searchProgress("SearchAgent", {
+        provider: provider as "openalex" | "crossref" | "semantic_scholar",
+        query_idx: query_idx || 1,
+        query_total: query_total || 3,
+        page: data.page || 1,
+        found: found || 0,
+        candidates_total: candidates_total || 0,
+      });
+      searchProgress = Math.min(searchProgress + 5, 80);
+      emitter.emitStepProgress('s2', searchProgress, `${provider}: ${found} encontrados`, candidates_total, options.targetCount);
+    });
+
+    pipelineEmitter.on("verify_progress", (data: any) => {
+      const { checked, ok, dead } = data;
+      progressModel.addVerified(ok);
+      emitter.verifyProgress("VerificationAgent", { checked: checked || 0, ok: ok || 0, dead: dead || 0 });
+      emitter.emitStepProgress('s3', 20 + Math.min((ok / options.targetCount) * 60, 60), `Verificados: ${ok}/${checked}`);
+    });
+
+    pipelineEmitter.on("accepted_progress", (data: any) => {
+      progressModel.addAccepted(data.accepted || 1);
+      emitter.acceptedProgress("AcceptanceAgent", {
+        accepted: data.accepted || 0,
+        target: data.target || options.targetCount,
+      });
+    });
+
+    pipelineEmitter.on("filter_progress", (data: any) => {
+      emitter.filterProgress("FilterAgent", {
+        regions: data.regions || [],
+        geo_mismatch: data.geo_mismatch || 0,
+        year_out_of_range: data.year_out_of_range || 0,
+        duplicate: data.duplicate || 0,
+        low_relevance: data.low_relevance || 0,
+      });
+    });
+
+    pipelineEmitter.on("export_progress", (data: any) => {
+      emitter.exportProgress("ExportAgent", {
+        columns_count: data.columns_count || 0,
+        rows_written: data.rows_written || 0,
+        target: data.target || options.targetCount,
+      });
+    });
+
     const result = await runAcademicPipeline(searchTopic, pipelineEmitter, {
       targetCount: options.targetCount,
       yearStart: options.yearStart,

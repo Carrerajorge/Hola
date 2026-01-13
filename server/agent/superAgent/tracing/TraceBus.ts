@@ -318,6 +318,10 @@ export class TraceBus extends EventEmitter {
       progress: (data.query_idx / data.query_total) * 100,
       metrics: {
         articles_collected: data.candidates_total,
+        queries_current: data.query_idx,
+        queries_total: data.query_total,
+        pages_searched: data.page,
+        candidates_found: data.candidates_total,
       },
     });
     this.publish(event);
