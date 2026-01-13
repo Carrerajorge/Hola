@@ -164,10 +164,12 @@ export function LiveExecutionConsole({
     setNarrationText("Iniciando agente de búsqueda…");
 
     const unsubscribe = streamClient.subscribe((newState) => {
-      console.log(`[LiveExecutionConsole] State update:`, newState.connectionMode, newState.phase, newState.status);
+      console.log(`[LiveExecutionConsole] State update:`, newState.connectionMode, newState.phase, newState.status, 
+        `queries=${newState.queries_current}/${newState.queries_total}`, `found=${newState.candidates_found}`);
       setState(newState);
       
-      // Process only new events
+      // Process only new events for NarrationAgent
+      let eventNarration: string | null = null;
       for (const event of newState.events) {
         const eventKey = `${event.run_id}-${event.seq}`;
         if (processedEventsRef.current.has(eventKey)) continue;
@@ -175,18 +177,15 @@ export function LiveExecutionConsole({
         
         const newNarration = narrationAgentRef.current!.processEvent(event);
         if (newNarration.currentNarration) {
-          setNarrationText(newNarration.currentNarration);
+          eventNarration = newNarration.currentNarration;
           console.log(`[NarrationAgent] ${newNarration.phase}: ${newNarration.currentNarration}`);
         }
       }
       
-      // Also generate narration from state if no events yet
-      if (newState.events.length === 0 || processedEventsRef.current.size === 0) {
-        const stateNarration = generateNarrationFromState(newState);
-        if (stateNarration) {
-          setNarrationText(stateNarration);
-        }
-      }
+      // Always prefer state-based narration as it has the latest aggregated data
+      const stateNarration = generateNarrationFromState(newState);
+      const finalNarration = stateNarration || eventNarration || "Procesando…";
+      setNarrationText(finalNarration);
       
       if (newState.status === "completed" && onComplete) {
         onComplete(newState.artifacts);
@@ -206,43 +205,61 @@ export function LiveExecutionConsole({
     };
   }, [runId, onComplete, onError]);
 
-  // Generate narration directly from RunStreamState when events are missing
+  // Generate narration directly from RunStreamState - always show current state
   function generateNarrationFromState(s: RunStreamState): string {
-    const { phase, target, queries_current, queries_total, candidates_found, metrics, rules } = s;
+    const { phase, target, queries_current, queries_total, candidates_found, metrics, rules, pages_searched } = s;
     
     switch (phase) {
       case "planning":
         if (rules?.yearStart || rules?.yearEnd || target > 0) {
-          return `Estoy preparando el plan: años ${rules?.yearStart || "?"}-${rules?.yearEnd || "?"}, objetivo ${target} artículos.`;
+          return `Preparando plan de búsqueda: años ${rules?.yearStart || 2020}-${rules?.yearEnd || 2025}, objetivo ${target || 50} artículos.`;
         }
-        return "Planificando búsqueda…";
+        return "Planificando búsqueda académica…";
       
       case "signals":
-        if (queries_current > 0 || candidates_found > 0) {
-          return `Buscando artículos: consulta ${queries_current}/${queries_total || "?"}, encontrados ${candidates_found} candidatos.`;
+        // Build a detailed message showing actual progress
+        const parts: string[] = [];
+        parts.push("Buscando artículos");
+        if (queries_current > 0 || queries_total > 0) {
+          parts.push(`(consulta ${queries_current || 1}/${queries_total || "?"})`);
         }
-        return "Buscando artículos en fuentes académicas…";
+        if (pages_searched > 0) {
+          parts.push(`- ${pages_searched} páginas`);
+        }
+        if (candidates_found > 0) {
+          parts.push(`→ ${candidates_found} candidatos encontrados`);
+        }
+        return parts.join(" ") + "…";
       
       case "verification":
-        if (metrics.articles_verified > 0) {
-          return `Verificando enlaces/DOI: ${metrics.articles_verified} verificados, ${metrics.articles_accepted} aceptados.`;
+      case "deep":
+        const verified = metrics.articles_verified || 0;
+        const accepted = metrics.articles_accepted || 0;
+        if (verified > 0 || accepted > 0) {
+          return `Verificando DOIs y enlaces: ${verified} revisados, ${accepted} válidos hasta ahora.`;
         }
-        return "Verificando enlaces y DOIs…";
+        return "Verificando enlaces y DOIs de artículos…";
       
       case "enrichment":
+        if (metrics.articles_accepted > 0) {
+          return `Enriqueciendo metadatos: ${metrics.articles_accepted} artículos procesados.`;
+        }
         return "Enriqueciendo metadatos de artículos…";
       
       case "export":
         if (metrics.articles_accepted > 0) {
-          return `Generando Excel con ${metrics.articles_accepted} artículos…`;
+          return `Generando Excel con ${metrics.articles_accepted} artículos verificados…`;
         }
-        return "Generando archivo Excel…";
+        return "Preparando archivo Excel…";
       
       case "finalization":
-        return `Finalizando: ${metrics.articles_accepted}/${target} artículos exportados.`;
+        return `Finalizado: ${metrics.articles_accepted || 0}/${target || "?"} artículos exportados.`;
       
       default:
-        return "Procesando solicitud…";
+        if (phase === "idle") {
+          return "Iniciando agente de búsqueda…";
+        }
+        return `Procesando: fase ${phase}…`;
     }
   }
 
@@ -285,21 +302,13 @@ export function LiveExecutionConsole({
       )}
     >
       {narrationText && (
-        <div className="relative px-4 py-4 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10 border-b-2 border-primary/30 overflow-hidden">
-          {state.status === 'running' && (
-            <div 
-              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
-              style={{
-                animation: 'shimmer 1.5s ease-in-out infinite',
-                backgroundSize: '200% 100%',
-              }}
-            />
-          )}
-          <div className="relative z-10">
-            <p className="text-base font-semibold text-foreground leading-relaxed tracking-tight">
-              {narrationText}
-            </p>
-          </div>
+        <div className={cn(
+          "relative px-4 py-4 border-b-2 border-primary/30",
+          state.status === 'running' ? "shimmer-text bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10" : "bg-muted/20"
+        )}>
+          <p className="text-base font-semibold text-foreground leading-relaxed tracking-tight">
+            {narrationText}
+          </p>
         </div>
       )}
       <div className="p-3 space-y-2.5">
