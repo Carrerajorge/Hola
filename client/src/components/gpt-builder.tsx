@@ -207,6 +207,11 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     setHasChanges(true);
   };
 
+  // Sync form data without marking as changed (for server response hydration)
+  const syncFormData = (updates: Partial<typeof formData>) => {
+    setFormData(prev => ({ ...prev, ...updates }));
+  };
+
   const handleSave = async () => {
     if (!formData.name.trim()) {
       toast({
@@ -247,8 +252,17 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
       if (response.ok) {
         const savedGpt = await response.json();
-        setHasChanges(false);
         setSavedGptData(savedGpt);
+        // Sync all formData with server response without marking dirty
+        syncFormData({ 
+          visibility: savedGpt.visibility || "private",
+          name: savedGpt.name,
+          slug: savedGpt.slug,
+          description: savedGpt.description || "",
+        });
+        setHasChanges(false);
+        // Show confirmation modal with visibility options
+        // onSave is called when modal closes to prevent parent from closing builder
         setShowUpdateModal(true);
       } else {
         throw new Error("Error al guardar");
@@ -447,16 +461,34 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
   const handleVisibilityChange = async (newVisibility: string) => {
     if (!savedGptData) return;
-    handleFormChange({ visibility: newVisibility as "private" | "team" | "public" });
+    const typedVisibility = newVisibility as "private" | "team" | "public";
+    const previousVisibility = savedGptData.visibility as "private" | "team" | "public";
+    
+    // Update immediately for UI responsiveness (without marking dirty)
+    syncFormData({ visibility: typedVisibility });
+    setSavedGptData(prev => prev ? { ...prev, visibility: typedVisibility } : null);
     
     try {
-      await fetch(`/api/gpts/${savedGptData.id}`, {
+      const response = await fetch(`/api/gpts/${savedGptData.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ visibility: newVisibility })
       });
+      
+      if (response.ok) {
+        const updatedGpt = await response.json();
+        setSavedGptData(updatedGpt);
+        syncFormData({ visibility: updatedGpt.visibility });
+      } else {
+        // Revert on error
+        syncFormData({ visibility: previousVisibility });
+        setSavedGptData(prev => prev ? { ...prev, visibility: previousVisibility } : null);
+      }
     } catch (error) {
       console.error("Error updating visibility:", error);
+      // Revert on error using captured previous value
+      syncFormData({ visibility: previousVisibility });
+      setSavedGptData(prev => prev ? { ...prev, visibility: previousVisibility } : null);
     }
   };
 
@@ -469,6 +501,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
   const handleViewGpt = () => {
     setShowUpdateModal(false);
+    // onSave already called in handleSave, just close modal
+    // If visibility was changed, notify parent with updated data
     if (savedGptData) {
       onSave?.(savedGptData);
     }

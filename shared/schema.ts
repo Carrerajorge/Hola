@@ -692,6 +692,10 @@ export const insertGptCategorySchema = createInsertSchema(gptCategories).omit({
 export type InsertGptCategory = z.infer<typeof insertGptCategorySchema>;
 export type GptCategory = typeof gptCategories.$inferSelect;
 
+// GPT Visibility Schema
+export const gptVisibilitySchema = z.enum(['private', 'team', 'public']);
+export type GptVisibility = z.infer<typeof gptVisibilitySchema>;
+
 // GPT Capabilities Schema
 export const gptCapabilitiesSchema = z.object({
   webBrowsing: z.boolean().default(false),
