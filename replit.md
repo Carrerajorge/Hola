@@ -39,6 +39,16 @@ Preferred communication style: Simple, everyday language.
 - **Python Agent v5.0**: Standalone Python-based agent system with tools, multi-level caching, per-domain rate limiting, browser pool, security guard, and pattern-based intent detection.
 - **LangGraph Agent System**: Enterprise-grade agent orchestration using the LangGraph framework with StateGraph-based workflow management, supervisor and reflection patterns, human-in-the-loop approvals, PostgreSQL checkpoint persistence, and conversation memory.
 - **Agentic Orchestration Pipeline**: Professional multi-agent system including PromptAnalyzer (intent classification, memory hydration), IntentRouter (routes prompts to direct, single_agent, or multi_agent paths), SupervisorAgent (LangGraph orchestrator for parallel execution, retry logic), AgentLoopFacade (main pipeline composer), ActivityStreamPublisher (SSE streaming for real-time UI updates), and a comprehensive Memory System for persisting and hydrating execution context.
+- **Conversation Memory System**: Production-grade server-side persistence for conversation state with:
+  - PostgreSQL tables: `conversation_states`, `conversation_messages`, `conversation_artifacts`, `conversation_images`, `conversation_contexts`, `conversation_state_versions`
+  - Redis cache layer with automatic fallback to in-memory Map when unavailable
+  - Versioned state management with snapshot/restore capabilities for rollback
+  - Artifact deduplication by SHA-256 checksum
+  - Image edit chain tracking (parent→child relationships for edits)
+  - Transactional message insertion with sequence locking to prevent race conditions
+  - REST API at `/api/memory/chats/:chatId/...` for hydrate/append/snapshot operations
+  - React Query-based frontend hook (`useConversationState`) for seamless state synchronization
+  - Automatic image persistence from ProductionWorkflowRunner during agent execution
 
 ### Infrastructure
 - **Security**: Password hashing with bcrypt, multi-tenant validation, authentication middleware, max iterations/timeout for agent runs.
