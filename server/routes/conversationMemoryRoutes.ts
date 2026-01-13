@@ -1,6 +1,12 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { conversationStateService } from "../services/conversationStateService";
 import { z } from "zod";
+import { ContextRetriever, RetrievedContext, RetrievalConfig } from "../lib/contextRetriever";
+import { PromptBuilder, PromptBuildOptions } from "../lib/promptBuilder";
+import { KeywordExtractor } from "../lib/keywordExtractor";
+import { AutoSummarizer, SummaryResult } from "../lib/autoSummarizer";
+import { IntentRouter, DetectedIntent, IntentType } from "../lib/intentRouter";
+import { RAGRetriever } from "../lib/ragRetriever";
 
 const router = Router();
 
@@ -346,6 +352,342 @@ router.put("/chats/:chatId/summary", async (req: Request, res: Response, next: N
 router.get("/memory/stats", async (_req: Request, res: Response) => {
   const stats = conversationStateService.getCacheStats();
   res.json(stats);
+});
+
+const processTurnSchema = z.object({
+  message: z.string().min(1),
+  requestId: z.string().optional(),
+  options: z.object({
+    language: z.enum(["es", "en"]).optional(),
+    maxContextTokens: z.number().optional(),
+  }).optional(),
+});
+
+const retrieveContextSchema = z.object({
+  query: z.string().min(1),
+  intent: z.object({
+    type: z.string().optional(),
+    confidence: z.number().optional(),
+    requiresRAG: z.boolean().optional(),
+    ragQuery: z.string().nullable().optional(),
+    artifactReferences: z.array(z.any()).optional(),
+    imageReferences: z.array(z.any()).optional(),
+    imageEditParams: z.any().nullable().optional(),
+  }).optional(),
+  config: z.object({
+    ragTopK: z.number().optional(),
+    ragMinScore: z.number().optional(),
+    recencyWindowSize: z.number().optional(),
+    enableRunningSummary: z.boolean().optional(),
+    maxFactsToInclude: z.number().optional(),
+  }).optional(),
+});
+
+const buildPromptSchema = z.object({
+  message: z.string().min(1),
+  context: z.any().optional(),
+  intent: z.any().optional(),
+  options: z.object({
+    includeSystemContext: z.boolean().optional(),
+    language: z.enum(["es", "en"]).optional(),
+    citationFormat: z.enum(["numbered", "bracketed"]).optional(),
+  }).optional(),
+});
+
+const extractKeywordsSchema = z.object({
+  text: z.string().min(1),
+  maxKeywords: z.number().optional(),
+});
+
+const summarizeSchema = z.object({
+  force: z.boolean().optional(),
+  language: z.enum(["es", "en"]).optional(),
+});
+
+const telemetryStore = new Map<string, { queries: Array<{ timeMs: number; chunksRetrieved: number; timestamp: number }> }>();
+
+router.post("/chats/:chatId/process-turn", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { chatId } = req.params;
+    const startTime = performance.now();
+
+    const validation = processTurnSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ error: "Invalid request", details: validation.error.issues });
+    }
+
+    const { message, requestId, options } = validation.data;
+    const userId = (req as any).user?.id;
+
+    let wasIdempotent = false;
+    if (requestId) {
+      const existing = await conversationStateService.hydrateState(chatId, userId);
+      if (existing?.messages?.some(m => (m as any).requestId === requestId)) {
+        wasIdempotent = true;
+      }
+    }
+
+    const state = await conversationStateService.getOrCreateState(chatId, userId);
+
+    const conversationState = {
+      artifacts: (state.artifacts || []).map(a => ({ artifactId: a.id, ...a })),
+      images: (state.images || []).map(img => ({ imageId: img.id, ...img })),
+    };
+    const intent = IntentRouter.detectIntent(message, conversationState);
+
+    const ragRetriever = new RAGRetriever(chatId);
+    const contextRetriever = new ContextRetriever(ragRetriever, options?.maxContextTokens ? { ragTopK: 5 } : {});
+    const context = await contextRetriever.retrieve(state, message, intent);
+
+    const promptBuilder = new PromptBuilder(options?.maxContextTokens || 4000);
+    const prompt = promptBuilder.build(message, context, intent, {
+      language: options?.language || "es",
+    });
+
+    const processingTimeMs = performance.now() - startTime;
+
+    if (!telemetryStore.has(chatId)) {
+      telemetryStore.set(chatId, { queries: [] });
+    }
+    const telemetry = telemetryStore.get(chatId)!;
+    telemetry.queries.push({
+      timeMs: processingTimeMs,
+      chunksRetrieved: context.relevantChunks.length,
+      timestamp: Date.now(),
+    });
+    if (telemetry.queries.length > 100) {
+      telemetry.queries = telemetry.queries.slice(-100);
+    }
+
+    res.json({
+      intent,
+      context,
+      prompt,
+      wasIdempotent,
+      processingTimeMs,
+    });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] POST process-turn error:", error.message);
+    next(error);
+  }
+});
+
+router.post("/chats/:chatId/retrieve-context", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { chatId } = req.params;
+    const startTime = performance.now();
+
+    const validation = retrieveContextSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ error: "Invalid request", details: validation.error.issues });
+    }
+
+    const { query, intent: partialIntent, config } = validation.data;
+    const userId = (req as any).user?.id;
+
+    const state = await conversationStateService.getOrCreateState(chatId, userId);
+
+    const defaultIntent: DetectedIntent = {
+      type: IntentType.CONTINUE_CONVERSATION,
+      confidence: 0.5,
+      artifactReferences: [],
+      imageReferences: [],
+      requiresRAG: true,
+      ragQuery: query,
+      imageEditParams: null,
+    };
+    const intent = { ...defaultIntent, ...partialIntent } as DetectedIntent;
+
+    const ragRetriever = new RAGRetriever(chatId);
+    const contextRetriever = new ContextRetriever(ragRetriever, config as Partial<RetrievalConfig>);
+    const context = await contextRetriever.retrieve(state, query, intent);
+
+    const timeMs = performance.now() - startTime;
+
+    res.json({ context, timeMs });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] POST retrieve-context error:", error.message);
+    next(error);
+  }
+});
+
+router.post("/chats/:chatId/build-prompt", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { chatId } = req.params;
+
+    const validation = buildPromptSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ error: "Invalid request", details: validation.error.issues });
+    }
+
+    const { message, context: providedContext, intent: providedIntent, options } = validation.data;
+    const userId = (req as any).user?.id;
+
+    let context: RetrievedContext;
+    let intent: DetectedIntent;
+
+    if (providedContext && providedIntent) {
+      context = providedContext as RetrievedContext;
+      intent = providedIntent as DetectedIntent;
+    } else {
+      const state = await conversationStateService.getOrCreateState(chatId, userId);
+
+      const conversationState = {
+        artifacts: (state.artifacts || []).map(a => ({ artifactId: a.id, ...a })),
+        images: (state.images || []).map(img => ({ imageId: img.id, ...img })),
+      };
+      intent = providedIntent as DetectedIntent || IntentRouter.detectIntent(message, conversationState);
+
+      if (!providedContext) {
+        const ragRetriever = new RAGRetriever(chatId);
+        const contextRetriever = new ContextRetriever(ragRetriever);
+        context = await contextRetriever.retrieve(state, message, intent);
+      } else {
+        context = providedContext as RetrievedContext;
+      }
+    }
+
+    const promptBuilder = new PromptBuilder(options?.maxContextTokens || 4000);
+    const prompt = promptBuilder.build(message, context, intent, options as PromptBuildOptions);
+
+    res.json({ prompt });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] POST build-prompt error:", error.message);
+    next(error);
+  }
+});
+
+router.get("/chats/:chatId/telemetry", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { chatId } = req.params;
+
+    const telemetry = telemetryStore.get(chatId);
+    if (!telemetry || telemetry.queries.length === 0) {
+      return res.json({
+        stats: {
+          avgTimeMs: 0,
+          totalQueries: 0,
+          avgChunks: 0,
+        },
+        recentQueries: [],
+      });
+    }
+
+    const queries = telemetry.queries;
+    const totalQueries = queries.length;
+    const avgTimeMs = queries.reduce((sum, q) => sum + q.timeMs, 0) / totalQueries;
+    const avgChunks = queries.reduce((sum, q) => sum + q.chunksRetrieved, 0) / totalQueries;
+
+    const recentQueries = queries.slice(-10).map(q => ({
+      timeMs: Math.round(q.timeMs * 100) / 100,
+      chunksRetrieved: q.chunksRetrieved,
+      timestamp: new Date(q.timestamp).toISOString(),
+    }));
+
+    res.json({
+      stats: {
+        avgTimeMs: Math.round(avgTimeMs * 100) / 100,
+        totalQueries,
+        avgChunks: Math.round(avgChunks * 100) / 100,
+      },
+      recentQueries,
+    });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] GET telemetry error:", error.message);
+    next(error);
+  }
+});
+
+router.post("/extract-keywords", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const validation = extractKeywordsSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ error: "Invalid request", details: validation.error.issues });
+    }
+
+    const { text, maxKeywords } = validation.data;
+
+    const keywords = KeywordExtractor.extract(text, maxKeywords || 10);
+    const entities = KeywordExtractor.extractEntities(text);
+
+    res.json({
+      keywords,
+      entities: entities.map(e => ({ text: e.text, type: e.type })),
+    });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] POST extract-keywords error:", error.message);
+    next(error);
+  }
+});
+
+router.post("/chats/:chatId/summarize", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { chatId } = req.params;
+
+    const validation = summarizeSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({ error: "Invalid request", details: validation.error.issues });
+    }
+
+    const { force, language } = validation.data;
+    const userId = (req as any).user?.id;
+
+    const state = await conversationStateService.getOrCreateState(chatId, userId);
+    const messages = state.messages || [];
+
+    if (messages.length === 0) {
+      return res.json({
+        summary: null,
+        wasTriggered: false,
+      });
+    }
+
+    const summarizer = new AutoSummarizer({ summaryLanguage: language || "es" });
+
+    const currentTurn = messages.length;
+    const existingSummary = state.context?.summary || undefined;
+    const lastSummarizedTurn = (state.context as any)?.lastSummarizedTurn || 0;
+
+    const shouldTrigger = force || summarizer.shouldSummarize(currentTurn, lastSummarizedTurn);
+
+    if (!shouldTrigger) {
+      return res.json({
+        summary: existingSummary ? {
+          summary: existingSummary,
+          tokenCount: Math.ceil((existingSummary as string).length / 4),
+          mainTopics: state.context?.topics || [],
+          keyEntities: (state.context?.entities || []).map((e: any) => e.name),
+          lastSummarizedTurn,
+        } : null,
+        wasTriggered: false,
+      });
+    }
+
+    const formattedMessages = messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const summary = await summarizer.summarize(formattedMessages, existingSummary, language);
+
+    await conversationStateService.updateContext(chatId, {
+      summary: summary.summary,
+      topics: summary.mainTopics,
+      entities: summary.keyEntities.map(name => ({
+        name,
+        type: "extracted",
+        mentions: 1,
+      })),
+    });
+
+    res.json({
+      summary,
+      wasTriggered: true,
+    });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] POST summarize error:", error.message);
+    next(error);
+  }
 });
 
 export default router;
