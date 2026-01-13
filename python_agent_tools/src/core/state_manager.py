@@ -1,6 +1,6 @@
 """State Manager - Persistent state for agents and workflows."""
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable, Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -9,6 +9,50 @@ import asyncio
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+_websocket_publish_agent: Optional[Callable[[str, str, dict], Awaitable[None]]] = None
+_websocket_publish_workflow: Optional[Callable[[str, str, float, dict], Awaitable[None]]] = None
+
+
+def set_websocket_publishers(
+    agent_publisher: Optional[Callable[[str, str, dict], Awaitable[None]]] = None,
+    workflow_publisher: Optional[Callable[[str, str, float, dict], Awaitable[None]]] = None
+):
+    """Set the WebSocket publisher functions for real-time updates."""
+    global _websocket_publish_agent, _websocket_publish_workflow
+    _websocket_publish_agent = agent_publisher
+    _websocket_publish_workflow = workflow_publisher
+    logger.info("websocket_publishers_configured")
+
+
+def _schedule_async(coro) -> None:
+    """Safely schedule an async coroutine as fire-and-forget.
+    
+    Handles cases where there's no running event loop gracefully.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(coro)
+    except RuntimeError:
+        pass
+
+
+async def _notify_agent_update(agent_name: str, status: str, data: dict = None):
+    """Internal helper to publish agent updates via WebSocket."""
+    if _websocket_publish_agent:
+        try:
+            await _websocket_publish_agent(agent_name, status, data or {})
+        except Exception as e:
+            logger.warning("websocket_agent_notify_failed", error=str(e))
+
+
+async def _notify_workflow_update(workflow_id: str, status: str, progress: float, data: dict = None):
+    """Internal helper to publish workflow updates via WebSocket."""
+    if _websocket_publish_workflow:
+        try:
+            await _websocket_publish_workflow(workflow_id, status, progress, data or {})
+        except Exception as e:
+            logger.warning("websocket_workflow_notify_failed", error=str(e))
 
 
 class AgentStatus(str, Enum):
@@ -133,7 +177,11 @@ class WorkflowState:
 
 
 class StateManager:
-    """Manages persistent state for agents and workflows."""
+    """Manages persistent state for agents and workflows.
+    
+    All methods are synchronous for compatibility with both sync and async callers.
+    WebSocket notifications are scheduled as fire-and-forget tasks.
+    """
     
     _instance: Optional["StateManager"] = None
     
@@ -169,23 +217,37 @@ class StateManager:
         return state
     
     def start_agent(self, agent_name: str, task: str) -> AgentState:
+        """Start an agent with a task. WebSocket notification is fire-and-forget."""
         state = self.set_state(agent_name)
         state.start(task)
         logger.info("agent_started", agent=agent_name, task=task[:100] if task else "")
+        _schedule_async(_notify_agent_update(agent_name, AgentStatus.RUNNING.value, {"task": task[:100] if task else ""}))
         return state
     
     def complete_agent(self, agent_name: str, results: Dict[str, Any]) -> Optional[AgentState]:
+        """Complete an agent with results. WebSocket notification is fire-and-forget."""
         state = self.get_state(agent_name)
         if state:
             state.complete(results)
             logger.info("agent_completed", agent=agent_name)
+            _schedule_async(_notify_agent_update(agent_name, AgentStatus.COMPLETED.value, {"results": results}))
         return state
     
     def fail_agent(self, agent_name: str, error: str) -> Optional[AgentState]:
+        """Fail an agent with an error. WebSocket notification is fire-and-forget."""
         state = self.get_state(agent_name)
         if state:
             state.fail(error)
             logger.error("agent_failed", agent=agent_name, error=error)
+            _schedule_async(_notify_agent_update(agent_name, AgentStatus.FAILED.value, {"error": error}))
+        return state
+    
+    def update_agent_progress(self, agent_name: str, progress: float) -> Optional[AgentState]:
+        """Update agent progress. WebSocket notification is fire-and-forget."""
+        state = self.get_state(agent_name)
+        if state:
+            state.update_progress(progress)
+            _schedule_async(_notify_agent_update(agent_name, state.status.value, {"progress": progress}))
         return state
     
     def start_workflow(
@@ -241,14 +303,17 @@ class StateManager:
         return workflow
     
     def start_workflow_execution(self, workflow_id: str) -> Optional[WorkflowState]:
+        """Start workflow execution. WebSocket notification is fire-and-forget."""
         workflow = self._workflows.get(workflow_id)
         if workflow:
             workflow.status = WorkflowStatus.RUNNING
             workflow.started_at = datetime.utcnow()
             logger.info("workflow_execution_started", workflow_id=workflow_id)
+            _schedule_async(_notify_workflow_update(workflow_id, WorkflowStatus.RUNNING.value, workflow.progress, {"name": workflow.name}))
         return workflow
     
     def cancel_workflow(self, workflow_id: str) -> Optional[WorkflowState]:
+        """Cancel a workflow. WebSocket notification is fire-and-forget."""
         workflow = self._workflows.get(workflow_id)
         if workflow:
             workflow.status = WorkflowStatus.CANCELLED
@@ -257,6 +322,7 @@ class StateManager:
                 if state.status == AgentStatus.RUNNING:
                     state.status = AgentStatus.CANCELLED
             logger.info("workflow_cancelled", workflow_id=workflow_id)
+            _schedule_async(_notify_workflow_update(workflow_id, WorkflowStatus.CANCELLED.value, workflow.progress, {}))
         return workflow
     
     def get_workflow_status(self, workflow_id: str) -> Optional[Dict[str, Any]]:

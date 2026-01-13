@@ -410,6 +410,226 @@ const agents = await client.listAgents();
 const agentResult = await client.executeAgent('research_agent', 'Find AI news');
 ```
 
+## WebSocket Endpoints
+
+The API provides WebSocket endpoints for real-time updates on agent executions and workflow progress.
+
+### WebSocket /ws/agents
+
+Connect to receive real-time agent execution updates.
+
+**Connection URL:** `ws://localhost:8001/ws/agents`
+
+**Message Types Received:**
+
+```json
+{
+  "type": "connected",
+  "channel": "agents",
+  "message": "Connected to agents channel"
+}
+```
+
+```json
+{
+  "type": "agent_update",
+  "agent_name": "research_agent",
+  "status": "running",
+  "data": {
+    "task": "Find recent AI news",
+    "progress": 0.5
+  }
+}
+```
+
+**Message Types to Send:**
+
+```json
+{"type": "ping"}
+```
+Response: `{"type": "pong"}`
+
+```json
+{"type": "subscribe"}
+```
+Response: `{"type": "subscribed", "channel": "agents"}`
+
+---
+
+### WebSocket /ws/workflows
+
+Connect to receive real-time workflow progress updates.
+
+**Connection URL:** `ws://localhost:8001/ws/workflows`
+
+**Message Types Received:**
+
+```json
+{
+  "type": "connected",
+  "channel": "workflows",
+  "message": "Connected to workflows channel"
+}
+```
+
+```json
+{
+  "type": "workflow_update",
+  "workflow_id": "abc123",
+  "status": "running",
+  "progress": 0.5,
+  "data": {
+    "name": "document_analysis",
+    "current_step": "parse"
+  }
+}
+```
+
+**Message Types to Send:**
+
+```json
+{"type": "ping"}
+```
+Response: `{"type": "pong"}`
+
+```json
+{"type": "subscribe", "workflow_id": "abc123"}
+```
+Response: `{"type": "subscribed", "channel": "workflows", "workflow_id": "abc123"}`
+
+---
+
+### GET /ws/status
+
+Get current WebSocket connection statistics.
+
+**Response:**
+```json
+{
+  "total_connections": 5,
+  "channels": {
+    "agents": 3,
+    "workflows": 2
+  }
+}
+```
+
+**Example:**
+```bash
+curl http://localhost:8001/ws/status
+```
+
+---
+
+## WebSocket Client Examples
+
+### JavaScript/TypeScript Client
+
+```typescript
+// Connect to agents channel
+const agentsSocket = new WebSocket('ws://localhost:8001/ws/agents');
+
+agentsSocket.onopen = () => {
+  console.log('Connected to agents channel');
+  // Send ping to keep connection alive
+  setInterval(() => {
+    agentsSocket.send(JSON.stringify({ type: 'ping' }));
+  }, 30000);
+};
+
+agentsSocket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  
+  switch (message.type) {
+    case 'agent_update':
+      console.log(`Agent ${message.agent_name} status: ${message.status}`);
+      if (message.data.progress) {
+        console.log(`Progress: ${message.data.progress * 100}%`);
+      }
+      break;
+    case 'pong':
+      console.log('Received pong');
+      break;
+  }
+};
+
+agentsSocket.onerror = (error) => {
+  console.error('WebSocket error:', error);
+};
+
+agentsSocket.onclose = () => {
+  console.log('Disconnected from agents channel');
+};
+```
+
+### Python Client
+
+```python
+import asyncio
+import websockets
+import json
+
+async def listen_to_agents():
+    uri = "ws://localhost:8001/ws/agents"
+    async with websockets.connect(uri) as websocket:
+        print("Connected to agents channel")
+        
+        # Handle incoming messages
+        async for message in websocket:
+            data = json.loads(message)
+            
+            if data["type"] == "agent_update":
+                print(f"Agent {data['agent_name']} status: {data['status']}")
+                if "progress" in data.get("data", {}):
+                    print(f"Progress: {data['data']['progress'] * 100}%")
+            elif data["type"] == "connected":
+                print(data["message"])
+
+asyncio.run(listen_to_agents())
+```
+
+### React Hook Example
+
+```typescript
+import { useEffect, useState, useCallback, useRef } from 'react';
+
+interface AgentUpdate {
+  type: string;
+  agent_name: string;
+  status: string;
+  data: Record<string, any>;
+}
+
+export function useAgentUpdates() {
+  const [updates, setUpdates] = useState<AgentUpdate[]>([]);
+  const [connected, setConnected] = useState(false);
+  const socketRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    const socket = new WebSocket('ws://localhost:8001/ws/agents');
+    socketRef.current = socket;
+
+    socket.onopen = () => setConnected(true);
+    socket.onclose = () => setConnected(false);
+    
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'agent_update') {
+        setUpdates(prev => [...prev, message]);
+      }
+    };
+
+    return () => socket.close();
+  }, []);
+
+  const clearUpdates = useCallback(() => setUpdates([]), []);
+
+  return { updates, connected, clearUpdates };
+}
+```
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |

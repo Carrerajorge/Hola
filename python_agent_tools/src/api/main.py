@@ -1,9 +1,10 @@
-from fastapi import FastAPI, HTTPException, Query, Path
+from fastapi import FastAPI, HTTPException, Query, Path, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional, get_type_hints, Type
 import structlog
+import asyncio
 
 from ..utils.logging_config import setup_logging
 from ..utils.config import get_settings
@@ -33,6 +34,9 @@ def _register_tools():
     from ..tools.browser_tool import BrowserTool
     from ..tools.document_gen import DocumentGenTool
     from ..tools.data_transform import DataTransformTool, DataValidateTool
+    from ..tools.nlp_tools import TextAnalyzeTool, SummarizeTool, TranslateTool
+    from ..tools.analytics_tools import DataStatsTool, TrendAnalyzeTool
+    from ..tools.monitoring_tools import SystemMonitorTool, ProcessMonitorTool
 
 _register_tools()
 
@@ -78,6 +82,10 @@ TAGS_METADATA = [
     {
         "name": "workflows",
         "description": "Operations for executing multi-step workflows",
+    },
+    {
+        "name": "websocket",
+        "description": "WebSocket endpoints for real-time updates",
     },
 ]
 
@@ -421,3 +429,133 @@ async def execute_tool(
         TOOL_EXECUTIONS.labels(tool_name=tool_name, success="false").inc()
         logger.error("tool_execution_failed", tool=tool_name, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+from .websocket import manager, publish_agent_update, publish_workflow_update
+from ..core.state_manager import set_websocket_publishers
+
+
+@app.on_event("startup")
+async def configure_websocket_publishers():
+    """Configure WebSocket publishers for state manager on startup."""
+    set_websocket_publishers(
+        agent_publisher=publish_agent_update,
+        workflow_publisher=publish_workflow_update
+    )
+    logger.info("websocket_publishers_configured")
+
+
+@app.websocket("/ws/agents")
+async def websocket_agents(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time agent execution updates.
+    
+    Connect to receive updates when:
+    - Agent starts execution
+    - Agent progress updates
+    - Agent completes or fails
+    
+    Messages are JSON formatted with structure:
+    {
+        "type": "agent_update",
+        "agent_name": "research_agent",
+        "status": "running",
+        "data": {...}
+    }
+    """
+    await manager.connect(websocket, channel="agents")
+    try:
+        await websocket.send_json({
+            "type": "connected",
+            "channel": "agents",
+            "message": "Connected to agents channel"
+        })
+        while True:
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+                if message.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+                elif message.get("type") == "subscribe":
+                    await websocket.send_json({
+                        "type": "subscribed",
+                        "channel": "agents"
+                    })
+            except json.JSONDecodeError:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid JSON format"
+                })
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, channel="agents")
+        logger.info("websocket_agents_disconnected")
+
+
+@app.websocket("/ws/workflows")
+async def websocket_workflows(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time workflow progress updates.
+    
+    Connect to receive updates when:
+    - Workflow starts execution
+    - Workflow step completes
+    - Workflow progress changes
+    - Workflow completes or fails
+    
+    Messages are JSON formatted with structure:
+    {
+        "type": "workflow_update",
+        "workflow_id": "abc123",
+        "status": "running",
+        "progress": 0.5,
+        "data": {...}
+    }
+    """
+    await manager.connect(websocket, channel="workflows")
+    try:
+        await websocket.send_json({
+            "type": "connected",
+            "channel": "workflows",
+            "message": "Connected to workflows channel"
+        })
+        while True:
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+                if message.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+                elif message.get("type") == "subscribe":
+                    workflow_id = message.get("workflow_id")
+                    await websocket.send_json({
+                        "type": "subscribed",
+                        "channel": "workflows",
+                        "workflow_id": workflow_id
+                    })
+            except json.JSONDecodeError:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid JSON format"
+                })
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, channel="workflows")
+        logger.info("websocket_workflows_disconnected")
+
+
+@app.get(
+    "/ws/status",
+    tags=["websocket"],
+    summary="Get WebSocket connection status",
+    description="Returns the current WebSocket connection statistics."
+)
+async def websocket_status():
+    """Get current WebSocket connection statistics."""
+    return {
+        "total_connections": manager.get_connection_count(),
+        "channels": {
+            channel: manager.get_connection_count(channel)
+            for channel in manager.get_channels()
+        }
+    }
+
+
+import json

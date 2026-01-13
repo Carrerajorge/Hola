@@ -22,6 +22,8 @@ class ToolCategory(str, Enum):
     AUTOMATION = "Automatización"
     SECURITY = "Seguridad"
     MONITORING = "Monitoreo"
+    NLP = "NLP"
+    ANALYTICS = "Analytics"
 
 class Priority(str, Enum):
     CRITICAL = "Crítica"
