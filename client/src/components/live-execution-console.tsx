@@ -311,12 +311,25 @@ export function LiveExecutionConsole({
           "relative px-4 py-4 border-b-2 border-primary/30",
           state.status === 'running' ? "bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10" : "bg-muted/20"
         )}>
-          <p className={cn(
-            "text-base font-semibold leading-relaxed tracking-tight",
-            state.status === 'running' ? "shimmer-text" : "text-foreground"
-          )}>
-            {narrationText}
-          </p>
+          {state.status === 'running' ? (
+            <p 
+              className="text-base font-semibold leading-relaxed tracking-tight"
+              style={{
+                background: 'linear-gradient(110deg, #00000066 0%, #00000066 42%, #000000ee 50%, #00000066 58%, #00000066 100%)',
+                backgroundSize: '220% 100%',
+                WebkitBackgroundClip: 'text',
+                backgroundClip: 'text',
+                color: 'transparent',
+                animation: 'shimmerTextAnim 1.1s linear infinite',
+              }}
+            >
+              {narrationText}
+            </p>
+          ) : (
+            <p className="text-base font-semibold leading-relaxed tracking-tight text-foreground">
+              {narrationText}
+            </p>
+          )}
         </div>
       )}
       <div className="p-3 space-y-2.5">
