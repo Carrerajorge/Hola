@@ -230,6 +230,11 @@ export class SuperAgentOrchestrator extends EventEmitter {
     if (!this.state) return;
     
     this.state.phase = "signals";
+    this.emitSSE("phase_started", { 
+      phase: "signals", 
+      status: "running",
+      message: "Buscando artículos en bases de datos académicas…" 
+    });
     this.emitSSE("progress", { phase: "signals", status: "starting" });
     
     const prompt = this.state.contract.original_prompt;
@@ -648,6 +653,11 @@ export class SuperAgentOrchestrator extends EventEmitter {
     if (!this.state || this.state.sources.length === 0) return;
     
     this.state.phase = "deep";
+    this.emitSSE("phase_started", { 
+      phase: "verification", 
+      status: "running",
+      message: "Verificando DOIs y enlaces de artículos…" 
+    });
     this.emitSSE("progress", { phase: "deep", status: "starting" });
     
     const topSources = [...this.state.sources]
@@ -712,6 +722,11 @@ export class SuperAgentOrchestrator extends EventEmitter {
     this.state.phase = "creating";
     
     // Notify frontend that we're starting document generation
+    this.emitSSE("phase_started", { 
+      phase: "export", 
+      status: "running",
+      message: "Generando documentos…" 
+    });
     this.emitSSE("progress", { 
       phase: "export", 
       status: "starting",

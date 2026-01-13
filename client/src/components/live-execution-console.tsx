@@ -313,15 +313,7 @@ export function LiveExecutionConsole({
         )}>
           {state.status === 'running' ? (
             <p 
-              className="text-base font-semibold leading-relaxed tracking-tight"
-              style={{
-                background: 'linear-gradient(110deg, #00000066 0%, #00000066 42%, #000000ee 50%, #00000066 58%, #00000066 100%)',
-                backgroundSize: '220% 100%',
-                WebkitBackgroundClip: 'text',
-                backgroundClip: 'text',
-                color: 'transparent',
-                animation: 'shimmerTextAnim 1.1s linear infinite',
-              }}
+              className="text-base font-semibold leading-relaxed tracking-tight shimmer-narration"
             >
               {narrationText}
             </p>

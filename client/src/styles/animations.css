@@ -492,12 +492,33 @@
   color: transparent !important;
 }
 
+/* Shimmer narration - optimized for light backgrounds */
+.shimmer-narration {
+  background: linear-gradient(110deg, #1e40afaa 0%, #1e40afaa 42%, #1e40af 50%, #1e40afaa 58%, #1e40afaa 100%) !important;
+  background-size: 220% 100% !important;
+  background-position: -120% 0 !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+  animation: shimmerTextAnim 1.1s linear infinite !important;
+}
+
+.dark .shimmer-narration {
+  background: linear-gradient(110deg, #93c5fdaa 0%, #93c5fdaa 42%, #dbeafe 50%, #93c5fdaa 58%, #93c5fdaa 100%) !important;
+  background-size: 220% 100% !important;
+  background-position: -120% 0 !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+}
+
 @keyframes shimmerTextAnim {
   to { background-position: 120% 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shimmer-text {
+  .shimmer-text,
+  .shimmer-narration {
     animation: none !important;
     background: none !important;
     color: inherit !important;
