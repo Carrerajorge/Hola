@@ -10,6 +10,7 @@ import { seedProductionData } from "./seed-production";
 import { verifyDatabaseConnection } from "./db";
 import { securityHeaders, apiSecurityHeaders } from "./middleware/securityHeaders";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
+import { pythonServiceManager } from "./lib/pythonServiceManager";
 
 const app = express();
 const httpServer = createServer(app);
@@ -82,6 +83,18 @@ app.use((req, res, next) => {
 
 (async () => {
   const isProduction = process.env.NODE_ENV === "production";
+  const startPythonService = process.env.START_PYTHON_SERVICE === "true";
+  
+  // Start Python Agent Tools service if enabled
+  if (startPythonService) {
+    log("Starting Python Agent Tools service...");
+    const pythonStarted = await pythonServiceManager.start();
+    if (pythonStarted) {
+      log(`Python service running on port ${pythonServiceManager.getPort()}`);
+    } else {
+      log("[WARNING] Python service failed to start - some features may not work");
+    }
+  }
   
   // Verify database connection before starting (critical in production)
   log("Verifying database connection...");
@@ -142,6 +155,14 @@ app.use((req, res, next) => {
       registerCleanup(async () => {
         log("Closing database connections...");
       });
+
+      // Register Python service cleanup
+      if (startPythonService && pythonServiceManager.isRunning()) {
+        registerCleanup(async () => {
+          log("Stopping Python service...");
+          pythonServiceManager.stop();
+        });
+      }
 
       log("Graceful shutdown handler configured");
     },
