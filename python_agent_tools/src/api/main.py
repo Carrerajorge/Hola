@@ -144,13 +144,11 @@ class ToolExecuteRequest(BaseModel):
     """Request body for executing a tool."""
     tool_name: str = Field(
         ...,
-        description="The name of the tool to execute",
-        example="shell"
+        description="The name of the tool to execute"
     )
     input: Dict[str, Any] = Field(
         ...,
-        description="Input parameters for the tool",
-        example={"command": "echo Hello World"}
+        description="Input parameters for the tool"
     )
 
     class Config:
@@ -170,8 +168,7 @@ class ToolExecuteResponse(BaseModel):
     )
     data: Optional[Any] = Field(
         None,
-        description="The output data from the tool execution",
-        example={"stdout": "Hello World\n", "stderr": "", "exit_code": 0}
+        description="The output data from the tool execution"
     )
     error: Optional[str] = Field(
         None,
@@ -179,8 +176,7 @@ class ToolExecuteResponse(BaseModel):
     )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional metadata about the execution",
-        example={"execution_time_ms": 45}
+        description="Additional metadata about the execution"
     )
 
     class Config:
@@ -198,28 +194,23 @@ class ToolInfo(BaseModel):
     """Information about a registered tool."""
     name: str = Field(
         ...,
-        description="Unique identifier for the tool",
-        example="shell"
+        description="Unique identifier for the tool"
     )
     description: str = Field(
         ...,
-        description="Human-readable description of what the tool does",
-        example="Execute shell commands safely"
+        description="Human-readable description of what the tool does"
     )
     category: str = Field(
         ...,
-        description="Category the tool belongs to",
-        example="execution"
+        description="Category the tool belongs to"
     )
     priority: str = Field(
         ...,
-        description="Priority level of the tool",
-        example="high"
+        description="Priority level of the tool"
     )
     dependencies: List[str] = Field(
         ...,
-        description="List of tool dependencies",
-        example=[]
+        description="List of tool dependencies"
     )
 
     class Config:
@@ -312,8 +303,7 @@ async def list_tools():
 async def get_tool(
     tool_name: str = Path(
         ...,
-        description="The unique name of the tool to retrieve",
-        example="shell"
+        description="The unique name of the tool to retrieve"
     )
 ):
     """
@@ -368,8 +358,7 @@ async def get_tool(
 async def execute_tool(
     tool_name: str = Path(
         ...,
-        description="The name of the tool to execute",
-        example="shell"
+        description="The name of the tool to execute"
     ),
     request: ToolExecuteRequest = ...
 ):
