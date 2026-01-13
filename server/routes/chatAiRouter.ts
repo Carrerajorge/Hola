@@ -182,7 +182,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments } = req.body;
+      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -263,6 +263,8 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         attachmentContext,
         forceDirectResponse: hasAttachments && attachmentContext.length > 0,
         hasRawAttachments: hasAttachments,
+        lastImageBase64,
+        lastImageId,
         onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update)
       });
       

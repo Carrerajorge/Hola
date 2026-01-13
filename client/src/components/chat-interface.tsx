@@ -63,7 +63,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
 
-import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, generateRequestId, generateClientRequestId, getActiveRun, updateActiveRunStatus, clearActiveRun, hasActiveRun, resolveRealChatId, isPendingChat } from "@/hooks/use-chats";
+import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, getLastGeneratedImage, storeLastGeneratedImageInfo, generateRequestId, generateClientRequestId, getActiveRun, updateActiveRunStatus, clearActiveRun, hasActiveRun, resolveRealChatId, isPendingChat } from "@/hooks/use-chats";
 import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
 import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
@@ -88,6 +88,7 @@ import { markdownToTipTap } from "@/lib/markdownToHtml";
 import { detectGmailIntent } from "@/lib/gmailIntentDetector";
 import { shouldAutoActivateAgent } from "@/lib/complexityDetector";
 import { shouldUseSuperAgent } from "@/lib/superAgentDetector";
+import { useImageState, fetchImageAsBase64 } from "@/hooks/use-image-state";
 import { useAgentStore, useAgentRun, type AgentRunState } from "@/stores/agent-store";
 import { useSuperAgentStore } from "@/stores/super-agent-store";
 import { useSuperAgentStream, type SuperAgentState, type SuperAgentArtifact, type SuperAgentFinal } from "@/hooks/use-super-agent";
@@ -3104,16 +3105,27 @@ export function ChatInterface({
       /\b(crea|create|genera|generate|haz|make)\b.*\b(pdf)\b/i,
       /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i,
     ];
-    const isGenerationRequest = generationPatterns.some(p => p.test(input));
     
-    if (isGenerationRequest) {
-      console.log("[handleSubmit] Generation intent detected - routing directly to /api/chat");
+    const imageEditPatterns = [
+      /\b(edita|modifica|cambia|ajusta|arregla)\s+(la\s+)?(última|anterior|esa|esta)\s*(imagen|foto)?/i,
+      /\b(hazle|ponle|agrégale|quítale|añádele)\s+/i,
+      /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
+      /\bpon(le|er)?\s+/i,
+      /\bagrega(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+      /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+    ];
+    
+    const isGenerationRequest = generationPatterns.some(p => p.test(input));
+    const isImageEditRequest = imageEditPatterns.some(p => p.test(input));
+    
+    if (isGenerationRequest || isImageEditRequest) {
+      console.log("[handleSubmit] Generation/Edit intent detected - routing directly to /api/chat");
       
       // Set thinking state
       setAiState("thinking");
       setAiProcessSteps([
-        { step: "Procesando tu solicitud", status: "active" },
-        { step: "Generando contenido", status: "pending" }
+        { step: isImageEditRequest ? "Procesando edición de imagen" : "Procesando tu solicitud", status: "active" },
+        { step: isImageEditRequest ? "Editando imagen" : "Generando contenido", status: "pending" }
       ]);
       
       const generationInput = input;
@@ -3136,6 +3148,25 @@ export function ChatInterface({
       onSendMessage(userMsg);
       
       try {
+        // Check if we have a last image for editing
+        let lastImageBase64: string | null = null;
+        let lastImageId: string | null = null;
+        
+        if (isImageEditRequest) {
+          const lastImage = getLastGeneratedImage();
+          if (lastImage?.base64) {
+            lastImageBase64 = lastImage.base64;
+            lastImageId = lastImage.artifactId || lastImage.messageId;
+            console.log("[handleSubmit] Found last image for editing:", lastImageId);
+          } else if (lastImage?.previewUrl) {
+            lastImageBase64 = await fetchImageAsBase64(lastImage.previewUrl);
+            lastImageId = lastImage.artifactId || lastImage.messageId;
+            console.log("[handleSubmit] Fetched last image base64 for editing:", lastImageId);
+          } else {
+            console.log("[handleSubmit] No last image found for editing");
+          }
+        }
+        
         // Direct call to /api/chat for generation - bypasses SSE/runs system
         const response = await fetch("/api/chat", {
           method: "POST",
@@ -3143,7 +3174,9 @@ export function ChatInterface({
           body: JSON.stringify({
             messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
             provider: selectedProvider,
-            model: selectedModel
+            model: selectedModel,
+            lastImageBase64,
+            lastImageId,
           })
         });
         
@@ -3907,6 +3940,14 @@ export function ChatInterface({
             
             // Store image in separate memory store to prevent loss during localStorage sync
             storeGeneratedImage(msgId, imageData.imageData);
+            
+            // Track last generated image for edit operations
+            storeLastGeneratedImageInfo({
+              messageId: msgId,
+              base64: imageData.imageData,
+              artifactId: imageData.artifactId || null,
+              previewUrl: imageData.previewUrl,
+            });
             
             // Save generated image to user's library (fire and forget)
             if (user) {

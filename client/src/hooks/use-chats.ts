@@ -306,8 +306,32 @@ export function getGeneratedImage(messageId: string): string | undefined {
   return generatedImagesStore.get(messageId);
 }
 
+export interface LastImageInfo {
+  messageId: string;
+  base64: string;
+  artifactId: string | null;
+  previewUrl?: string;
+}
+
+// Track last generated image metadata
+let lastGeneratedImageInfo: LastImageInfo | null = null;
+
+export function storeLastGeneratedImageInfo(info: LastImageInfo): void {
+  lastGeneratedImageInfo = info;
+  console.log('[storeLastGeneratedImageInfo] Stored last image:', info.messageId);
+}
+
+export function getLastGeneratedImage(): LastImageInfo | null {
+  return lastGeneratedImageInfo;
+}
+
+export function clearLastGeneratedImage(): void {
+  lastGeneratedImageInfo = null;
+}
+
 export function clearGeneratedImages(): void {
   generatedImagesStore.clear();
+  lastGeneratedImageInfo = null;
 }
 
 export function useChats() {

@@ -66,7 +66,7 @@ import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
 import { z } from "zod";
 
-import { Message, storeGeneratedImage, getGeneratedImage, WebSource } from "@/hooks/use-chats";
+import { Message, storeGeneratedImage, getGeneratedImage, storeLastGeneratedImageInfo, WebSource } from "@/hooks/use-chats";
 import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
 import { SourcesIndicator } from "@/components/sources-indicator";
 import { SourcesPanel } from "@/components/sources-panel";
@@ -1664,6 +1664,11 @@ const AssistantMessage = memo(function AssistantMessage({
 
     if (result && !storeImage) {
       storeGeneratedImage(message.id, result);
+      storeLastGeneratedImageInfo({
+        messageId: message.id,
+        base64: result,
+        artifactId: null,
+      });
     }
 
     return result;

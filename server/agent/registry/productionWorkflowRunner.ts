@@ -85,6 +85,17 @@ export type GenerationIntent =
   | "browse_url"
   | "generic";
 
+export interface ImageContext {
+  lastImageBase64?: string;
+  lastImageId?: string;
+  specificImageBase64?: string;
+  specificImageId?: string;
+}
+
+export interface RunContext {
+  image?: ImageContext;
+}
+
 export interface RunPlan {
   objective: string;
   steps: PlanStep[];
@@ -297,11 +308,11 @@ export class ProductionWorkflowRunner extends EventEmitter {
     return statuses;
   }
 
-  async startRun(query: string): Promise<{ runId: string; requestId: string; statusUrl: string; eventsUrl: string }> {
+  async startRun(query: string, context?: RunContext): Promise<{ runId: string; requestId: string; statusUrl: string; eventsUrl: string }> {
     const runId = crypto.randomUUID();
     const requestId = crypto.randomUUID();
     const intent = classifyIntent(query);
-    const plan = this.createPlan(query, intent);
+    const plan = this.createPlan(query, intent, context);
 
     this.metrics.totalRuns++;
     this.metrics.lastUpdated = new Date().toISOString();
@@ -366,7 +377,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
     };
   }
 
-  private createPlan(query: string, intent: GenerationIntent): RunPlan {
+  private createPlan(query: string, intent: GenerationIntent, context?: RunContext): RunPlan {
     const steps: PlanStep[] = [];
     const toolName = INTENT_TO_TOOL[intent];
     const isGenerator = isGenerationIntent(intent);
@@ -386,7 +397,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
         stepIndex: 1,
         toolName: INTENT_TO_TOOL[secondaryIntent],
         description: `Generate ${secondaryIntent}`,
-        input: { query, content: query },
+        input: this.buildToolInput(INTENT_TO_TOOL[secondaryIntent], query, context),
         isGenerator: true,
         dependencies: [0],
       });
@@ -395,7 +406,7 @@ export class ProductionWorkflowRunner extends EventEmitter {
         stepIndex: 0,
         toolName,
         description: `Execute ${toolName} for: ${query.slice(0, 50)}`,
-        input: this.buildToolInput(toolName, query),
+        input: this.buildToolInput(toolName, query, context),
         isGenerator,
         dependencies: [],
       });
@@ -409,10 +420,18 @@ export class ProductionWorkflowRunner extends EventEmitter {
     };
   }
 
-  private buildToolInput(toolName: string, query: string): unknown {
+  private buildToolInput(toolName: string, query: string, context?: RunContext): unknown {
     switch (toolName) {
       case "image_generate":
-        return { prompt: query, size: "1024x1024", format: "png" };
+        return { 
+          prompt: query, 
+          size: "1024x1024", 
+          format: "png",
+          lastImageBase64: context?.image?.lastImageBase64,
+          lastImageId: context?.image?.lastImageId,
+          specificImageBase64: context?.image?.specificImageBase64,
+          specificImageId: context?.image?.specificImageId,
+        };
       case "slides_create":
         return { title: query.slice(0, 50), content: query, slides: 5 };
       case "docx_generate":
@@ -1955,8 +1974,8 @@ IMG: [descripción breve de imagen relevante]
     });
   }
 
-  async executeAndWait(query: string): Promise<{ run: ProductionRun; response: string }> {
-    const { runId } = await this.startRun(query);
+  async executeAndWait(query: string, context?: RunContext): Promise<{ run: ProductionRun; response: string }> {
+    const { runId } = await this.startRun(query, context);
     const run = await this.waitForCompletion(runId);
     
     let response = "";

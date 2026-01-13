@@ -364,9 +364,11 @@ export async function handleChatRequest(
     attachmentContext?: string;
     forceDirectResponse?: boolean;
     hasRawAttachments?: boolean;
+    lastImageBase64?: string;
+    lastImageId?: string;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, userId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false, hasRawAttachments = false } = options;
+  const { useRag = true, conversationId, userId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false, hasRawAttachments = false, lastImageBase64, lastImageId } = options;
   const hasImages = images && images.length > 0;
   
   // Fetch user settings for feature flags and preferences
@@ -1188,7 +1190,8 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           const enrichedPrompt = hasAttachments && attachmentContext 
             ? `${lastUserMessage.content}\n\n[DOCUMENTO DE REFERENCIA]\n${attachmentContext.slice(0, 20000)}`
             : lastUserMessage.content;
-          const { run, response } = await productionWorkflowRunner.executeAndWait(enrichedPrompt);
+          const imageContext = lastImageBase64 ? { image: { lastImageBase64, lastImageId } } : undefined;
+          const { run, response } = await productionWorkflowRunner.executeAndWait(enrichedPrompt, imageContext);
           
           // Build response with artifact information
           let artifactInfo = null;
