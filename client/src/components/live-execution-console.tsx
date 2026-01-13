@@ -25,7 +25,7 @@ import {
   TraceEvent
 } from "@/lib/runStreamClient";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { NarrationAgent, NarrationState } from "@/lib/narrationAgent";
+import { PhaseNarrator } from "@/lib/phaseNarrator";
 
 interface LiveExecutionConsoleProps {
   runId: string | null;
@@ -145,8 +145,8 @@ export function LiveExecutionConsole({
 }: LiveExecutionConsoleProps) {
   const [state, setState] = useState<RunStreamState | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [narrationText, setNarrationText] = useState<string>("");
-  const narrationAgentRef = useRef<NarrationAgent | null>(null);
+  const [narrationText, setNarrationText] = useState<string>("Iniciando agente de búsqueda…");
+  const narratorRef = useRef<PhaseNarrator | null>(null);
   const processedEventsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -159,7 +159,9 @@ export function LiveExecutionConsole({
     console.log(`[LiveExecutionConsole] Connecting to run: ${runId}`);
     const streamClient = new RunStreamClient(runId);
 
-    narrationAgentRef.current = new NarrationAgent();
+    narratorRef.current = new PhaseNarrator((newNarration) => {
+      setNarrationText(newNarration);
+    });
     processedEventsRef.current = new Set();
     setNarrationText("Iniciando agente de búsqueda…");
 
@@ -168,24 +170,14 @@ export function LiveExecutionConsole({
         `queries=${newState.queries_current}/${newState.queries_total}`, `found=${newState.candidates_found}`);
       setState(newState);
       
-      // Process only new events for NarrationAgent
-      let eventNarration: string | null = null;
       for (const event of newState.events) {
         const eventKey = `${event.run_id}-${event.seq}`;
         if (processedEventsRef.current.has(eventKey)) continue;
         processedEventsRef.current.add(eventKey);
         
-        const newNarration = narrationAgentRef.current!.processEvent(event);
-        if (newNarration.currentNarration) {
-          eventNarration = newNarration.currentNarration;
-          console.log(`[NarrationAgent] ${newNarration.phase}: ${newNarration.currentNarration}`);
-        }
+        const narration = narratorRef.current!.processEvent(event);
+        console.log(`[PhaseNarrator] ${event.event_type}: ${narration}`);
       }
-      
-      // Always prefer state-based narration as it has the latest aggregated data
-      const stateNarration = generateNarrationFromState(newState);
-      const finalNarration = stateNarration || eventNarration || "Procesando…";
-      setNarrationText(finalNarration);
       
       if (newState.status === "completed" && onComplete) {
         onComplete(newState.artifacts);
@@ -202,71 +194,9 @@ export function LiveExecutionConsole({
       console.log(`[LiveExecutionConsole] Unmounting for run: ${runId}`);
       unsubscribe();
       streamClient.destroy();
+      narratorRef.current?.destroy();
     };
   }, [runId, onComplete, onError]);
-
-  // Generate narration directly from RunStreamState - always show current state
-  function generateNarrationFromState(s: RunStreamState): string {
-    const { phase, target, queries_current, queries_total, candidates_found, metrics, rules, pages_searched } = s;
-    
-    switch (phase) {
-      case "planning":
-        if (rules?.yearStart || rules?.yearEnd || target > 0) {
-          return `Preparando plan de búsqueda: años ${rules?.yearStart || 2020}-${rules?.yearEnd || 2025}, objetivo ${target || 50} artículos.`;
-        }
-        return "Planificando búsqueda académica…";
-      
-      case "signals":
-        // Build a detailed message showing actual progress
-        const parts: string[] = [];
-        parts.push("Buscando artículos");
-        if (queries_current > 0 || queries_total > 0) {
-          parts.push(`(consulta ${queries_current || 1}/${queries_total || "?"})`);
-        }
-        if (pages_searched > 0) {
-          parts.push(`- ${pages_searched} páginas`);
-        }
-        if (candidates_found > 0) {
-          parts.push(`→ ${candidates_found} candidatos encontrados`);
-        }
-        return parts.join(" ") + "…";
-      
-      case "verification":
-      case "deep":
-        const verified = metrics.articles_verified || 0;
-        const accepted = metrics.articles_accepted || 0;
-        if (verified > 0 || accepted > 0) {
-          return `Verificando DOIs y enlaces: ${verified} revisados, ${accepted} válidos hasta ahora.`;
-        }
-        return "Verificando enlaces y DOIs de artículos…";
-      
-      case "enrichment":
-        if (metrics.articles_accepted > 0) {
-          return `Enriqueciendo metadatos: ${metrics.articles_accepted} artículos procesados.`;
-        }
-        return "Enriqueciendo metadatos de artículos…";
-      
-      case "export":
-      case "creating":
-        // Use run_title if available (set from progress.message)
-        if (s.run_title && s.run_title.includes("Generando")) {
-          return s.run_title;
-        }
-        if (metrics.articles_accepted > 0) {
-          return `Generando documento con ${metrics.articles_accepted} artículos verificados…`;
-        }
-        return "Preparando documento…";
-      
-      case "finalization":
-        return `Finalizado: ${metrics.articles_accepted || 0}/${target || "?"} artículos exportados.`;
-      
-      default:
-        if (phase === "idle") {
-          return "Iniciando agente de búsqueda…";
-        }
-        return `Procesando: fase ${phase}…`;
-    }
-  }
 
   if (!runId) {
     return null;

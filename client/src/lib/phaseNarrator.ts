@@ -1,0 +1,467 @@
+import type { TraceEvent } from "./runStreamClient";
+
+export interface NarrationMetrics {
+  providers: string[];
+  yearStart: number;
+  yearEnd: number;
+  target: number;
+  currentProvider: string;
+  queryIdx: number;
+  queryTotal: number;
+  page: number;
+  foundInQuery: number;
+  candidatesTotal: number;
+  regions: string[];
+  geoMismatch: number;
+  yearOutOfRange: number;
+  duplicate: number;
+  lowRelevance: number;
+  checked: number;
+  verified: number;
+  dead: number;
+  accepted: number;
+  columnsCount: number;
+  rowsWritten: number;
+  rowsTotal: number;
+  filename: string;
+  rejectedTotal: number;
+  currentTool: string;
+  retryIn: number;
+  rateLimitedProvider: string;
+}
+
+export interface PhaseNarratorState {
+  narration: string;
+  phase: string;
+  lastUpdated: number;
+  metrics: NarrationMetrics;
+}
+
+const DEBOUNCE_MIN = 800;
+const DEBOUNCE_MAX = 1200;
+
+function randomDebounce(): number {
+  return DEBOUNCE_MIN + Math.random() * (DEBOUNCE_MAX - DEBOUNCE_MIN);
+}
+
+function createDefaultMetrics(): NarrationMetrics {
+  return {
+    providers: [],
+    yearStart: 0,
+    yearEnd: 0,
+    target: 0,
+    currentProvider: "",
+    queryIdx: 0,
+    queryTotal: 0,
+    page: 0,
+    foundInQuery: 0,
+    candidatesTotal: 0,
+    regions: [],
+    geoMismatch: 0,
+    yearOutOfRange: 0,
+    duplicate: 0,
+    lowRelevance: 0,
+    checked: 0,
+    verified: 0,
+    dead: 0,
+    accepted: 0,
+    columnsCount: 0,
+    rowsWritten: 0,
+    rowsTotal: 0,
+    filename: "",
+    rejectedTotal: 0,
+    currentTool: "",
+    retryIn: 0,
+    rateLimitedProvider: "",
+  };
+}
+
+function generateNarration(phase: string, m: NarrationMetrics): string {
+  switch (phase) {
+    case "idle":
+      return "Iniciando agente de búsqueda…";
+
+    case "planning":
+      if (m.target > 0 && m.providers.length > 0) {
+        return `Plan: buscar ${m.target} artículos (${m.yearStart || 2020}–${m.yearEnd || 2025}) en ${m.providers.join(", ")}.`;
+      }
+      if (m.target > 0) {
+        return `Plan: buscar ${m.target} artículos (${m.yearStart || 2020}–${m.yearEnd || 2025}).`;
+      }
+      return "Analizando consulta y preparando plan…";
+
+    case "signals":
+    case "search":
+      if (m.currentProvider && m.queryIdx > 0 && m.queryTotal > 0) {
+        const found = m.candidatesTotal > 0 ? ` → ${m.candidatesTotal} candidatos` : "";
+        return `${m.currentProvider}: consulta ${m.queryIdx}/${m.queryTotal}, pág. ${m.page || 1}${found}.`;
+      }
+      if (m.currentProvider && m.candidatesTotal > 0) {
+        return `${m.currentProvider}: ${m.candidatesTotal} candidatos encontrados.`;
+      }
+      if (m.currentProvider) {
+        return `Buscando en ${m.currentProvider}…`;
+      }
+      if (m.candidatesTotal > 0) {
+        return `Buscando artículos: ${m.candidatesTotal} candidatos.`;
+      }
+      return "Buscando en bases académicas…";
+
+    case "filter":
+      const filterReasons: string[] = [];
+      if (m.geoMismatch > 0) filterReasons.push(`región: ${m.geoMismatch}`);
+      if (m.yearOutOfRange > 0) filterReasons.push(`año: ${m.yearOutOfRange}`);
+      if (m.duplicate > 0) filterReasons.push(`duplicados: ${m.duplicate}`);
+      if (m.lowRelevance > 0) filterReasons.push(`irrelevantes: ${m.lowRelevance}`);
+      if (filterReasons.length > 0) {
+        return `Filtros aplicados → descartados: ${filterReasons.join(", ")}.`;
+      }
+      return "Aplicando filtros de región y año…";
+
+    case "verification":
+    case "deep":
+      if (m.checked > 0) {
+        return `Verificando DOIs: ${m.checked} revisados, ${m.verified} válidos, ${m.dead} caídos.`;
+      }
+      return "Verificando enlaces y DOIs…";
+
+    case "enrichment":
+      if (m.accepted > 0) {
+        return `Enriqueciendo: ${m.accepted}/${m.target} artículos aceptados.`;
+      }
+      return "Enriqueciendo metadatos…";
+
+    case "export":
+    case "creating":
+      if (m.filename && m.rowsWritten > 0) {
+        return `Generando ${m.filename}: fila ${m.rowsWritten}/${m.rowsTotal || m.target || "?"}…`;
+      }
+      if (m.filename) {
+        return `Generando ${m.filename}…`;
+      }
+      if (m.accepted > 0) {
+        return `Generando Excel con ${m.accepted} artículos…`;
+      }
+      return "Generando archivo Excel…";
+
+    case "finalization":
+    case "completed":
+      if (m.filename) {
+        const rejected = m.rejectedTotal > 0 ? ` (${m.rejectedTotal} descartados)` : "";
+        return `Excel listo: ${m.filename}${rejected}.`;
+      }
+      if (m.accepted > 0) {
+        return `Completado: ${m.accepted} artículos exportados.`;
+      }
+      return "Exportación finalizada.";
+
+    case "rate_limited":
+      if (m.rateLimitedProvider && m.retryIn > 0) {
+        return `${m.rateLimitedProvider} limitó solicitudes, reintentando en ${m.retryIn}s…`;
+      }
+      return "Esperando por límite de tasa…";
+
+    case "retry":
+      if (m.currentTool && m.retryIn > 0) {
+        return `Reintentando ${m.currentTool} en ${m.retryIn}s…`;
+      }
+      return "Reintentando solicitud…";
+
+    case "tool_executing":
+      if (m.currentTool) {
+        return `Ejecutando: ${m.currentTool}…`;
+      }
+      return "Ejecutando herramienta…";
+
+    default:
+      if (m.candidatesTotal > 0 && m.accepted > 0) {
+        return `Procesando: ${m.accepted}/${m.target} aceptados de ${m.candidatesTotal} candidatos.`;
+      }
+      if (m.candidatesTotal > 0) {
+        return `Procesando ${m.candidatesTotal} candidatos…`;
+      }
+      return "Procesando solicitud…";
+  }
+}
+
+function extractMetricsFromEvent(
+  event: TraceEvent,
+  current: NarrationMetrics
+): Partial<NarrationMetrics> {
+  const updates: Partial<NarrationMetrics> = {};
+  const evt = event as any;
+
+  switch (event.event_type) {
+    case "run_started":
+      if (evt.evidence?.target) updates.target = evt.evidence.target;
+      if (evt.target) updates.target = evt.target;
+      break;
+
+    case "plan_created":
+      if (evt.evidence?.year_start) updates.yearStart = evt.evidence.year_start;
+      if (evt.evidence?.year_end) updates.yearEnd = evt.evidence.year_end;
+      if (evt.evidence?.target) updates.target = evt.evidence.target;
+      if (evt.evidence?.regions) updates.regions = evt.evidence.regions;
+      if (evt.evidence?.providers) updates.providers = evt.evidence.providers;
+      break;
+
+    case "search_progress":
+    case "source_collected":
+      if (evt.provider) updates.currentProvider = evt.provider;
+      if (event.agent) {
+        const a = event.agent.toLowerCase();
+        if (a.includes("openalex")) updates.currentProvider = "OpenAlex";
+        else if (a.includes("crossref")) updates.currentProvider = "CrossRef";
+        else if (a.includes("semantic")) updates.currentProvider = "Semantic Scholar";
+        else if (a.includes("scopus")) updates.currentProvider = "Scopus";
+        else if (a.includes("wos")) updates.currentProvider = "Web of Science";
+      }
+      if (event.metrics?.queries_current) updates.queryIdx = event.metrics.queries_current;
+      if (event.metrics?.queries_total) updates.queryTotal = event.metrics.queries_total;
+      if (event.metrics?.pages_searched) updates.page = event.metrics.pages_searched;
+      if (event.metrics?.candidates_found !== undefined) {
+        updates.foundInQuery = Math.max(0, event.metrics.candidates_found - (current.candidatesTotal || 0));
+        updates.candidatesTotal = event.metrics.candidates_found;
+      }
+      if (event.metrics?.articles_collected !== undefined) {
+        updates.candidatesTotal = event.metrics.articles_collected;
+      }
+      break;
+
+    case "filter_progress":
+      if (evt.metrics?.geo_mismatch) updates.geoMismatch = evt.metrics.geo_mismatch;
+      if (evt.metrics?.year_out_of_range) updates.yearOutOfRange = evt.metrics.year_out_of_range;
+      if (evt.metrics?.duplicate) updates.duplicate = evt.metrics.duplicate;
+      if (evt.metrics?.low_relevance) updates.lowRelevance = evt.metrics.low_relevance;
+      break;
+
+    case "verify_progress":
+    case "source_verified":
+      if (event.metrics?.articles_verified !== undefined) {
+        updates.verified = event.metrics.articles_verified;
+      }
+      if (evt.metrics?.checked) updates.checked = evt.metrics.checked;
+      if (evt.metrics?.ok) updates.verified = evt.metrics.ok;
+      if (evt.metrics?.dead) updates.dead = evt.metrics.dead;
+      break;
+
+    case "source_rejected":
+      updates.dead = (current.dead || 0) + 1;
+      updates.checked = (current.checked || 0) + 1;
+      if (event.metrics?.reject_count) updates.rejectedTotal = event.metrics.reject_count;
+      break;
+
+    case "accepted_progress":
+      if (event.metrics?.articles_accepted !== undefined) {
+        updates.accepted = event.metrics.articles_accepted;
+      }
+      break;
+
+    case "artifact_declared":
+    case "artifact_generating":
+      if (evt.filename) updates.filename = evt.filename;
+      if (evt.artifact_type === "xlsx") updates.filename = evt.filename || "articles.xlsx";
+      if (event.message) {
+        const match = event.message.match(/([^/\\]+\.(xlsx|csv|pdf|docx))$/i);
+        if (match) updates.filename = match[1];
+      }
+      break;
+
+    case "export_progress":
+      if (evt.metrics?.columns_count) updates.columnsCount = evt.metrics.columns_count;
+      if (evt.metrics?.rows_written) updates.rowsWritten = evt.metrics.rows_written;
+      if (evt.metrics?.rows_total) updates.rowsTotal = evt.metrics.rows_total;
+      break;
+
+    case "artifact":
+      if (evt.name) updates.filename = evt.name;
+      if (evt.type === "xlsx" && !updates.filename) updates.filename = "articles.xlsx";
+      break;
+
+    case "run_completed":
+      if (evt.evidence?.final_url) {
+        const match = evt.evidence.final_url.match(/([^/\\]+\.(xlsx|csv|pdf|docx))$/i);
+        if (match) updates.filename = match[1];
+      }
+      if (event.metrics?.reject_count) updates.rejectedTotal = event.metrics.reject_count;
+      if (event.metrics?.articles_accepted) updates.accepted = event.metrics.articles_accepted;
+      break;
+
+    case "tool_call":
+      if (evt.tool) updates.currentTool = evt.tool;
+      break;
+
+    case "tool_result":
+      updates.currentTool = "";
+      break;
+
+    case "retry_scheduled":
+      if (evt.retry_in) updates.retryIn = evt.retry_in;
+      if (evt.tool) updates.currentTool = evt.tool;
+      break;
+
+    case "rate_limited":
+      if (evt.provider) updates.rateLimitedProvider = evt.provider;
+      if (evt.retry_after) updates.retryIn = evt.retry_after;
+      break;
+
+    case "progress":
+    case "progress_update":
+      if (event.metrics?.candidates_found) updates.candidatesTotal = event.metrics.candidates_found;
+      if (event.metrics?.articles_verified) updates.verified = event.metrics.articles_verified;
+      if (event.metrics?.articles_accepted) updates.accepted = event.metrics.articles_accepted;
+      if (evt.document_type === "xlsx" && evt.status === "generating") {
+        updates.filename = "articles.xlsx";
+      }
+      if (evt.artifact_id) {
+        updates.filename = updates.filename || "articles.xlsx";
+      }
+      break;
+
+    case "phase_started":
+    case "step_started":
+      break;
+  }
+
+  return updates;
+}
+
+function mapPhaseFromEvent(event: TraceEvent, currentPhase: string): string {
+  if (event.phase) return event.phase;
+
+  switch (event.event_type) {
+    case "run_started":
+      return "planning";
+    case "plan_created":
+      return "planning";
+    case "search_progress":
+    case "source_collected":
+      return "signals";
+    case "filter_progress":
+      return "filter";
+    case "verify_progress":
+    case "source_verified":
+    case "source_rejected":
+      return "verification";
+    case "accepted_progress":
+      return "enrichment";
+    case "artifact_declared":
+    case "artifact_generating":
+    case "export_progress":
+      return "export";
+    case "artifact":
+      return "export";
+    case "run_completed":
+      return "finalization";
+    case "rate_limited":
+      return "rate_limited";
+    case "retry_scheduled":
+      return "retry";
+    case "tool_call":
+      return "tool_executing";
+    case "phase_started":
+    case "step_started":
+      return (event as any).phase || currentPhase;
+    default:
+      return currentPhase;
+  }
+}
+
+export class PhaseNarrator {
+  private state: PhaseNarratorState;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingNarration: string = "";
+  private lastPhase: string = "idle";
+  private onNarrationChange?: (narration: string) => void;
+
+  constructor(onNarrationChange?: (narration: string) => void) {
+    this.state = {
+      narration: "Iniciando agente de búsqueda…",
+      phase: "idle",
+      lastUpdated: Date.now(),
+      metrics: createDefaultMetrics(),
+    };
+    this.onNarrationChange = onNarrationChange;
+  }
+
+  processEvent(event: TraceEvent): string {
+    const metricUpdates = extractMetricsFromEvent(event, this.state.metrics);
+    this.state.metrics = { ...this.state.metrics, ...metricUpdates };
+
+    const newPhase = mapPhaseFromEvent(event, this.state.phase);
+    const phaseChanged = newPhase !== this.lastPhase;
+    this.state.phase = newPhase;
+
+    const newNarration = generateNarration(newPhase, this.state.metrics);
+
+    if (phaseChanged) {
+      this.emitImmediately(newNarration);
+      this.lastPhase = newPhase;
+    } else if (newNarration !== this.state.narration) {
+      this.scheduleEmit(newNarration);
+    }
+
+    return this.state.narration;
+  }
+
+  private emitImmediately(narration: string): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this.state.narration = narration;
+    this.state.lastUpdated = Date.now();
+    this.pendingNarration = "";
+    this.onNarrationChange?.(narration);
+  }
+
+  private scheduleEmit(narration: string): void {
+    this.pendingNarration = narration;
+
+    if (this.debounceTimer) return;
+
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      if (this.pendingNarration && this.pendingNarration !== this.state.narration) {
+        this.state.narration = this.pendingNarration;
+        this.state.lastUpdated = Date.now();
+        this.onNarrationChange?.(this.pendingNarration);
+        this.pendingNarration = "";
+      }
+    }, randomDebounce());
+  }
+
+  getCurrentNarration(): string {
+    return this.state.narration;
+  }
+
+  getState(): PhaseNarratorState {
+    return { ...this.state };
+  }
+
+  getMetrics(): NarrationMetrics {
+    return { ...this.state.metrics };
+  }
+
+  reset(): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    this.state = {
+      narration: "Iniciando agente de búsqueda…",
+      phase: "idle",
+      lastUpdated: Date.now(),
+      metrics: createDefaultMetrics(),
+    };
+    this.lastPhase = "idle";
+    this.pendingNarration = "";
+  }
+
+  destroy(): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+  }
+}
