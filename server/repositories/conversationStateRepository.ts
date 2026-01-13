@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq, and, desc, asc, sql } from "drizzle-orm";
+import { eq, and, desc, asc, sql, avg, count } from "drizzle-orm";
 import {
   conversationStates,
   conversationStateVersions,
@@ -9,6 +9,8 @@ import {
   conversationContexts,
   memoryFacts,
   runningSummaries,
+  retrievalTelemetry,
+  processedRequests,
   InsertConversationState,
   InsertConversationMessage,
   InsertConversationArtifact,
@@ -17,6 +19,7 @@ import {
   InsertConversationStateVersion,
   InsertMemoryFact,
   InsertRunningSummary,
+  InsertRetrievalTelemetry,
   ConversationState,
   ConversationMessage,
   ConversationArtifact,
@@ -25,7 +28,9 @@ import {
   ConversationStateVersion,
   MemoryFact,
   RunningSummary,
+  RetrievalTelemetry,
   HydratedConversationState,
+  ProcessedRequest,
 } from "@shared/schema";
 
 export class ConversationStateRepository {
@@ -442,6 +447,73 @@ export class ConversationStateRepository {
     await db
       .delete(conversationStates)
       .where(eq(conversationStates.chatId, chatId));
+  }
+
+  async checkRequestProcessed(requestId: string): Promise<{ wasProcessed: boolean; messageId?: string }> {
+    const [existing] = await db
+      .select({ messageId: processedRequests.messageId })
+      .from(processedRequests)
+      .where(eq(processedRequests.requestId, requestId))
+      .limit(1);
+
+    if (existing) {
+      return { wasProcessed: true, messageId: existing.messageId || undefined };
+    }
+    return { wasProcessed: false };
+  }
+
+  async recordProcessedRequest(requestId: string, stateId: string, messageId: string): Promise<void> {
+    await db
+      .insert(processedRequests)
+      .values({
+        requestId,
+        stateId,
+        messageId,
+      })
+      .onConflictDoNothing();
+  }
+
+  async saveTelemetry(
+    stateId: string,
+    data: {
+      requestId: string;
+      query: string;
+      chunksRetrieved: number;
+      totalTimeMs: number;
+      topScores: any[];
+      retrievalType?: string;
+    }
+  ): Promise<void> {
+    await db.insert(retrievalTelemetry).values({
+      stateId,
+      requestId: data.requestId,
+      query: data.query,
+      chunksRetrieved: data.chunksRetrieved,
+      totalTimeMs: data.totalTimeMs,
+      topScores: data.topScores,
+      retrievalType: data.retrievalType || null,
+    });
+  }
+
+  async getTelemetryStats(
+    stateId: string
+  ): Promise<{ avgTimeMs: number; totalQueries: number; avgChunks: number }> {
+    const result = await db
+      .select({
+        avgTimeMs: avg(retrievalTelemetry.totalTimeMs),
+        totalQueries: count(),
+        avgChunks: avg(retrievalTelemetry.chunksRetrieved),
+      })
+      .from(retrievalTelemetry)
+      .where(eq(retrievalTelemetry.stateId, stateId));
+
+    const stats = result[0];
+
+    return {
+      avgTimeMs: Number(stats?.avgTimeMs) || 0,
+      totalQueries: Number(stats?.totalQueries) || 0,
+      avgChunks: Number(stats?.avgChunks) || 0,
+    };
   }
 }
 

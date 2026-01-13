@@ -2843,6 +2843,7 @@ export const conversationMessages = pgTable("conversation_messages", {
   parentMessageId: varchar("parent_message_id"),
   attachmentIds: text("attachment_ids").array().default([]),
   imageIds: text("image_ids").array().default([]),
+  keywords: text("keywords").array().default([]),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
@@ -2992,6 +2993,26 @@ export const insertRunningSummarySchema = createInsertSchema(runningSummaries).o
 export type InsertRunningSummary = z.infer<typeof insertRunningSummarySchema>;
 export type RunningSummary = typeof runningSummaries.$inferSelect;
 
+// Processed requests table for idempotency
+export const processedRequests = pgTable("processed_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  requestId: varchar("request_id", { length: 100 }).notNull().unique(),
+  stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
+  messageId: varchar("message_id", { length: 100 }),
+  processedAt: timestamp("processed_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("processed_requests_request_idx").on(table.requestId),
+  index("processed_requests_state_idx").on(table.stateId),
+]);
+
+export const insertProcessedRequestSchema = createInsertSchema(processedRequests).omit({
+  id: true,
+  processedAt: true,
+});
+
+export type InsertProcessedRequest = z.infer<typeof insertProcessedRequestSchema>;
+export type ProcessedRequest = typeof processedRequests.$inferSelect;
+
 // Full hydrated state type for API responses
 export const hydratedConversationStateSchema = z.object({
   id: z.string(),
@@ -3053,3 +3074,28 @@ export const hydratedConversationStateSchema = z.object({
 });
 
 export type HydratedConversationState = z.infer<typeof hydratedConversationStateSchema>;
+
+// Retrieval Telemetry table - tracks context retrieval performance metrics
+export const retrievalTelemetry = pgTable("retrieval_telemetry", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
+  requestId: varchar("request_id", { length: 100 }).notNull(),
+  query: text("query").notNull(),
+  chunksRetrieved: integer("chunks_retrieved").default(0),
+  totalTimeMs: integer("total_time_ms").default(0),
+  topScores: jsonb("top_scores").default([]),
+  retrievalType: varchar("retrieval_type", { length: 50 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("retrieval_telemetry_state_idx").on(table.stateId),
+  index("retrieval_telemetry_request_idx").on(table.requestId),
+  index("retrieval_telemetry_created_idx").on(table.createdAt),
+]);
+
+export const insertRetrievalTelemetrySchema = createInsertSchema(retrievalTelemetry).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertRetrievalTelemetry = z.infer<typeof insertRetrievalTelemetrySchema>;
+export type RetrievalTelemetry = typeof retrievalTelemetry.$inferSelect;

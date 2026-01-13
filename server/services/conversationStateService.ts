@@ -14,6 +14,7 @@ import {
 } from "@shared/schema";
 import { IntentRouter, DetectedIntent, ConversationState as IntentState } from "../lib/intentRouter";
 import { RAGRetriever, SearchResult, SearchOptions } from "../lib/ragRetriever";
+import { KeywordExtractor } from "../lib/keywordExtractor";
 import crypto from "crypto";
 
 export interface AppendMessageOptions {
@@ -22,6 +23,7 @@ export interface AppendMessageOptions {
   attachmentIds?: string[];
   imageIds?: string[];
   metadata?: Record<string, unknown>;
+  requestId?: string;
 }
 
 export interface AddArtifactOptions {
@@ -93,7 +95,17 @@ class ConversationStateService {
     content: string,
     options: AppendMessageOptions = {}
   ): Promise<HydratedConversationState> {
+    if (options.requestId) {
+      const { wasProcessed, messageId } = await conversationStateRepository.checkRequestProcessed(options.requestId);
+      if (wasProcessed) {
+        console.log(`[ConversationStateService] Request ${options.requestId} already processed, returning cached state`);
+        return this.hydrateState(chatId, undefined, { forceRefresh: false }) as Promise<HydratedConversationState>;
+      }
+    }
+
     const dbState = await conversationStateRepository.getOrCreate(chatId);
+
+    const keywords = KeywordExtractor.extract(content, 10);
 
     const messageData: InsertConversationMessage = {
       stateId: dbState.id,
@@ -104,10 +116,16 @@ class ConversationStateService {
       sequence: 0,
       attachmentIds: options.attachmentIds || [],
       imageIds: options.imageIds || [],
+      keywords,
       metadata: options.metadata || null,
     };
 
     const persistedMessage = await conversationStateRepository.addMessage(messageData);
+
+    if (options.requestId) {
+      await conversationStateRepository.recordProcessedRequest(options.requestId, dbState.id, persistedMessage.id);
+    }
+
     await redisConversationCache.invalidateAll(chatId);
 
     const retriever = this.ragRetrievers.get(chatId);
