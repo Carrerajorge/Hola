@@ -8,8 +8,8 @@ import json
 import csv
 import io
 import re
-from xml.etree import ElementTree as ET
-from xml.dom import minidom
+from defusedxml.ElementTree import fromstring, Element, SubElement, tostring, ParseError
+from defusedxml import minidom
 
 
 class TransformResult(BaseModel):
@@ -121,7 +121,7 @@ def parse_csv(data: str, delimiter: str = ",") -> List[Dict[str, Any]]:
 
 def parse_xml(data: str) -> List[Dict[str, Any]]:
     """Parse XML data to list of dictionaries."""
-    root = ET.fromstring(data)
+    root = fromstring(data)
     records = []
     
     for child in root:
@@ -166,23 +166,23 @@ def to_csv(records: List[Dict[str, Any]], delimiter: str = ",") -> str:
 
 def to_xml(records: List[Dict[str, Any]], root_name: str = "root", item_name: str = "item", pretty: bool = True) -> str:
     """Convert records to XML string."""
-    root = ET.Element(root_name)
+    root = Element(root_name)
     
     for record in records:
-        item = ET.SubElement(root, item_name)
+        item = SubElement(root, item_name)
         for key, value in record.items():
             safe_key = re.sub(r'[^\w]', '_', str(key))
             if not safe_key[0].isalpha() and safe_key[0] != '_':
                 safe_key = '_' + safe_key
-            elem = ET.SubElement(item, safe_key)
+            elem = SubElement(item, safe_key)
             elem.text = str(value) if value is not None else ""
     
     if pretty:
-        xml_str = ET.tostring(root, encoding='unicode')
+        xml_str = tostring(root, encoding='unicode')
         dom = minidom.parseString(xml_str)
         return dom.toprettyxml(indent="  ")
     
-    return ET.tostring(root, encoding='unicode')
+    return tostring(root, encoding='unicode')
 
 
 @ToolRegistry.register
@@ -267,7 +267,7 @@ class DataTransformTool(BaseTool[DataTransformInput, DataTransformOutput]):
                 success=False,
                 error=f"JSON parsing error: {str(e)}"
             )
-        except ET.ParseError as e:
+        except ParseError as e:
             return DataTransformOutput(
                 success=False,
                 error=f"XML parsing error: {str(e)}"
