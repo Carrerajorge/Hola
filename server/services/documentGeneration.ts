@@ -2,11 +2,25 @@ import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
 import { JSDOM } from "jsdom";
 import { generateWordFromMarkdown } from "./markdownToDocx";
+import { 
+  ExcelStyleConfig, 
+  ExcelDashboardBuilder, 
+  type DashboardConfig
+} from "../lib/excelStyles";
 
 export interface DocumentContent {
   title: string;
   type: "word" | "excel" | "ppt";
   content: any;
+}
+
+export interface ProfessionalExcelOptions {
+  useProfessionalStyles?: boolean;
+  dashboard?: DashboardConfig;
+  priorityColumn?: number;
+  alternateRows?: boolean;
+  freezeHeader?: boolean;
+  autoFilter?: boolean;
 }
 
 function isHtmlContent(content: string): boolean {
@@ -138,25 +152,76 @@ export async function generateWordDocument(title: string, content: string): Prom
   return generateWordFromMarkdown(title, markdownContent);
 }
 
-export async function generateExcelDocument(title: string, data: any[][]): Promise<Buffer> {
+export async function generateExcelDocument(
+  title: string, 
+  data: any[][], 
+  options: ProfessionalExcelOptions = {}
+): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'IliaGPT';
+  workbook.created = new Date();
   
   const safeData = data.length > 0 ? data : [["Contenido"], ["No hay datos disponibles"]];
+  const styles = new ExcelStyleConfig();
+  const dashboardBuilder = new ExcelDashboardBuilder(workbook, styles);
+  
+  if (options.dashboard) {
+    dashboardBuilder.createDashboard(options.dashboard);
+  }
   
   const sheetName = title.replace(/[\\/:*?\[\]]/g, "").slice(0, 31) || "Hoja1";
   const worksheet = workbook.addWorksheet(sheetName);
   
-  worksheet.addRows(safeData);
+  if (options.useProfessionalStyles && safeData.length > 1) {
+    const headers = safeData[0].map(h => String(h));
+    const rows = safeData.slice(1);
+    
+    dashboardBuilder.applyProfessionalTableStyle(
+      worksheet,
+      1,
+      headers,
+      rows,
+      {
+        freezeHeader: options.freezeHeader ?? true,
+        autoFilter: options.autoFilter ?? true,
+        alternateRows: options.alternateRows ?? true,
+        priorityColumn: options.priorityColumn,
+      }
+    );
+    
+    const colWidths = safeData[0]?.map((_, colIndex) => {
+      const maxLength = Math.max(...safeData.map(row => String(row[colIndex] || "").length));
+      return Math.min(Math.max(maxLength, 12), 60);
+    }) || [];
+    
+    colWidths.forEach((width, index) => {
+      worksheet.getColumn(index + 1).width = width;
+    });
+  } else {
+    worksheet.addRows(safeData);
+    
+    const colWidths = safeData[0]?.map((_, colIndex) => {
+      const maxLength = Math.max(...safeData.map(row => String(row[colIndex] || "").length));
+      return Math.min(Math.max(maxLength, 10), 50);
+    }) || [];
+    
+    worksheet.columns = colWidths.map((width, index) => ({
+      key: String.fromCharCode(65 + index),
+      width: width
+    }));
+  }
   
-  const colWidths = safeData[0]?.map((_, colIndex) => {
-    const maxLength = Math.max(...safeData.map(row => String(row[colIndex] || "").length));
-    return Math.min(Math.max(maxLength, 10), 50);
-  }) || [];
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+export async function generateProfessionalDashboard(config: DashboardConfig): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'IliaGPT';
+  workbook.created = new Date();
   
-  worksheet.columns = colWidths.map((width, index) => ({
-    key: String.fromCharCode(65 + index),
-    width: width
-  }));
+  const styles = new ExcelStyleConfig();
+  const builder = new ExcelDashboardBuilder(workbook, styles);
+  builder.createDashboard(config);
   
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
