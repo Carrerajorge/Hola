@@ -110,6 +110,7 @@ export interface SuperAgentFinal {
 
 export interface SuperAgentState {
   sessionId: string | null;
+  runId: string | null;
   isRunning: boolean;
   phase: SuperAgentPhase;
   contract: SuperAgentContract | null;
@@ -127,6 +128,7 @@ export interface SuperAgentState {
 
 const initialState: SuperAgentState = {
   sessionId: null,
+  runId: null,
   isRunning: false,
   phase: "idle",
   contract: null,
@@ -339,7 +341,9 @@ export function useSuperAgentStream(): UseSuperAgentReturn {
         }
 
         const sessionId = response.headers.get("X-Session-ID");
-        setState((prev) => ({ ...prev, sessionId }));
+        const runId = response.headers.get("X-Run-ID");
+        console.log("[SuperAgent] Received run_id from backend:", runId);
+        setState((prev) => ({ ...prev, sessionId, runId }));
 
         const reader = response.body?.getReader();
         if (!reader) {

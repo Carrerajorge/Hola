@@ -52,12 +52,15 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     const sessionId = session_id || randomUUID();
     const runId = run_id || `run_${randomUUID()}`;
     
+    console.log(`[SuperAgent] Starting run with runId=${runId}, from_client=${!!run_id}`);
+    
     const traceBus = new TraceBus(runId);
     const gateway = getStreamGateway();
     
     const eventStore = getEventStore();
     
     traceBus.on("trace", async (event) => {
+      console.log(`[SuperAgent] TraceBus event: ${event.event_type} -> publishing to gateway with runId=${runId}`);
       gateway.publish(runId, event);
       try {
         await eventStore.append(event);
