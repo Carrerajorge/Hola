@@ -1,5 +1,22 @@
-import { Router } from "express";
+import { Router, Request } from "express";
 import { storage } from "../storage";
+
+function getCurrentUserId(req: Request): string {
+  const sessionUserId = (req.session as any)?.userId || (req.session as any)?.passport?.user;
+  return sessionUserId || `anon_${req.sessionID}`;
+}
+
+async function canEditGpt(req: Request, gptId: string): Promise<{ allowed: boolean; gpt: any | null; error?: string }> {
+  const gpt = await storage.getGpt(gptId);
+  if (!gpt) {
+    return { allowed: false, gpt: null, error: "GPT not found" };
+  }
+  const currentUserId = getCurrentUserId(req);
+  if (gpt.creatorId && gpt.creatorId !== currentUserId) {
+    return { allowed: false, gpt, error: "Solo el creador puede modificar este GPT" };
+  }
+  return { allowed: true, gpt };
+}
 
 export function createGptRouter() {
   const router = Router();
@@ -128,12 +145,14 @@ export function createGptRouter() {
 
   router.patch("/gpts/:id", async (req, res) => {
     try {
-      const updates = req.body;
-      const gpt = await storage.updateGpt(req.params.id, updates);
-      if (!gpt) {
-        return res.status(404).json({ error: "GPT not found" });
+      const { allowed, error } = await canEditGpt(req, req.params.id);
+      if (!allowed) {
+        return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
-      res.json(gpt);
+      
+      const updates = req.body;
+      const updatedGpt = await storage.updateGpt(req.params.id, updates);
+      res.json(updatedGpt);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -141,6 +160,11 @@ export function createGptRouter() {
 
   router.delete("/gpts/:id", async (req, res) => {
     try {
+      const { allowed, error } = await canEditGpt(req, req.params.id);
+      if (!allowed) {
+        return res.status(error === "GPT not found" ? 404 : 403).json({ error });
+      }
+      
       await storage.deleteGpt(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
@@ -214,6 +238,11 @@ export function createGptRouter() {
 
   router.post("/gpts/:id/knowledge", async (req, res) => {
     try {
+      const { allowed, error } = await canEditGpt(req, req.params.id);
+      if (!allowed) {
+        return res.status(error === "GPT not found" ? 404 : 403).json({ error });
+      }
+      
       const { fileName, fileType, fileSize, storageUrl, contentHash, extractedText, embeddingStatus, metadata } = req.body;
       
       if (!fileName || !fileType || !fileSize || !storageUrl) {
@@ -240,6 +269,11 @@ export function createGptRouter() {
 
   router.patch("/gpts/:id/knowledge/:knowledgeId", async (req, res) => {
     try {
+      const { allowed, error } = await canEditGpt(req, req.params.id);
+      if (!allowed) {
+        return res.status(error === "GPT not found" ? 404 : 403).json({ error });
+      }
+      
       const updates = req.body;
       const knowledge = await storage.updateGptKnowledge(req.params.knowledgeId, updates);
       if (!knowledge) {
@@ -253,6 +287,11 @@ export function createGptRouter() {
 
   router.delete("/gpts/:id/knowledge/:knowledgeId", async (req, res) => {
     try {
+      const { allowed, error } = await canEditGpt(req, req.params.id);
+      if (!allowed) {
+        return res.status(error === "GPT not found" ? 404 : 403).json({ error });
+      }
+      
       await storage.deleteGptKnowledge(req.params.knowledgeId);
       res.json({ success: true });
     } catch (error: any) {
@@ -272,6 +311,11 @@ export function createGptRouter() {
 
   router.post("/gpts/:id/actions", async (req, res) => {
     try {
+      const { allowed, error } = await canEditGpt(req, req.params.id);
+      if (!allowed) {
+        return res.status(error === "GPT not found" ? 404 : 403).json({ error });
+      }
+      
       const { 
         name, description, actionType, httpMethod, endpoint, 
         headers, bodyTemplate, responseMapping, authType, authConfig, 
@@ -307,6 +351,11 @@ export function createGptRouter() {
 
   router.patch("/gpts/:id/actions/:actionId", async (req, res) => {
     try {
+      const { allowed, error } = await canEditGpt(req, req.params.id);
+      if (!allowed) {
+        return res.status(error === "GPT not found" ? 404 : 403).json({ error });
+      }
+      
       const updates = req.body;
       const action = await storage.updateGptAction(req.params.actionId, updates);
       if (!action) {
@@ -320,6 +369,11 @@ export function createGptRouter() {
 
   router.delete("/gpts/:id/actions/:actionId", async (req, res) => {
     try {
+      const { allowed, error } = await canEditGpt(req, req.params.id);
+      if (!allowed) {
+        return res.status(error === "GPT not found" ? 404 : 403).json({ error });
+      }
+      
       await storage.deleteGptAction(req.params.actionId);
       res.json({ success: true });
     } catch (error: any) {
