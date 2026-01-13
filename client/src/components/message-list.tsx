@@ -2480,6 +2480,7 @@ export function MessageList({
         {/* Super Agent Live Execution Console - show when uiPhase is 'console' (virtualized) */}
         {uiPhase === 'console' && activeRunId && variant === "default" && (
           <motion.div
+            key={`execution-console-${activeRunId}`}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
@@ -2492,6 +2493,7 @@ export function MessageList({
             }}
           >
             <LiveExecutionConsole 
+              key={activeRunId}
               runId={activeRunId}
               onComplete={onRunComplete}
               className="flex-1"
@@ -2640,11 +2642,13 @@ export function MessageList({
       {/* Super Agent Live Execution Console - show when uiPhase is 'console' */}
       {uiPhase === 'console' && activeRunId && variant === "default" && (
         <motion.div
+          key={`execution-console-std-${activeRunId}`}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
         >
           <LiveExecutionConsole 
+            key={`std-${activeRunId}`}
             runId={activeRunId}
             onComplete={onRunComplete}
             className="flex-1"

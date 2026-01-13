@@ -1015,50 +1015,40 @@ export function ChatInterface({
   
   const uiPhaseTimerRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Execution stream client for UniversalExecutionConsole
+  // Execution stream client for UniversalExecutionConsole - DISABLED
+  // This was causing re-renders that interfered with LiveExecutionConsole in MessageList.
+  // LiveExecutionConsole has its own RunStreamClient that handles streaming correctly.
   const [executionClient, setExecutionClient] = useState<ExecutionStreamClient | null>(null);
   const [executionRunState, setExecutionRunState] = useState<FlatRunState | null>(null);
   
-  // Connect/disconnect ExecutionStreamClient based on uiPhase and activeRunId
-  useEffect(() => {
-    // Only connect when in console phase with an active run
-    if (uiPhase === 'console' && activeRunId) {
-      console.log('[ExecutionConsole] Creating client for run:', activeRunId);
-      const client = new ExecutionStreamClient(activeRunId);
-      
-      // Subscribe to state updates
-      const unsubscribe = client.subscribe((state) => {
-        setExecutionRunState(state);
-        
-        // Trigger completion when run finishes
-        if (state.status === 'completed') {
-          console.log('[uiPhase] ExecutionStreamClient run completed, transitioning to done');
-          setUiPhase('done');
-        }
-      });
-      
-      // Connect to the stream
-      client.connect();
-      setExecutionClient(client);
-      
-      // Cleanup on unmount or when dependencies change
-      return () => {
-        console.log('[ExecutionConsole] Destroying client for run:', activeRunId);
-        unsubscribe();
-        client.destroy();
-        setExecutionClient(null);
-        setExecutionRunState(null);
-      };
-    } else {
-      // Clean up if we're not in console phase or don't have a run
-      if (executionClient) {
-        console.log('[ExecutionConsole] Cleaning up client (phase changed or no run)');
-        executionClient.destroy();
-        setExecutionClient(null);
-        setExecutionRunState(null);
-      }
-    }
-  }, [uiPhase, activeRunId]);
+  // DISABLED: ExecutionStreamClient was connecting to /stream endpoint and causing re-renders
+  // that unmounted/remounted the LiveExecutionConsole in a loop.
+  // The LiveExecutionConsole in MessageList now handles all SSE streaming via RunStreamClient.
+  // useEffect(() => {
+  //   if (uiPhase === 'console' && activeRunId) {
+  //     const client = new ExecutionStreamClient(activeRunId);
+  //     const unsubscribe = client.subscribe((state) => {
+  //       setExecutionRunState(state);
+  //       if (state.status === 'completed') {
+  //         setUiPhase('done');
+  //       }
+  //     });
+  //     client.connect();
+  //     setExecutionClient(client);
+  //     return () => {
+  //       unsubscribe();
+  //       client.destroy();
+  //       setExecutionClient(null);
+  //       setExecutionRunState(null);
+  //     };
+  //   } else {
+  //     if (executionClient) {
+  //       executionClient.destroy();
+  //       setExecutionClient(null);
+  //       setExecutionRunState(null);
+  //     }
+  //   }
+  // }, [uiPhase, activeRunId]);
   
   // Optimistic messages - shown immediately before they appear in props
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
