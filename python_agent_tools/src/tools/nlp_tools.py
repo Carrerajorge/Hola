@@ -3,6 +3,13 @@ from pydantic import Field
 from .base import BaseTool, ToolCategory, Priority, ToolInput, ToolOutput
 from ..core.registry import ToolRegistry
 
+try:
+    from langdetect import detect, detect_langs, LangDetectException
+    LANGDETECT_AVAILABLE = True
+except ImportError:
+    LANGDETECT_AVAILABLE = False
+    LangDetectException = Exception  # type: ignore[misc, assignment]
+
 class TextAnalyzeInput(ToolInput):
     text: str = Field(..., min_length=1, max_length=50000)
     analyses: List[str] = Field(default=["language", "sentiment", "keywords"])
@@ -38,17 +45,23 @@ class TextAnalyzeTool(BaseTool[TextAnalyzeInput, TextAnalyzeOutput]):
             )
             
             if "language" in input.analyses:
-                # Simple language detection based on common words
-                common_words = {
-                    'en': {'the', 'is', 'are', 'and', 'or', 'but', 'in', 'on', 'at', 'to'},
-                    'es': {'el', 'la', 'los', 'las', 'es', 'son', 'y', 'o', 'en', 'de'},
-                    'fr': {'le', 'la', 'les', 'est', 'sont', 'et', 'ou', 'en', 'de', 'du'},
-                    'de': {'der', 'die', 'das', 'ist', 'sind', 'und', 'oder', 'in', 'zu'},
-                }
-                text_lower = input.text.lower()
-                text_words = set(text_lower.split())
-                scores = {lang: len(text_words & words) for lang, words in common_words.items()}
-                result.language = max(scores.keys(), key=lambda k: scores[k]) if any(scores.values()) else "unknown"
+                if LANGDETECT_AVAILABLE and len(input.text.strip()) >= 10:
+                    try:
+                        result.language = detect(input.text)
+                    except LangDetectException:
+                        result.language = "unknown"
+                else:
+                    # Fallback: Simple heuristic for short texts
+                    common_words = {
+                        'en': {'the', 'is', 'are', 'and', 'or', 'but', 'in', 'on', 'at', 'to'},
+                        'es': {'el', 'la', 'los', 'las', 'es', 'son', 'y', 'o', 'en', 'de'},
+                        'fr': {'le', 'la', 'les', 'est', 'sont', 'et', 'ou', 'en', 'de', 'du'},
+                        'de': {'der', 'die', 'das', 'ist', 'sind', 'und', 'oder', 'in', 'zu'},
+                    }
+                    text_lower = input.text.lower()
+                    text_words = set(text_lower.split())
+                    scores = {lang: len(text_words & w) for lang, w in common_words.items()}
+                    result.language = max(scores.keys(), key=lambda k: scores[k]) if any(scores.values()) else "unknown"
             
             if "sentiment" in input.analyses:
                 positive_words = ["good", "great", "excellent", "amazing", "wonderful", "love", "happy", "best"]
