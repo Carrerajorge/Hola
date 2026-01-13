@@ -33,8 +33,8 @@ class ShellTool(BaseTool[ShellInput, ShellOutput]):
             return ShellOutput(success=False, error=f"Command not allowed: {cmd_parts[0] if cmd_parts else 'empty'}")
         
         try:
-            proc = await asyncio.create_subprocess_shell(
-                input.command,
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_parts,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=input.working_dir
