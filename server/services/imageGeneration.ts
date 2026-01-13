@@ -9,10 +9,10 @@ const ai = new GoogleGenAI({
 });
 
 const IMAGE_MODELS = [
-  "gemini-2.5-flash-image",
+  "gemini-2.0-flash-exp",
+  "gemini-2.5-flash-preview-04-17",
+  "imagen-3.0-generate-002",
   "gemini-2.0-flash-exp-image-generation",
-  "gemini-2.5-flash-preview-native-audio-dialog", 
-  "gemini-3-pro-image-preview"
 ];
 
 export interface ImageGenerationResult {
