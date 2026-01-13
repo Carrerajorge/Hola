@@ -287,11 +287,11 @@ class ProcessMonitorTool(BaseTool[ProcessMonitorInput, ProcessMonitorOutput]):
         total_processes = 0
         
         try:
+            # Use exec instead of shell to avoid command injection risks
             sort_field = "%cpu" if input.sort_by == "cpu" else "%mem"
-            cmd = f"ps aux --sort=-{sort_field} | head -n {input.top_n + 1}"
             
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
+            proc = await asyncio.create_subprocess_exec(
+                "ps", "aux", f"--sort=-{sort_field}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -299,7 +299,12 @@ class ProcessMonitorTool(BaseTool[ProcessMonitorInput, ProcessMonitorOutput]):
             
             if stdout:
                 lines = stdout.decode().strip().split('\n')
+                # Process all lines and limit to top_n in Python instead of using head
+                count = 0
                 for line in lines[1:]:
+                    if count >= input.top_n:
+                        break
+                    
                     parts = line.split(None, 10)
                     if len(parts) >= 11:
                         name = parts[10].split()[0] if parts[10] else ""
@@ -318,14 +323,17 @@ class ProcessMonitorTool(BaseTool[ProcessMonitorInput, ProcessMonitorOutput]):
                             "memory_percent": float(parts[3]),
                             "status": status
                         })
+                        count += 1
             
-            count_proc = await asyncio.create_subprocess_shell(
-                "ps aux | wc -l",
+            # Count total processes - using exec for consistency
+            count_proc = await asyncio.create_subprocess_exec(
+                "ps", "aux",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             count_stdout, _ = await count_proc.communicate()
-            total_processes = int(count_stdout.decode().strip()) - 1 if count_stdout else 0
+            if count_stdout:
+                total_processes = len(count_stdout.decode().strip().split('\n')) - 1
             
         except (FileNotFoundError, PermissionError, OSError):
             raise
