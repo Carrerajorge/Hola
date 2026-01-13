@@ -86,22 +86,32 @@ export class ConversationStateRepository {
   }
 
   async addMessage(data: InsertConversationMessage): Promise<ConversationMessage> {
-    const [message] = await db
-      .insert(conversationMessages)
-      .values(data)
-      .returning();
+    return db.transaction(async (tx) => {
+      const [stateRow] = await tx
+        .select({ messageCount: conversationStates.messageCount })
+        .from(conversationStates)
+        .where(eq(conversationStates.id, data.stateId))
+        .for("update");
 
-    await db
-      .update(conversationStates)
-      .set({
-        messageCount: sql`${conversationStates.messageCount} + 1`,
-        lastMessageId: message.id,
-        totalTokens: sql`${conversationStates.totalTokens} + ${data.tokenCount || 0}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(conversationStates.id, data.stateId));
+      const nextSequence = (stateRow?.messageCount ?? 0) + 1;
 
-    return message;
+      const [message] = await tx
+        .insert(conversationMessages)
+        .values({ ...data, sequence: nextSequence })
+        .returning();
+
+      await tx
+        .update(conversationStates)
+        .set({
+          messageCount: nextSequence,
+          lastMessageId: message.id,
+          totalTokens: sql`${conversationStates.totalTokens} + ${data.tokenCount || 0}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(conversationStates.id, data.stateId));
+
+      return message;
+    });
   }
 
   async getMessages(stateId: string): Promise<ConversationMessage[]> {

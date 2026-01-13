@@ -86,8 +86,6 @@ class ConversationStateService {
     options: AppendMessageOptions = {}
   ): Promise<HydratedConversationState> {
     const dbState = await conversationStateRepository.getOrCreate(chatId);
-    const currentMessages = await conversationStateRepository.getMessages(dbState.id);
-    const sequence = currentMessages.length + 1;
 
     const messageData: InsertConversationMessage = {
       stateId: dbState.id,
@@ -95,14 +93,14 @@ class ConversationStateService {
       role,
       content,
       tokenCount: options.tokenCount || this.estimateTokens(content),
-      sequence,
+      sequence: 0,
       attachmentIds: options.attachmentIds || [],
       imageIds: options.imageIds || [],
       metadata: options.metadata || null,
     };
 
     await conversationStateRepository.addMessage(messageData);
-    await redisConversationCache.invalidate(chatId);
+    await redisConversationCache.invalidateAll(chatId);
 
     return this.hydrateState(chatId, undefined, { forceRefresh: true }) as Promise<HydratedConversationState>;
   }
@@ -146,7 +144,7 @@ class ConversationStateService {
     };
 
     await conversationStateRepository.addArtifact(artifactData);
-    await redisConversationCache.invalidate(chatId);
+    await redisConversationCache.invalidateAll(chatId);
 
     return this.hydrateState(chatId, undefined, { forceRefresh: true }) as Promise<HydratedConversationState>;
   }
@@ -177,7 +175,7 @@ class ConversationStateService {
     };
 
     await conversationStateRepository.addImage(imageData);
-    await redisConversationCache.invalidate(chatId);
+    await redisConversationCache.invalidateAll(chatId);
 
     return this.hydrateState(chatId, undefined, { forceRefresh: true }) as Promise<HydratedConversationState>;
   }
@@ -202,7 +200,7 @@ class ConversationStateService {
     };
 
     await conversationStateRepository.upsertContext(mergedContext);
-    await redisConversationCache.invalidate(chatId);
+    await redisConversationCache.invalidateAll(chatId);
 
     return this.hydrateState(chatId, undefined, { forceRefresh: true }) as Promise<HydratedConversationState>;
   }
@@ -229,7 +227,7 @@ class ConversationStateService {
     );
 
     await conversationStateRepository.incrementVersion(dbState.id);
-    await redisConversationCache.invalidate(chatId);
+    await redisConversationCache.invalidateAll(chatId);
 
     console.log(`[ConversationStateService] Created snapshot v${newVersion} for ${chatId}`);
     return newVersion;
@@ -245,7 +243,7 @@ class ConversationStateService {
     }
 
     console.log(`[ConversationStateService] Restoring ${chatId} to version ${version}`);
-    await redisConversationCache.invalidate(chatId);
+    await redisConversationCache.invalidateAll(chatId);
     return versionRecord.snapshot as unknown as HydratedConversationState;
   }
 

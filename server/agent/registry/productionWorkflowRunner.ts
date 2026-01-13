@@ -14,6 +14,7 @@ import {
   ExponentialBackoff
 } from "./resilience";
 import { llmGateway } from "../../lib/llmGateway";
+import { conversationStateService } from "../../services/conversationStateService";
 
 export type RunStatus = "queued" | "planning" | "running" | "verifying" | "completed" | "failed" | "cancelled" | "timeout";
 
@@ -887,6 +888,26 @@ export class ProductionWorkflowRunner extends EventEmitter {
             createdAt: new Date().toISOString(),
             previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
           };
+
+          const chatId = (input as any).chatId || run.requestId;
+          if (chatId) {
+            try {
+              await conversationStateService.addImage(
+                chatId,
+                prompt,
+                `/api/artifacts/${path.basename(filePath)}`,
+                result.model || "gemini-image",
+                intent.mode as "generate" | "edit_last" | "edit_specific",
+                {
+                  parentImageId: parentId || undefined,
+                  base64Preview: result.imageBase64.slice(0, 500),
+                }
+              );
+              console.log(`[WorkflowRunner] Persisted image to conversation state (chatId: ${chatId})`);
+            } catch (persistError: any) {
+              console.warn(`[WorkflowRunner] Failed to persist image to state: ${persistError.message}`);
+            }
+          }
 
           return {
             success: true,
