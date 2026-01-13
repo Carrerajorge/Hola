@@ -191,7 +191,7 @@ export default function Home() {
     };
   }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
 
-  const handleNewChat = () => {
+  const handleNewChat = (options?: { preserveGpt?: boolean }) => {
     // TRANSACTIONAL RESET: Block all re-hydration for 5 seconds
     // This prevents stale state from coming back after navigation
     useAgentStore.getState().blockRehydration();
@@ -223,6 +223,12 @@ export default function Home() {
     setIsNewChatMode(true);
     setNewChatStableKey(null);
     pendingChatIdRef.current = null;
+    
+    // AGGRESSIVE RESET: Clear active GPT to return to LLM models view
+    // Only clear GPT if not explicitly preserving it (e.g., when selecting a new GPT)
+    if (!options?.preserveGpt) {
+      setActiveGpt(null);
+    }
     
     // Close any open dialogs
     setIsAppsDialogOpen(false);
@@ -295,7 +301,7 @@ export default function Home() {
 
   const handleSelectGpt = (gpt: Gpt) => {
     setActiveGpt(gpt);
-    handleNewChat();
+    handleNewChat({ preserveGpt: true });
     toast.success(`Usando ${gpt.name}`);
   };
 
