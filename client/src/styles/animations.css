@@ -471,33 +471,36 @@
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
-/* Shimmer text effect - animated gradient over text */
+/* Shimmer text effect - animated gradient over text (light mode) */
 .shimmer-text {
-  background: linear-gradient(
-    110deg,
-    hsl(var(--foreground) / 0.7) 0%,
-    hsl(var(--foreground) / 0.7) 42%,
-    hsl(var(--foreground)) 50%,
-    hsl(var(--foreground) / 0.7) 58%,
-    hsl(var(--foreground) / 0.7) 100%
-  );
-  background-size: 220% 100%;
-  background-position: -120% 0;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shimmerTextSlide 1.1s linear infinite;
+  background: linear-gradient(110deg, #00000066 0%, #00000066 42%, #000000ee 50%, #00000066 58%, #00000066 100%) !important;
+  background-size: 220% 100% !important;
+  background-position: -120% 0 !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+  animation: shimmerTextAnim 1.1s linear infinite !important;
 }
 
-@keyframes shimmerTextSlide {
+/* Shimmer text effect - dark mode */
+.dark .shimmer-text {
+  background: linear-gradient(110deg, #ffffff40 0%, #ffffff40 42%, #ffffffee 50%, #ffffff40 58%, #ffffff40 100%) !important;
+  background-size: 220% 100% !important;
+  background-position: -120% 0 !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  color: transparent !important;
+}
+
+@keyframes shimmerTextAnim {
   to { background-position: 120% 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text {
-    animation: none;
-    background: none;
-    color: hsl(var(--foreground));
+    animation: none !important;
+    background: none !important;
+    color: inherit !important;
   }
 }
 
