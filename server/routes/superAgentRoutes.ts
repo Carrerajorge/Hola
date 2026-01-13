@@ -57,17 +57,13 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     const traceBus = new TraceBus(runId);
     const gateway = getStreamGateway();
     
-    const eventStore = getEventStore();
+    // Register the TraceBus with the gateway - this enables:
+    // 1. SSE clients to receive live TraceEvents with full metrics
+    // 2. Automatic EventStore persistence via gateway's trace listener
+    // 3. Proper heartbeat management and cleanup
+    gateway.registerRun(runId, traceBus);
     
-    traceBus.on("trace", async (event) => {
-      console.log(`[SuperAgent] TraceBus event: ${event.event_type} -> publishing to gateway with runId=${runId}`);
-      gateway.publish(runId, event);
-      try {
-        await eventStore.append(event);
-      } catch (e) {
-        console.warn("[SuperAgent] Failed to persist trace event:", e);
-      }
-    });
+    console.log(`[SuperAgent] Registered run ${runId} with StreamGateway`);
     
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -246,7 +242,7 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     
     req.on("close", () => {
       console.log(`[SuperAgent] Client disconnected: ${sessionId}`);
-      traceBus.destroy();
+      gateway.unregisterRun(runId);
       if (redisClient?.isReady) {
         redisClient.quit().catch(() => {});
       }
@@ -268,7 +264,8 @@ router.post("/super/stream", async (req: Request, res: Response) => {
       });
     }
     
-    traceBus.destroy();
+    // Cleanup: unregister run from gateway (handles traceBus.destroy() internally)
+    gateway.unregisterRun(runId);
     
     if (redisClient?.isReady) {
       await redisClient.quit();
