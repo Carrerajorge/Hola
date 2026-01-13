@@ -8,7 +8,10 @@ const ai = new GoogleGenAI({
   ...(baseURL ? { baseURL } : {})
 });
 
-const IMAGE_MODEL = "gemini-2.0-flash-exp";
+const IMAGE_MODELS = [
+  "models/gemini-2.5-flash-image",
+  "gemini-2.0-flash-exp-image-generation",
+];
 
 export interface ImageGenerationResult {
   imageBase64: string;
@@ -26,41 +29,56 @@ export async function generateImage(prompt: string): Promise<ImageGenerationResu
     throw new Error("Image generation not configured - missing API key");
   }
 
-  try {
-    console.log(`[ImageGeneration] Using model: ${IMAGE_MODEL}`);
-    
-    const response = await ai.models.generateContent({
-      model: IMAGE_MODEL,
-      contents: prompt,
-      config: {
-        responseModalities: ["IMAGE"],
-      }
-    });
+  let lastError: Error | null = null;
+  
+  for (const model of IMAGE_MODELS) {
+    try {
+      console.log(`[ImageGeneration] Trying model: ${model}`);
+      
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }]
+          }
+        ],
+        config: {
+          responseModalities: ["IMAGE"],
+        }
+      });
 
-    const parts = response.candidates?.[0]?.content?.parts;
-    
-    if (!parts || parts.length === 0) {
-      throw new Error("Model returned no parts");
-    }
-
-    for (const part of parts) {
-      if (part.inlineData && part.inlineData.data) {
-        const durationMs = Date.now() - startTime;
-        console.log(`[ImageGeneration] Success with model ${IMAGE_MODEL} in ${durationMs}ms`);
-        return {
-          imageBase64: part.inlineData.data,
-          mimeType: part.inlineData.mimeType || "image/png",
-          prompt,
-          model: IMAGE_MODEL
-        };
+      const parts = response.candidates?.[0]?.content?.parts;
+      
+      if (!parts || parts.length === 0) {
+        console.log(`[ImageGeneration] Model ${model} returned no parts, trying next...`);
+        continue;
       }
+
+      for (const part of parts) {
+        if (part.inlineData && part.inlineData.data) {
+          const durationMs = Date.now() - startTime;
+          console.log(`[ImageGeneration] Success with model ${model} in ${durationMs}ms`);
+          return {
+            imageBase64: part.inlineData.data,
+            mimeType: part.inlineData.mimeType || "image/png",
+            prompt,
+            model
+          };
+        }
+      }
+      
+      console.log(`[ImageGeneration] Model ${model} returned parts but no image data, trying next...`);
+    } catch (error: any) {
+      console.error(`[ImageGeneration] Model ${model} failed:`, error.message);
+      lastError = error;
+      continue;
     }
-    
-    throw new Error("Model returned parts but no image data");
-  } catch (error: any) {
-    console.error(`[ImageGeneration] Failed:`, error.message);
-    throw new Error(`Image generation failed: ${error.message}`);
   }
+
+  const errorMsg = lastError?.message || "All models failed to generate image";
+  console.error(`[ImageGeneration] All models exhausted. Last error: ${errorMsg}`);
+  throw new Error(`Image generation failed: ${errorMsg}`);
 }
 
 export function detectImageRequest(message: string): boolean {
