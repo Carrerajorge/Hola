@@ -836,10 +836,15 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 }: MarkdownRendererProps) {
   const processedContent = useMemo(() => {
     if (!content) return "";
-    let processed = content;
-    processed = preprocessSourceBadges(processed, webSources);
-    const sanitized = sanitize ? sanitizeContent(processed) : processed;
-    return enableMath ? preprocessMathInMarkdown(sanitized) : sanitized;
+    try {
+      let processed = content;
+      processed = preprocessSourceBadges(processed, webSources);
+      const sanitized = sanitize ? sanitizeContent(processed) : processed;
+      return enableMath ? preprocessMathInMarkdown(sanitized) : sanitized;
+    } catch (error) {
+      console.error('[MarkdownRenderer] Content processing error:', error);
+      return content;
+    }
   }, [content, enableMath, sanitize, webSources]);
 
   const remarkPlugins = useMemo(() => {
@@ -854,7 +859,15 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     if (sanitize && !enableMath) {
       plugins.push([rehypeSanitize, sanitizeSchema]);
     }
-    if (enableMath) plugins.push(rehypeKatex);
+    if (enableMath) {
+      plugins.push([rehypeKatex, { 
+        throwOnError: false, 
+        errorColor: '#cc0000',
+        strict: false,
+        trust: false,
+        output: 'htmlAndMathml'
+      }]);
+    }
     if (enableCodeHighlight) plugins.push(rehypeHighlight);
     return plugins;
   }, [enableMath, enableCodeHighlight, sanitize]);

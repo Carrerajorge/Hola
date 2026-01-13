@@ -193,15 +193,24 @@ export function parseMathContent(text: string): ParsedMathContent {
 
 export function preprocessMathInMarkdown(markdown: string): string {
   if (!markdown) return markdown;
-  let processed = markdown
-    .replace(/\\\[/g, "$$")
-    .replace(/\\\]/g, "$$")
-    .replace(/\\\(/g, "$")
-    .replace(/\\\)/g, "$");
-  processed = processed.replace(/am`([^`]+)`/g, (_, asciiMath) => {
-    const latex = asciiMathToLatex(asciiMath);
-    return `$${latex}$`;
-  });
+  try {
+    let processed = markdown
+      .replace(/\\\[/g, "$$")
+      .replace(/\\\]/g, "$$")
+      .replace(/\\\(/g, "$")
+      .replace(/\\\)/g, "$");
+    processed = processed.replace(/am`([^`]+)`/g, (_, asciiMath) => {
+      try {
+        const latex = asciiMathToLatex(asciiMath);
+        return `$${latex}$`;
+      } catch {
+        return asciiMath;
+      }
+    });
 
-  return processed;
+    return processed;
+  } catch (error) {
+    console.warn('[preprocessMathInMarkdown] Error processing math:', error);
+    return markdown;
+  }
 }
