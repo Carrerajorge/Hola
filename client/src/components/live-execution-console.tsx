@@ -307,21 +307,20 @@ export function LiveExecutionConsole({
       )}
     >
       {narrationText && (
-        <div className={cn(
-          "relative px-4 py-4 border-b-2 border-primary/30",
-          state.status === 'running' ? "bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10" : "bg-muted/20"
-        )}>
-          {state.status === 'running' ? (
-            <p 
-              className="text-base font-semibold leading-relaxed tracking-tight shimmer-narration"
-            >
-              {narrationText}
-            </p>
-          ) : (
-            <p className="text-base font-semibold leading-relaxed tracking-tight text-foreground">
-              {narrationText}
-            </p>
-          )}
+        <div className="px-4 py-3 border-b border-border/30 bg-background/50">
+          <p 
+            className="text-sm font-medium leading-relaxed"
+            style={state.status === 'running' ? {
+              background: 'linear-gradient(110deg, #64748b 0%, #64748b 42%, #0f172a 50%, #64748b 58%, #64748b 100%)',
+              backgroundSize: '220% 100%',
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+              color: 'transparent',
+              animation: 'shimmerTextAnim 1.1s linear infinite',
+            } : { color: 'inherit' }}
+          >
+            {narrationText}
+          </p>
         </div>
       )}
       <div className="p-3 space-y-2.5">
