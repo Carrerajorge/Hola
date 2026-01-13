@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 from pydantic import Field
 from .base import BaseTool, ToolCategory, Priority, ToolInput, ToolOutput
 from ..core.registry import ToolRegistry
@@ -25,19 +25,40 @@ class ShellTool(BaseTool[ShellInput, ShellOutput]):
     priority = Priority.CRITICAL
     dependencies = []
     
-    ALLOWED_COMMANDS: Tuple[str, ...] = ("ls", "cat", "grep", "find", "echo", "pwd", "head", "tail", "wc")
+    ALLOWED_COMMANDS: Dict[str, str] = {
+        "ls": "/bin/ls",
+        "cat": "/bin/cat",
+        "grep": "/bin/grep",
+        "find": "/usr/bin/find",
+        "echo": "/bin/echo",
+        "pwd": "/bin/pwd",
+        "head": "/usr/bin/head",
+        "tail": "/usr/bin/tail",
+        "wc": "/usr/bin/wc",
+    }
     FORBIDDEN_PATTERNS = re.compile(r'[;&|`$<>\\]|\.\.')
     ALLOWED_WORKING_DIRS: Tuple[str, ...] = ("/tmp", "/home", "/var/log")
+    MAX_ARG_LENGTH: int = 500
+    
+    def _resolve_command(self, cmd_name: str) -> Optional[str]:
+        """Resolve command name to a safe, absolute path from whitelist."""
+        base_cmd = os.path.basename(cmd_name)
+        safe_path = self.ALLOWED_COMMANDS.get(base_cmd)
+        if safe_path and os.path.isfile(safe_path) and os.access(safe_path, os.X_OK):
+            return safe_path
+        return None
     
     def _validate_command(self, cmd_parts: List[str]) -> Optional[str]:
         if not cmd_parts:
             return "Empty command"
         
-        base_cmd = os.path.basename(cmd_parts[0])
-        if base_cmd not in self.ALLOWED_COMMANDS:
+        if self._resolve_command(cmd_parts[0]) is None:
+            base_cmd = os.path.basename(cmd_parts[0])
             return f"Command not allowed: {base_cmd}"
         
         for arg in cmd_parts[1:]:
+            if len(arg) > self.MAX_ARG_LENGTH:
+                return f"Argument too long: {len(arg)} chars"
             if self.FORBIDDEN_PATTERNS.search(arg):
                 return f"Forbidden characters in argument: {arg[:20]}"
         
@@ -78,10 +99,14 @@ class ShellTool(BaseTool[ShellInput, ShellOutput]):
         
         safe_cwd = os.path.normpath(os.path.abspath(input.working_dir)) if input.working_dir else None
         
+        safe_cmd_path = self._resolve_command(cmd_parts[0])
+        if safe_cmd_path is None:
+            return ShellOutput(success=False, error="Command resolution failed")
+        
         try:
             proc = await asyncio.create_subprocess_exec(
-                cmd_parts[0],
-                *[shlex.quote(arg) for arg in cmd_parts[1:]],
+                safe_cmd_path,
+                *cmd_parts[1:],
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=safe_cwd
