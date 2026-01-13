@@ -7,7 +7,13 @@ import {
   InsertConversationImage,
   ConversationContextData,
   ImageEditHistory,
+  InsertMemoryFact,
+  InsertRunningSummary,
+  MemoryFact,
+  RunningSummary,
 } from "@shared/schema";
+import { IntentRouter, DetectedIntent, ConversationState as IntentState } from "../lib/intentRouter";
+import { RAGRetriever, SearchResult, SearchOptions } from "../lib/ragRetriever";
 import crypto from "crypto";
 
 export interface AppendMessageOptions {
@@ -40,6 +46,8 @@ export interface HydrateOptions {
 }
 
 class ConversationStateService {
+  private ragRetrievers: Map<string, RAGRetriever> = new Map();
+
   async hydrateState(
     chatId: string,
     userId?: string,
@@ -99,8 +107,13 @@ class ConversationStateService {
       metadata: options.metadata || null,
     };
 
-    await conversationStateRepository.addMessage(messageData);
+    const persistedMessage = await conversationStateRepository.addMessage(messageData);
     await redisConversationCache.invalidateAll(chatId);
+
+    const retriever = this.ragRetrievers.get(chatId);
+    if (retriever) {
+      retriever.indexMessage({ messageId: persistedMessage.id, content, role });
+    }
 
     return this.hydrateState(chatId, undefined, { forceRefresh: true }) as Promise<HydratedConversationState>;
   }
@@ -300,6 +313,74 @@ class ConversationStateService {
     await conversationStateRepository.delete(chatId);
     await redisConversationCache.invalidateAll(chatId);
     console.log(`[ConversationStateService] Deleted state for ${chatId}`);
+  }
+
+  async analyzeIntent(chatId: string, message: string): Promise<DetectedIntent> {
+    const state = await this.hydrateState(chatId);
+    const intentState: IntentState = {
+      artifacts: state?.artifacts || [],
+      images: state?.images || []
+    };
+    return IntentRouter.detectIntent(message, intentState);
+  }
+
+  async searchContext(
+    chatId: string,
+    query: string,
+    options?: SearchOptions
+  ): Promise<SearchResult[]> {
+    let retriever = this.ragRetrievers.get(chatId);
+    if (!retriever) {
+      retriever = new RAGRetriever(chatId);
+      const state = await this.hydrateState(chatId);
+      if (state) {
+        for (const msg of state.messages) {
+          retriever.indexMessage({ messageId: msg.id, content: msg.content, role: msg.role });
+        }
+        for (const art of state.artifacts) {
+          retriever.indexArtifact({ artifactId: art.id, extractedText: art.extractedText || undefined });
+        }
+        for (const img of state.images) {
+          retriever.indexImage({ imageId: img.id, prompt: img.prompt });
+        }
+      }
+      this.ragRetrievers.set(chatId, retriever);
+    }
+    return retriever.search(query, options);
+  }
+
+  async addMemoryFact(chatId: string, fact: Omit<InsertMemoryFact, 'stateId'>): Promise<MemoryFact> {
+    const dbState = await conversationStateRepository.getOrCreate(chatId);
+    return conversationStateRepository.addMemoryFact(dbState.id, fact);
+  }
+
+  async getMemoryFacts(chatId: string): Promise<MemoryFact[]> {
+    const dbState = await conversationStateRepository.findByChatId(chatId);
+    if (!dbState) return [];
+    return conversationStateRepository.getMemoryFacts(dbState.id);
+  }
+
+  async updateMemoryFact(factId: string, updates: Partial<InsertMemoryFact>): Promise<MemoryFact | null> {
+    return conversationStateRepository.updateMemoryFact(factId, updates);
+  }
+
+  async deleteMemoryFact(factId: string): Promise<void> {
+    await conversationStateRepository.deleteMemoryFact(factId);
+  }
+
+  async getSummary(chatId: string): Promise<RunningSummary | null> {
+    const dbState = await conversationStateRepository.findByChatId(chatId);
+    if (!dbState) return null;
+    return conversationStateRepository.getRunningSummary(dbState.id);
+  }
+
+  async updateSummary(chatId: string, summary: Omit<InsertRunningSummary, 'stateId'>): Promise<RunningSummary> {
+    const dbState = await conversationStateRepository.getOrCreate(chatId);
+    return conversationStateRepository.upsertRunningSummary(dbState.id, summary);
+  }
+
+  clearRAGCache(chatId: string): void {
+    this.ragRetrievers.delete(chatId);
   }
 
   private estimateTokens(text: string): number {

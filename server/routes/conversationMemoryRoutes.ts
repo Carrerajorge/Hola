@@ -250,6 +250,99 @@ router.delete("/chats/:chatId/state", async (req: Request, res: Response, next: 
   }
 });
 
+router.post("/chats/:chatId/analyze-intent", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { chatId } = req.params;
+    const { message } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: "message is required" });
+    }
+    const intent = await conversationStateService.analyzeIntent(chatId, message);
+    res.json({ intent });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] POST analyze-intent error:", error.message);
+    next(error);
+  }
+});
+
+router.post("/chats/:chatId/search", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { chatId } = req.params;
+    const { query, options } = req.body;
+    if (!query) {
+      return res.status(400).json({ error: "query is required" });
+    }
+    const results = await conversationStateService.searchContext(chatId, query, options);
+    res.json({ results });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] POST search error:", error.message);
+    next(error);
+  }
+});
+
+router.get("/chats/:chatId/facts", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const facts = await conversationStateService.getMemoryFacts(req.params.chatId);
+    res.json({ facts });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] GET facts error:", error.message);
+    next(error);
+  }
+});
+
+router.post("/chats/:chatId/facts", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const fact = await conversationStateService.addMemoryFact(req.params.chatId, req.body);
+    res.status(201).json({ fact });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] POST facts error:", error.message);
+    next(error);
+  }
+});
+
+router.patch("/facts/:factId", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const fact = await conversationStateService.updateMemoryFact(req.params.factId, req.body);
+    if (!fact) {
+      return res.status(404).json({ error: "Fact not found" });
+    }
+    res.json({ fact });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] PATCH facts error:", error.message);
+    next(error);
+  }
+});
+
+router.delete("/facts/:factId", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await conversationStateService.deleteMemoryFact(req.params.factId);
+    res.status(204).send();
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] DELETE facts error:", error.message);
+    next(error);
+  }
+});
+
+router.get("/chats/:chatId/summary", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const summary = await conversationStateService.getSummary(req.params.chatId);
+    res.json({ summary });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] GET summary error:", error.message);
+    next(error);
+  }
+});
+
+router.put("/chats/:chatId/summary", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const summary = await conversationStateService.updateSummary(req.params.chatId, req.body);
+    res.json({ summary });
+  } catch (error: any) {
+    console.error("[ConversationMemoryRoutes] PUT summary error:", error.message);
+    next(error);
+  }
+});
+
 router.get("/memory/stats", async (_req: Request, res: Response) => {
   const stats = conversationStateService.getCacheStats();
   res.json(stats);
