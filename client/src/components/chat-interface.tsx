@@ -989,6 +989,7 @@ export function ChatInterface({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
   const [regeneratingMsgIndex, setRegeneratingMsgIndex] = useState<number | null>(null);
+  const [gptSessionId, setGptSessionId] = useState<string | null>(null);
   const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -1120,6 +1121,11 @@ export function ChatInterface({
     
     prevChatIdForOptimisticRef.current = chatId;
   }, [chatId]); // Only depend on chatId - don't run effect on every optimistic message change
+  
+  // Reset GPT session ID when activeGpt or chatId changes (new chat or GPT switch)
+  useEffect(() => {
+    setGptSessionId(null);
+  }, [activeGpt?.id, chatId]);
   
   // Use the store-based polling hook for the active agent run (only when valid messageId exists)
   useAgentPolling(currentAgentMessageId);
@@ -4709,12 +4715,8 @@ IMPORTANTE:
             provider: selectedProvider,
             model: selectedModel,
             attachments: attachments.length > 0 ? attachments : undefined,
-            gptConfig: activeGpt ? {
-              id: activeGpt.id,
-              systemPrompt: activeGpt.systemPrompt,
-              temperature: parseFloat(activeGpt.temperature || "0.7"),
-              topP: parseFloat(activeGpt.topP || "1")
-            } : undefined
+            gptId: activeGpt?.id,
+            session_id: gptSessionId
           }),
           signal: abortControllerRef.current?.signal
         });
@@ -4731,6 +4733,17 @@ IMPORTANTE:
 
         if (!response.ok) {
           throw new Error(data.error || "Failed to get response");
+        }
+        
+        // Save and log GPT session metadata from server
+        if (data.session_id) {
+          setGptSessionId(data.session_id);
+          console.log('[Chat] Using GPT session:', {
+            sessionId: data.session_id,
+            gptId: data.gpt_id,
+            configVersion: data.config_version,
+            toolPermissions: data.tool_permissions
+          });
         }
         
         // Update steps: mark searching done, generating active

@@ -692,6 +692,31 @@ export const insertGptCategorySchema = createInsertSchema(gptCategories).omit({
 export type InsertGptCategory = z.infer<typeof insertGptCategorySchema>;
 export type GptCategory = typeof gptCategories.$inferSelect;
 
+// GPT Capabilities Schema
+export const gptCapabilitiesSchema = z.object({
+  webBrowsing: z.boolean().default(false),
+  codeInterpreter: z.boolean().default(false),
+  imageGeneration: z.boolean().default(false),
+  fileUpload: z.boolean().default(false),
+  dataAnalysis: z.boolean().default(false),
+});
+
+// GPT Runtime Policy Schema
+export const gptRuntimePolicySchema = z.object({
+  enforceModel: z.boolean().default(false),
+  modelFallbacks: z.array(z.string()).default([]),
+  maxTokensOverride: z.number().optional(),
+  temperatureOverride: z.number().optional(),
+  allowClientOverride: z.boolean().default(false),
+});
+
+// GPT Tool Permissions Schema
+export const gptToolPermissionsSchema = z.object({
+  mode: z.enum(['allowlist', 'denylist']).default('allowlist'),
+  tools: z.array(z.string()).default([]),
+  actionsEnabled: z.boolean().default(true),
+});
+
 // Custom GPTs
 export const gpts = pgTable("gpts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -711,6 +736,9 @@ export const gpts = pgTable("gpts", {
   conversationStarters: jsonb("conversation_starters"), // array of starter prompts
   usageCount: integer("usage_count").default(0),
   version: integer("version").default(1),
+  recommendedModel: text("recommended_model"),
+  runtimePolicy: jsonb("runtime_policy").$type<z.infer<typeof gptRuntimePolicySchema>>(),
+  toolPermissions: jsonb("tool_permissions").$type<z.infer<typeof gptToolPermissionsSchema>>(),
   isPublished: text("is_published").default("false"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -725,6 +753,10 @@ export const insertGptSchema = createInsertSchema(gpts).omit({
   createdAt: true,
   updatedAt: true,
   usageCount: true,
+}).extend({
+  recommendedModel: z.string().optional(),
+  runtimePolicy: gptRuntimePolicySchema.optional(),
+  toolPermissions: gptToolPermissionsSchema.optional(),
 });
 
 export type InsertGpt = z.infer<typeof insertGptSchema>;
@@ -842,6 +874,38 @@ export const insertSidebarPinnedGptSchema = createInsertSchema(sidebarPinnedGpts
 
 export type InsertSidebarPinnedGpt = z.infer<typeof insertSidebarPinnedGptSchema>;
 export type SidebarPinnedGpt = typeof sidebarPinnedGpts.$inferSelect;
+
+// GPT Sessions - Immutable session contracts with frozen config
+export const gptSessions = pgTable("gpt_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id").references(() => chats.id, { onDelete: "cascade" }),
+  gptId: varchar("gpt_id").notNull().references(() => gpts.id),
+  configVersion: integer("config_version").notNull(),
+  frozenSystemPrompt: text("frozen_system_prompt").notNull(),
+  frozenCapabilities: jsonb("frozen_capabilities").$type<z.infer<typeof gptCapabilitiesSchema>>(),
+  frozenToolPermissions: jsonb("frozen_tool_permissions").$type<z.infer<typeof gptToolPermissionsSchema>>(),
+  frozenRuntimePolicy: jsonb("frozen_runtime_policy").$type<z.infer<typeof gptRuntimePolicySchema>>(),
+  enforcedModelId: text("enforced_model_id"),
+  knowledgeContextIds: jsonb("knowledge_context_ids").$type<string[]>().default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at"),
+}, (table) => [
+  index("gpt_sessions_chat_idx").on(table.chatId),
+  index("gpt_sessions_gpt_idx").on(table.gptId),
+]);
+
+export const insertGptSessionSchema = createInsertSchema(gptSessions).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  frozenCapabilities: gptCapabilitiesSchema.optional(),
+  frozenToolPermissions: gptToolPermissionsSchema.optional(),
+  frozenRuntimePolicy: gptRuntimePolicySchema.optional(),
+  knowledgeContextIds: z.array(z.string()).optional(),
+});
+
+export type InsertGptSession = z.infer<typeof insertGptSessionSchema>;
+export type GptSession = typeof gptSessions.$inferSelect;
 
 // Admin Tables
 

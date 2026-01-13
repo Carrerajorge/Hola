@@ -11,6 +11,7 @@ import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
 import { detectEmailIntent, handleEmailChatRequest } from "./gmailChatIntegration";
 import { productionWorkflowRunner, classifyIntent, isGenerationIntent } from "../agent/registry/productionWorkflowRunner";
 import { agentLoopFacade, promptAnalyzer, type ComplexityLevel } from "../agent/orchestration";
+import { buildSystemPromptWithContext, isToolAllowed, getEnforcedModel, type GptSessionContract } from "./gptSessionService";
 
 const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true';
 
@@ -78,6 +79,18 @@ interface GptConfig {
   systemPrompt: string;
   temperature: number;
   topP: number;
+}
+
+// GPT Session Info - supports both new contract-based sessions and legacy gptConfig
+export interface GptSessionInfo {
+  contract: GptSessionContract | null;
+  // Legacy support - will be deprecated
+  legacyConfig?: {
+    id: string;
+    systemPrompt: string;
+    temperature: number;
+    topP: number;
+  };
 }
 
 interface DocumentMode {
@@ -343,6 +356,14 @@ interface ChatResponse {
   browserSessionId?: string | null;
   figmaDiagram?: FigmaDiagram;
   multiIntentResponse?: PipelineResponse;
+  // GPT Session metadata - included when a session contract is active
+  gpt_id?: string;
+  config_version?: number;
+  tool_permissions?: {
+    mode: 'allowlist' | 'denylist';
+    allowedTools: string[];
+    actionsEnabled: boolean;
+  };
 }
 
 function broadcastAgentUpdate(runId: string, update: any) {
@@ -356,7 +377,8 @@ export async function handleChatRequest(
     userId?: string;
     images?: string[];
     onAgentProgress?: (update: ProgressUpdate) => void;
-    gptConfig?: GptConfig;
+    gptSession?: GptSessionInfo;
+    gptConfig?: GptConfig; // Legacy - kept for backward compatibility
     documentMode?: DocumentMode;
     figmaMode?: boolean;
     provider?: LLMProvider;
@@ -368,7 +390,7 @@ export async function handleChatRequest(
     lastImageId?: string;
   } = {}
 ): Promise<ChatResponse> {
-  const { useRag = true, conversationId, userId, images, onAgentProgress, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false, hasRawAttachments = false, lastImageBase64, lastImageId } = options;
+  const { useRag = true, conversationId, userId, images, onAgentProgress, gptSession, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false, hasRawAttachments = false, lastImageBase64, lastImageId } = options;
   const hasImages = images && images.length > 0;
   
   // Fetch user settings for feature flags and preferences
@@ -449,8 +471,27 @@ export async function handleChatRequest(
     }
   }
 
+  // GPT Session Resolution
+  // Priority: gptSession.contract (new immutable) > gptSession.legacyConfig > gptConfig (legacy)
+  let activeSessionContract: GptSessionContract | null = null;
   let validatedGptConfig = gptConfig;
-  if (gptConfig?.id) {
+  let effectiveModel = model;
+
+  if (gptSession?.contract) {
+    // Use the immutable contract directly - no additional validation needed
+    activeSessionContract = gptSession.contract;
+    effectiveModel = getEnforcedModel(activeSessionContract, model);
+    console.log(`[ChatService] Using GPT Session Contract: gptId=${activeSessionContract.gptId}, version=${activeSessionContract.configVersion}, model=${effectiveModel}`);
+    
+    // Track usage for the GPT
+    storage.incrementGptUsage(activeSessionContract.gptId).catch(console.error);
+  } else if (gptSession?.legacyConfig) {
+    // Legacy config passed through - use as-is
+    validatedGptConfig = gptSession.legacyConfig;
+    console.log(`[ChatService] Using legacy GPT config: id=${validatedGptConfig.id}`);
+    storage.incrementGptUsage(validatedGptConfig.id).catch(console.error);
+  } else if (gptConfig?.id) {
+    // Old API path - validate and load fresh
     try {
       const gpt = await storage.getGpt(gptConfig.id);
       if (gpt) {
@@ -1586,9 +1627,14 @@ REGLAS IMPORTANTES:
 6. NO incluyas explicaciones, solo los comandos y datos.
 `;
 
+  // Build system prompt - prioritize session contract over legacy config
+  const gptSystemPrompt = activeSessionContract 
+    ? buildSystemPromptWithContext(activeSessionContract)
+    : validatedGptConfig?.systemPrompt;
+
   const documentModePrompt = documentMode ? (
-    validatedGptConfig
-      ? `${validatedGptConfig.systemPrompt}
+    gptSystemPrompt
+      ? `${gptSystemPrompt}
 
 Estás ayudando al usuario a crear un documento ${documentMode.type === 'word' ? 'Word' : documentMode.type === 'excel' ? 'Excel' : 'PowerPoint'}.
 ${documentModeInstructions}${documentMode.type === 'excel' ? excelChartInstructions : ''}${contextInfo}`
@@ -1724,8 +1770,8 @@ ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
   const fullDocumentContext = persistentDocumentContext + attachmentContext;
   const systemContent = documentModePrompt 
     ? documentModePrompt
-    : (validatedGptConfig 
-        ? `${validatedGptConfig.systemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`
+    : (gptSystemPrompt 
+        ? `${gptSystemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`
         : `${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`);
 
   const systemMessage: ChatMessage = {
@@ -1733,8 +1779,9 @@ ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
     content: systemContent
   };
 
-  const temperature = validatedGptConfig?.temperature ?? 0.7;
-  const topP = validatedGptConfig?.topP ?? 1;
+  // Extract temperature and topP - prioritize contract, fall back to legacy config
+  const temperature = activeSessionContract?.temperature ?? validatedGptConfig?.temperature ?? 0.7;
+  const topP = activeSessionContract?.topP ?? validatedGptConfig?.topP ?? 1;
 
   // Handle Figma diagram generation mode
   if (figmaMode && lastUserMessage) {

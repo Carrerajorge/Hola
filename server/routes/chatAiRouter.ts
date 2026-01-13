@@ -2,6 +2,7 @@ import { Router } from "express";
 import { storage } from "../storage";
 import { handleChatRequest, AVAILABLE_MODELS, DEFAULT_PROVIDER, DEFAULT_MODEL } from "../services/chatService";
 import { llmGateway } from "../lib/llmGateway";
+import { getOrCreateSession, getEnforcedModel, getSessionById, type GptSessionContract } from "../services/gptSessionService";
 import { generateImage, detectImageRequest, extractImagePrompt } from "../services/imageGeneration";
 import { runETLAgent, getAvailableCountries, getAvailableIndicators } from "../etl";
 import { extractAllAttachmentsContent, extractAttachmentContent, formatAttachmentsAsContext, type Attachment } from "../services/attachmentService";
@@ -182,7 +183,7 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
   router.post("/chat", async (req, res) => {
     try {
-      const { messages, useRag = true, conversationId, images, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId } = req.body;
+      const { messages, useRag = true, conversationId, images, gptConfig, gptId, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachments, lastImageBase64, lastImageId, session_id } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -190,6 +191,56 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       const user = (req as any).user;
       const userId = user?.claims?.sub;
+
+      // GPT Session Contract Resolution
+      // Priority: session_id (reuse existing) > gptId (create new) > gptConfig (legacy)
+      let gptSessionContract: GptSessionContract | null = null;
+      let effectiveModel = model;
+      let serverSessionId: string | null = null;
+      
+      // Helper to determine if conversationId is valid for session lookup
+      const isValidConversationId = (id?: string): boolean => {
+        if (!id) return false;
+        if (id.startsWith('pending-')) return false;
+        if (id.trim() === '') return false;
+        return true;
+      };
+      
+      // First, try to retrieve existing session by session_id
+      if (session_id) {
+        try {
+          gptSessionContract = await getSessionById(session_id);
+          if (gptSessionContract) {
+            serverSessionId = gptSessionContract.sessionId;
+            effectiveModel = getEnforcedModel(gptSessionContract, model);
+            console.log(`[Chat API] Reusing existing session: session_id=${session_id}, gptId=${gptSessionContract.gptId}, configVersion=${gptSessionContract.configVersion}`);
+          } else {
+            console.log(`[Chat API] Session not found: session_id=${session_id}, will create new if gptId provided`);
+          }
+        } catch (sessionError) {
+          console.error(`[Chat API] Error retrieving session ${session_id}:`, sessionError);
+        }
+      }
+      
+      // If no session from session_id, try to create/get one via gptId
+      if (!gptSessionContract && gptId) {
+        try {
+          if (isValidConversationId(conversationId)) {
+            // Valid conversationId - use it for session lookup
+            gptSessionContract = await getOrCreateSession(conversationId, gptId);
+            console.log(`[Chat API] GPT Session created/retrieved: gptId=${gptId}, configVersion=${gptSessionContract.configVersion}`);
+          } else {
+            // No valid conversationId - create session with null chatId (still persisted)
+            gptSessionContract = await getOrCreateSession("", gptId);
+            console.log(`[Chat API] New GPT Session created: gptId=${gptId}, sessionId=${gptSessionContract.sessionId}, configVersion=${gptSessionContract.configVersion}`);
+          }
+          serverSessionId = gptSessionContract.sessionId;
+          effectiveModel = getEnforcedModel(gptSessionContract, model);
+        } catch (sessionError) {
+          console.error(`[Chat API] Error creating GPT session for gptId=${gptId}:`, sessionError);
+          // Fall back to legacy gptConfig if session creation fails
+        }
+      }
 
       // DATA_MODE ENFORCEMENT: Reject document attachments - must use /analyze endpoint
       const hasDocumentAttachments = attachments && Array.isArray(attachments) && 
@@ -250,16 +301,25 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         content: msg.content
       }));
 
+      // Build gptSession info - prefer contract-based session over legacy gptConfig
+      const gptSession = gptSessionContract ? {
+        contract: gptSessionContract,
+      } : gptConfig ? {
+        contract: null,
+        legacyConfig: gptConfig
+      } : undefined;
+
       const response = await handleChatRequest(formattedMessages, {
         useRag,
         conversationId,
         userId,
         images,
-        gptConfig,
+        gptSession,
+        gptConfig, // Keep for backward compatibility
         documentMode,
         figmaMode,
         provider,
-        model,
+        model: effectiveModel,
         attachmentContext,
         forceDirectResponse: hasAttachments && attachmentContext.length > 0,
         hasRawAttachments: hasAttachments,
@@ -279,7 +339,9 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
               messageCount: messages.length,
               useRag,
               documentMode: documentMode || false,
-              hasImages: !!images && images.length > 0
+              hasImages: !!images && images.length > 0,
+              gptId: gptSessionContract?.gptId || gptConfig?.id || null,
+              configVersion: gptSessionContract?.configVersion || null
             }
           });
         } catch (auditError) {
@@ -287,7 +349,16 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         }
       }
       
-      res.json(response);
+      // Add GPT session metadata to response if contract-based session is active
+      const responseWithMetadata = gptSessionContract ? {
+        ...response,
+        gpt_id: gptSessionContract.gptId,
+        config_version: gptSessionContract.configVersion,
+        tool_permissions: gptSessionContract.toolPermissions,
+        session_id: serverSessionId || gptSessionContract.sessionId
+      } : response;
+
+      res.json(responseWithMetadata);
     } catch (error: any) {
       const requestId = `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       console.error(`[Chat API Error] requestId=${requestId}:`, error);
@@ -454,7 +525,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const { messages, conversationId, runId, chatId, attachments } = req.body;
+      const { messages, conversationId, runId, chatId, attachments, gptId, model, session_id } = req.body;
       
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({ error: "Messages array is required" });
@@ -474,6 +545,61 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
 
       const user = (req as any).user;
       const userId = user?.claims?.sub;
+
+      // GPT Session Contract Resolution for streaming
+      // Priority: session_id (reuse existing) > gptId (create new)
+      let gptSessionContract: GptSessionContract | null = null;
+      let effectiveModel = model || DEFAULT_MODEL;
+      let serverSessionId: string | null = null;
+      
+      const isValidConversationIdForStream = (id?: string): boolean => {
+        if (!id) return false;
+        if (id.startsWith('pending-')) return false;
+        if (id.trim() === '') return false;
+        return true;
+      };
+      
+      // First, try to retrieve existing session by session_id
+      if (session_id) {
+        try {
+          gptSessionContract = await getSessionById(session_id);
+          if (gptSessionContract) {
+            serverSessionId = gptSessionContract.sessionId;
+            effectiveModel = getEnforcedModel(gptSessionContract, model);
+            console.log(`[Stream] Reusing existing session: session_id=${session_id}, gptId=${gptSessionContract.gptId}, configVersion=${gptSessionContract.configVersion}`);
+          } else {
+            console.log(`[Stream] Session not found: session_id=${session_id}, will create new if gptId provided`);
+          }
+        } catch (sessionError) {
+          console.error(`[Stream] Error retrieving session ${session_id}:`, sessionError);
+        }
+      }
+      
+      // If no session from session_id, try to create/get one via gptId
+      if (!gptSessionContract && gptId) {
+        try {
+          const effectiveChatIdForSession = chatId || conversationId;
+          if (isValidConversationIdForStream(effectiveChatIdForSession)) {
+            gptSessionContract = await getOrCreateSession(effectiveChatIdForSession, gptId);
+            console.log(`[Stream] GPT Session created/retrieved: gptId=${gptId}, configVersion=${gptSessionContract.configVersion}`);
+          } else {
+            gptSessionContract = await getOrCreateSession("", gptId);
+            console.log(`[Stream] New GPT Session created: gptId=${gptId}, sessionId=${gptSessionContract.sessionId}`);
+          }
+          serverSessionId = gptSessionContract.sessionId;
+          effectiveModel = getEnforcedModel(gptSessionContract, model);
+        } catch (sessionError) {
+          console.error(`[Stream] Error creating GPT session for gptId=${gptId}:`, sessionError);
+        }
+      }
+
+      // Session metadata for SSE events
+      const sessionMetadata = gptSessionContract ? {
+        gpt_id: gptSessionContract.gptId,
+        config_version: gptSessionContract.configVersion,
+        tool_permissions: gptSessionContract.toolPermissions,
+        session_id: serverSessionId || gptSessionContract.sessionId,
+      } : null;
 
       // Get the last user message for PARE routing
       const lastUserMessage = [...messages].reverse().find((m: any) => m.role === 'user');
@@ -828,7 +954,8 @@ ${systemContent}`;
         primaryAgent: unifiedContext?.requestSpec.primaryAgent,
         targetAgents: unifiedContext?.requestSpec.targetAgents,
         isAgenticMode: unifiedContext?.isAgenticMode,
-        timestamp: Date.now() 
+        timestamp: Date.now(),
+        ...sessionMetadata
       });
       
       emitTraceEvent(effectiveRunId, 'task_start', {
@@ -898,6 +1025,7 @@ ${systemContent}`;
             runId: effectiveRunId,
             intent: unifiedContext?.requestSpec.intent,
             timestamp: Date.now(),
+            ...sessionMetadata
           });
         } else {
           writeSse(res, 'chunk', {
@@ -939,7 +1067,8 @@ ${systemContent}`;
           intent: unifiedContext?.requestSpec.intent,
           deliverableType: unifiedContext?.requestSpec.deliverableType,
           durationMs,
-          timestamp: Date.now() 
+          timestamp: Date.now(),
+          ...sessionMetadata
         });
         
         emitTraceEvent(effectiveRunId, 'done', {
