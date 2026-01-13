@@ -99,13 +99,18 @@ export function createUserRouter() {
       const { id } = req.params;
       
       const user = (req as any).user;
-      const userId = user?.claims?.sub;
+      let userId = user?.claims?.sub;
       
+      // For anonymous users, use session-based ID
       if (!userId) {
-        return res.status(401).json({ error: "Authentication required" });
+        const sessionId = (req as any).sessionID;
+        if (sessionId) {
+          userId = `anon_${sessionId}`;
+        }
       }
       
-      if (userId !== id) {
+      // Allow access if userId matches id, or if both are anonymous and match the session pattern
+      if (!userId || userId !== id) {
         return res.status(403).json({ error: "Access denied: You can only access your own settings" });
       }
       
@@ -150,13 +155,18 @@ export function createUserRouter() {
       const { id } = req.params;
       
       const user = (req as any).user;
-      const userId = user?.claims?.sub;
+      let userId = user?.claims?.sub;
       
+      // For anonymous users, use session-based ID
       if (!userId) {
-        return res.status(401).json({ error: "Authentication required" });
+        const sessionId = (req as any).sessionID;
+        if (sessionId) {
+          userId = `anon_${sessionId}`;
+        }
       }
       
-      if (userId !== id) {
+      // Allow access if userId matches id, or if both are anonymous and match the session pattern
+      if (!userId || userId !== id) {
         return res.status(403).json({ error: "Access denied: You can only update your own settings" });
       }
       

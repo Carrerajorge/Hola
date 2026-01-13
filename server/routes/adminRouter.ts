@@ -26,17 +26,15 @@ import { getSeedStatus } from "../seed-production";
 async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
     const userReq = req as any;
-    if (!userReq.user?.claims?.sub) {
-      return res.status(401).json({ error: "Authentication required" });
-    }
-    const user = await authStorage.getUser(userReq.user.claims.sub);
-    if (!user || user.role !== "admin") {
+    const userEmail = userReq.user?.claims?.email;
+    
+    if (!userEmail || userEmail !== 'carrerajorge874@gmail.com') {
       await storage.createAuditLog({
         action: "admin_access_denied",
         resource: "admin_panel",
-        details: { userId: userReq.user.claims.sub, path: req.path }
+        details: { email: userEmail, path: req.path }
       });
-      return res.status(403).json({ error: "Admin access required" });
+      return res.status(403).json({ error: "Admin access restricted" });
     }
     next();
   } catch (error) {
