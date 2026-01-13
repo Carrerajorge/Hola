@@ -8,7 +8,8 @@ import json
 import csv
 import io
 import re
-from defusedxml.ElementTree import Element, SubElement, fromstring, tostring, ParseError
+from xml.etree.ElementTree import Element, SubElement
+from defusedxml.ElementTree import fromstring, tostring, ParseError
 from defusedxml import minidom
 
 
