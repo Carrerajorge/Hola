@@ -951,6 +951,7 @@ export function ChatInterface({
     refreshState: refreshConversationState,
     addImage: addImageToState,
     addArtifact: addArtifactToState,
+    getLatestImage: getLatestImageFromServer,
   } = useConversationState(chatId);
   
   useEffect(() => {
@@ -3131,25 +3132,45 @@ export function ChatInterface({
     ];
     
     const imageEditPatterns = [
+      // Spanish - explicit image reference
       /\b(edita|modifica|cambia|ajusta|arregla)\s+(la\s+)?(última|anterior|esa|esta)\s*(imagen|foto)?/i,
       /\b(hazle|ponle|agrégale|quítale|añádele)\s+/i,
-      /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
       /\bpon(le|er)?\s+/i,
       /\bagrega(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
       /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+      
+      // Spanish - IMPLICIT edit commands (when there's a recent image, these imply editing it)
+      /\bagrega\s+(a\s+)?[A-Z]/i,                   // "agrega a Cristiano", "agrega un árbol"
+      /\bañade\s+(a\s+)?[A-Z]/i,                    // "añade a Messi"
+      /\bpon\s+(a\s+)?[A-Z]/i,                      // "pon a Neymar"
+      /\bquita(r)?\s+(a\s+)?[A-Z]/i,               // "quita a alguien"
+      /\b(al\s+)?(costado|lado|fondo|frente)\b/i,   // "al costado", "al lado", "al fondo"
+      /\b(en\s+el\s+)?(costado|lado|fondo|frente)\b/i,
+      /\bcámbia(le|r)?\s+(el|la|los|las)\s+\w+/i,   // "cámbiale el color", "cambiar el fondo"
+      /\bhaz(le|lo)?\s+más\s+\w+/i,                 // "hazlo más grande", "hazle más brillante"
+      
+      // English - explicit
+      /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
+      
+      // English - implicit edit commands
+      /\badd\s+[A-Z]/i,                             // "add Ronaldo", "add a tree"
+      /\bput\s+[A-Z]/i,                             // "put Messi"
+      /\bremove\s+[A-Z]/i,                          // "remove the person"
+      /\b(on\s+the\s+)?(side|left|right|background|front)\b/i,
+      /\bmake\s+(it|the\s+\w+)\s+more\s+\w+/i,      // "make it more colorful"
     ];
     
     const isGenerationRequest = generationPatterns.some(p => p.test(input));
-    const isImageEditRequest = imageEditPatterns.some(p => p.test(input));
+    const hasEditPattern = imageEditPatterns.some(p => p.test(input));
     
-    if (isGenerationRequest || isImageEditRequest) {
-      console.log("[handleSubmit] Generation/Edit intent detected - routing directly to /api/chat");
+    if (isGenerationRequest || hasEditPattern) {
+      console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
       
       // Set thinking state
       setAiState("thinking");
       setAiProcessSteps([
-        { step: isImageEditRequest ? "Procesando edición de imagen" : "Procesando tu solicitud", status: "active" },
-        { step: isImageEditRequest ? "Editando imagen" : "Generando contenido", status: "pending" }
+        { step: "Procesando tu solicitud", status: "active" },
+        { step: "Generando contenido", status: "pending" }
       ]);
       
       const generationInput = input;
@@ -3172,23 +3193,88 @@ export function ChatInterface({
       onSendMessage(userMsg);
       
       try {
-        // Check if we have a last image for editing
+        // Only fetch image context if we have an edit pattern (not for generation-only requests)
+        // This prevents misrouting generation requests like "agrega una conclusión" to image edit
         let lastImageBase64: string | null = null;
         let lastImageId: string | null = null;
+        let isImageEditRequest = false;
         
-        if (isImageEditRequest) {
+        if (hasEditPattern) {
+          console.log("[handleSubmit] Edit pattern detected - checking for image context...");
+          
+          // Strategy 1: Check local memory cache first (fastest)
           const lastImage = getLastGeneratedImage();
           if (lastImage?.base64) {
             lastImageBase64 = lastImage.base64;
             lastImageId = lastImage.artifactId || lastImage.messageId;
-            console.log("[handleSubmit] Found last image for editing:", lastImageId);
+            console.log("[handleSubmit] Found last image in local memory:", lastImageId);
           } else if (lastImage?.previewUrl) {
             lastImageBase64 = await fetchImageAsBase64(lastImage.previewUrl);
             lastImageId = lastImage.artifactId || lastImage.messageId;
-            console.log("[handleSubmit] Fetched last image base64 for editing:", lastImageId);
+            console.log("[handleSubmit] Fetched last image base64 from local memory:", lastImageId);
           } else {
-            console.log("[handleSubmit] No last image found for editing");
+            // Strategy 2: Search visible messages for image artifacts (works after refresh)
+            const messagesWithImages = messages.filter(m => m.artifact?.type === "image" && (m.artifact.previewUrl || m.artifact.downloadUrl));
+            if (messagesWithImages.length > 0) {
+              const lastImageMsg = messagesWithImages[messagesWithImages.length - 1];
+              const imageUrl = lastImageMsg.artifact?.previewUrl || lastImageMsg.artifact?.downloadUrl;
+              if (imageUrl) {
+                console.log("[handleSubmit] Found image in chat messages, fetching from URL:", imageUrl);
+                try {
+                  lastImageBase64 = await fetchImageAsBase64(imageUrl);
+                  lastImageId = lastImageMsg.artifact?.artifactId || lastImageMsg.id;
+                  console.log("[handleSubmit] Fetched last image base64 from chat messages:", lastImageId);
+                } catch (fetchError) {
+                  console.warn("[handleSubmit] Failed to fetch image from chat messages:", fetchError);
+                }
+              }
+            }
+            
+            // Strategy 3: Try server memory system (last resort)
+            if (!lastImageBase64) {
+              console.log("[handleSubmit] No local image, checking server memory...");
+              try {
+                const serverImage = await getLatestImageFromServer();
+                if (serverImage?.base64Preview) {
+                  lastImageBase64 = serverImage.base64Preview;
+                  lastImageId = serverImage.id;
+                  console.log("[handleSubmit] Found last image from server memory:", lastImageId);
+                } else if (serverImage?.imageUrl) {
+                  lastImageBase64 = await fetchImageAsBase64(serverImage.imageUrl);
+                  lastImageId = serverImage.id;
+                  console.log("[handleSubmit] Fetched last image base64 from server:", lastImageId);
+                } else {
+                  console.log("[handleSubmit] No images found in server memory");
+                }
+              } catch (serverError) {
+                console.warn("[handleSubmit] Failed to get image from server:", serverError);
+              }
+            }
           }
+          
+          // Determine if this is an edit request based on whether we found an image
+          const hasImageContext = !!lastImageBase64;
+          isImageEditRequest = hasImageContext;
+          
+          // If we retrieved an image from server, persist it to local cache for future use
+          if (lastImageBase64 && lastImageId && !getLastGeneratedImage()) {
+            console.log("[handleSubmit] Persisting server image to local cache:", lastImageId);
+            storeLastGeneratedImageInfo({
+              messageId: lastImageId,
+              base64: lastImageBase64,
+              artifactId: lastImageId,
+            });
+          }
+          
+        }
+        
+        if (isImageEditRequest) {
+          console.log("[handleSubmit] Image edit request confirmed with image context");
+          // Update UI to reflect edit mode
+          setAiProcessSteps([
+            { step: "Procesando edición de imagen", status: "active" },
+            { step: "Editando imagen", status: "pending" }
+          ]);
         }
         
         // Direct call to /api/chat for generation - bypasses SSE/runs system

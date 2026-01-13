@@ -173,12 +173,11 @@ export class ConversationStateRepository {
   }
 
   async addImage(data: InsertConversationImage): Promise<ConversationImage> {
-    if (data.parentImageId) {
-      await db
-        .update(conversationImages)
-        .set({ isLatest: "false" })
-        .where(eq(conversationImages.id, data.parentImageId));
-    }
+    // Mark ALL previous images in this conversation as not latest
+    await db
+      .update(conversationImages)
+      .set({ isLatest: "false" })
+      .where(eq(conversationImages.stateId, data.stateId));
 
     const [image] = await db
       .insert(conversationImages)

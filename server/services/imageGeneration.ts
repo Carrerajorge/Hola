@@ -175,13 +175,34 @@ export interface ImageIntentResult {
 export function classifyImageIntent(message: string, hasLastImage: boolean): ImageIntentResult {
   const lowerMessage = message.toLowerCase();
   
+  // Patterns that indicate editing the last image (implicit or explicit)
   const editLastPatterns = [
+    // Spanish - explicit image reference
     /\b(edita|modifica|cambia|ajusta|arregla)\s+(la\s+)?(última|anterior|esa|esta)\s*(imagen|foto)?/i,
     /\b(hazle|ponle|agrégale|quítale|añádele)\s+/i,
-    /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
     /\bpon(le|er)?\s+/i,
     /\bagrega(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
     /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+    
+    // Spanish - IMPLICIT edit commands (when hasLastImage is true, these imply editing the last image)
+    /\bagrega\s+(a\s+)?[A-Z]/i,                   // "agrega a Cristiano", "agrega un árbol"
+    /\bañade\s+(a\s+)?[A-Z]/i,                    // "añade a Messi"
+    /\bpon\s+(a\s+)?[A-Z]/i,                      // "pon a Neymar"
+    /\bquita(r)?\s+(a\s+)?[A-Z]/i,               // "quita a alguien"
+    /\b(al\s+)?(costado|lado|fondo|frente)\b/i,   // "al costado", "al lado", "al fondo"
+    /\b(en\s+el\s+)?(costado|lado|fondo|frente)\b/i,
+    /\bcámbia(le|r)?\s+(el|la|los|las)\s+\w+/i,   // "cámbiale el color", "cambiar el fondo"
+    /\bhaz(le|lo)?\s+más\s+\w+/i,                 // "hazlo más grande", "hazle más brillante"
+    
+    // English - explicit
+    /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
+    
+    // English - implicit edit commands
+    /\badd\s+[A-Z]/i,                             // "add Ronaldo", "add a tree"
+    /\bput\s+[A-Z]/i,                             // "put Messi"
+    /\bremove\s+[A-Z]/i,                          // "remove the person"
+    /\b(on\s+the\s+)?(side|left|right|background|front)\b/i,
+    /\bmake\s+(it|the\s+\w+)\s+more\s+\w+/i,      // "make it more colorful"
   ];
   
   const editSpecificPatterns = [
