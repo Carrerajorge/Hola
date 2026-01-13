@@ -309,9 +309,12 @@ export function LiveExecutionConsole({
       {narrationText && (
         <div className={cn(
           "relative px-4 py-4 border-b-2 border-primary/30",
-          state.status === 'running' ? "shimmer-text bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10" : "bg-muted/20"
+          state.status === 'running' ? "bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10" : "bg-muted/20"
         )}>
-          <p className="text-base font-semibold text-foreground leading-relaxed tracking-tight">
+          <p className={cn(
+            "text-base font-semibold leading-relaxed tracking-tight",
+            state.status === 'running' ? "shimmer-text" : "text-foreground"
+          )}>
             {narrationText}
           </p>
         </div>
