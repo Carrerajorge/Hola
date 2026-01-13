@@ -286,13 +286,25 @@ export class SuperAgentOrchestrator extends EventEmitter {
           status: data.phase,
           ...data,
         });
-        if (data.phase === "search" || data.phase === "fetching" || data.phase === "verifying") {
+        
+        // Track candidates from any phase that reports counts
+        const candidateCount = data.count || data.totalCandidates || data.relevantCount || data.verifiedCount || data.enrichedCount || 0;
+        
+        if (data.phase === "search" && data.status !== "starting") {
           pipelineSearchCount++;
           this.emitSSE("search_progress", {
+            provider: "OpenAlex",
             queries_current: pipelineSearchCount,
             queries_total: data.totalIterations || 4,
             pages_searched: data.pagesSearched || pipelineSearchCount,
-            candidates_found: data.candidatesFound || 0,
+            candidates_found: candidateCount,
+          });
+        } else if (data.phase === "verification" || data.phase === "enrichment") {
+          this.emitSSE("search_progress", {
+            provider: data.phase === "verification" ? "Verificación" : "Enriquecimiento",
+            queries_current: pipelineSearchCount,
+            queries_total: 4,
+            candidates_found: candidateCount,
           });
         }
       });
