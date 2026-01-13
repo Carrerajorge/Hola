@@ -69,7 +69,7 @@ Output formats:
 - Markdown
 - HTML"""
     
-    async def generate(self, prompt: str, format: str = "text", tone: str = None) -> str:
+    async def generate(self, prompt: str, format: str = "text", tone: Optional[str] = None) -> str:
         """Generate content based on a prompt."""
         tone = tone or self.config.default_tone
         
@@ -78,7 +78,9 @@ Output formats:
             "context": {"format": format, "tone": tone, "max_length": self.config.max_output_length}
         })
         
-        return result.data.get("content", "") if result.success else ""
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("content", "")
+        return ""
     
     async def edit(self, text: str, instructions: str) -> str:
         """Edit text based on instructions."""
@@ -87,7 +89,9 @@ Output formats:
             "context": {"original_text": text}
         })
         
-        return result.data.get("edited_text", text) if result.success else text
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("edited_text", text)
+        return text
     
     async def summarize(self, text: str, max_length: int = 500) -> str:
         """Summarize text to a specified length."""
@@ -96,7 +100,9 @@ Output formats:
             "context": {"text": text}
         })
         
-        return result.data.get("summary", "") if result.success else ""
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("summary", "")
+        return ""
     
     async def translate(self, text: str, target_language: str) -> str:
         """Translate text to a target language."""
@@ -108,7 +114,9 @@ Output formats:
             "context": {"text": text}
         })
         
-        return result.data.get("translation", text) if result.success else text
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("translation", text)
+        return text
     
     async def proofread(self, text: str) -> Dict[str, Any]:
         """Proofread text and suggest corrections."""
@@ -117,7 +125,9 @@ Output formats:
             "context": {"text": text}
         })
         
-        return result.data if result.success else {"original": text, "corrections": []}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"original": text, "corrections": []}
     
     async def run(self, task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute the content agent's main loop."""

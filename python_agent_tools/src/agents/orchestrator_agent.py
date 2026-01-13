@@ -77,7 +77,7 @@ When delegating tasks:
         """Get list of registered agent names."""
         return list(self._registered_agents.keys())
     
-    async def delegate(self, agent_name: str, task: str, context: Dict[str, Any] = None) -> AgentResult:
+    async def delegate(self, agent_name: str, task: str, context: Optional[Dict[str, Any]] = None) -> AgentResult:
         """Delegate a task to a specific agent."""
         if agent_name not in self._registered_agents:
             return AgentResult(

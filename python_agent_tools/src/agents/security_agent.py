@@ -86,10 +86,16 @@ Best practices:
             "context": {"code": str(read_result.data)[:10000]}
         })
         
+        vulnerabilities: List[Any] = []
+        severity = "error"
+        if scan_result.success and scan_result.data is not None and isinstance(scan_result.data, dict):
+            vulnerabilities = scan_result.data.get("vulnerabilities", [])
+            severity = scan_result.data.get("severity", "unknown")
+        
         result = {
             "path": path,
-            "vulnerabilities": scan_result.data.get("vulnerabilities", []) if scan_result.success else [],
-            "severity": scan_result.data.get("severity", "unknown") if scan_result.success else "error"
+            "vulnerabilities": vulnerabilities,
+            "severity": severity
         }
         
         self._scan_results.append(result)
@@ -106,18 +112,24 @@ Best practices:
         if not result.success:
             self._blocked_attempts += 1
         
+        sanitized = None
+        threats_detected: List[Any] = [result.error] if result.error else []
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            sanitized = result.data.get("sanitized", input_data)
+            threats_detected = result.data.get("threats", [])
+        
         return {
             "original": input_data,
-            "sanitized": result.data.get("sanitized", input_data) if result.success else None,
+            "sanitized": sanitized,
             "is_safe": result.success,
-            "threats_detected": result.data.get("threats", []) if result.success else [result.error]
+            "threats_detected": threats_detected
         }
     
     async def manage_secret(
         self,
         action: str,
         key: str,
-        value: str = None
+        value: Optional[str] = None
     ) -> Dict[str, Any]:
         """Manage secrets (get, set, delete)."""
         if not self.config.enable_secrets_detection:
@@ -129,7 +141,9 @@ Best practices:
             "value": value
         })
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def detect_secrets(self, content: str) -> List[Dict[str, Any]]:
         """Detect exposed secrets in content."""
@@ -138,7 +152,9 @@ Best practices:
             "context": {"content": content[:10000]}
         })
         
-        return result.data.get("secrets_found", []) if result.success else []
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("secrets_found", [])
+        return []
     
     async def check_dependencies(self, path: str) -> Dict[str, Any]:
         """Check dependencies for known vulnerabilities."""
@@ -175,7 +191,9 @@ Best practices:
             "context": {"results": self._scan_results}
         })
         
-        return result.data.get("recommendations", []) if result.success else []
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("recommendations", [])
+        return []
     
     async def run(self, task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute the security agent's main loop."""

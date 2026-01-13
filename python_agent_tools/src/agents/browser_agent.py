@@ -82,9 +82,11 @@ Best practices:
             self._navigation_history.append(url)
             self._page_cache[url] = result.data
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
-    async def extract_content(self, url: str, selector: str = None) -> Dict[str, Any]:
+    async def extract_content(self, url: str, selector: Optional[str] = None) -> Dict[str, Any]:
         """Extract content from a web page."""
         if url not in self._page_cache:
             await self.navigate(url)
@@ -96,7 +98,9 @@ Best practices:
             "context": {"page_content": str(page_content)[:5000]}
         })
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def fill_form(self, url: str, form_data: Dict[str, str]) -> Dict[str, Any]:
         """Fill and submit a form on a web page."""
@@ -107,7 +111,9 @@ Best practices:
             "headers": {"User-Agent": self.config.user_agent}
         })
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def scrape(self, url: str, selectors: Dict[str, str]) -> Dict[str, Any]:
         """Scrape specific elements from a web page."""
@@ -124,12 +130,16 @@ Best practices:
             }
         })
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def search(self, query: str) -> List[Dict[str, Any]]:
         """Perform a web search."""
         result = await self.execute_tool("search_web", {"query": query})
-        return result.data if result.success else []
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, list) else [result.data]
+        return []
     
     async def screenshot(self, url: str, output_path: str) -> Dict[str, Any]:
         """Take a screenshot of a web page."""
@@ -154,8 +164,8 @@ Best practices:
             result = await self.navigate(url)
             return {"action": "navigate", "result": result}
         elif "extract" in task.lower():
-            selector = context.get("selector")
-            result = await self.extract_content(url, selector)
+            selector = context.get("selector", "")
+            result = await self.extract_content(url, selector if selector else None)
             return {"action": "extract", "result": result}
         elif "form" in task.lower() or "fill" in task.lower():
             form_data = context.get("form_data", {})

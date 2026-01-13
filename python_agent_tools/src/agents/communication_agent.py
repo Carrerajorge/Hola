@@ -92,13 +92,15 @@ Best practices:
         if result.success:
             self._sent_count += len(to)
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def send_notification(
         self,
         channel: str,
         message: str,
-        data: Dict[str, Any] = None
+        data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Send a notification to a channel."""
         if not self.config.enable_notifications:
@@ -114,7 +116,9 @@ Best practices:
         if result.success:
             self._sent_count += 1
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def compose_message(self, template: str, context: Dict[str, Any]) -> str:
         """Compose a message using a template and context."""
@@ -123,7 +127,9 @@ Best practices:
             "context": context
         })
         
-        return result.data.get("message", template) if result.success else template
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("message", template)
+        return template
     
     async def queue_message(self, message: Dict[str, Any]) -> str:
         """Add a message to the queue."""

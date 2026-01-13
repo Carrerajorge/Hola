@@ -70,7 +70,7 @@ Best practices:
 - Document transformations applied
 - Optimize for large datasets"""
     
-    async def load_data(self, path: str, format: str = None) -> Dict[str, Any]:
+    async def load_data(self, path: str, format: Optional[str] = None) -> Dict[str, Any]:
         """Load data from a file."""
         if format and format not in self.config.supported_formats:
             return {"error": f"Format '{format}' not supported"}
@@ -80,9 +80,9 @@ Best practices:
         
         result = await self.execute_tool("file_read", {"path": path})
         
-        if result.success:
+        if result.success and result.data is not None:
             self._data_cache[path] = result.data
-            return result.data
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
         return {"error": result.error}
     
     async def analyze(self, data: Any, analysis_type: str = "describe") -> Dict[str, Any]:
@@ -107,7 +107,9 @@ print(json.dumps(result))
             "language": "python"
         })
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def transform(self, data: Any, transformation: str) -> Dict[str, Any]:
         """Apply a transformation to the data."""
@@ -116,7 +118,9 @@ print(json.dumps(result))
             "context": {"data_sample": str(data)[:1000]}
         })
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def visualize(self, data: Any, chart_type: str = "bar") -> Dict[str, Any]:
         """Generate a visualization of the data."""
@@ -149,7 +153,9 @@ print(json.dumps({{'chart_path': '/tmp/chart.png', 'chart_type': '{chart_type}'}
             "language": "python"
         })
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def run(self, task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute the data agent's main loop."""

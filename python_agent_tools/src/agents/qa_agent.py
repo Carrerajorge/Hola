@@ -110,7 +110,9 @@ Best practices:
             "context": {"code": code, "language": language}
         })
         
-        return result.data.get("tests", "") if result.success else ""
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("tests", "")
+        return ""
     
     async def validate_data(self, data: Any, schema: Dict[str, Any]) -> Dict[str, Any]:
         """Validate data against a schema."""
@@ -119,7 +121,9 @@ Best practices:
             "context": {"data": str(data)[:5000], "schema": schema}
         })
         
-        return result.data if result.success else {"valid": False, "errors": [result.error]}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"valid": False, "errors": [result.error]}
     
     async def run_linter(self, path: str, language: str = "python") -> Dict[str, Any]:
         """Run linting on a file or directory."""

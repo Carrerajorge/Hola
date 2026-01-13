@@ -1,4 +1,4 @@
-from typing import List, Any, Dict, Optional, Callable, Awaitable
+from typing import List, Any, Dict, Optional, Callable, Awaitable, Union
 from dataclasses import dataclass, field
 from enum import Enum
 import asyncio
@@ -51,7 +51,7 @@ class Pipeline:
         step = PipelineStep(name=name, tool=tool, **kwargs)
         return self.add_step(step)
     
-    async def execute(self, initial_data: Dict[str, Any] = None) -> PipelineContext:
+    async def execute(self, initial_data: Optional[Dict[str, Any]] = None) -> PipelineContext:
         """Execute the pipeline."""
         context = PipelineContext(data=initial_data or {})
         context.status = PipelineStatus.RUNNING
@@ -115,7 +115,7 @@ class ParallelPipeline:
         self.pipelines.append(pipeline)
         return self
     
-    async def execute(self, initial_data: Dict[str, Any] = None) -> List[PipelineContext]:
+    async def execute(self, initial_data: Optional[Dict[str, Any]] = None) -> List[Union[PipelineContext, BaseException]]:
         """Execute all pipelines in parallel."""
         self.logger.info("parallel_execution_started", count=len(self.pipelines))
         tasks = [p.execute(initial_data.copy() if initial_data else {}) for p in self.pipelines]

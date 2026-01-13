@@ -72,7 +72,7 @@ Best practices:
         self,
         content: str,
         format: str = "docx",
-        template: str = None
+        template: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a new document."""
         if format not in self.config.supported_output_formats:
@@ -87,7 +87,7 @@ Best practices:
         
         write_result = await self.execute_tool("file_write", {
             "path": output_path,
-            "content": result.data.get("document", content) if result.success else content
+            "content": (result.data.get("document", content) if result.success and result.data is not None and isinstance(result.data, dict) else content)
         })
         
         if write_result.success:
@@ -107,7 +107,9 @@ Best practices:
             "context": {"content": str(result.data)[:10000]}
         })
         
-        return parse_result.data if parse_result.success else {"raw_content": result.data}
+        if parse_result.success and parse_result.data is not None:
+            return parse_result.data if isinstance(parse_result.data, dict) else {"result": parse_result.data}
+        return {"raw_content": result.data}
     
     async def convert_document(
         self,
@@ -132,7 +134,7 @@ Best practices:
         
         write_result = await self.execute_tool("file_write", {
             "path": output_path,
-            "content": convert_result.data.get("converted", str(read_result.data)) if convert_result.success else str(read_result.data)
+            "content": (convert_result.data.get("converted", str(read_result.data)) if convert_result.success and convert_result.data is not None and isinstance(convert_result.data, dict) else str(read_result.data))
         })
         
         if write_result.success:
@@ -152,7 +154,9 @@ Best practices:
             "context": {"content": str(read_result.data)[:10000]}
         })
         
-        return extract_result.data.get("tables", []) if extract_result.success else []
+        if extract_result.success and extract_result.data is not None and isinstance(extract_result.data, dict):
+            return extract_result.data.get("tables", [])
+        return []
     
     async def merge_documents(self, paths: List[str], output_path: str) -> Dict[str, Any]:
         """Merge multiple documents into one."""

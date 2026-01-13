@@ -75,7 +75,9 @@ When generating code:
             "context": {"language": language}
         })
         
-        return result.data.get("code", "") if result.success else ""
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("code", "")
+        return ""
     
     async def execute_code(self, code: str, language: str = "python") -> Dict[str, Any]:
         """Execute code in a sandbox."""
@@ -104,7 +106,9 @@ When generating code:
             "context": {"code": code, "language": language}
         })
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def debug(self, code: str, error: str, language: str = "python") -> Dict[str, Any]:
         """Debug code given an error message."""
@@ -113,7 +117,9 @@ When generating code:
             "context": {"code": code, "error": error, "language": language}
         })
         
-        return result.data if result.success else {"error": result.error}
+        if result.success and result.data is not None:
+            return result.data if isinstance(result.data, dict) else {"result": result.data}
+        return {"error": result.error}
     
     async def run(self, task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute the code agent's main loop."""

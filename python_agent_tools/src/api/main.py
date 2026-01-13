@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, get_type_hints, Type
 import structlog
 
 from ..utils.logging_config import setup_logging
@@ -114,7 +114,14 @@ async def execute_tool(tool_name: str, request: ToolExecuteRequest):
         raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
     
     try:
-        input_class = tool.__class__.__orig_bases__[0].__args__[0]
+        tool_class = tool.__class__
+        input_class: Optional[Type[Any]] = None
+        for base in getattr(tool_class, '__orig_bases__', []):
+            if hasattr(base, '__args__') and len(base.__args__) > 0:
+                input_class = base.__args__[0]
+                break
+        if input_class is None:
+            raise HTTPException(status_code=500, detail="Could not determine input class for tool")
         tool_input = input_class(**request.input)
         result = await tool.execute(tool_input)
         return ToolExecuteResponse(

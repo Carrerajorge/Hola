@@ -45,7 +45,12 @@ class BaseAgent(ABC):
     """Abstract base class for all agents."""
     
     name: str
-    description: str
+    
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        """Return the description of this agent."""
+        pass
     
     def __init__(
         self,

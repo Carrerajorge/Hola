@@ -63,7 +63,7 @@ Output format:
 - Note any contradictions or uncertainties
 - Suggest areas for further investigation"""
     
-    async def search(self, query: str, max_results: int = None) -> List[Dict[str, Any]]:
+    async def search(self, query: str, max_results: Optional[int] = None) -> List[Dict[str, Any]]:
         """Perform a web search."""
         max_results = max_results or self.config.max_search_results
         
@@ -75,7 +75,7 @@ Output format:
             "max_results": max_results
         })
         
-        if result.success:
+        if result.success and result.data is not None:
             self._search_cache[query] = result.data
             return result.data
         return []
@@ -90,7 +90,9 @@ Output format:
             "context": {"findings": findings}
         })
         
-        return result.data.get("synthesis", str(findings)) if result.success else str(findings)
+        if result.success and result.data is not None and isinstance(result.data, dict):
+            return result.data.get("synthesis", str(findings))
+        return str(findings)
     
     async def run(self, task: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute the research agent's main loop."""
