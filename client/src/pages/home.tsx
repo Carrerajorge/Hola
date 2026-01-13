@@ -33,7 +33,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useStreamingStore, useProcessingChatIds, usePendingBadges } from "@/stores/streamingStore";
 import { useAgentStore } from "@/stores/agent-store";
+import { useSuperAgentStore } from "@/stores/super-agent-store";
 import { pollingManager } from "@/lib/polling-manager";
+import { queryClient } from "@/lib/queryClient";
 
 export default function Home() {
   const isMobile = useIsMobile();
@@ -190,16 +192,33 @@ export default function Home() {
   }, [handleClearPendingCount, setActiveChatId, setAiProcessSteps]);
 
   const handleNewChat = () => {
-    // Create a new chat with fresh state
-    // Don't set a temporary key here - we'll use the stableKey from createChat
-    // This ensures chatInterfaceKey remains stable during pending→real chat transitions
+    // TRANSACTIONAL RESET: Block all re-hydration for 5 seconds
+    // This prevents stale state from coming back after navigation
+    useAgentStore.getState().blockRehydration();
     
-    // DO NOT reset aiState - let background streaming complete naturally
-    // The aiStateChatId check prevents the indicator from showing on the new chat
-    // Only reset process steps for UI display
+    // Clear all streaming badges and pending response indicators
+    useStreamingStore.getState().clearAllBadges();
+    
+    // Clear all Super Agent runs
+    useSuperAgentStore.getState().clearAllRuns();
+    
+    // Cancel all active agent runs and clear agent state
+    pollingManager.cancelAll();
+    useAgentStore.getState().clearAllRuns();
+    
+    // Clear conversation state query cache to prevent stale data
+    queryClient.removeQueries({ queryKey: ['conversationState'] });
+    
+    // Reset AI processing state for UI display
     setAiProcessSteps([]);
+    setAiStateRaw('idle');
+    setAiStateChatId(null);
     
-    // Clear chat references
+    // Reset Super Agent UI state
+    setUiPhase('idle');
+    setActiveRunId(null);
+    
+    // Clear chat references - this triggers new chat mode
     setActiveChatId(null);
     setIsNewChatMode(true);
     setNewChatStableKey(null);
@@ -207,10 +226,6 @@ export default function Home() {
     
     // Close any open dialogs
     setIsAppsDialogOpen(false);
-    
-    // Cancel all active agent runs and clear agent state
-    pollingManager.cancelAll();
-    useAgentStore.getState().clearAllRuns();
   };
   
   const handleSendNewChatMessage = useCallback((message: Message) => {

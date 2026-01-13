@@ -34,6 +34,7 @@ export interface AgentRunState {
 interface AgentStore {
   runs: Record<string, AgentRunState>;
   activePolling: Set<string>;
+  skipHydrationUntil: number;
   
   getRunByChatId: (chatId: string) => AgentRunState | null;
   getRunByRunId: (runId: string) => AgentRunState | null;
@@ -51,6 +52,7 @@ interface AgentStore {
   
   clearRun: (messageId: string) => void;
   clearAllRuns: () => void;
+  blockRehydration: () => void;
 }
 
 export const useAgentStore = create<AgentStore>()(
@@ -58,6 +60,7 @@ export const useAgentStore = create<AgentStore>()(
     (set, get) => ({
       runs: {},
       activePolling: new Set(),
+      skipHydrationUntil: 0,
       
       getRunByChatId: (chatId: string) => {
         const runs = Object.values(get().runs);
@@ -187,17 +190,33 @@ export const useAgentStore = create<AgentStore>()(
       },
       
       clearAllRuns: () => {
-        set({ runs: {}, activePolling: new Set() });
+        set({ runs: {}, activePolling: new Set(), skipHydrationUntil: Date.now() + 5000 });
+      },
+      
+      blockRehydration: () => {
+        set({ skipHydrationUntil: Date.now() + 5000 });
       }
     }),
     {
       name: 'sira-agent-runs',
       storage: createJSONStorage(() => sessionStorage),
-      partialize: (state) => ({ runs: state.runs }),
+      partialize: (state) => ({ runs: state.runs, skipHydrationUntil: state.skipHydrationUntil }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           state.activePolling = new Set();
+          
+          if (Date.now() < state.skipHydrationUntil) {
+            state.runs = {};
+            state.skipHydrationUntil = 0;
+            return;
+          }
+          
           setTimeout(async () => {
+            const currentState = useAgentStore.getState();
+            if (Date.now() < currentState.skipHydrationUntil) {
+              return;
+            }
+            
             const { pollingManager } = await import('@/lib/polling-manager');
             Object.entries(state.runs).forEach(([messageId, run]) => {
               if (run.runId && ['starting', 'queued', 'planning', 'running'].includes(run.status)) {

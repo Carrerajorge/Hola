@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import { useLocation } from "wouter";
 import { SquarePen, Loader2, Check } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -19,19 +18,17 @@ export function NewChatButton({
   className,
   showTooltip = true,
 }: NewChatButtonProps) {
-  const [, setLocation] = useLocation();
   const [isHovered, setIsHovered] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
   const handleClick = useCallback(() => {
     if (isCreating) return;
     
-    setLocation("/");
     onNewChat?.();
     
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 800);
-  }, [isCreating, setLocation, onNewChat]);
+  }, [isCreating, onNewChat]);
 
   const baseClasses = "relative overflow-hidden group font-medium transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2";
   
