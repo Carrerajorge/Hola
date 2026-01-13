@@ -8,10 +8,16 @@ export function createChatsRouter() {
   router.get("/chats", async (req, res) => {
     try {
       const user = (req as any).user;
-      const userId = user?.claims?.sub;
+      let userId = user?.claims?.sub;
       
+      // For anonymous users, use session-based ID
       if (!userId) {
-        return res.json([]);
+        const sessionId = (req as any).sessionID;
+        if (sessionId) {
+          userId = `anon_${sessionId}`;
+        } else {
+          return res.json([]);
+        }
       }
       
       const chatList = await storage.getChats(userId);
@@ -25,10 +31,12 @@ export function createChatsRouter() {
     try {
       const { title } = req.body;
       const user = (req as any).user;
-      const userId = user?.claims?.sub;
+      let userId = user?.claims?.sub;
       
+      // Allow anonymous users to create chats with session-based ID
       if (!userId) {
-        return res.status(401).json({ error: "Authentication required to create chats" });
+        const sessionId = (req as any).sessionID || `anon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        userId = `anon_${sessionId}`;
       }
       
       const chat = await storage.createChat({ title: title || "New Chat", userId });
@@ -41,8 +49,16 @@ export function createChatsRouter() {
   router.get("/chats/:id", async (req, res) => {
     try {
       const user = (req as any).user;
-      const userId = user?.claims?.sub;
+      let userId = user?.claims?.sub;
       const userEmail = user?.claims?.email;
+      
+      // For anonymous users, use session-based ID
+      if (!userId) {
+        const sessionId = (req as any).sessionID;
+        if (sessionId) {
+          userId = `anon_${sessionId}`;
+        }
+      }
       
       const chat = await storage.getChat(req.params.id);
       if (!chat) {
@@ -186,7 +202,15 @@ export function createChatsRouter() {
   router.post("/chats/:id/messages", async (req, res) => {
     try {
       const user = (req as any).user;
-      const userId = user?.claims?.sub;
+      let userId = user?.claims?.sub;
+      
+      // For anonymous users, use session-based ID
+      if (!userId) {
+        const sessionId = (req as any).sessionID;
+        if (sessionId) {
+          userId = `anon_${sessionId}`;
+        }
+      }
       
       const chat = await storage.getChat(req.params.id);
       if (!chat) {
