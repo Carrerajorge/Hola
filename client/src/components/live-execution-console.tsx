@@ -237,17 +237,17 @@ export function LiveExecutionConsole({
       )}
     >
       {narrationText && (
-        <div className="px-4 py-3 border-b border-border/30 bg-background/50">
+        <div className="px-3 py-2 border-b border-border/20">
           <p 
-            className="text-sm font-medium leading-relaxed"
+            className="text-sm font-medium"
             style={state.status === 'running' ? {
-              background: 'linear-gradient(110deg, #64748b 0%, #64748b 42%, #0f172a 50%, #64748b 58%, #64748b 100%)',
-              backgroundSize: '220% 100%',
+              background: 'linear-gradient(90deg, #475569 0%, #475569 40%, #1e293b 50%, #475569 60%, #475569 100%)',
+              backgroundSize: '200% 100%',
               WebkitBackgroundClip: 'text',
               backgroundClip: 'text',
               color: 'transparent',
-              animation: 'shimmerTextAnim 1.1s linear infinite',
-            } : { color: 'inherit' }}
+              animation: 'shimmerTextAnim 1.2s ease-in-out infinite',
+            } : undefined}
           >
             {narrationText}
           </p>

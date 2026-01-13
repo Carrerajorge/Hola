@@ -37,12 +37,8 @@ export interface PhaseNarratorState {
   metrics: NarrationMetrics;
 }
 
-const DEBOUNCE_MIN = 800;
-const DEBOUNCE_MAX = 1200;
-
-function randomDebounce(): number {
-  return DEBOUNCE_MIN + Math.random() * (DEBOUNCE_MAX - DEBOUNCE_MIN);
-}
+const DEBOUNCE_MS = 1500;
+const MAX_UPDATE_INTERVAL = 2000;
 
 function createDefaultMetrics(): NarrationMetrics {
   return {
@@ -420,6 +416,9 @@ export class PhaseNarrator {
 
     if (this.debounceTimer) return;
 
+    const timeSinceLastUpdate = Date.now() - this.state.lastUpdated;
+    const delay = Math.min(DEBOUNCE_MS, MAX_UPDATE_INTERVAL - timeSinceLastUpdate);
+
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
       if (this.pendingNarration && this.pendingNarration !== this.state.narration) {
@@ -428,7 +427,7 @@ export class PhaseNarrator {
         this.onNarrationChange?.(this.pendingNarration);
         this.pendingNarration = "";
       }
-    }, randomDebounce());
+    }, Math.max(100, delay));
   }
 
   getCurrentNarration(): string {
