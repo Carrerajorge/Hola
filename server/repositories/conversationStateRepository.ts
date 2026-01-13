@@ -7,18 +7,24 @@ import {
   conversationArtifacts,
   conversationImages,
   conversationContexts,
+  memoryFacts,
+  runningSummaries,
   InsertConversationState,
   InsertConversationMessage,
   InsertConversationArtifact,
   InsertConversationImage,
   InsertConversationContext,
   InsertConversationStateVersion,
+  InsertMemoryFact,
+  InsertRunningSummary,
   ConversationState,
   ConversationMessage,
   ConversationArtifact,
   ConversationImage,
   ConversationContext,
   ConversationStateVersion,
+  MemoryFact,
+  RunningSummary,
   HydratedConversationState,
 } from "@shared/schema";
 
@@ -366,6 +372,70 @@ export class ConversationStateRepository {
       createdAt: state.createdAt.toISOString(),
       updatedAt: state.updatedAt.toISOString(),
     };
+  }
+
+  // Memory Facts methods
+  async addMemoryFact(stateId: string, fact: Omit<InsertMemoryFact, 'stateId'>): Promise<MemoryFact> {
+    const [memoryFact] = await db
+      .insert(memoryFacts)
+      .values({ ...fact, stateId })
+      .returning();
+    return memoryFact;
+  }
+
+  async getMemoryFacts(stateId: string): Promise<MemoryFact[]> {
+    return db
+      .select()
+      .from(memoryFacts)
+      .where(eq(memoryFacts.stateId, stateId))
+      .orderBy(desc(memoryFacts.createdAt));
+  }
+
+  async updateMemoryFact(factId: string, updates: Partial<InsertMemoryFact>): Promise<MemoryFact> {
+    const [memoryFact] = await db
+      .update(memoryFacts)
+      .set(updates)
+      .where(eq(memoryFacts.id, factId))
+      .returning();
+    return memoryFact;
+  }
+
+  async deleteMemoryFact(factId: string): Promise<void> {
+    await db
+      .delete(memoryFacts)
+      .where(eq(memoryFacts.id, factId));
+  }
+
+  // Running Summary methods
+  async getRunningSummary(stateId: string): Promise<RunningSummary | null> {
+    const [summary] = await db
+      .select()
+      .from(runningSummaries)
+      .where(eq(runningSummaries.stateId, stateId))
+      .limit(1);
+    return summary || null;
+  }
+
+  async upsertRunningSummary(stateId: string, summary: Omit<InsertRunningSummary, 'stateId'>): Promise<RunningSummary> {
+    const existing = await this.getRunningSummary(stateId);
+
+    if (existing) {
+      const [updated] = await db
+        .update(runningSummaries)
+        .set({
+          ...summary,
+          lastUpdatedAt: new Date(),
+        })
+        .where(eq(runningSummaries.stateId, stateId))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db
+      .insert(runningSummaries)
+      .values({ ...summary, stateId })
+      .returning();
+    return created;
   }
 
   async delete(chatId: string): Promise<void> {

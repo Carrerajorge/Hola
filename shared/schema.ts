@@ -2946,6 +2946,52 @@ export const insertConversationContextSchema = createInsertSchema(conversationCo
 export type InsertConversationContext = z.infer<typeof insertConversationContextSchema>;
 export type ConversationContext = typeof conversationContexts.$inferSelect;
 
+// Memory facts table - stores persistent facts about user preferences, decisions, entities
+export const memoryFacts = pgTable("memory_facts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
+  factType: varchar("fact_type", { length: 50 }).notNull(), // user_preference, decision, fact, summary, entity
+  content: text("content").notNull(),
+  confidence: integer("confidence").default(80), // 0-100
+  source: varchar("source", { length: 50 }), // user_stated, inferred, system
+  extractedAtTurn: integer("extracted_at_turn"),
+  validUntil: timestamp("valid_until", { withTimezone: true }),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("memory_facts_state_idx").on(table.stateId),
+  index("memory_facts_type_idx").on(table.factType),
+]);
+
+export const insertMemoryFactSchema = createInsertSchema(memoryFacts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertMemoryFact = z.infer<typeof insertMemoryFactSchema>;
+export type MemoryFact = typeof memoryFacts.$inferSelect;
+
+// Running summary table - stores progressive conversation summary
+export const runningSummaries = pgTable("running_summaries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }).unique(),
+  content: text("content").default(""),
+  tokenCount: integer("token_count").default(0),
+  lastUpdatedAtTurn: integer("last_updated_at_turn").default(0),
+  mainTopics: text("main_topics").array().default([]),
+  lastUpdatedAt: timestamp("last_updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("running_summaries_state_idx").on(table.stateId),
+]);
+
+export const insertRunningSummarySchema = createInsertSchema(runningSummaries).omit({
+  id: true,
+  lastUpdatedAt: true,
+});
+
+export type InsertRunningSummary = z.infer<typeof insertRunningSummarySchema>;
+export type RunningSummary = typeof runningSummaries.$inferSelect;
+
 // Full hydrated state type for API responses
 export const hydratedConversationStateSchema = z.object({
   id: z.string(),
