@@ -212,15 +212,26 @@ function extractMetricsFromEvent(
         else if (a.includes("scopus")) updates.currentProvider = "Scopus";
         else if (a.includes("wos")) updates.currentProvider = "Web of Science";
       }
-      if (event.metrics?.queries_current) updates.queryIdx = event.metrics.queries_current;
-      if (event.metrics?.queries_total) updates.queryTotal = event.metrics.queries_total;
-      if (event.metrics?.pages_searched) updates.page = event.metrics.pages_searched;
-      if (event.metrics?.candidates_found !== undefined) {
-        updates.foundInQuery = Math.max(0, event.metrics.candidates_found - (current.candidatesTotal || 0));
-        updates.candidatesTotal = event.metrics.candidates_found;
+      // Check both root level and metrics for these fields
+      const queriesCurrent = evt.queries_current ?? event.metrics?.queries_current;
+      const queriesTotal = evt.queries_total ?? event.metrics?.queries_total;
+      const pagesSearched = evt.pages_searched ?? event.metrics?.pages_searched;
+      const candidatesFound = evt.candidates_found ?? event.metrics?.candidates_found;
+      const articlesCollected = evt.articles_collected ?? event.metrics?.articles_collected;
+      
+      if (queriesCurrent) updates.queryIdx = queriesCurrent;
+      if (queriesTotal) updates.queryTotal = queriesTotal;
+      if (pagesSearched) updates.page = pagesSearched;
+      if (candidatesFound !== undefined) {
+        updates.foundInQuery = Math.max(0, candidatesFound - (current.candidatesTotal || 0));
+        updates.candidatesTotal = candidatesFound;
       }
-      if (event.metrics?.articles_collected !== undefined) {
-        updates.candidatesTotal = event.metrics.articles_collected;
+      if (articlesCollected !== undefined) {
+        updates.candidatesTotal = articlesCollected;
+      }
+      // Set default provider if not detected
+      if (!updates.currentProvider && !current.currentProvider) {
+        updates.currentProvider = "OpenAlex";
       }
       break;
 
