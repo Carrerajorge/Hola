@@ -247,10 +247,15 @@ export function LiveExecutionConsole({
         return "Enriqueciendo metadatos de artículos…";
       
       case "export":
-        if (metrics.articles_accepted > 0) {
-          return `Generando Excel con ${metrics.articles_accepted} artículos verificados…`;
+      case "creating":
+        // Use run_title if available (set from progress.message)
+        if (s.run_title && s.run_title.includes("Generando")) {
+          return s.run_title;
         }
-        return "Preparando archivo Excel…";
+        if (metrics.articles_accepted > 0) {
+          return `Generando documento con ${metrics.articles_accepted} artículos verificados…`;
+        }
+        return "Preparando documento…";
       
       case "finalization":
         return `Finalizado: ${metrics.articles_accepted || 0}/${target || "?"} artículos exportados.`;

@@ -711,6 +711,14 @@ export class SuperAgentOrchestrator extends EventEmitter {
     
     this.state.phase = "creating";
     
+    // Notify frontend that we're starting document generation
+    this.emitSSE("progress", { 
+      phase: "export", 
+      status: "starting",
+      message: "Generando documentos...",
+      documents_total: this.state.contract.requirements.must_create.length,
+    });
+    
     for (const docType of this.state.contract.requirements.must_create) {
       this.emitSSE("tool_call", {
         id: `tc_create_${docType}`,
@@ -720,6 +728,12 @@ export class SuperAgentOrchestrator extends EventEmitter {
       
       try {
         if (docType === "xlsx") {
+          this.emitSSE("progress", { 
+            phase: "export", 
+            status: "generating",
+            message: `Generando Excel con ${this.state.sources.filter(s => s.verified === true).length} artículos...`,
+            document_type: "xlsx",
+          });
           this.emitSSE("artifact_generating", {
             artifact_type: "xlsx",
             filename: "articles.xlsx",
@@ -736,6 +750,13 @@ export class SuperAgentOrchestrator extends EventEmitter {
           });
           
           this.emitSSE("artifact", artifact);
+          this.emitSSE("progress", { 
+            phase: "export", 
+            status: "completed",
+            message: `Excel generado: ${artifact.name}`,
+            document_type: "xlsx",
+            artifact_id: artifact.id,
+          });
           this.emitSSE("tool_result", {
             tool_call_id: `tc_create_${docType}`,
             success: true,
@@ -749,6 +770,12 @@ export class SuperAgentOrchestrator extends EventEmitter {
           });
           
         } else if (docType === "docx") {
+          this.emitSSE("progress", { 
+            phase: "export", 
+            status: "generating",
+            message: "Generando documento Word...",
+            document_type: "docx",
+          });
           this.emitSSE("artifact_generating", {
             artifact_type: "docx",
             filename: "document.docx",
@@ -765,6 +792,13 @@ export class SuperAgentOrchestrator extends EventEmitter {
           });
           
           this.emitSSE("artifact", artifact);
+          this.emitSSE("progress", { 
+            phase: "export", 
+            status: "completed",
+            message: `Word generado: ${artifact.name}`,
+            document_type: "docx",
+            artifact_id: artifact.id,
+          });
           this.emitSSE("tool_result", {
             tool_call_id: `tc_create_${docType}`,
             success: true,
