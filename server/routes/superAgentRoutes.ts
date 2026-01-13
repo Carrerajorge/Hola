@@ -117,18 +117,25 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           }
           break;
         case "source":
+        case "source_signal":
+          // Both source and source_signal events increment article counter
           articlesCollected++;
-          if (event.data?.doi) {
+          console.log(`[SuperAgent] source_signal received: articlesCollected=${articlesCollected}, type=${event.event_type}`);
+          const sourceData = event.data || {};
+          if (sourceData.doi || sourceData.title) {
             traceBus.sourceCollected(
               "SuperAgent",
-              event.data.doi,
-              event.data.title || "Untitled",
-              event.data.relevance || 0.8
+              sourceData.doi || `unknown-${articlesCollected}`,
+              sourceData.title || "Untitled",
+              sourceData.relevance || sourceData.score || 0.8
             );
           }
           traceBus.toolProgress("SuperAgent", `Collected ${articlesCollected} sources`, 
             Math.min(40, (articlesCollected / 50) * 40),
-            { articles_collected: articlesCollected }
+            { 
+              articles_collected: articlesCollected,
+              candidates_found: articlesCollected 
+            }
           );
           break;
         case "verify":
@@ -186,6 +193,34 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           break;
         case "heartbeat":
           traceBus.heartbeat();
+          break;
+        case "search_progress":
+          // Emit search progress to TraceBus so frontend receives it
+          const searchData = event.data || {};
+          traceBus.toolProgress(
+            searchData.provider || "OpenAlex",
+            `Searching: ${searchData.queries_current || 0}/${searchData.queries_total || 4} queries, ${searchData.candidates_found || 0} candidates`,
+            Math.min(30, ((searchData.queries_current || 0) / (searchData.queries_total || 4)) * 30),
+            {
+              queries_current: searchData.queries_current || 0,
+              queries_total: searchData.queries_total || 4,
+              pages_searched: searchData.pages_searched || 0,
+              candidates_found: searchData.candidates_found || 0,
+            }
+          );
+          break;
+        case "progress":
+          // Emit generic progress events to TraceBus
+          const progressData = event.data || {};
+          if (progressData.phase === "signals" && progressData.count) {
+            articlesCollected = progressData.count;
+            traceBus.toolProgress(
+              "SuperAgent",
+              `Found ${articlesCollected} candidates`,
+              Math.min(40, (articlesCollected / 50) * 40),
+              { articles_collected: articlesCollected, candidates_found: articlesCollected }
+            );
+          }
           break;
       }
       
