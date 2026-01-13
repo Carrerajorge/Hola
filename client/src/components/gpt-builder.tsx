@@ -583,7 +583,23 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <Button variant="outline" size="sm" data-testid="button-share">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                data-testid="button-share"
+                onClick={() => {
+                  if (editingGpt) {
+                    setSavedGptData(editingGpt);
+                    setShowUpdateModal(true);
+                  } else {
+                    toast({
+                      title: "Guarda primero",
+                      description: "Guarda el GPT antes de compartir",
+                      variant: "destructive"
+                    });
+                  }
+                }}
+              >
                 <LinkIcon className="h-4 w-4 mr-2" />
                 Compartir
               </Button>
