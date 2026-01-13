@@ -140,11 +140,12 @@ export class ContextRetriever {
     const windowSize = this.config.recencyWindowSize;
     
     const recentMessages = messages.slice(-windowSize);
+    const startIndex = Math.max(0, messages.length - windowSize);
     
     return recentMessages.map((msg, index) => ({
       role: msg.role,
       content: msg.content,
-      turnNumber: messages.length - windowSize + index + 1,
+      turnNumber: startIndex + index + 1,
     }));
   }
 
