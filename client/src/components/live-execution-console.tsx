@@ -285,12 +285,20 @@ export function LiveExecutionConsole({
       )}
     >
       {narrationText && (
-        <div className="relative px-4 py-3 bg-muted/30 border-b border-border/40 overflow-hidden">
+        <div className="relative px-4 py-4 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-blue-500/10 border-b-2 border-primary/30 overflow-hidden">
           {state.status === 'running' && (
-            <div className="absolute inset-0 animate-shimmer" />
+            <div 
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+              style={{
+                animation: 'shimmer 1.5s ease-in-out infinite',
+                backgroundSize: '200% 100%',
+              }}
+            />
           )}
           <div className="relative z-10">
-            <p className="text-sm font-medium text-foreground leading-relaxed">{narrationText}</p>
+            <p className="text-base font-semibold text-foreground leading-relaxed tracking-tight">
+              {narrationText}
+            </p>
           </div>
         </div>
       )}

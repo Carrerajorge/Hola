@@ -229,7 +229,7 @@ export class RunStreamClient {
       "retry_scheduled", "fallback_activated",
       "source_collected", "source_verified", "source_rejected",
       "artifact_created", "artifact_generating", "progress_update",
-      "plan_created", "search_progress",
+      "plan_created", "search_progress", "progress",
     ];
 
     for (const type of eventTypes) {
@@ -419,6 +419,29 @@ export class RunStreamClient {
           if (event.metrics.candidates_found !== undefined) {
             this.state.candidates_found = event.metrics.candidates_found;
           }
+        }
+        this.state.phase = "signals";
+        break;
+
+      case "progress":
+        const anyEvent = event as any;
+        if (anyEvent.phase) {
+          this.state.phase = anyEvent.phase;
+        }
+        if (anyEvent.status) {
+          console.log(`[RunStreamClient] Progress status: ${anyEvent.status}`);
+        }
+        if (anyEvent.collected !== undefined) {
+          this.state.candidates_found = anyEvent.collected;
+        }
+        if (anyEvent.queries_current !== undefined) {
+          this.state.queries_current = anyEvent.queries_current;
+        }
+        if (anyEvent.queries_total !== undefined) {
+          this.state.queries_total = anyEvent.queries_total;
+        }
+        if (event.metrics) {
+          this.updateMetrics(event.metrics);
         }
         break;
 
