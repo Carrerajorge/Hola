@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query, Path, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Path, Body, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
@@ -360,7 +360,7 @@ async def execute_tool(
         ...,
         description="The name of the tool to execute"
     ),
-    request: ToolExecuteRequest = ...
+    request: ToolExecuteRequest = Body(...)
 ):
     """
     Execute a tool with given input.
