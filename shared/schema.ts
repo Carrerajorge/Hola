@@ -726,7 +726,7 @@ export const gpts = pgTable("gpts", {
   avatar: text("avatar"),
   categoryId: varchar("category_id").references(() => gptCategories.id),
   creatorId: varchar("creator_id"),
-  visibility: text("visibility").default("private"), // private, public, unlisted
+  visibility: text("visibility").default("private"), // private, team, public
   systemPrompt: text("system_prompt").notNull(),
   temperature: text("temperature").default("0.7"),
   topP: text("top_p").default("1"),

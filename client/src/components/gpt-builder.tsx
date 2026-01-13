@@ -34,7 +34,10 @@ import {
   Upload,
   FileText,
   HelpCircle,
-  RotateCcw
+  RotateCcw,
+  Lock,
+  Users,
+  ExternalLink
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -80,6 +83,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [savedGptData, setSavedGptData] = useState<Gpt | null>(null);
   
   const [formData, setFormData] = useState({
     name: "",
@@ -90,7 +95,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     temperature: 0.7,
     topP: 1,
     maxTokens: 4096,
-    visibility: "private" as "private" | "public" | "unlisted",
+    visibility: "private" as "private" | "team" | "public",
     conversationStarters: [""],
     recommendedModel: "",
     capabilities: {
@@ -115,7 +120,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
         temperature: parseFloat(editingGpt.temperature || "0.7"),
         topP: parseFloat(editingGpt.topP || "1"),
         maxTokens: editingGpt.maxTokens || 4096,
-        visibility: (editingGpt.visibility as "private" | "public" | "unlisted") || "private",
+        visibility: (editingGpt.visibility as "private" | "team" | "public") || "private",
         conversationStarters: Array.isArray(editingGpt.conversationStarters) && editingGpt.conversationStarters.length > 0
           ? editingGpt.conversationStarters
           : [""],
@@ -242,9 +247,9 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
       if (response.ok) {
         const savedGpt = await response.json();
-        toast({ title: editingGpt ? "GPT actualizado" : "GPT creado" });
         setHasChanges(false);
-        onSave?.(savedGpt);
+        setSavedGptData(savedGpt);
+        setShowUpdateModal(true);
       } else {
         throw new Error("Error al guardar");
       }
@@ -437,6 +442,35 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
         description: "No se pudo guardar la acción",
         variant: "destructive"
       });
+    }
+  };
+
+  const handleVisibilityChange = async (newVisibility: string) => {
+    if (!savedGptData) return;
+    handleFormChange({ visibility: newVisibility as "private" | "team" | "public" });
+    
+    try {
+      await fetch(`/api/gpts/${savedGptData.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility: newVisibility })
+      });
+    } catch (error) {
+      console.error("Error updating visibility:", error);
+    }
+  };
+
+  const handleCopyLink = () => {
+    if (savedGptData) {
+      navigator.clipboard.writeText(`${window.location.origin}/gpt/${savedGptData.slug}`);
+      toast({ title: "Enlace copiado" });
+    }
+  };
+
+  const handleViewGpt = () => {
+    setShowUpdateModal(false);
+    if (savedGptData) {
+      onSave?.(savedGptData);
     }
   };
 
@@ -1041,6 +1075,143 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                     {editingAction ? "Actualizar" : "Crear"}
                   </Button>
                 </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {showUpdateModal && savedGptData && (
+          <Dialog open={showUpdateModal} onOpenChange={setShowUpdateModal}>
+            <DialogContent className="sm:max-w-[400px]" data-testid="gpt-updated-modal">
+              <DialogHeader className="flex flex-row items-center justify-between">
+                <DialogTitle>GPT actualizado</DialogTitle>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowUpdateModal(false)}
+                  className="h-6 w-6 rounded-full"
+                  data-testid="button-close-update-modal"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </DialogHeader>
+              <VisuallyHidden>
+                <DialogDescription>Tu GPT ha sido actualizado correctamente</DialogDescription>
+              </VisuallyHidden>
+              
+              <div className="py-4">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center overflow-hidden">
+                    {savedGptData.avatar ? (
+                      <img src={savedGptData.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-2xl">🤖</span>
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="font-semibold">{savedGptData.name}</h3>
+                    <p className="text-sm text-muted-foreground">Por {savedGptData.creatorUsername || "ti"}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <Label className="text-sm font-medium">Acceso</Label>
+                  
+                  <div 
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
+                      formData.visibility === "private" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                    )}
+                    onClick={() => handleVisibilityChange("private")}
+                    data-testid="visibility-private"
+                  >
+                    <div className={cn(
+                      "w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5",
+                      formData.visibility === "private" ? "border-primary" : "border-muted-foreground"
+                    )}>
+                      {formData.visibility === "private" && (
+                        <div className="w-2.5 h-2.5 rounded-full bg-primary" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Lock className="h-4 w-4" />
+                        <span className="font-medium text-sm">Privado</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">Solo tú puedes acceder</p>
+                    </div>
+                  </div>
+
+                  <div 
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
+                      formData.visibility === "team" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                    )}
+                    onClick={() => handleVisibilityChange("team")}
+                    data-testid="visibility-team"
+                  >
+                    <div className={cn(
+                      "w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5",
+                      formData.visibility === "team" ? "border-primary" : "border-muted-foreground"
+                    )}>
+                      {formData.visibility === "team" && (
+                        <div className="w-2.5 h-2.5 rounded-full bg-primary" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        <span className="font-medium text-sm">Equipo</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">Miembros de tu equipo pueden acceder</p>
+                    </div>
+                  </div>
+
+                  <div 
+                    className={cn(
+                      "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
+                      formData.visibility === "public" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                    )}
+                    onClick={() => handleVisibilityChange("public")}
+                    data-testid="visibility-public"
+                  >
+                    <div className={cn(
+                      "w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5",
+                      formData.visibility === "public" ? "border-primary" : "border-muted-foreground"
+                    )}>
+                      {formData.visibility === "public" && (
+                        <div className="w-2.5 h-2.5 rounded-full bg-primary" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <LinkIcon className="h-4 w-4" />
+                        <span className="font-medium text-sm">Cualquiera que tenga el enlace</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">Público con enlace</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={handleCopyLink}
+                  data-testid="button-copy-link"
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  Copiar enlace
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={handleViewGpt}
+                  data-testid="button-view-gpt"
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Ver GPT
+                </Button>
               </div>
             </DialogContent>
           </Dialog>
