@@ -713,7 +713,7 @@ export class WebDevTool extends BaseTool {
     fastapi: {
       dirs: ["app", "app/routers"],
       files: {
-        "requirements.txt": "fastapi>=0.109.0\nuvicorn>=0.27.0",
+        "requirements.txt": "fastapi>=0.128.0\nuvicorn>=0.40.0\npython-multipart>=0.0.21",
         "app/main.py": `from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get("/")\ndef read_root():\n    return {"message": "Hello FastAPI!"}\n\nif __name__ == "__main__":\n    import uvicorn\n    uvicorn.run(app, host="0.0.0.0", port=5000)`
       }
     }
