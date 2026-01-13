@@ -2696,3 +2696,43 @@ export const insertPareIdempotencyKeySchema = createInsertSchema(pareIdempotency
 
 export type InsertPareIdempotencyKey = z.infer<typeof insertPareIdempotencyKeySchema>;
 export type PareIdempotencyKey = typeof pareIdempotencyKeys.$inferSelect;
+
+// ==========================================
+// Image State Management System
+// ==========================================
+
+export type ImageMode = 'generate' | 'edit_last' | 'edit_specific';
+
+export const imageHistoryEntrySchema = z.object({
+  id: z.string(),
+  prompt: z.string(),
+  mode: z.enum(['generate', 'edit_last', 'edit_specific']),
+  parentId: z.string().nullable(),
+  imageUrl: z.string(),
+  thumbnailUrl: z.string().optional(),
+  timestamp: z.number(),
+  model: z.string().optional(),
+});
+
+export type ImageHistoryEntry = z.infer<typeof imageHistoryEntrySchema>;
+
+export const imageSessionStateSchema = z.object({
+  threadId: z.string(),
+  lastImageId: z.string().nullable(),
+  lastImageUrl: z.string().nullable(),
+  history: z.array(imageHistoryEntrySchema),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+export type ImageSessionState = z.infer<typeof imageSessionStateSchema>;
+
+export const imageIntentSchema = z.object({
+  mode: z.enum(['generate', 'edit_last', 'edit_specific']),
+  prompt: z.string(),
+  referenceImageId: z.string().nullable(),
+  referenceImageUrl: z.string().nullable(),
+  editInstruction: z.string().nullable(),
+});
+
+export type ImageIntent = z.infer<typeof imageIntentSchema>;

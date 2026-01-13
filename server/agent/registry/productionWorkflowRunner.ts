@@ -824,21 +824,43 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
     switch (toolName) {
       case "image_generate": {
-        const { generateImage } = await import("../../services/imageGeneration");
+        const { generateImage, editImage, classifyImageIntent } = await import("../../services/imageGeneration");
         const prompt = (input as any).prompt || run.query;
-        console.log(`[WorkflowRunner] image_generate: Generating image for "${prompt.slice(0, 50)}..."`);
+        const lastImageBase64 = (input as any).lastImageBase64 || null;
+        const lastImageId = (input as any).lastImageId || null;
+        const specificImageBase64 = (input as any).specificImageBase64 || null;
+        const specificImageId = (input as any).specificImageId || null;
+        
+        const intent = classifyImageIntent(prompt, !!lastImageBase64);
+        console.log(`[WorkflowRunner] image_generate: Mode=${intent.mode}, prompt="${prompt.slice(0, 50)}..."`);
         
         try {
-          const result = await generateImage(prompt);
+          let result;
+          let parentId: string | null = null;
+          
+          if (intent.mode === 'edit_last' && lastImageBase64) {
+            console.log(`[WorkflowRunner] image_generate: Editing last image (id: ${lastImageId})`);
+            result = await editImage(lastImageBase64, prompt);
+            parentId = lastImageId;
+          } else if (intent.mode === 'edit_specific' && specificImageBase64) {
+            console.log(`[WorkflowRunner] image_generate: Editing specific image (id: ${specificImageId})`);
+            result = await editImage(specificImageBase64, prompt);
+            parentId = specificImageId;
+          } else {
+            console.log(`[WorkflowRunner] image_generate: Generating new image from scratch`);
+            result = await generateImage(prompt);
+          }
+          
           const filePath = path.join(ARTIFACTS_DIR, `image_${safeTitle}_${timestamp}.png`);
           const imageBuffer = Buffer.from(result.imageBase64, "base64");
           fs.writeFileSync(filePath, imageBuffer);
           
           const stats = fs.statSync(filePath);
-          console.log(`[WorkflowRunner] image_generate: Saved image to ${filePath} (${stats.size} bytes, model: ${result.model})`);
+          const artifactId = crypto.randomUUID();
+          console.log(`[WorkflowRunner] image_generate: Saved to ${filePath} (${stats.size} bytes, model: ${result.model}, mode: ${intent.mode})`);
           
           const artifact: ArtifactInfo = {
-            artifactId: crypto.randomUUID(),
+            artifactId,
             type: "image",
             mimeType: result.mimeType || "image/png",
             path: filePath,
@@ -849,7 +871,16 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
           return {
             success: true,
-            data: { imageGenerated: true, filePath, prompt, model: result.model },
+            data: { 
+              imageGenerated: true, 
+              filePath, 
+              prompt, 
+              model: result.model, 
+              mode: intent.mode,
+              imageId: artifactId,
+              parentId,
+              imageBase64: result.imageBase64,
+            },
             artifacts: [artifact],
           };
         } catch (error: any) {

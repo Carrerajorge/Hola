@@ -81,6 +81,146 @@ export async function generateImage(prompt: string): Promise<ImageGenerationResu
   throw new Error(`Image generation failed: ${errorMsg}`);
 }
 
+export interface ImageEditResult extends ImageGenerationResult {
+  parentId?: string;
+}
+
+export async function editImage(
+  baseImageBase64: string,
+  editPrompt: string,
+  baseMimeType: string = "image/png"
+): Promise<ImageEditResult> {
+  const startTime = Date.now();
+  console.log(`[ImageGeneration] Starting edit for prompt: "${editPrompt.slice(0, 100)}..."`);
+  
+  if (!apiKey) {
+    console.error("[ImageGeneration] No API key configured");
+    throw new Error("Image generation not configured - missing API key");
+  }
+
+  const EDIT_MODELS = [
+    "models/gemini-2.5-flash-image",
+    "gemini-2.0-flash-exp-image-generation",
+  ];
+
+  let lastError: Error | null = null;
+  
+  for (const model of EDIT_MODELS) {
+    try {
+      console.log(`[ImageGeneration] Trying edit with model: ${model}`);
+      
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                inlineData: {
+                  mimeType: baseMimeType,
+                  data: baseImageBase64,
+                }
+              },
+              { text: `Edit this image: ${editPrompt}` }
+            ]
+          }
+        ],
+        config: {
+          responseModalities: ["IMAGE"],
+        }
+      });
+
+      const parts = response.candidates?.[0]?.content?.parts;
+      
+      if (!parts || parts.length === 0) {
+        console.log(`[ImageGeneration] Edit model ${model} returned no parts, trying next...`);
+        continue;
+      }
+
+      for (const part of parts) {
+        if (part.inlineData && part.inlineData.data) {
+          const durationMs = Date.now() - startTime;
+          console.log(`[ImageGeneration] Edit success with model ${model} in ${durationMs}ms`);
+          return {
+            imageBase64: part.inlineData.data,
+            mimeType: part.inlineData.mimeType || "image/png",
+            prompt: editPrompt,
+            model
+          };
+        }
+      }
+      
+      console.log(`[ImageGeneration] Edit model ${model} returned parts but no image data, trying next...`);
+    } catch (error: any) {
+      console.error(`[ImageGeneration] Edit model ${model} failed:`, error.message);
+      lastError = error;
+      continue;
+    }
+  }
+
+  const errorMsg = lastError?.message || "All models failed to edit image";
+  console.error(`[ImageGeneration] All edit models exhausted. Last error: ${errorMsg}`);
+  throw new Error(`Image edit failed: ${errorMsg}`);
+}
+
+export type ImageMode = 'generate' | 'edit_last' | 'edit_specific';
+
+export interface ImageIntentResult {
+  mode: ImageMode;
+  prompt: string;
+  editInstruction: string | null;
+  referenceImageId: string | null;
+}
+
+export function classifyImageIntent(message: string, hasLastImage: boolean): ImageIntentResult {
+  const lowerMessage = message.toLowerCase();
+  
+  const editLastPatterns = [
+    /\b(edita|modifica|cambia|ajusta|arregla)\s+(la\s+)?(última|anterior|esa|esta)\s*(imagen|foto)?/i,
+    /\b(hazle|ponle|agrégale|quítale|añádele)\s+/i,
+    /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
+    /\bpon(le|er)?\s+/i,
+    /\bagrega(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+    /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
+  ];
+  
+  const editSpecificPatterns = [
+    /\bedita(r)?\s+(la\s+)?imagen\s+(número|#|id:?\s*)\d+/i,
+    /\bedit\s+(image|photo)\s+(number|#|id:?\s*)\d+/i,
+    /\bmodifica(r)?\s+(la\s+)?imagen\s+\d+/i,
+  ];
+  
+  for (const pattern of editSpecificPatterns) {
+    if (pattern.test(message)) {
+      const idMatch = message.match(/\d+/);
+      return {
+        mode: 'edit_specific',
+        prompt: message,
+        editInstruction: message,
+        referenceImageId: idMatch ? idMatch[0] : null,
+      };
+    }
+  }
+  
+  for (const pattern of editLastPatterns) {
+    if (pattern.test(message) && hasLastImage) {
+      return {
+        mode: 'edit_last',
+        prompt: message,
+        editInstruction: message,
+        referenceImageId: null,
+      };
+    }
+  }
+  
+  return {
+    mode: 'generate',
+    prompt: message,
+    editInstruction: null,
+    referenceImageId: null,
+  };
+}
+
 export function detectImageRequest(message: string): boolean {
   const lowerMessage = message.toLowerCase();
   
