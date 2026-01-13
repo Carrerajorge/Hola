@@ -824,26 +824,42 @@ export class ProductionWorkflowRunner extends EventEmitter {
 
     switch (toolName) {
       case "image_generate": {
-        const filePath = path.join(ARTIFACTS_DIR, `image_${safeTitle}_${timestamp}.png`);
-        const pngBuffer = this.createRealPNG(256, 256);
-        fs.writeFileSync(filePath, pngBuffer);
+        const { generateImage } = await import("../../services/imageGeneration");
+        const prompt = (input as any).prompt || run.query;
+        console.log(`[WorkflowRunner] image_generate: Generating image for "${prompt.slice(0, 50)}..."`);
         
-        const stats = fs.statSync(filePath);
-        const artifact: ArtifactInfo = {
-          artifactId: crypto.randomUUID(),
-          type: "image",
-          mimeType: "image/png",
-          path: filePath,
-          sizeBytes: stats.size,
-          createdAt: new Date().toISOString(),
-          previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
-        };
+        try {
+          const result = await generateImage(prompt);
+          const filePath = path.join(ARTIFACTS_DIR, `image_${safeTitle}_${timestamp}.png`);
+          const imageBuffer = Buffer.from(result.imageBase64, "base64");
+          fs.writeFileSync(filePath, imageBuffer);
+          
+          const stats = fs.statSync(filePath);
+          console.log(`[WorkflowRunner] image_generate: Saved image to ${filePath} (${stats.size} bytes, model: ${result.model})`);
+          
+          const artifact: ArtifactInfo = {
+            artifactId: crypto.randomUUID(),
+            type: "image",
+            mimeType: result.mimeType || "image/png",
+            path: filePath,
+            sizeBytes: stats.size,
+            createdAt: new Date().toISOString(),
+            previewUrl: `/api/artifacts/${path.basename(filePath)}/preview`,
+          };
 
-        return {
-          success: true,
-          data: { imageGenerated: true, filePath, prompt: (input as any).prompt, width: 256, height: 256 },
-          artifacts: [artifact],
-        };
+          return {
+            success: true,
+            data: { imageGenerated: true, filePath, prompt, model: result.model },
+            artifacts: [artifact],
+          };
+        } catch (error: any) {
+          console.error(`[WorkflowRunner] image_generate failed:`, error.message);
+          return {
+            success: false,
+            data: null,
+            error: `Image generation failed: ${error.message}`,
+          };
+        }
       }
 
       case "slides_create": {
