@@ -20,6 +20,7 @@ import { renderCvFromSpec } from "../services/cvRenderer";
 import { selectCvTemplate } from "../services/documentMappingService";
 import { excelSpecSchema, docSpecSchema, cvSpecSchema } from "../../shared/documentSpecs";
 import { llmGateway } from "../lib/llmGateway";
+import { generateAgentToolsExcel } from "../lib/agentToolsGenerator";
 
 export function createDocumentsRouter() {
   const router = Router();
@@ -64,6 +65,20 @@ export function createDocumentsRouter() {
     } catch (error: any) {
       console.error("Document generation error:", error);
       res.status(500).json({ error: "Failed to generate document", details: error.message });
+    }
+  });
+
+  router.get("/agent-tools-catalog", async (req, res) => {
+    try {
+      const buffer = await generateAgentToolsExcel();
+      const filename = `Agent_Tools_PRO_Edition_${new Date().toISOString().split('T')[0]}.xlsx`;
+      
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buffer);
+    } catch (error: any) {
+      console.error("Agent tools catalog generation error:", error);
+      res.status(500).json({ error: "Failed to generate agent tools catalog", details: error.message });
     }
   });
 
