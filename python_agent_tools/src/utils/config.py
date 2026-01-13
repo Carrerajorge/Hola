@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     )
     
     app_name: str = "python-agent-tools"
+    environment: str = "development"
     debug: bool = False
     log_level: str = "INFO"
     

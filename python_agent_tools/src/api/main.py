@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Path
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.openapi.utils import get_openapi
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional, get_type_hints, Type
 import structlog
 
@@ -28,16 +29,88 @@ def _register_tools():
     from ..tools.embeddings import EmbeddingsTool
     from ..tools.secrets_manage import SecretsManageTool
     from ..tools.sanitize_input import SanitizeInputTool
+    from ..tools.web_scraper import WebScraperTool
+    from ..tools.browser_tool import BrowserTool
+    from ..tools.document_gen import DocumentGenTool
+    from ..tools.data_transform import DataTransformTool, DataValidateTool
 
 _register_tools()
 
 from ..core.registry import registry
 from ..core.factory import ToolFactory
 
+API_DESCRIPTION = """
+## Python Agent Tools API
+
+A FastAPI-based interface for executing agent tools, managing agents, and running workflows.
+
+### Features
+
+* **Tools Management** - List, inspect, and execute individual tools
+* **Agents Management** - List and execute AI agents that combine multiple tools
+* **Workflows** - Execute complex multi-step workflows
+* **Health Monitoring** - Check API status and metrics
+
+### Rate Limiting
+
+The API implements rate limiting to prevent abuse:
+- Default limit: 100 requests per minute
+- Burst size: 20 requests
+
+### Error Handling
+
+All errors return a consistent JSON format with a `detail` field describing the error.
+"""
+
+TAGS_METADATA = [
+    {
+        "name": "health",
+        "description": "Health check and status endpoints",
+    },
+    {
+        "name": "tools",
+        "description": "Operations for listing, inspecting, and executing individual tools",
+    },
+    {
+        "name": "agents",
+        "description": "Operations for managing and executing AI agents",
+    },
+    {
+        "name": "workflows",
+        "description": "Operations for executing multi-step workflows",
+    },
+]
+
 app = FastAPI(
     title="Python Agent Tools API",
-    description="API for executing agent tools",
-    version="1.0.0"
+    description=API_DESCRIPTION,
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=TAGS_METADATA,
+    contact={
+        "name": "API Support",
+        "email": "support@example.com",
+    },
+    license_info={
+        "name": "MIT",
+    },
+)
+
+from ..utils.middleware import (
+    RequestLoggingMiddleware,
+    RateLimitMiddleware,
+    ErrorHandlingMiddleware,
+    SecurityHeadersMiddleware,
+)
+
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(ErrorHandlingMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(
+    RateLimitMiddleware,
+    requests_per_minute=getattr(settings, 'rate_limit_rpm', 100),
+    burst_size=getattr(settings, 'rate_limit_burst', 20),
 )
 
 app.add_middleware(
@@ -49,34 +122,150 @@ app.add_middleware(
 )
 
 from .agents import agents_router
+from .workflows import workflows_router
+from .health import router as health_router
+
+app.include_router(health_router, tags=["health"])
 app.include_router(agents_router, prefix="/agents", tags=["agents"])
+app.include_router(workflows_router, prefix="/workflows", tags=["workflows"])
 
 factory = ToolFactory()
 
+
 class ToolExecuteRequest(BaseModel):
-    tool_name: str
-    input: Dict[str, Any]
+    """Request body for executing a tool."""
+    tool_name: str = Field(
+        ...,
+        description="The name of the tool to execute",
+        example="shell"
+    )
+    input: Dict[str, Any] = Field(
+        ...,
+        description="Input parameters for the tool",
+        example={"command": "echo Hello World"}
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "tool_name": "shell",
+                "input": {"command": "echo Hello World"}
+            }
+        }
+
 
 class ToolExecuteResponse(BaseModel):
-    success: bool
-    data: Optional[Any] = None
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = {}
+    """Response from tool execution."""
+    success: bool = Field(
+        ...,
+        description="Whether the tool execution was successful"
+    )
+    data: Optional[Any] = Field(
+        None,
+        description="The output data from the tool execution",
+        example={"stdout": "Hello World\n", "stderr": "", "exit_code": 0}
+    )
+    error: Optional[str] = Field(
+        None,
+        description="Error message if execution failed"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional metadata about the execution",
+        example={"execution_time_ms": 45}
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "data": {"stdout": "Hello World\n", "stderr": "", "exit_code": 0},
+                "error": None,
+                "metadata": {"execution_time_ms": 45}
+            }
+        }
+
 
 class ToolInfo(BaseModel):
-    name: str
-    description: str
-    category: str
-    priority: str
-    dependencies: List[str]
+    """Information about a registered tool."""
+    name: str = Field(
+        ...,
+        description="Unique identifier for the tool",
+        example="shell"
+    )
+    description: str = Field(
+        ...,
+        description="Human-readable description of what the tool does",
+        example="Execute shell commands safely"
+    )
+    category: str = Field(
+        ...,
+        description="Category the tool belongs to",
+        example="execution"
+    )
+    priority: str = Field(
+        ...,
+        description="Priority level of the tool",
+        example="high"
+    )
+    dependencies: List[str] = Field(
+        ...,
+        description="List of tool dependencies",
+        example=[]
+    )
 
-@app.get("/health")
-async def health():
-    return {"status": "healthy", "tools_count": len(registry.list_all())}
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "shell",
+                "description": "Execute shell commands safely",
+                "category": "execution",
+                "priority": "high",
+                "dependencies": []
+            }
+        }
 
-@app.get("/tools", response_model=List[ToolInfo])
+
+@app.get(
+    "/tools",
+    response_model=List[ToolInfo],
+    tags=["tools"],
+    summary="List all registered tools",
+    description="Returns a list of all tools registered in the system with their metadata.",
+    responses={
+        200: {
+            "description": "List of tools retrieved successfully",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "name": "shell",
+                            "description": "Execute shell commands safely",
+                            "category": "execution",
+                            "priority": "high",
+                            "dependencies": []
+                        },
+                        {
+                            "name": "code_execute",
+                            "description": "Execute code in a sandboxed environment",
+                            "category": "execution",
+                            "priority": "high",
+                            "dependencies": ["sanitize_input"]
+                        }
+                    ]
+                }
+            }
+        }
+    }
+)
 async def list_tools():
-    """List all registered tools."""
+    """
+    List all registered tools.
+    
+    Returns a complete list of all tools available in the system,
+    including their names, descriptions, categories, priorities,
+    and dependencies.
+    """
     tools = []
     for name in registry.list_all():
         tool_class = registry.get(name)
@@ -90,9 +279,43 @@ async def list_tools():
             ))
     return tools
 
-@app.get("/tools/{tool_name}")
-async def get_tool(tool_name: str):
-    """Get tool details."""
+
+@app.get(
+    "/tools/{tool_name}",
+    response_model=ToolInfo,
+    tags=["tools"],
+    summary="Get tool details",
+    description="Retrieve detailed information about a specific tool by name.",
+    responses={
+        200: {
+            "description": "Tool details retrieved successfully",
+            "model": ToolInfo
+        },
+        404: {
+            "description": "Tool not found",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Tool 'unknown_tool' not found"}
+                }
+            }
+        }
+    }
+)
+async def get_tool(
+    tool_name: str = Path(
+        ...,
+        description="The unique name of the tool to retrieve",
+        example="shell"
+    )
+):
+    """
+    Get details for a specific tool.
+    
+    Retrieves the full metadata for a tool including its description,
+    category, priority level, and any dependencies it requires.
+    
+    - **tool_name**: The unique identifier of the tool
+    """
     tool_class = registry.get(tool_name)
     if not tool_class:
         raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
@@ -104,14 +327,74 @@ async def get_tool(tool_name: str):
         dependencies=tool_class.dependencies
     )
 
-@app.post("/tools/{tool_name}/execute", response_model=ToolExecuteResponse)
-async def execute_tool(tool_name: str, request: ToolExecuteRequest):
-    """Execute a tool with given input."""
+
+@app.post(
+    "/tools/{tool_name}/execute",
+    response_model=ToolExecuteResponse,
+    tags=["tools"],
+    summary="Execute a tool",
+    description="Execute a specific tool with the provided input parameters.",
+    responses={
+        200: {
+            "description": "Tool executed successfully",
+            "model": ToolExecuteResponse
+        },
+        404: {
+            "description": "Tool not found",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Tool 'unknown_tool' not found"}
+                }
+            }
+        },
+        500: {
+            "description": "Tool execution failed",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Command execution failed: Permission denied"}
+                }
+            }
+        }
+    }
+)
+async def execute_tool(
+    tool_name: str = Path(
+        ...,
+        description="The name of the tool to execute",
+        example="shell"
+    ),
+    request: ToolExecuteRequest = ...
+):
+    """
+    Execute a tool with given input.
+    
+    Runs the specified tool with the provided input parameters and
+    returns the execution result including any output data, errors,
+    and metadata.
+    
+    - **tool_name**: The unique identifier of the tool to execute
+    - **request**: The execution request containing tool_name and input parameters
+    
+    ### Example
+    
+    ```json
+    {
+        "tool_name": "shell",
+        "input": {"command": "echo Hello World"}
+    }
+    ```
+    """
+    from ..utils.middleware import TOOL_EXECUTIONS
+    import time
+    
     logger.info("execute_tool_request", tool=tool_name)
     
     tool = factory.get_or_create(tool_name)
     if not tool:
         raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+    
+    start_time = time.perf_counter()
+    success = False
     
     try:
         tool_class = tool.__class__
@@ -124,6 +407,10 @@ async def execute_tool(tool_name: str, request: ToolExecuteRequest):
             raise HTTPException(status_code=500, detail="Could not determine input class for tool")
         tool_input = input_class(**request.input)
         result = await tool.execute(tool_input)
+        success = result.success
+        
+        TOOL_EXECUTIONS.labels(tool_name=tool_name, success=str(success)).inc()
+        
         return ToolExecuteResponse(
             success=result.success,
             data=result.data,
@@ -131,5 +418,6 @@ async def execute_tool(tool_name: str, request: ToolExecuteRequest):
             metadata=result.metadata
         )
     except Exception as e:
+        TOOL_EXECUTIONS.labels(tool_name=tool_name, success="false").inc()
         logger.error("tool_execution_failed", tool=tool_name, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
