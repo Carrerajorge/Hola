@@ -74,7 +74,7 @@ export default function MonitoringDashboard() {
       const [analyticsRes, pythonRes, healthRes, obsRes, historyRes] = await Promise.allSettled([
         fetch('/api/execution/analytics'),
         fetch('/api/python-tools/health'),
-        fetch('/api/health'),
+        fetch('/health'),
         fetch('/api/observability/health'),
         fetch('/api/execution/history?limit=10')
       ]);
