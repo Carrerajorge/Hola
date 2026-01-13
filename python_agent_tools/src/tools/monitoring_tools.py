@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
+from typing import List, Optional, Dict, Any, TYPE_CHECKING, Literal
 from pydantic import Field
 from .base import BaseTool, ToolCategory, Priority, ToolInput, ToolOutput
 from ..core.registry import ToolRegistry
@@ -259,7 +259,7 @@ class SystemMonitorTool(BaseTool[SystemMonitorInput, SystemMonitorOutput]):
 class ProcessMonitorInput(ToolInput):
     filter_name: Optional[str] = None
     top_n: int = Field(default=10, ge=1, le=100)
-    sort_by: str = Field(default="cpu")
+    sort_by: Literal["cpu", "memory"] = Field(default="cpu")
 
 class ProcessInfo(ToolOutput):
     pid: int = 0
@@ -287,7 +287,8 @@ class ProcessMonitorTool(BaseTool[ProcessMonitorInput, ProcessMonitorOutput]):
         total_processes = 0
         
         try:
-            cmd = f"ps aux --sort=-{input.sort_by == 'cpu' and '%cpu' or '%mem'} | head -n {input.top_n + 1}"
+            sort_field = "%cpu" if input.sort_by == "cpu" else "%mem"
+            cmd = f"ps aux --sort=-{sort_field} | head -n {input.top_n + 1}"
             
             proc = await asyncio.create_subprocess_shell(
                 cmd,
