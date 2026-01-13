@@ -103,6 +103,7 @@ import { MessageList, parseDocumentBlocks, type DocumentBlock } from "@/componen
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
 // AgentPanel removed - progress is shown inline in chat messages
 import { useAuth } from "@/hooks/use-auth";
+import { useConversationState } from "@/hooks/use-conversation-state";
 import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
@@ -942,6 +943,29 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const { user } = useAuth();
   const { toast } = useToast();
+  
+  const { 
+    state: conversationState, 
+    isLoading: isConversationStateLoading,
+    error: conversationStateError,
+    refreshState: refreshConversationState,
+    addImage: addImageToState,
+    addArtifact: addArtifactToState,
+  } = useConversationState(chatId);
+  
+  useEffect(() => {
+    if (conversationState) {
+      console.log(`[ChatInterface] Conversation state loaded for chat ${chatId}:`, {
+        messagesCount: conversationState.messages?.length || 0,
+        imagesCount: conversationState.images?.length || 0,
+        artifactsCount: conversationState.artifacts?.length || 0,
+      });
+    }
+    if (conversationStateError) {
+      console.warn(`[ChatInterface] Failed to load conversation state for chat ${chatId}:`, conversationStateError);
+    }
+  }, [chatId, conversationState, conversationStateError]);
+  
   const { initialDraft, saveDraftDebounced, clearDraft, currentTextRef } = useDraft(chatId);
   const [input, setInputRaw] = useState(initialDraft);
   
