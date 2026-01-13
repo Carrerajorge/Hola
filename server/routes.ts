@@ -41,6 +41,7 @@ import { createRegistryRouter } from "./routes/registryRouter";
 import wordPipelineRoutes from "./routes/wordPipelineRoutes";
 import redisSSERouter from "./routes/redisSSERouter";
 import superAgentRouter from "./routes/superAgentRoutes";
+import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
 import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
@@ -267,6 +268,7 @@ export async function registerRoutes(
   app.use("/api", createRegistryRouter());
   app.use("/api/word-pipeline", wordPipelineRoutes);
   app.use("/api/sse", redisSSERouter);
+  app.use("/api/memory", conversationMemoryRoutes);
   app.use("/api", superAgentRouter);
   app.use("/api", createRunController());
 

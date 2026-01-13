@@ -8,6 +8,13 @@
       "when": 1766557255843,
       "tag": "0000_pale_timeslip",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1768285293978,
+      "tag": "0001_faulty_vance_astro",
+      "breakpoints": true
     }
   ]
 }

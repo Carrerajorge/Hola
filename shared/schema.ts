@@ -2736,3 +2736,274 @@ export const imageIntentSchema = z.object({
 });
 
 export type ImageIntent = z.infer<typeof imageIntentSchema>;
+
+// ==========================================
+// Conversation Memory System
+// ==========================================
+
+// Zod schemas for JSONB columns
+export const conversationContextDataSchema = z.object({
+  summary: z.string().optional(),
+  entities: z.array(z.object({
+    name: z.string(),
+    type: z.string(),
+    mentions: z.number().default(1),
+    lastMentioned: z.string().optional(),
+  })).default([]),
+  userPreferences: z.record(z.string(), z.unknown()).default({}),
+  topics: z.array(z.string()).default([]),
+  sentiment: z.enum(['positive', 'negative', 'neutral']).optional(),
+});
+
+export type ConversationContextData = z.infer<typeof conversationContextDataSchema>;
+
+export const artifactMetadataSchema = z.object({
+  pageCount: z.number().optional(),
+  wordCount: z.number().optional(),
+  language: z.string().optional(),
+  dimensions: z.object({ width: z.number(), height: z.number() }).optional(),
+  duration: z.number().optional(),
+  encoding: z.string().optional(),
+  customFields: z.record(z.string(), z.unknown()).optional(),
+});
+
+export type ArtifactMetadata = z.infer<typeof artifactMetadataSchema>;
+
+export const imageEditHistorySchema = z.object({
+  editId: z.string(),
+  prompt: z.string(),
+  timestamp: z.string(),
+  model: z.string().optional(),
+});
+
+export type ImageEditHistory = z.infer<typeof imageEditHistorySchema>;
+
+// Main ConversationState table - versioned state per chat
+export const conversationStates = pgTable("conversation_states", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  version: integer("version").notNull().default(1),
+  totalTokens: integer("total_tokens").default(0),
+  messageCount: integer("message_count").default(0),
+  artifactCount: integer("artifact_count").default(0),
+  imageCount: integer("image_count").default(0),
+  lastMessageId: varchar("last_message_id"),
+  lastImageId: varchar("last_image_id"),
+  isActive: text("is_active").default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("conversation_states_chat_idx").on(table.chatId),
+  index("conversation_states_user_idx").on(table.userId),
+  index("conversation_states_version_idx").on(table.chatId, table.version),
+  uniqueIndex("conversation_states_chat_unique").on(table.chatId),
+]);
+
+export const insertConversationStateSchema = createInsertSchema(conversationStates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertConversationState = z.infer<typeof insertConversationStateSchema>;
+export type ConversationState = typeof conversationStates.$inferSelect;
+
+// Versioned snapshots for rollback
+export const conversationStateVersions = pgTable("conversation_state_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
+  version: integer("version").notNull(),
+  snapshot: jsonb("snapshot").notNull(),
+  changeDescription: text("change_description"),
+  authorId: varchar("author_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("conversation_versions_state_idx").on(table.stateId),
+  index("conversation_versions_version_idx").on(table.stateId, table.version),
+]);
+
+export const insertConversationStateVersionSchema = createInsertSchema(conversationStateVersions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertConversationStateVersion = z.infer<typeof insertConversationStateVersionSchema>;
+export type ConversationStateVersion = typeof conversationStateVersions.$inferSelect;
+
+// Messages within conversation state
+export const conversationMessages = pgTable("conversation_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
+  chatMessageId: varchar("chat_message_id").references(() => chatMessages.id, { onDelete: "set null" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  tokenCount: integer("token_count").default(0),
+  sequence: integer("sequence").notNull(),
+  parentMessageId: varchar("parent_message_id"),
+  attachmentIds: text("attachment_ids").array().default([]),
+  imageIds: text("image_ids").array().default([]),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("conversation_messages_state_idx").on(table.stateId),
+  index("conversation_messages_sequence_idx").on(table.stateId, table.sequence),
+  index("conversation_messages_created_idx").on(table.createdAt),
+]);
+
+export const insertConversationMessageSchema = createInsertSchema(conversationMessages).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertConversationMessage = z.infer<typeof insertConversationMessageSchema>;
+export type ConversationMessage = typeof conversationMessages.$inferSelect;
+
+// Artifacts (uploaded files: doc/pdf/img/etc)
+export const conversationArtifacts = pgTable("conversation_artifacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
+  messageId: varchar("message_id").references(() => conversationMessages.id, { onDelete: "set null" }),
+  artifactType: text("artifact_type").notNull(),
+  mimeType: text("mime_type").notNull(),
+  fileName: text("file_name"),
+  fileSize: integer("file_size"),
+  checksum: varchar("checksum", { length: 64 }),
+  storageUrl: text("storage_url").notNull(),
+  extractedText: text("extracted_text"),
+  metadata: jsonb("metadata").$type<ArtifactMetadata>(),
+  processingStatus: text("processing_status").default("pending"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("conversation_artifacts_state_idx").on(table.stateId),
+  index("conversation_artifacts_message_idx").on(table.messageId),
+  index("conversation_artifacts_type_idx").on(table.artifactType),
+  index("conversation_artifacts_checksum_idx").on(table.checksum),
+]);
+
+export const insertConversationArtifactSchema = createInsertSchema(conversationArtifacts).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertConversationArtifact = z.infer<typeof insertConversationArtifactSchema>;
+export type ConversationArtifact = typeof conversationArtifacts.$inferSelect;
+
+// Generated images with edit history chain
+export const conversationImages = pgTable("conversation_images", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
+  messageId: varchar("message_id").references(() => conversationMessages.id, { onDelete: "set null" }),
+  parentImageId: varchar("parent_image_id"),
+  prompt: text("prompt").notNull(),
+  imageUrl: text("image_url").notNull(),
+  thumbnailUrl: text("thumbnail_url"),
+  base64Preview: text("base64_preview"),
+  model: text("model"),
+  mode: text("mode").default("generate"),
+  width: integer("width"),
+  height: integer("height"),
+  editHistory: jsonb("edit_history").$type<ImageEditHistory[]>().default([]),
+  isLatest: text("is_latest").default("true"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("conversation_images_state_idx").on(table.stateId),
+  index("conversation_images_message_idx").on(table.messageId),
+  index("conversation_images_parent_idx").on(table.parentImageId),
+  index("conversation_images_latest_idx").on(table.stateId, table.isLatest),
+]);
+
+export const insertConversationImageSchema = createInsertSchema(conversationImages).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertConversationImage = z.infer<typeof insertConversationImageSchema>;
+export type ConversationImage = typeof conversationImages.$inferSelect;
+
+// Context (summary, entities, user preferences)
+export const conversationContexts = pgTable("conversation_contexts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  stateId: varchar("state_id").notNull().references(() => conversationStates.id, { onDelete: "cascade" }),
+  summary: text("summary"),
+  entities: jsonb("entities").$type<ConversationContextData['entities']>().default([]),
+  userPreferences: jsonb("user_preferences").$type<Record<string, unknown>>().default({}),
+  topics: text("topics").array().default([]),
+  sentiment: text("sentiment"),
+  lastUpdatedAt: timestamp("last_updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("conversation_contexts_state_idx").on(table.stateId),
+  uniqueIndex("conversation_contexts_state_unique").on(table.stateId),
+]);
+
+export const insertConversationContextSchema = createInsertSchema(conversationContexts).omit({
+  id: true,
+  createdAt: true,
+  lastUpdatedAt: true,
+});
+
+export type InsertConversationContext = z.infer<typeof insertConversationContextSchema>;
+export type ConversationContext = typeof conversationContexts.$inferSelect;
+
+// Full hydrated state type for API responses
+export const hydratedConversationStateSchema = z.object({
+  id: z.string(),
+  chatId: z.string(),
+  userId: z.string().nullable(),
+  version: z.number(),
+  totalTokens: z.number(),
+  messages: z.array(z.object({
+    id: z.string(),
+    role: z.string(),
+    content: z.string(),
+    tokenCount: z.number(),
+    sequence: z.number(),
+    attachmentIds: z.array(z.string()),
+    imageIds: z.array(z.string()),
+    createdAt: z.string(),
+  })),
+  artifacts: z.array(z.object({
+    id: z.string(),
+    artifactType: z.string(),
+    mimeType: z.string(),
+    fileName: z.string().nullable(),
+    fileSize: z.number().nullable(),
+    checksum: z.string().nullable(),
+    storageUrl: z.string(),
+    extractedText: z.string().nullable(),
+    metadata: artifactMetadataSchema.nullable(),
+    processingStatus: z.string().nullable(),
+    createdAt: z.string(),
+  })),
+  images: z.array(z.object({
+    id: z.string(),
+    parentImageId: z.string().nullable(),
+    prompt: z.string(),
+    imageUrl: z.string(),
+    thumbnailUrl: z.string().nullable(),
+    model: z.string().nullable(),
+    mode: z.string().nullable(),
+    editHistory: z.array(imageEditHistorySchema),
+    isLatest: z.string().nullable(),
+    createdAt: z.string(),
+  })),
+  context: z.object({
+    summary: z.string().nullable(),
+    entities: z.array(z.object({
+      name: z.string(),
+      type: z.string(),
+      mentions: z.number(),
+      lastMentioned: z.string().optional(),
+    })),
+    userPreferences: z.record(z.string(), z.unknown()),
+    topics: z.array(z.string()),
+    sentiment: z.string().nullable(),
+  }).nullable(),
+  lastMessageId: z.string().nullable(),
+  lastImageId: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type HydratedConversationState = z.infer<typeof hydratedConversationStateSchema>;
