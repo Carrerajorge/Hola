@@ -1,4 +1,5 @@
-from typing import Optional, List, Tuple, Dict
+"""Secure shell command execution with strict whitelisting."""
+from typing import Optional, List, Tuple, Dict, Callable, Awaitable
 from pydantic import Field
 from .base import BaseTool, ToolCategory, Priority, ToolInput, ToolOutput
 from ..core.registry import ToolRegistry
@@ -17,69 +18,171 @@ class ShellOutput(ToolOutput):
     stderr: Optional[str] = None
     return_code: Optional[int] = None
 
+
+class SecureCommandExecutor:
+    """
+    Secure command executor with hardcoded paths and strict validation.
+    Each command has a dedicated execution method to prevent injection.
+    """
+    
+    FORBIDDEN_CHARS = re.compile(r'[;&|`$<>\\]|\.\.')
+    MAX_ARG_LEN = 500
+    ALLOWED_DIRS: Tuple[str, ...] = ("/tmp", "/home", "/var/log")
+    
+    @staticmethod
+    def _sanitize_arg(arg: str) -> Optional[str]:
+        """Validate and sanitize a single argument. Returns None if invalid."""
+        if not arg or len(arg) > SecureCommandExecutor.MAX_ARG_LEN:
+            return None
+        if SecureCommandExecutor.FORBIDDEN_CHARS.search(arg):
+            return None
+        return arg
+    
+    @staticmethod
+    def _validate_args(args: List[str]) -> Tuple[bool, List[str]]:
+        """Validate all arguments. Returns (success, sanitized_args)."""
+        sanitized = []
+        for arg in args:
+            clean = SecureCommandExecutor._sanitize_arg(arg)
+            if clean is None:
+                return False, []
+            sanitized.append(clean)
+        return True, sanitized
+    
+    @staticmethod
+    def _validate_cwd(cwd: Optional[str]) -> Optional[str]:
+        """Validate and normalize working directory."""
+        if cwd is None:
+            return None
+        try:
+            normalized = os.path.normpath(os.path.abspath(cwd))
+        except (ValueError, TypeError):
+            return None
+        if not any(normalized.startswith(d) for d in SecureCommandExecutor.ALLOWED_DIRS):
+            return None
+        if not os.path.isdir(normalized):
+            return None
+        return normalized
+    
+    @staticmethod
+    async def _run_command(
+        cmd_path: str,  # Must be a literal string constant
+        args: List[str],
+        cwd: Optional[str],
+        timeout: int
+    ) -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
+        """Execute command with validated arguments."""
+        valid, clean_args = SecureCommandExecutor._validate_args(args)
+        if not valid:
+            return False, None, "Invalid arguments", None
+        
+        safe_cwd = SecureCommandExecutor._validate_cwd(cwd)
+        if cwd is not None and safe_cwd is None:
+            return False, None, "Invalid working directory", None
+        
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                cmd_path,
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), 
+                timeout=timeout
+            )
+            return (
+                proc.returncode == 0,
+                stdout.decode(errors='replace') if stdout else None,
+                stderr.decode(errors='replace') if stderr else None,
+                proc.returncode
+            )
+        except asyncio.TimeoutError:
+            return False, None, "Command timed out", None
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
+
+    @staticmethod
+    async def exec_ls(args: List[str], cwd: Optional[str], timeout: int):
+        """Execute /bin/ls with validated arguments."""
+        return await SecureCommandExecutor._run_command("/bin/ls", args, cwd, timeout)
+    
+    @staticmethod
+    async def exec_cat(args: List[str], cwd: Optional[str], timeout: int):
+        """Execute /bin/cat with validated arguments."""
+        return await SecureCommandExecutor._run_command("/bin/cat", args, cwd, timeout)
+    
+    @staticmethod
+    async def exec_grep(args: List[str], cwd: Optional[str], timeout: int):
+        """Execute /bin/grep with validated arguments."""
+        return await SecureCommandExecutor._run_command("/bin/grep", args, cwd, timeout)
+    
+    @staticmethod
+    async def exec_find(args: List[str], cwd: Optional[str], timeout: int):
+        """Execute /usr/bin/find with validated arguments."""
+        return await SecureCommandExecutor._run_command("/usr/bin/find", args, cwd, timeout)
+    
+    @staticmethod
+    async def exec_echo(args: List[str], cwd: Optional[str], timeout: int):
+        """Execute /bin/echo with validated arguments."""
+        return await SecureCommandExecutor._run_command("/bin/echo", args, cwd, timeout)
+    
+    @staticmethod
+    async def exec_pwd(args: List[str], cwd: Optional[str], timeout: int):
+        """Execute /bin/pwd with validated arguments."""
+        return await SecureCommandExecutor._run_command("/bin/pwd", args, cwd, timeout)
+    
+    @staticmethod
+    async def exec_head(args: List[str], cwd: Optional[str], timeout: int):
+        """Execute /usr/bin/head with validated arguments."""
+        return await SecureCommandExecutor._run_command("/usr/bin/head", args, cwd, timeout)
+    
+    @staticmethod
+    async def exec_tail(args: List[str], cwd: Optional[str], timeout: int):
+        """Execute /usr/bin/tail with validated arguments."""
+        return await SecureCommandExecutor._run_command("/usr/bin/tail", args, cwd, timeout)
+    
+    @staticmethod
+    async def exec_wc(args: List[str], cwd: Optional[str], timeout: int):
+        """Execute /usr/bin/wc with validated arguments."""
+        return await SecureCommandExecutor._run_command("/usr/bin/wc", args, cwd, timeout)
+
+
+# Command dispatcher mapping - only these commands can be executed
+COMMAND_DISPATCH: Dict[str, Callable[[List[str], Optional[str], int], Awaitable]] = {
+    "ls": SecureCommandExecutor.exec_ls,
+    "cat": SecureCommandExecutor.exec_cat,
+    "grep": SecureCommandExecutor.exec_grep,
+    "find": SecureCommandExecutor.exec_find,
+    "echo": SecureCommandExecutor.exec_echo,
+    "pwd": SecureCommandExecutor.exec_pwd,
+    "head": SecureCommandExecutor.exec_head,
+    "tail": SecureCommandExecutor.exec_tail,
+    "wc": SecureCommandExecutor.exec_wc,
+}
+
+
 @ToolRegistry.register
 class ShellTool(BaseTool[ShellInput, ShellOutput]):
+    """
+    Secure shell command execution tool.
+    
+    Security features:
+    - Strict command whitelist with hardcoded paths
+    - Dedicated execution methods per command (no dynamic path resolution)
+    - Argument validation and sanitization
+    - Restricted environment variables
+    - Working directory validation
+    - Timeout enforcement
+    """
+    
     name = "shell"
-    description = "Executes shell commands safely"
+    description = "Executes shell commands safely with strict whitelisting"
     category = ToolCategory.SYSTEM
     priority = Priority.CRITICAL
     dependencies = []
-    
-    ALLOWED_COMMANDS: Dict[str, str] = {
-        "ls": "/bin/ls",
-        "cat": "/bin/cat",
-        "grep": "/bin/grep",
-        "find": "/usr/bin/find",
-        "echo": "/bin/echo",
-        "pwd": "/bin/pwd",
-        "head": "/usr/bin/head",
-        "tail": "/usr/bin/tail",
-        "wc": "/usr/bin/wc",
-    }
-    FORBIDDEN_PATTERNS = re.compile(r'[;&|`$<>\\]|\.\.')
-    ALLOWED_WORKING_DIRS: Tuple[str, ...] = ("/tmp", "/home", "/var/log")
-    MAX_ARG_LENGTH: int = 500
-    
-    def _resolve_command(self, cmd_name: str) -> Optional[str]:
-        """Resolve command name to a safe, absolute path from whitelist."""
-        base_cmd = os.path.basename(cmd_name)
-        safe_path = self.ALLOWED_COMMANDS.get(base_cmd)
-        if safe_path and os.path.isfile(safe_path) and os.access(safe_path, os.X_OK):
-            return safe_path
-        return None
-    
-    def _validate_command(self, cmd_parts: List[str]) -> Optional[str]:
-        if not cmd_parts:
-            return "Empty command"
-        
-        if self._resolve_command(cmd_parts[0]) is None:
-            base_cmd = os.path.basename(cmd_parts[0])
-            return f"Command not allowed: {base_cmd}"
-        
-        for arg in cmd_parts[1:]:
-            if len(arg) > self.MAX_ARG_LENGTH:
-                return f"Argument too long: {len(arg)} chars"
-            if self.FORBIDDEN_PATTERNS.search(arg):
-                return f"Forbidden characters in argument: {arg[:20]}"
-        
-        return None
-    
-    def _validate_working_dir(self, working_dir: Optional[str]) -> Optional[str]:
-        if working_dir is None:
-            return None
-        
-        try:
-            normalized = os.path.normpath(os.path.abspath(working_dir))
-        except (ValueError, TypeError):
-            return "Invalid working directory path"
-        
-        if not any(normalized.startswith(allowed) for allowed in self.ALLOWED_WORKING_DIRS):
-            return f"Working directory not allowed: {normalized}"
-        
-        if not os.path.isdir(normalized):
-            return f"Working directory does not exist: {normalized}"
-        
-        return None
     
     async def execute(self, input: ShellInput) -> ShellOutput:
         self.logger.info("shell_execute", command=input.command[:50])
@@ -89,41 +192,38 @@ class ShellTool(BaseTool[ShellInput, ShellOutput]):
         except ValueError as e:
             return ShellOutput(success=False, error=f"Invalid command syntax: {e}")
         
-        cmd_error = self._validate_command(cmd_parts)
-        if cmd_error:
-            return ShellOutput(success=False, error=cmd_error)
+        if not cmd_parts:
+            return ShellOutput(success=False, error="Empty command")
         
-        dir_error = self._validate_working_dir(input.working_dir)
-        if dir_error:
-            return ShellOutput(success=False, error=dir_error)
+        cmd_name = os.path.basename(cmd_parts[0])
+        executor = COMMAND_DISPATCH.get(cmd_name)
         
-        safe_cwd = os.path.normpath(os.path.abspath(input.working_dir)) if input.working_dir else None
-        
-        safe_cmd_path = self._resolve_command(cmd_parts[0])
-        if safe_cmd_path is None:
-            return ShellOutput(success=False, error="Command resolution failed")
-        
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                safe_cmd_path,
-                *cmd_parts[1:],
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=safe_cwd
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=input.timeout)
+        if executor is None:
+            allowed = ", ".join(sorted(COMMAND_DISPATCH.keys()))
             return ShellOutput(
-                success=proc.returncode == 0,
-                stdout=stdout.decode(errors='replace') if stdout else None,
-                stderr=stderr.decode(errors='replace') if stderr else None,
-                return_code=proc.returncode
+                success=False, 
+                error=f"Command not allowed: {cmd_name}. Allowed: {allowed}"
             )
-        except asyncio.TimeoutError:
-            return ShellOutput(success=False, error="Command timed out")
-        except FileNotFoundError:
-            return ShellOutput(success=False, error=f"Command not found: {cmd_parts[0]}")
-        except PermissionError:
-            return ShellOutput(success=False, error="Permission denied")
-        except Exception as e:
-            self.logger.error("shell_execute_error", error=str(e))
-            return ShellOutput(success=False, error="Execution failed")
+        
+        args = cmd_parts[1:] if len(cmd_parts) > 1 else []
+        
+        success, stdout, stderr, return_code = await executor(
+            args, 
+            input.working_dir, 
+            input.timeout
+        )
+        
+        if not success and stderr:
+            return ShellOutput(
+                success=False,
+                error=stderr,
+                stdout=stdout,
+                return_code=return_code
+            )
+        
+        return ShellOutput(
+            success=success,
+            stdout=stdout,
+            stderr=stderr,
+            return_code=return_code
+        )
