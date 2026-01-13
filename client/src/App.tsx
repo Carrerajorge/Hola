@@ -36,6 +36,7 @@ import WorkspaceSettingsPage from "@/pages/workspace-settings";
 import WorkspacePage from "@/pages/workspace";
 import SkillsPage from "@/pages/skills";
 import SpreadsheetAnalyzerPage from "@/pages/SpreadsheetAnalyzer";
+import MonitoringDashboard from "@/pages/MonitoringDashboard";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
@@ -144,6 +145,7 @@ function Router() {
       <Route path="/workspace" component={WorkspacePage} />
       <Route path="/skills" component={SkillsPage} />
       <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
+      <Route path="/monitoring" component={MonitoringDashboard} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -43,6 +43,7 @@ import redisSSERouter from "./routes/redisSSERouter";
 import superAgentRouter from "./routes/superAgentRoutes";
 import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
 import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
+import { createToolExecutionRouter } from "./routes/toolExecutionRouter";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
 import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
@@ -272,6 +273,7 @@ export async function registerRoutes(
   app.use("/api/memory", conversationMemoryRoutes);
   app.use("/api", superAgentRouter);
   app.use("/api", createPythonToolsRouter());
+  app.use("/api/execution", createToolExecutionRouter());
   app.use("/api", createRunController());
 
   // ===== Run Detail Endpoints =====
