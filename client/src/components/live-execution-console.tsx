@@ -285,12 +285,13 @@ export function LiveExecutionConsole({
       )}
     >
       {narrationText && (
-        <div className="px-4 py-3 bg-primary/10 border-b border-primary/20">
-          <div className="flex items-center gap-2 mb-1">
-            <MessageSquare className="w-4 h-4 text-primary animate-pulse" />
-            <span className="text-xs text-primary/80 font-medium uppercase tracking-wide">Qué estoy haciendo ahora</span>
+        <div className="relative px-4 py-3 bg-muted/30 border-b border-border/40 overflow-hidden">
+          {state.status === 'running' && (
+            <div className="absolute inset-0 animate-shimmer" />
+          )}
+          <div className="relative z-10">
+            <p className="text-sm font-medium text-foreground leading-relaxed">{narrationText}</p>
           </div>
-          <p className="text-sm font-medium text-foreground">{narrationText}</p>
         </div>
       )}
       <div className="p-3 space-y-2.5">
