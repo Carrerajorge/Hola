@@ -37,8 +37,8 @@ export interface PhaseNarratorState {
   metrics: NarrationMetrics;
 }
 
-const DEBOUNCE_MS = 1500;
-const MAX_UPDATE_INTERVAL = 2000;
+const DEBOUNCE_MS = 2000;
+const MAX_UPDATE_INTERVAL = 3000;
 
 function createDefaultMetrics(): NarrationMetrics {
   return {
