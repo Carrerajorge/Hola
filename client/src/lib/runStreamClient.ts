@@ -237,8 +237,10 @@ export class RunStreamClient {
         this.markFirstEventReceived();
         try {
           const data = JSON.parse(event.data);
-          console.log(`[RunStreamClient] Event received: ${type}`, data);
-          this.handleEvent(data);
+          // CRITICAL: Pass the SSE event type to handleEvent since the payload may not include it
+          const enrichedEvent = { ...data, event_type: data.event_type || type };
+          console.log(`[RunStreamClient] Event received: ${type}`, enrichedEvent);
+          this.handleEvent(enrichedEvent);
         } catch (e) {
           console.error("[RunStreamClient] Parse error:", e);
         }
@@ -424,25 +426,36 @@ export class RunStreamClient {
         break;
 
       case "progress":
-        const anyEvent = event as any;
-        if (anyEvent.phase) {
-          this.state.phase = anyEvent.phase;
+        const progressEvent = event as any;
+        // Always update phase if provided
+        if (progressEvent.phase) {
+          this.state.phase = progressEvent.phase;
+          console.log(`[RunStreamClient] Phase changed to: ${progressEvent.phase}`);
         }
-        if (anyEvent.status) {
-          console.log(`[RunStreamClient] Progress status: ${anyEvent.status}`);
+        // Ensure status is running when we receive progress events
+        if (this.state.status !== "completed" && this.state.status !== "failed") {
+          this.state.status = "running";
         }
-        if (anyEvent.collected !== undefined) {
-          this.state.candidates_found = anyEvent.collected;
+        if (progressEvent.status) {
+          console.log(`[RunStreamClient] Progress status: ${progressEvent.status}`);
         }
-        if (anyEvent.queries_current !== undefined) {
-          this.state.queries_current = anyEvent.queries_current;
+        if (progressEvent.collected !== undefined) {
+          this.state.candidates_found = progressEvent.collected;
         }
-        if (anyEvent.queries_total !== undefined) {
-          this.state.queries_total = anyEvent.queries_total;
+        if (progressEvent.queries_current !== undefined) {
+          this.state.queries_current = progressEvent.queries_current;
+        }
+        if (progressEvent.queries_total !== undefined) {
+          this.state.queries_total = progressEvent.queries_total;
+        }
+        if (progressEvent.message) {
+          this.state.run_title = progressEvent.message;
         }
         if (event.metrics) {
           this.updateMetrics(event.metrics);
         }
+        // Also store this event for the NarrationAgent
+        this.state.events.push(event);
         break;
 
       case "progress_update":

@@ -476,32 +476,40 @@
   overflow: hidden;
 }
 
-.shimmer-text::after {
+.shimmer-text::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.4) 50%,
+    rgba(59, 130, 246, 0.35) 25%,
+    rgba(147, 51, 234, 0.45) 50%,
+    rgba(59, 130, 246, 0.35) 75%,
     transparent 100%
   );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
+  animation: shimmerSlide 2s ease-in-out infinite;
   pointer-events: none;
+  z-index: 1;
 }
 
-.dark .shimmer-text::after {
+@keyframes shimmerSlide {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+.dark .shimmer-text::before {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.2) 50%,
+    rgba(96, 165, 250, 0.3) 25%,
+    rgba(167, 139, 250, 0.4) 50%,
+    rgba(96, 165, 250, 0.3) 75%,
     transparent 100%
   );
-  background-size: 200% 100%;
 }
 
 .animate-pulse-glow {
