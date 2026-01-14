@@ -6,9 +6,37 @@ import { getSecureUserId } from "../lib/anonUserHelper";
 import { verifyAnonToken } from "../lib/anonToken";
 import { notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema, integrationProviders, integrationTools } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { usageQuotaService } from "../services/usageQuotaService";
 
 export function createUserRouter() {
   const router = Router();
+
+  router.get("/api/user/usage", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      let userId = user?.claims?.sub;
+      
+      if (!userId) {
+        const token = req.headers['x-anonymous-token'] as string;
+        if (token) {
+          const parts = token.split(':');
+          if (parts.length >= 1 && parts[0].startsWith('anon_') && verifyAnonToken(parts[0], token)) {
+            userId = parts[0];
+          }
+        }
+      }
+      
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      
+      const usageStatus = await usageQuotaService.getUsageStatus(userId);
+      res.json(usageStatus);
+    } catch (error: any) {
+      console.error("Error getting usage status:", error);
+      res.status(500).json({ error: "Failed to get usage status" });
+    }
+  });
 
   router.get("/api/notification-event-types", async (req, res) => {
     try {

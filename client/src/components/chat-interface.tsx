@@ -111,6 +111,7 @@ import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme
 import { UniversalExecutionConsole } from "./universal-execution-console";
 import { ExecutionStreamClient, FlatRunState } from "@/lib/executionStreamClient";
 import { LiveExecutionConsole } from "./live-execution-console";
+import { PricingModal } from "./pricing-modal";
 
 function AvatarWithFallback({ 
   src, 
@@ -1015,6 +1016,8 @@ export function ChatInterface({
   const [showFigmaTokenInput, setShowFigmaTokenInput] = useState(false);
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number; resetAt: string | null; plan: string } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
   
@@ -3299,6 +3302,17 @@ export function ChatInterface({
         setAiProcessSteps(prev => prev.map((s, i) => 
           i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
         ));
+        
+        if (response.status === 402) {
+          const errorData = await response.json();
+          if (errorData.code === "QUOTA_EXCEEDED" && errorData.quota) {
+            setQuotaInfo(errorData.quota);
+            setShowPricingModal(true);
+            setAiState("idle");
+            setAiProcessSteps([]);
+            return;
+          }
+        }
         
         const data = await response.json();
         
@@ -6154,6 +6168,13 @@ IMPORTANTE:
             URL.revokeObjectURL(url);
           }
         }}
+      />
+
+      {/* Pricing Modal for quota exceeded */}
+      <PricingModal
+        open={showPricingModal}
+        onClose={() => setShowPricingModal(false)}
+        quota={quotaInfo || { remaining: 0, limit: 3, resetAt: null, plan: "free" }}
       />
 
       {/* Agent Panel removed - progress is shown inline in chat messages */}
