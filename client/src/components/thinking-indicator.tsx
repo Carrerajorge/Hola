@@ -171,22 +171,21 @@ export const PhaseNarrator = memo(function PhaseNarrator({
           font-weight: 500;
           display: inline-block;
           position: relative;
-          color: rgb(100, 100, 100);
           background: linear-gradient(
             90deg,
-            transparent 0%,
-            transparent 40%,
-            rgba(0, 180, 255, 1) 48%,
-            rgba(0, 210, 255, 1) 50%,
-            rgba(0, 180, 255, 1) 52%,
-            transparent 60%,
-            transparent 100%
+            rgb(120, 120, 120) 0%,
+            rgb(120, 120, 120) 35%,
+            rgb(0, 180, 255) 45%,
+            rgb(0, 220, 255) 50%,
+            rgb(0, 180, 255) 55%,
+            rgb(120, 120, 120) 65%,
+            rgb(120, 120, 120) 100%
           );
-          background-size: 250% 100%;
-          background-repeat: no-repeat;
+          background-size: 300% 100%;
           -webkit-background-clip: text;
           background-clip: text;
-          animation: lightning-flash 1.8s ease-in-out infinite;
+          -webkit-text-fill-color: transparent;
+          animation: lightning-flash 1.5s linear infinite;
           transition: opacity 0.1s ease-out, transform 0.1s ease-out;
         }
         
@@ -197,29 +196,28 @@ export const PhaseNarrator = memo(function PhaseNarrator({
         
         @keyframes lightning-flash {
           0% {
-            background-position: 150% 0;
+            background-position: 100% 0;
           }
           100% {
-            background-position: -50% 0;
+            background-position: -100% 0;
           }
         }
         
         .dark .phase-narrator-text {
-          color: rgb(180, 180, 180);
           background: linear-gradient(
             90deg,
-            transparent 0%,
-            transparent 40%,
-            rgba(0, 200, 255, 1) 48%,
-            rgba(50, 230, 255, 1) 50%,
-            rgba(0, 200, 255, 1) 52%,
-            transparent 60%,
-            transparent 100%
+            rgb(180, 180, 180) 0%,
+            rgb(180, 180, 180) 35%,
+            rgb(0, 200, 255) 45%,
+            rgb(80, 240, 255) 50%,
+            rgb(0, 200, 255) 55%,
+            rgb(180, 180, 180) 65%,
+            rgb(180, 180, 180) 100%
           );
-          background-size: 250% 100%;
-          background-repeat: no-repeat;
+          background-size: 300% 100%;
           -webkit-background-clip: text;
           background-clip: text;
+          -webkit-text-fill-color: transparent;
         }
         
         @media (prefers-reduced-motion: reduce) {
