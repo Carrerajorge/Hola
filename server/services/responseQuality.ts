@@ -60,10 +60,13 @@ export function analyzeResponseQuality(response: string): QualityAnalysis {
   let hasContentIssues = false;
 
   // Verificar respuesta vacía o muy corta
+  // Health checks y respuestas breves válidas (ej: "OK", "Hello!") no son errores
+  const VALID_SHORT_RESPONSES = /^(ok|hello|hi|yes|no|done|ready|online|healthy|pong|ack|acknowledged|confirmed|success|working|alive)[\s.!]*$/i;
+  
   if (!response || response.trim().length === 0) {
     issues.push("empty_response");
     isComplete = false;
-  } else if (response.trim().length < 10) {
+  } else if (response.trim().length < 10 && !VALID_SHORT_RESPONSES.test(response.trim())) {
     issues.push("response_too_short");
     isComplete = false;
   }

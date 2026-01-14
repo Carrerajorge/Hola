@@ -45,6 +45,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { messageLogger } from "@/lib/logger";
 import {
   Tooltip,
   TooltipContent,
@@ -2346,7 +2347,7 @@ export function MessageList({
   const scrollRef = parentRef || internalParentRef;
 
   // Debug: Log activeRunId and variant for troubleshooting
-  console.log('[MessageList] Render check:', { activeRunId, variant, aiState, uiPhase, streamingContent: !!streamingContent });
+  messageLogger.debug('Render check:', { activeRunId, variant, aiState, uiPhase, streamingContent: !!streamingContent });
 
   const shouldVirtualize = enableVirtualization && messages.length > VIRTUALIZATION_THRESHOLD && variant === "default";
 

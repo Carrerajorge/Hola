@@ -12,6 +12,7 @@ import { detectEmailIntent, handleEmailChatRequest } from "./gmailChatIntegratio
 import { productionWorkflowRunner, classifyIntent, isGenerationIntent } from "../agent/registry/productionWorkflowRunner";
 import { agentLoopFacade, promptAnalyzer, type ComplexityLevel } from "../agent/orchestration";
 import { buildSystemPromptWithContext, isToolAllowed, getEnforcedModel, type GptSessionContract } from "./gptSessionService";
+import { intentEnginePipeline, type PipelineOptions } from "../intent-engine";
 
 const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true';
 
@@ -422,27 +423,50 @@ export async function handleChatRequest(
     voiceEnabled: userSettings?.featureFlags?.voiceEnabled ?? true,
   };
   
-  // TODO: Tool Policy Enforcement Integration Points
-  // The checkToolPolicy and logToolCall functions from integrationPolicyService.ts
-  // should be called at the following tool invocation points:
-  // 
-  // 1. Web Search (lines ~291-324): Before calling searchWeb/searchScholar
-  //    Example: const policyCheck = await checkToolPolicy(userId, "web_search", "search_provider");
-  //    if (!policyCheck.allowed) { skip search and inform user }
-  //
-  // 2. RAG/Memory Retrieval (lines ~328-346): Before searching similar chunks
-  //    Example: const policyCheck = await checkToolPolicy(userId, "memory_retrieval", "rag_provider");
-  //
-  // 3. Multi-Intent Pipeline (line ~183): Before executing multiIntentPipeline.execute()
-  //    Example: const policyCheck = await checkToolPolicy(userId, "multi_intent", "agent_pipeline");
-  //
-  // 4. Agent Pipeline (line ~258): Before calling runPipeline()
-  //    Example: const policyCheck = await checkToolPolicy(userId, "agent_pipeline", "browser_agent");
-  //
-  // 5. Code Interpreter (detected via wantsChart flag): Before executing Python code
-  //    Example: const policyCheck = await checkToolPolicy(userId, "code_interpreter", "python_executor");
-  //
-  // After each tool execution, call logToolCall to record the invocation for audit purposes.
+  // Tool Policy Enforcement Helper
+  const enforcePolicyCheck = async (toolId: string, providerId: string): Promise<{ allowed: boolean; reason?: string }> => {
+    if (!userId) return { allowed: true };
+    try {
+      const check = await checkToolPolicy(userId, toolId, providerId);
+      if (!check.allowed) {
+        console.log(`[ToolPolicy] Blocked ${toolId} for user ${userId}: ${check.reason}`);
+      }
+      return check;
+    } catch (error) {
+      console.error(`[ToolPolicy] Error checking policy for ${toolId}:`, error);
+      return { allowed: true };
+    }
+  };
+
+  // Intent Engine Pipeline Integration
+  // Processes user message to extract intent, constraints, and quality metrics
+  // Results are used to influence routing decisions and system prompt construction
+  let intentEngineResult: Awaited<ReturnType<typeof intentEnginePipeline.process>> | null = null;
+  const lastMessage = messages.filter(m => m.role === "user").pop();
+  if (lastMessage && userId && conversationId) {
+    try {
+      const pipelineOptions: PipelineOptions = {
+        sessionId: conversationId,
+        userId: userId,
+        skipQualityGate: false,
+        skipSelfHeal: false
+      };
+      intentEngineResult = await intentEnginePipeline.process(lastMessage.content, pipelineOptions);
+      if (intentEngineResult.success) {
+        console.log(`[IntentEngine] Processed: intent=${intentEngineResult.context.intent?.primaryIntent}, quality=${intentEngineResult.qualityScore}`);
+      }
+    } catch (error) {
+      console.error("[IntentEngine] Pipeline error:", error);
+    }
+  }
+  
+  // Use intent engine results to enhance routing decisions
+  const intentContext = intentEngineResult?.success ? {
+    primaryIntent: intentEngineResult.context.intent?.primaryIntent,
+    constraints: intentEngineResult.context.constraints,
+    qualityScore: intentEngineResult.qualityScore,
+    isMultiIntent: (intentEngineResult.context.intent?.subIntents?.length || 0) > 1
+  } : null;
   
   // Extract response preferences
   const customInstructions = userSettings?.responsePreferences?.customInstructions || "";
@@ -1351,31 +1375,51 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
         const objective = routeResult.objective || lastUserMessage.content;
         let lastBrowserSessionId: string | null = null;
         
-        const pipelineResult = await runPipeline({
-          objective,
-          conversationId,
-          onProgress: (update) => {
-            onAgentProgress?.(update);
-            if (update.detail?.browserSessionId) {
-              lastBrowserSessionId = update.detail.browserSessionId;
-            }
-          }
-        });
+        // Enforce policy check before running agent pipeline
+        const agentPolicyCheck = await enforcePolicyCheck("agent_pipeline", "browser_agent");
+        if (!agentPolicyCheck.allowed) {
+          return {
+            content: `No puedo ejecutar esta tarea: ${agentPolicyCheck.reason}`,
+            role: "assistant"
+          };
+        }
         
-        return {
-          content: pipelineResult.summary || "Tarea completada.",
-          role: "assistant",
-          sources: pipelineResult.artifacts
-            .filter(a => a.type === "text" && a.name)
-            .slice(0, 5)
-            .map(a => ({ fileName: a.name!, content: a.content?.slice(0, 200) || "" })),
-          webSources: pipelineResult.webSources,
-          agentRunId: pipelineResult.runId,
-          wasAgentTask: true,
-          pipelineSteps: pipelineResult.steps.length,
-          pipelineSuccess: pipelineResult.success,
-          browserSessionId: lastBrowserSessionId
-        };
+        const pipelineStartTime = Date.now();
+        try {
+          const pipelineResult = await runPipeline({
+            objective,
+            conversationId,
+            onProgress: (update) => {
+              onAgentProgress?.(update);
+              if (update.detail?.browserSessionId) {
+                lastBrowserSessionId = update.detail.browserSessionId;
+              }
+            }
+          });
+          
+          await logToolCall(userId || "anonymous", "agent_pipeline", "browser_agent", 
+            { objective }, { steps: pipelineResult.steps.length, success: pipelineResult.success }, 
+            pipelineResult.success ? "success" : "error", Date.now() - pipelineStartTime);
+          
+          return {
+            content: pipelineResult.summary || "Tarea completada.",
+            role: "assistant",
+            sources: pipelineResult.artifacts
+              .filter(a => a.type === "text" && a.name)
+              .slice(0, 5)
+              .map(a => ({ fileName: a.name!, content: a.content?.slice(0, 200) || "" })),
+            webSources: pipelineResult.webSources,
+            agentRunId: pipelineResult.runId,
+            wasAgentTask: true,
+            pipelineSteps: pipelineResult.steps.length,
+            pipelineSuccess: pipelineResult.success,
+            browserSessionId: lastBrowserSessionId
+          };
+        } catch (pipelineError) {
+          await logToolCall(userId || "anonymous", "agent_pipeline", "browser_agent", 
+            { objective }, null, "error", Date.now() - pipelineStartTime, String(pipelineError));
+          throw pipelineError;
+        }
       }
     }
   }
@@ -1450,12 +1494,18 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   const userExplicitlyRequestsWeb = lastUserMessage && isExplicitWebRequest(lastUserMessage.content);
   const forceWebSearch = lastUserMessage && isSimpleSearchQuery(lastUserMessage.content) && !hasAttachments;
   
-  // Observability logging for routing decisions
-  console.log(`[ChatService:Routing] hasAttachments=${hasAttachments}, forceWebSearch=${forceWebSearch}, userExplicitlyRequestsWeb=${userExplicitlyRequestsWeb}`);
+  // Observability logging for routing decisions - include intent engine insights
+  console.log(`[ChatService:Routing] hasAttachments=${hasAttachments}, forceWebSearch=${forceWebSearch}, userExplicitlyRequestsWeb=${userExplicitlyRequestsWeb}, intent=${intentContext?.primaryIntent || "unknown"}, isMultiIntent=${intentContext?.isMultiIntent || false}`);
 
   // CRITICAL: Web search is BLOCKED when attachments are present UNLESS user explicitly requests it
   // This prevents the system from ignoring uploaded documents and searching the web instead
   const allowWebSearch = !hasAttachments || userExplicitlyRequestsWeb;
+  
+  // Intent-based search optimization: boost web search for research/information-seeking intents
+  const intentSuggestsSearch = intentContext?.primaryIntent && 
+    ['search', 'research', 'find', 'lookup', 'news', 'information'].some(
+      keyword => intentContext.primaryIntent?.toLowerCase().includes(keyword)
+    );
   
   if (hasAttachments && !userExplicitlyRequestsWeb) {
     console.log(`[ChatService:WebSearch] BLOCKED - Document mode active. hasAttachments=${hasAttachments}, userExplicitlyRequestsWeb=${userExplicitlyRequestsWeb}`);
@@ -1463,49 +1513,71 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   
   // Web search: either forced by simple query OR gated by webSearchAuto feature flag
   // GATED: Only allowed when no attachments OR user explicitly requests web
-  if (allowWebSearch && lastUserMessage && needsAcademicSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
-    console.log(`[ChatService:WebSearch] Academic search triggered`);
-    try {
-      const scholarResults = await searchScholar(lastUserMessage.content, 15);
-      
-      if (scholarResults.length > 0) {
-        webSearchInfo = "\n\n**Artículos académicos encontrados en Google Scholar:**\n" +
-          scholarResults.map((r, i) => 
-            `[${i + 1}] Autores: ${r.authors || "No disponible"}\nAño: ${r.year || "No disponible"}\nTítulo: ${r.title}\nURL: ${r.url}\nResumen: ${r.snippet}\nCita sugerida: ${r.citation}`
-          ).join("\n\n");
+  // Intent-aware: also triggers if intent engine detected a search/research intent
+  const shouldSearchWeb = forceWebSearch || featureFlags.webSearchAuto || intentSuggestsSearch;
+  if (allowWebSearch && lastUserMessage && needsAcademicSearch(lastUserMessage.content) && shouldSearchWeb) {
+    const academicPolicyCheck = await enforcePolicyCheck("academic_search", "google_scholar");
+    if (!academicPolicyCheck.allowed) {
+      console.log(`[ChatService:WebSearch] Academic search blocked by policy: ${academicPolicyCheck.reason}`);
+    } else {
+      console.log(`[ChatService:WebSearch] Academic search triggered`);
+      const searchStartTime = Date.now();
+      try {
+        const scholarResults = await searchScholar(lastUserMessage.content, 15);
+        await logToolCall(userId || "anonymous", "academic_search", "google_scholar", 
+          { query: lastUserMessage.content }, { count: scholarResults.length }, "success", Date.now() - searchStartTime);
         
-        // Capture web sources for citations
-        webSources = scholarResults
-          .filter(r => r.url)
-          .map(r => extractWebSource(r.url, r.title, r.snippet, r.year, r.imageUrl, r.siteName, r.canonicalUrl));
+        if (scholarResults.length > 0) {
+          webSearchInfo = "\n\n**Artículos académicos encontrados en Google Scholar:**\n" +
+            scholarResults.map((r, i) => 
+              `[${i + 1}] Autores: ${r.authors || "No disponible"}\nAño: ${r.year || "No disponible"}\nTítulo: ${r.title}\nURL: ${r.url}\nResumen: ${r.snippet}\nCita sugerida: ${r.citation}`
+            ).join("\n\n");
+          
+          // Capture web sources for citations
+          webSources = scholarResults
+            .filter(r => r.url)
+            .map(r => extractWebSource(r.url, r.title, r.snippet, r.year, r.imageUrl, r.siteName, r.canonicalUrl));
+        }
+      } catch (error) {
+        await logToolCall(userId || "anonymous", "academic_search", "google_scholar", 
+          { query: lastUserMessage.content }, null, "error", Date.now() - searchStartTime, String(error));
+        console.error("Academic search error:", error);
       }
-    } catch (error) {
-      console.error("Academic search error:", error);
     }
-  } else if (allowWebSearch && lastUserMessage && needsWebSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
-    console.log(`[ChatService:WebSearch] Web search triggered`);
-    try {
-      // Request more sources (20) for richer citations
-      const searchResults = await searchWeb(lastUserMessage.content, 20);
-      
-      // Include ALL sources found for citations (not just those with extracted content)
-      if (searchResults.results.length > 0) {
-        webSources = searchResults.results.map(r => extractWebSource(r.url, r.title, r.snippet, undefined, r.imageUrl, r.siteName, r.canonicalUrl));
+  } else if (allowWebSearch && lastUserMessage && needsWebSearch(lastUserMessage.content) && shouldSearchWeb) {
+    const webPolicyCheck = await enforcePolicyCheck("web_search", "duckduckgo");
+    if (!webPolicyCheck.allowed) {
+      console.log(`[ChatService:WebSearch] Web search blocked by policy: ${webPolicyCheck.reason}`);
+    } else {
+      console.log(`[ChatService:WebSearch] Web search triggered`);
+      const searchStartTime = Date.now();
+      try {
+        // Request more sources (20) for richer citations
+        const searchResults = await searchWeb(lastUserMessage.content, 20);
+        await logToolCall(userId || "anonymous", "web_search", "duckduckgo", 
+          { query: lastUserMessage.content }, { count: searchResults.results.length }, "success", Date.now() - searchStartTime);
+        
+        // Include ALL sources found for citations (not just those with extracted content)
+        if (searchResults.results.length > 0) {
+          webSources = searchResults.results.map(r => extractWebSource(r.url, r.title, r.snippet, undefined, r.imageUrl, r.siteName, r.canonicalUrl));
+        }
+        
+        if (searchResults.contents.length > 0) {
+          webSearchInfo = "\n\n**Información de Internet (actualizada):**\n" +
+            searchResults.contents.map((content, i) => 
+              `[${i + 1}] ${content.title} (${content.url}):\n${content.content}`
+            ).join("\n\n");
+        } else if (searchResults.results.length > 0) {
+          webSearchInfo = "\n\n**Resultados de búsqueda web:**\n" +
+            searchResults.results.map((r, i) => 
+              `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
+            ).join("\n");
+        }
+      } catch (error) {
+        await logToolCall(userId || "anonymous", "web_search", "duckduckgo", 
+          { query: lastUserMessage.content }, null, "error", Date.now() - searchStartTime, String(error));
+        console.error("Web search error:", error);
       }
-      
-      if (searchResults.contents.length > 0) {
-        webSearchInfo = "\n\n**Información de Internet (actualizada):**\n" +
-          searchResults.contents.map((content, i) => 
-            `[${i + 1}] ${content.title} (${content.url}):\n${content.content}`
-          ).join("\n\n");
-      } else if (searchResults.results.length > 0) {
-        webSearchInfo = "\n\n**Resultados de búsqueda web:**\n" +
-          searchResults.results.map((r, i) => 
-            `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
-          ).join("\n");
-      }
-    } catch (error) {
-      console.error("Web search error:", error);
     }
   }
 
@@ -1514,29 +1586,40 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   const userWantsMemory = lastUserMessage ? detectMemoryIntent(lastUserMessage.content) : false;
   
   if (useRag && featureFlags.memoryEnabled && lastUserMessage && userWantsMemory) {
-    try {
-      const queryEmbedding = await generateEmbedding(lastUserMessage.content);
-      const allChunks = await storage.searchSimilarChunks(queryEmbedding, LIMITS.RAG_SIMILAR_CHUNKS, userId);
-      
-      // Filter by similarity threshold - only include highly relevant chunks
-      const similarChunks = allChunks.filter((chunk: any) => {
-        const distance = parseFloat(chunk.distance || "1");
-        return distance < LIMITS.RAG_SIMILARITY_THRESHOLD;
-      });
-      
-      if (similarChunks.length > 0) {
-        sources = similarChunks.map((chunk: any) => ({
-          fileName: chunk.file_name || "Documento",
-          content: chunk.content.slice(0, 200) + "..."
-        }));
+    const ragPolicyCheck = await enforcePolicyCheck("memory_retrieval", "rag_search");
+    if (!ragPolicyCheck.allowed) {
+      console.log(`[ChatService:RAG] Memory retrieval blocked by policy: ${ragPolicyCheck.reason}`);
+    } else {
+      const ragStartTime = Date.now();
+      try {
+        const queryEmbedding = await generateEmbedding(lastUserMessage.content);
+        const allChunks = await storage.searchSimilarChunks(queryEmbedding, LIMITS.RAG_SIMILAR_CHUNKS, userId);
         
-        contextInfo = "\n\nContexto de tus documentos:\n" + 
-          similarChunks.map((chunk: any, i: number) => 
-            `[${i + 1}] ${chunk.file_name || "Documento"}: ${chunk.content}`
-          ).join("\n\n");
+        // Filter by similarity threshold - only include highly relevant chunks
+        const similarChunks = allChunks.filter((chunk: any) => {
+          const distance = parseFloat(chunk.distance || "1");
+          return distance < LIMITS.RAG_SIMILARITY_THRESHOLD;
+        });
+        
+        await logToolCall(userId || "anonymous", "memory_retrieval", "rag_search", 
+          { query: lastUserMessage.content }, { count: similarChunks.length }, "success", Date.now() - ragStartTime);
+        
+        if (similarChunks.length > 0) {
+          sources = similarChunks.map((chunk: any) => ({
+            fileName: chunk.file_name || "Documento",
+            content: chunk.content.slice(0, 200) + "..."
+          }));
+          
+          contextInfo = "\n\nContexto de tus documentos:\n" + 
+            similarChunks.map((chunk: any, i: number) => 
+              `[${i + 1}] ${chunk.file_name || "Documento"}: ${chunk.content}`
+            ).join("\n\n");
+        }
+      } catch (error) {
+        await logToolCall(userId || "anonymous", "memory_retrieval", "rag_search", 
+          { query: lastUserMessage.content }, null, "error", Date.now() - ragStartTime, String(error));
+        console.error("RAG search error:", error);
       }
-    } catch (error) {
-      console.error("RAG search error:", error);
     }
   }
 

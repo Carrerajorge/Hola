@@ -54,6 +54,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { chatLogger } from "@/lib/logger";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
@@ -1122,7 +1123,7 @@ export function ChatInterface({
     const isNewChatCreation = prevChatId === null && chatId?.startsWith('pending-');
     const isSameChatTransition = prevChatId?.startsWith('pending-') && chatId && !chatId.startsWith('pending-');
     
-    console.log("[ChatInterface] optimistic chatId effect:", { 
+    chatLogger.debug("optimistic chatId effect:", { 
       prevChatId, 
       chatId, 
       isInitialRender, 
@@ -1136,10 +1137,10 @@ export function ChatInterface({
     // 3. Not transitioning from pending to confirmed chatId (same chat)
     if (!isInitialRender && !isNewChatCreation && !isSameChatTransition) {
       // This is a real chat switch - clear optimistic messages
-      console.log("[ChatInterface] Clearing optimistic messages (real chat switch)");
+      chatLogger.debug("Clearing optimistic messages (real chat switch)");
       setOptimisticMessages([]);
     } else {
-      console.log("[ChatInterface] Keeping optimistic messages");
+      chatLogger.debug("Keeping optimistic messages");
     }
     
     prevChatIdForOptimisticRef.current = chatId;
