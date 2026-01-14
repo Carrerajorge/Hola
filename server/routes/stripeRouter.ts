@@ -4,6 +4,12 @@ import { db } from "../db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 
+const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number }> = {
+  price_go_monthly: { name: "Go", amount: 500 },
+  price_plus_monthly: { name: "Plus", amount: 2000 },
+  price_pro_monthly: { name: "Pro", amount: 20000 },
+};
+
 export function createStripeRouter() {
   const router = Router();
 
@@ -60,6 +66,40 @@ export function createStripeRouter() {
     } catch (error: any) {
       console.error("Error fetching products:", error);
       res.json({ products: [] });
+    }
+  });
+
+  router.get("/api/stripe/price-ids", async (req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT 
+          p.name as product_name,
+          pr.id as price_id,
+          pr.unit_amount
+        FROM stripe.products p
+        LEFT JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true
+        WHERE p.active = true
+        ORDER BY pr.unit_amount ASC
+      `);
+
+      const priceMapping: Record<string, string> = {};
+      for (const row of result.rows as any[]) {
+        const productName = (row.product_name || "").toLowerCase();
+        const amount = row.unit_amount;
+        
+        if (productName.includes("go") || amount === 500) {
+          priceMapping.price_go_monthly = row.price_id;
+        } else if (productName.includes("plus") || amount === 2000) {
+          priceMapping.price_plus_monthly = row.price_id;
+        } else if (productName.includes("pro") || amount === 20000) {
+          priceMapping.price_pro_monthly = row.price_id;
+        }
+      }
+
+      res.json({ priceMapping });
+    } catch (error: any) {
+      console.error("Error fetching price IDs:", error);
+      res.json({ priceMapping: {} });
     }
   });
 

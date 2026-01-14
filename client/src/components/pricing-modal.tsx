@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Check, Zap, Crown, Building2, Clock } from "lucide-react";
+import { Check, Zap, Rocket, Star, Crown, Clock } from "lucide-react";
 
 interface QuotaInfo {
   remaining: number;
@@ -38,6 +38,8 @@ interface PlanInfo {
   icon: React.ReactNode;
   gradient: string;
   popular?: boolean;
+  badge?: string;
+  buttonText?: string;
 }
 
 const plans: PlanInfo[] = [
@@ -46,48 +48,79 @@ const plans: PlanInfo[] = [
     name: "Gratis",
     price: "$0",
     priceId: null,
-    description: "Perfecto para comenzar",
+    description: "Mira lo que la IA puede hacer",
     icon: <Zap className="h-6 w-6" />,
     gradient: "from-gray-500 to-gray-600",
     features: [
-      { text: "10 solicitudes por día", included: true },
-      { text: "Generación de documentos básica", included: true },
-      { text: "Soporte por email", included: true },
-      { text: "Análisis avanzado", included: false },
-      { text: "Prioridad en cola", included: false },
+      { text: "3 solicitudes por día", included: true },
+      { text: "Obtén explicaciones sencillas", included: true },
+      { text: "Mantén chats breves para preguntas frecuentes", included: true },
+      { text: "Prueba la generación de imágenes", included: true },
+      { text: "Guardar memoria y contexto limitados", included: true },
+    ],
+  },
+  {
+    id: "go",
+    name: "Go",
+    price: "$5",
+    priceId: "price_go_monthly",
+    description: "Logra más con una IA más avanzada",
+    icon: <Rocket className="h-6 w-6" />,
+    gradient: "from-purple-500 to-purple-700",
+    popular: true,
+    badge: "NUEVO",
+    buttonText: "Mejorar el plan a Go",
+    features: [
+      { text: "50 solicitudes por día", included: true },
+      { text: "Explora a fondo preguntas más complejas", included: true },
+      { text: "Chatea más tiempo y carga más contenido", included: true },
+      { text: "Crea imágenes realistas para tus proyectos", included: true },
+      { text: "Almacena más contexto y obtén respuestas más inteligentes", included: true },
+      { text: "Obtén ayuda con la planificación y las tareas", included: true },
+      { text: "Explora proyectos, tareas y GPT personalizados", included: true },
+    ],
+  },
+  {
+    id: "plus",
+    name: "Plus",
+    price: "$20",
+    priceId: "price_plus_monthly",
+    description: "Descubre toda la experiencia",
+    icon: <Star className="h-6 w-6" />,
+    gradient: "from-blue-500 to-blue-700",
+    buttonText: "Obtener Plus",
+    features: [
+      { text: "200 solicitudes por día", included: true },
+      { text: "Resuelve problemas complejos", included: true },
+      { text: "Ten largas charlas en varias sesiones", included: true },
+      { text: "Crea más imágenes, más rápido", included: true },
+      { text: "Recuerda objetivos y conversaciones pasadas", included: true },
+      { text: "Planifica viajes y tareas con el modo Agente", included: true },
+      { text: "Organiza proyectos y GPT personalizados", included: true },
+      { text: "Produce y comparte videos en Sora", included: true },
+      { text: "Escribe código y crea aplicaciones con Codex", included: true },
     ],
   },
   {
     id: "pro",
     name: "Pro",
-    price: "$29",
+    price: "$200",
     priceId: "price_pro_monthly",
-    description: "Para profesionales y equipos pequeños",
+    description: "Maximiza tu productividad",
     icon: <Crown className="h-6 w-6" />,
-    gradient: "from-blue-500 to-purple-600",
-    popular: true,
-    features: [
-      { text: "500 solicitudes por mes", included: true },
-      { text: "Generación de documentos ilimitada", included: true },
-      { text: "Soporte prioritario", included: true },
-      { text: "Análisis avanzado con IA", included: true },
-      { text: "Prioridad en cola", included: false },
-    ],
-  },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    price: "$99",
-    priceId: "price_enterprise_monthly",
-    description: "Para grandes organizaciones",
-    icon: <Building2 className="h-6 w-6" />,
     gradient: "from-amber-500 to-orange-600",
+    buttonText: "Obtener Pro",
     features: [
-      { text: "Solicitudes ilimitadas", included: true },
-      { text: "Generación de documentos ilimitada", included: true },
-      { text: "Soporte dedicado 24/7", included: true },
-      { text: "Análisis avanzado con IA", included: true },
-      { text: "Prioridad máxima en cola", included: true },
+      { text: "Mensajes ilimitados", included: true },
+      { text: "Domina tareas y temas avanzados", included: true },
+      { text: "Trabaja en proyectos grandes con mensajes ilimitados", included: true },
+      { text: "Crea imágenes de alta calidad a cualquier escala", included: true },
+      { text: "Mantén todo el contexto con la memoria máxima", included: true },
+      { text: "Ejecuta investigaciones y planifica tareas con agentes", included: true },
+      { text: "Adapta tus proyectos y automatiza flujos de trabajo", included: true },
+      { text: "Supera tus límites con la creación de videos en Sora", included: true },
+      { text: "Implementa código más rápido con Codex", included: true },
+      { text: "Obtén acceso anticipado a características experimentales", included: true },
     ],
   },
 ];
@@ -122,6 +155,25 @@ function formatResetTime(resetAt: string | null): string {
 
 export function PricingModal({ open, onClose, quota }: PricingModalProps) {
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [priceMapping, setPriceMapping] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (open) {
+      fetch("/api/stripe/price-ids")
+        .then(res => res.json())
+        .then(data => {
+          if (data.priceMapping) {
+            setPriceMapping(data.priceMapping);
+          }
+        })
+        .catch(err => console.error("Error loading prices:", err));
+    }
+  }, [open]);
+
+  const getActualPriceId = (planPriceId: string | null): string | null => {
+    if (!planPriceId) return null;
+    return priceMapping[planPriceId] || planPriceId;
+  };
 
   const handleSubscribe = async (priceId: string, planId: string) => {
     if (!priceId) return;
@@ -157,15 +209,15 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent 
-        className="max-w-4xl max-h-[90vh] overflow-y-auto"
+        className="max-w-6xl max-h-[90vh] overflow-y-auto"
         data-testid="pricing-modal"
       >
         <DialogHeader className="text-center pb-4">
           <DialogTitle 
-            className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent"
+            className="text-2xl font-bold"
             data-testid="pricing-modal-title"
           >
-            Mejora tu Plan
+            Mejora tu plan
           </DialogTitle>
           <DialogDescription data-testid="pricing-modal-description">
             Has alcanzado el límite de tu plan actual. Elige un plan superior para continuar.
@@ -199,7 +251,7 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {plans.map((plan) => {
             const isCurrentPlan = currentPlanId === plan.id;
             const isLoading = loadingPlan === plan.id;
@@ -212,9 +264,9 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
                 } ${isCurrentPlan ? "opacity-75" : ""}`}
                 data-testid={`plan-card-${plan.id}`}
               >
-                {plan.popular && (
-                  <div className="absolute top-0 right-0 bg-gradient-to-r from-blue-500 to-purple-600 text-white text-xs font-semibold px-3 py-1 rounded-bl-lg">
-                    Popular
+                {plan.badge && (
+                  <div className="absolute top-0 left-12 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-xs font-semibold px-2 py-0.5 rounded-md">
+                    {plan.badge}
                   </div>
                 )}
                 
@@ -280,7 +332,7 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
                   ) : plan.priceId ? (
                     <Button 
                       className={`w-full bg-gradient-to-r ${plan.gradient} hover:opacity-90 text-white border-0`}
-                      onClick={() => handleSubscribe(plan.priceId!, plan.id)}
+                      onClick={() => handleSubscribe(getActualPriceId(plan.priceId)!, plan.id)}
                       disabled={isLoading}
                       data-testid={`plan-button-${plan.id}`}
                     >
@@ -293,7 +345,7 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
                           Procesando...
                         </span>
                       ) : (
-                        "Suscribirse"
+                        plan.buttonText || "Suscribirse"
                       )}
                     </Button>
                   ) : (
@@ -303,7 +355,7 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
                       disabled
                       data-testid={`plan-button-${plan.id}`}
                     >
-                      Gratis
+                      Tu plan actual
                     </Button>
                   )}
                 </CardContent>
