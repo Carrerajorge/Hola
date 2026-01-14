@@ -1,23 +1,16 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { sendShareNotificationEmail } from "../services/emailService";
+import { getSecureUserId, getOrCreateSecureUserId } from "../lib/anonUserHelper";
 
 export function createChatsRouter() {
   const router = Router();
 
   router.get("/chats", async (req, res) => {
     try {
-      const user = (req as any).user;
-      let userId = user?.claims?.sub;
-      
-      // For anonymous users, use session-based ID
+      const userId = getSecureUserId(req);
       if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
-        } else {
-          return res.json([]);
-        }
+        return res.json([]);
       }
       
       const chatList = await storage.getChats(userId);
@@ -30,14 +23,7 @@ export function createChatsRouter() {
   router.post("/chats", async (req, res) => {
     try {
       const { title } = req.body;
-      const user = (req as any).user;
-      let userId = user?.claims?.sub;
-      
-      // Allow anonymous users to create chats with session-based ID
-      if (!userId) {
-        const sessionId = (req as any).sessionID || `anon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        userId = `anon_${sessionId}`;
-      }
+      const userId = getOrCreateSecureUserId(req);
       
       const chat = await storage.createChat({ title: title || "New Chat", userId });
       res.json(chat);
@@ -48,17 +34,8 @@ export function createChatsRouter() {
 
   router.get("/chats/:id", async (req, res) => {
     try {
-      const user = (req as any).user;
-      let userId = user?.claims?.sub;
-      const userEmail = user?.claims?.email;
-      
-      // For anonymous users, use session-based ID
-      if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
-        }
-      }
+      const userId = getSecureUserId(req);
+      const userEmail = (req as any).user?.claims?.email;
       
       const chat = await storage.getChat(req.params.id);
       if (!chat) {
@@ -88,16 +65,7 @@ export function createChatsRouter() {
 
   router.patch("/chats/:id", async (req, res) => {
     try {
-      const user = (req as any).user;
-      let userId = user?.claims?.sub;
-      
-      // For anonymous users, use session-based ID
-      if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
-        }
-      }
+      const userId = getSecureUserId(req);
       
       const existingChat = await storage.getChat(req.params.id);
       if (!existingChat) {
@@ -122,16 +90,7 @@ export function createChatsRouter() {
 
   router.delete("/chats/:id", async (req, res) => {
     try {
-      const user = (req as any).user;
-      let userId = user?.claims?.sub;
-      
-      // For anonymous users, use session-based ID
-      if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
-        }
-      }
+      const userId = getSecureUserId(req);
       
       const chat = await storage.getChat(req.params.id);
       if (!chat) {
@@ -150,16 +109,7 @@ export function createChatsRouter() {
 
   router.post("/chats/:id/documents", async (req, res) => {
     try {
-      const user = (req as any).user;
-      let userId = user?.claims?.sub;
-      
-      // For anonymous users, use session-based ID
-      if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
-        }
-      }
+      const userId = getSecureUserId(req);
       
       const chat = await storage.getChat(req.params.id);
       if (!chat) {
@@ -183,17 +133,9 @@ export function createChatsRouter() {
 
   router.post("/chats/archive-all", async (req, res) => {
     try {
-      const user = (req as any).user;
-      let userId = user?.claims?.sub;
-      
-      // For anonymous users, use session-based ID
+      const userId = getSecureUserId(req);
       if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
-        } else {
-          return res.status(401).json({ error: "Unauthorized" });
-        }
+        return res.status(401).json({ error: "Unauthorized" });
       }
       
       const chats = await storage.getChats(userId);
@@ -212,17 +154,9 @@ export function createChatsRouter() {
 
   router.delete("/chats/delete-all", async (req, res) => {
     try {
-      const user = (req as any).user;
-      let userId = user?.claims?.sub;
-      
-      // For anonymous users, use session-based ID
+      const userId = getSecureUserId(req);
       if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
-        } else {
-          return res.status(401).json({ error: "Unauthorized" });
-        }
+        return res.status(401).json({ error: "Unauthorized" });
       }
       
       const chats = await storage.getChats(userId);
@@ -239,16 +173,7 @@ export function createChatsRouter() {
 
   router.post("/chats/:id/messages", async (req, res) => {
     try {
-      const user = (req as any).user;
-      let userId = user?.claims?.sub;
-      
-      // For anonymous users, use session-based ID
-      if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
-        }
-      }
+      const userId = getSecureUserId(req);
       
       const chat = await storage.getChat(req.params.id);
       if (!chat) {

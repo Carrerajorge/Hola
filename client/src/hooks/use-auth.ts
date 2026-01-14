@@ -3,6 +3,8 @@ import { useCallback } from "react";
 import type { User } from "@shared/schema";
 
 const AUTH_STORAGE_KEY = "siragpt_auth_user";
+const ANON_USER_ID_KEY = "siragpt_anon_user_id";
+const ANON_TOKEN_KEY = "siragpt_anon_token";
 
 function getStoredUser(): User | null {
   try {
@@ -28,27 +30,112 @@ function setStoredUser(user: User | null): void {
   }
 }
 
+function clearOldUserData(): void {
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch (e) {
+    // Ignore storage errors
+  }
+}
+
+export function getStoredAnonUserId(): string | null {
+  try {
+    return localStorage.getItem(ANON_USER_ID_KEY);
+  } catch (e) {
+    return null;
+  }
+}
+
+function setStoredAnonUserId(id: string): void {
+  try {
+    localStorage.setItem(ANON_USER_ID_KEY, id);
+  } catch (e) {
+    // Ignore storage errors
+  }
+}
+
+function clearAnonUserId(): void {
+  try {
+    localStorage.removeItem(ANON_USER_ID_KEY);
+    localStorage.removeItem(ANON_TOKEN_KEY);
+  } catch (e) {
+    // Ignore storage errors
+  }
+}
+
+export function getStoredAnonToken(): string | null {
+  try {
+    return localStorage.getItem(ANON_TOKEN_KEY);
+  } catch (e) {
+    return null;
+  }
+}
+
+function setStoredAnonToken(token: string): void {
+  try {
+    localStorage.setItem(ANON_TOKEN_KEY, token);
+  } catch (e) {
+    // Ignore storage errors
+  }
+}
+
+function clearAnonToken(): void {
+  try {
+    localStorage.removeItem(ANON_TOKEN_KEY);
+  } catch (e) {
+    // Ignore storage errors
+  }
+}
+
 async function fetchUser(): Promise<User | null> {
+  const storedAnonId = getStoredAnonUserId();
+  const headers: HeadersInit = {};
+  if (storedAnonId) {
+    headers['X-Anonymous-User-Id'] = storedAnonId;
+  }
+  
   const response = await fetch("/api/auth/user", {
     credentials: "include",
+    headers,
   });
 
+  if (response.ok) {
+    const user = await response.json();
+    setStoredUser(user);
+    clearAnonUserId();
+    return user;
+  }
+
   if (response.status === 401) {
-    // Try localStorage fallback
-    const storedUser = getStoredUser();
-    if (storedUser) {
-      return storedUser;
+    clearOldUserData();
+    
+    try {
+      const identityRes = await fetch("/api/session/identity", {
+        credentials: "include",
+        headers,
+      });
+      if (identityRes.ok) {
+        const identity = await identityRes.json();
+        if (identity.userId) {
+          setStoredAnonUserId(identity.userId);
+          if (identity.token) {
+            setStoredAnonToken(identity.token);
+          }
+          const anonUser = {
+            id: identity.userId,
+            email: null,
+            isAnonymous: true
+          };
+          return anonUser as any;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to get session identity:", e);
     }
     return null;
   }
 
-  if (!response.ok) {
-    throw new Error(`${response.status}: ${response.statusText}`);
-  }
-
-  const user = await response.json();
-  setStoredUser(user);
-  return user;
+  throw new Error(`${response.status}: ${response.statusText}`);
 }
 
 export function useAuth() {

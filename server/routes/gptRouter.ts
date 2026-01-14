@@ -1,17 +1,13 @@
 import { Router, Request } from "express";
 import { storage } from "../storage";
-
-function getCurrentUserId(req: Request): string {
-  const sessionUserId = (req.session as any)?.userId || (req.session as any)?.passport?.user;
-  return sessionUserId || `anon_${req.sessionID}`;
-}
+import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 
 async function canEditGpt(req: Request, gptId: string): Promise<{ allowed: boolean; gpt: any | null; error?: string }> {
   const gpt = await storage.getGpt(gptId);
   if (!gpt) {
     return { allowed: false, gpt: null, error: "GPT not found" };
   }
-  const currentUserId = getCurrentUserId(req);
+  const currentUserId = getOrCreateSecureUserId(req);
   if (gpt.creatorId && gpt.creatorId !== currentUserId) {
     return { allowed: false, gpt, error: "Solo el creador puede modificar este GPT" };
   }

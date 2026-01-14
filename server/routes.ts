@@ -9,6 +9,7 @@ import { StepUpdate } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import { generateAnonToken } from "./lib/anonToken";
 import { pptExportRouter } from "./routes/pptExport";
 import { createChatsRouter } from "./routes/chatsRouter";
 import { createFilesRouter } from "./routes/filesRouter";
@@ -207,6 +208,37 @@ export async function registerRoutes(
 ): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
+  
+  // Session identity endpoint for consistent user ID across frontend/backend
+  // SECURITY: Anonymous user IDs are now bound to the session to prevent impersonation
+  app.get("/api/session/identity", (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const authUserId = user?.claims?.sub;
+    const authEmail = user?.claims?.email;
+    
+    if (authUserId) {
+      return res.json({
+        userId: authUserId,
+        email: authEmail,
+        isAnonymous: false
+      });
+    }
+    
+    // For anonymous users, bind ID to session (not header) to prevent impersonation
+    const session = req.session as any;
+    if (!session.anonUserId) {
+      const sessionId = (req as any).sessionID;
+      session.anonUserId = sessionId ? `anon_${sessionId}` : null;
+    }
+    
+    const anonUserId = session.anonUserId;
+    res.json({
+      userId: anonUserId,
+      token: anonUserId ? generateAnonToken(anonUserId) : null,
+      email: null,
+      isAnonymous: true
+    });
+  });
   
   const artifactsDir = path.join(process.cwd(), "artifacts");
   if (!fs.existsSync(artifactsDir)) {

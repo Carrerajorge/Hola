@@ -228,9 +228,8 @@ function mapApiToLocalSettings(apiSettings: ApiUserSettings): Partial<UserSettin
 
 async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null> {
   try {
-    const response = await fetch(`/api/users/${userId}/settings`, {
-      credentials: 'include',
-    });
+    const { apiFetch } = await import('@/lib/apiClient');
+    const response = await apiFetch(`/api/users/${userId}/settings`);
     if (!response.ok) {
       if (response.status === 401) {
         return null;
@@ -247,12 +246,12 @@ async function fetchUserSettings(userId: string): Promise<ApiUserSettings | null
 
 async function saveUserSettings(userId: string, settings: Omit<ApiUserSettings, 'userId'>): Promise<boolean> {
   try {
-    const response = await fetch(`/api/users/${userId}/settings`, {
+    const { apiFetch } = await import('@/lib/apiClient');
+    const response = await apiFetch(`/api/users/${userId}/settings`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
       },
-      credentials: 'include',
       body: JSON.stringify(settings),
     });
     if (!response.ok) {

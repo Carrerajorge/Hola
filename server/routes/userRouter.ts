@@ -2,6 +2,8 @@ import { Router } from "express";
 import crypto from "crypto";
 import { storage } from "../storage";
 import { db } from "../db";
+import { getSecureUserId } from "../lib/anonUserHelper";
+import { verifyAnonToken } from "../lib/anonToken";
 import { notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema, integrationProviders, integrationTools } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
@@ -98,20 +100,21 @@ export function createUserRouter() {
     try {
       const { id } = req.params;
       
+      // For authenticated users, verify ownership
       const user = (req as any).user;
-      let userId = user?.claims?.sub;
+      const authUserId = user?.claims?.sub;
       
-      // For anonymous users, use session-based ID
-      if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
+      if (authUserId) {
+        // Authenticated user - must match
+        if (authUserId !== id) {
+          return res.status(403).json({ error: "Access denied: You can only access your own settings" });
         }
-      }
-      
-      // Allow access if userId matches id, or if both are anonymous and match the session pattern
-      if (!userId || userId !== id) {
-        return res.status(403).json({ error: "Access denied: You can only access your own settings" });
+      } else {
+        // Anonymous user - verify token for cryptographic authentication
+        const token = req.headers['x-anonymous-token'] as string;
+        if (!id.startsWith('anon_') || !verifyAnonToken(id, token)) {
+          return res.status(403).json({ error: "Access denied" });
+        }
       }
       
       const settings = await storage.getUserSettings(id);
@@ -154,20 +157,21 @@ export function createUserRouter() {
     try {
       const { id } = req.params;
       
+      // For authenticated users, verify ownership
       const user = (req as any).user;
-      let userId = user?.claims?.sub;
+      const authUserId = user?.claims?.sub;
       
-      // For anonymous users, use session-based ID
-      if (!userId) {
-        const sessionId = (req as any).sessionID;
-        if (sessionId) {
-          userId = `anon_${sessionId}`;
+      if (authUserId) {
+        // Authenticated user - must match
+        if (authUserId !== id) {
+          return res.status(403).json({ error: "Access denied: You can only update your own settings" });
         }
-      }
-      
-      // Allow access if userId matches id, or if both are anonymous and match the session pattern
-      if (!userId || userId !== id) {
-        return res.status(403).json({ error: "Access denied: You can only update your own settings" });
+      } else {
+        // Anonymous user - verify token for cryptographic authentication
+        const token = req.headers['x-anonymous-token'] as string;
+        if (!id.startsWith('anon_') || !verifyAnonToken(id, token)) {
+          return res.status(403).json({ error: "Access denied" });
+        }
       }
       
       const { responsePreferences, userProfile, featureFlags } = req.body;

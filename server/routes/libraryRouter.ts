@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { libraryService, LibraryServiceError, type FileMetadata } from "../services/libraryService";
+import { getOrCreateSecureUserId } from "../lib/anonUserHelper";
 import { db } from "../db";
 import { eq, and, desc, isNull } from "drizzle-orm";
 import {
@@ -31,21 +32,9 @@ import {
 export function createLibraryRouter() {
   const router = Router();
 
-  const getUserId = (req: any): string => {
-    const authUserId = req.user?.claims?.sub;
-    if (authUserId) return authUserId;
-    
-    const sessionId = req.sessionID;
-    return sessionId ? `anon_${sessionId}` : `anon_${Date.now()}`;
-  };
-
-  const getOrCreateUserId = (req: any): string => {
-    return getUserId(req);
-  };
-
   router.post("/api/library/upload/request-url", ...validate({ body: uploadRequestUrlSchema }), async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { filename, contentType, folderId } = req.body;
 
@@ -68,7 +57,7 @@ export function createLibraryRouter() {
 
   router.post("/api/library/upload/complete", ...validate({ body: uploadCompleteSchema }), async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { storagePath, metadata } = req.body;
 
@@ -101,7 +90,7 @@ export function createLibraryRouter() {
 
   router.get("/api/library/folders", async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const folders = await db
         .select()
@@ -118,7 +107,7 @@ export function createLibraryRouter() {
 
   router.post("/api/library/folders", ...validate({ body: createFolderSchema }), async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { name, description, color, icon, parentId } = req.body;
 
@@ -158,7 +147,7 @@ export function createLibraryRouter() {
 
   router.put("/api/library/folders/:id", ...validate({ body: updateFolderSchema, params: uuidParamSchema }), async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id } = req.params;
       const { name, description, color, icon } = req.body;
@@ -197,7 +186,7 @@ export function createLibraryRouter() {
 
   router.delete("/api/library/folders/:id", async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id } = req.params;
 
@@ -226,7 +215,7 @@ export function createLibraryRouter() {
 
   router.get("/api/library/collections", async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const collections = await db
         .select()
@@ -243,7 +232,7 @@ export function createLibraryRouter() {
 
   router.post("/api/library/collections", ...validate({ body: createCollectionSchema }), async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { name, description, type, coverFileId, smartRules, isPublic } = req.body;
 
@@ -268,7 +257,7 @@ export function createLibraryRouter() {
 
   router.put("/api/library/collections/:id", ...validate({ body: updateCollectionSchema, params: uuidParamSchema }), async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id } = req.params;
       const { name, description, type, coverFileId, smartRules, isPublic } = req.body;
@@ -309,7 +298,7 @@ export function createLibraryRouter() {
 
   router.delete("/api/library/collections/:id", async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id } = req.params;
 
@@ -336,7 +325,7 @@ export function createLibraryRouter() {
 
   router.post("/api/library/collections/:id/files", ...validate({ body: addFileToCollectionSchema, params: uuidParamSchema }), async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id } = req.params;
       const { fileId, order } = req.body;
@@ -394,7 +383,7 @@ export function createLibraryRouter() {
 
   router.delete("/api/library/collections/:id/files/:fileId", async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id, fileId } = req.params;
 
@@ -436,7 +425,7 @@ export function createLibraryRouter() {
 
   router.get("/api/library/files", ...validate({ query: libraryFilesQuerySchema }), async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { type, folder, search, limit, offset } = req.query;
 
@@ -500,7 +489,7 @@ export function createLibraryRouter() {
 
   router.get("/api/library/files/:id", async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id } = req.params;
 
@@ -519,7 +508,7 @@ export function createLibraryRouter() {
 
   router.put("/api/library/files/:id", ...validate({ body: updateFileSchema, params: uuidParamSchema }), async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id } = req.params;
       const { name, description, tags, folderId, isFavorite, isPinned, isArchived, isPublic, metadata } = req.body;
@@ -563,7 +552,7 @@ export function createLibraryRouter() {
 
   router.delete("/api/library/files/:id", async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id } = req.params;
 
@@ -585,7 +574,7 @@ export function createLibraryRouter() {
 
   router.get("/api/library/files/:id/download", async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const { id } = req.params;
 
@@ -603,7 +592,7 @@ export function createLibraryRouter() {
 
   router.get("/api/library/stats", async (req, res) => {
     try {
-      const userId = getOrCreateUserId(req);
+      const userId = getOrCreateSecureUserId(req);
 
       const stats = await libraryService.getStorageStats(userId);
 

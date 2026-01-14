@@ -1,0 +1,85 @@
+import type { Request } from "express";
+
+/**
+ * Securely retrieves the user ID from a request.
+ * 
+ * For authenticated users: returns the authenticated user's ID.
+ * For anonymous users: returns a session-bound anonymous ID.
+ * 
+ * SECURITY: The X-Anonymous-User-Id header is ONLY trusted if it matches
+ * the session-bound ID. This prevents impersonation attacks where malicious
+ * clients send arbitrary anon_* IDs in headers.
+ * 
+ * @param req - Express request object
+ * @returns User ID string or null if unable to determine
+ */
+export function getSecureUserId(req: Request): string | null {
+  // 1. Try authenticated user first
+  const user = (req as any).user;
+  const authUserId = user?.claims?.sub;
+  if (authUserId) {
+    return authUserId;
+  }
+
+  const session = req.session as any;
+
+  // 2. Check X-Anonymous-User-Id header ONLY if it matches session-bound ID
+  const headerUserId = req.headers['x-anonymous-user-id'];
+  if (
+    headerUserId &&
+    typeof headerUserId === 'string' &&
+    session?.anonUserId &&
+    headerUserId === session.anonUserId
+  ) {
+    return headerUserId;
+  }
+
+  // 3. Fallback to session-bound ID or generate new one
+  if (!session.anonUserId) {
+    const sessionId = (req as any).sessionID;
+    if (sessionId) {
+      session.anonUserId = `anon_${sessionId}`;
+    }
+  }
+
+  return session?.anonUserId || null;
+}
+
+/**
+ * Gets or creates a user ID, ensuring one is always returned.
+ * Falls back to a timestamp-based ID if no session is available.
+ * 
+ * @param req - Express request object
+ * @returns User ID string (never null)
+ */
+export function getOrCreateSecureUserId(req: Request): string {
+  const userId = getSecureUserId(req);
+  if (userId) {
+    return userId;
+  }
+  
+  // Last resort fallback for edge cases where session isn't available
+  return `anon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+/**
+ * Checks if the current user is authenticated (not anonymous).
+ * 
+ * @param req - Express request object
+ * @returns true if user is authenticated, false if anonymous
+ */
+export function isAuthenticated(req: Request): boolean {
+  const user = (req as any).user;
+  return !!user?.claims?.sub;
+}
+
+/**
+ * Gets the authenticated user's email if available.
+ * 
+ * @param req - Express request object
+ * @returns Email string or null if anonymous/unavailable
+ */
+export function getAuthEmail(req: Request): string | null {
+  const user = (req as any).user;
+  return user?.claims?.email || null;
+}
