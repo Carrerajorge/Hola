@@ -842,6 +842,26 @@ export interface MarkdownRendererProps {
   webSources?: Array<{ url: string; siteName?: string; domain: string }>;
 }
 
+function isSimpleContent(text: string): boolean {
+  if (!text || text.length < 5) return true;
+  const hasCodeBlocks = /```[\s\S]*```|`[^`]+`/.test(text);
+  const hasMath = /\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$|\\[[\s\S]+?\\]|\\([\s\S]+?\\)/.test(text);
+  const hasComplexMarkdown = /^#{1,6}\s|^\s*[-*+]\s|\|.*\|.*\||!\[.*\]\(.*\)/.test(text);
+  const hasLinks = /\[.*\]\(.*\)/.test(text);
+  return !hasCodeBlocks && !hasMath && !hasComplexMarkdown && !hasLinks;
+}
+
+function SafeSimpleRenderer({ content, className }: { content: string; className?: string }) {
+  const paragraphs = content.split(/\n\n+/).filter(p => p.trim());
+  return (
+    <div className={cn("prose prose-sm dark:prose-invert max-w-none", className)} data-testid="markdown-renderer-simple">
+      {paragraphs.map((p, i) => (
+        <p key={i} className="mb-3 leading-relaxed whitespace-pre-wrap">{p}</p>
+      ))}
+    </div>
+  );
+}
+
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
   className,
@@ -857,6 +877,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   customComponents = {},
   webSources,
 }: MarkdownRendererProps) {
+  const [renderError, setRenderError] = useState<Error | null>(null);
+
   const processedContent = useMemo(() => {
     if (!content) return "";
     try {
@@ -870,15 +892,22 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     }
   }, [content, enableMath, sanitize, webSources]);
 
+  useEffect(() => {
+    setRenderError(null);
+  }, [processedContent]);
+
+  const isSimple = useMemo(() => isSimpleContent(content || ''), [content]);
+
   const remarkPlugins = useMemo(() => {
     const plugins: any[] = [];
-    if (enableGfm) plugins.push(remarkGfm);
-    if (enableMath) plugins.push(remarkMath);
+    if (enableGfm && !isSimple) plugins.push(remarkGfm);
+    if (enableMath && !isSimple) plugins.push(remarkMath);
     return plugins;
-  }, [enableGfm, enableMath]);
+  }, [enableGfm, enableMath, isSimple]);
 
   const rehypePlugins = useMemo(() => {
     const plugins: any[] = [];
+    if (isSimple) return plugins;
     if (sanitize && !enableMath) {
       plugins.push([rehypeSanitize, sanitizeSchema]);
     }
@@ -893,7 +922,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     }
     if (enableCodeHighlight) plugins.push(rehypeHighlight);
     return plugins;
-  }, [enableMath, enableCodeHighlight, sanitize]);
+  }, [enableMath, enableCodeHighlight, sanitize, isSimple]);
 
   const CodeComponent = useMemo(() => {
     if (enableInteractiveCode) {
@@ -966,17 +995,31 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     return null;
   }
 
-  return (
-    <div className={cn("prose prose-sm dark:prose-invert max-w-none", className)} data-testid="markdown-renderer">
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        components={components}
-      >
-        {processedContent}
-      </ReactMarkdown>
-    </div>
-  );
+  if (renderError) {
+    return <SafeSimpleRenderer content={content} className={className} />;
+  }
+
+  if (isSimple) {
+    return <SafeSimpleRenderer content={processedContent} className={className} />;
+  }
+
+  try {
+    return (
+      <div className={cn("prose prose-sm dark:prose-invert max-w-none", className)} data-testid="markdown-renderer">
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          components={components}
+        >
+          {processedContent}
+        </ReactMarkdown>
+      </div>
+    );
+  } catch (error) {
+    console.error('[MarkdownRenderer] Render error:', error);
+    setRenderError(error as Error);
+    return <SafeSimpleRenderer content={content} className={className} />;
+  }
 });
 
 export default MarkdownRenderer;

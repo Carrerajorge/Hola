@@ -1507,7 +1507,7 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
           {agentRun.summary && agentRun.status === "completed" && (!agentRun.steps || agentRun.steps.length === 0) && (
             <div className="mt-2 pt-2 border-t border-border/50">
               <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-                <MarkdownErrorBoundary>
+                <MarkdownErrorBoundary key={`agent-summary-${agentRun.summary.length}`} fallbackContent={agentRun.summary}>
                   <MarkdownRenderer content={agentRun.summary} />
                 </MarkdownErrorBoundary>
               </div>
@@ -1761,7 +1761,7 @@ const AssistantMessage = memo(function AssistantMessage({
                 key={blockIdx}
                 className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0"
               >
-                <MarkdownErrorBoundary fallbackContent={block.content}>
+                <MarkdownErrorBoundary key={`${message.id}-${blockIdx}-${block.content.length}`} fallbackContent={block.content}>
                   <MarkdownRenderer
                     content={block.content}
                     customComponents={{ ...CleanDataTableComponents }}
@@ -2449,7 +2449,7 @@ export function MessageList({
           >
             <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
               <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                <MarkdownErrorBoundary key={`stream-virt-${streamingContent.length}`} fallbackContent={streamingContent}>
                   <MarkdownRenderer
                     content={streamingContent}
                     customComponents={{ ...CleanDataTableComponents }}
@@ -2618,7 +2618,7 @@ export function MessageList({
         <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
           <div className="flex flex-col gap-2 max-w-[85%] items-start min-w-0">
             <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-              <MarkdownErrorBoundary fallbackContent={streamingContent}>
+              <MarkdownErrorBoundary key={`stream-std-${streamingContent.length}`} fallbackContent={streamingContent}>
                 <MarkdownRenderer
                   content={streamingContent}
                   customComponents={{ ...CleanDataTableComponents }}
