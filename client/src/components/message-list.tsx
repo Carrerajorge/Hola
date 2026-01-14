@@ -2522,9 +2522,7 @@ export function MessageList({
               transform: `translateY(${virtualizer.getTotalSize()}px)`,
             }}
           >
-            <PhaseNarrator 
-              phase={aiState === "thinking" ? "searching" : "responding"} 
-            />
+            <PhaseNarrator autoProgress={true} />
           </motion.div>
         )}
       </div>
@@ -2630,9 +2628,7 @@ export function MessageList({
           data-testid="thinking-indicator-standard"
           className="flex w-full max-w-3xl mx-auto gap-4 justify-start px-4"
         >
-          <PhaseNarrator 
-            phase={aiState === "thinking" ? "searching" : "responding"} 
-          />
+          <PhaseNarrator autoProgress={true} />
         </motion.div>
       )}
     </>

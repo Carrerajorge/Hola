@@ -2,128 +2,97 @@ import { memo, useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 
 type ThinkingPhase = 
-  | "thinking" 
+  | "connecting"
   | "searching" 
   | "analyzing" 
-  | "generating" 
-  | "coding"
-  | "browsing"
-  | "connecting"
   | "processing"
-  | "verifying"
-  | "responding";
+  | "generating"
+  | "responding"
+  | "finalizing";
 
 interface ThinkingIndicatorProps {
   phase?: ThinkingPhase;
   message?: string;
   className?: string;
   variant?: "minimal" | "detailed" | "inline" | "phase-narrator";
+  isSearching?: boolean;
 }
 
+const phaseSequence: ThinkingPhase[] = [
+  "connecting",
+  "searching",
+  "analyzing", 
+  "processing",
+  "generating",
+  "responding",
+  "finalizing"
+];
+
 const phaseNarrations: Record<ThinkingPhase, string[]> = {
-  thinking: [
-    "Procesando solicitud",
-    "Analizando contexto",
-    "Preparando respuesta"
+  connecting: [
+    "Conectando con servidores",
+    "Inicializando búsqueda"
   ],
   searching: [
     "Buscando en la web",
-    "Explorando fuentes",
+    "Explorando fuentes científicas",
     "Consultando bases de datos",
-    "Recopilando información"
+    "Recopilando artículos"
   ],
   analyzing: [
-    "Analizando contenido",
-    "Extrayendo datos clave",
-    "Procesando información"
-  ],
-  generating: [
-    "Generando respuesta",
-    "Construyendo contenido",
-    "Finalizando"
-  ],
-  responding: [
-    "Escribiendo respuesta",
-    "Procesando información",
-    "Generando contenido"
-  ],
-  coding: [
-    "Escribiendo código",
-    "Optimizando solución",
-    "Verificando sintaxis"
-  ],
-  browsing: [
-    "Navegando la web",
-    "Cargando página",
-    "Extrayendo contenido"
-  ],
-  connecting: [
-    "Conectando servicio",
-    "Estableciendo enlace",
-    "Sincronizando"
+    "Analizando resultados",
+    "Evaluando relevancia",
+    "Filtrando información"
   ],
   processing: [
-    "Procesando datos",
-    "Calculando resultados",
-    "Optimizando salida"
+    "Procesando contenido",
+    "Extrayendo datos clave",
+    "Organizando información"
   ],
-  verifying: [
-    "Verificando datos",
-    "Validando información",
-    "Confirmando exactitud"
+  generating: [
+    "Preparando respuesta",
+    "Estructurando contenido"
+  ],
+  responding: [
+    "Generando respuesta",
+    "Escribiendo contenido"
+  ],
+  finalizing: [
+    "Finalizando",
+    "Completando respuesta"
   ]
 };
 
-const PhaseNarrator = memo(function PhaseNarrator({
-  phase = "thinking",
+const phaseDurations: Record<ThinkingPhase, number> = {
+  connecting: 800,
+  searching: 3500,
+  analyzing: 2500,
+  processing: 2000,
+  generating: 1500,
+  responding: 2000,
+  finalizing: 1000
+};
+
+export const PhaseNarrator = memo(function PhaseNarrator({
+  phase,
   message,
-  className
+  className,
+  autoProgress = true
 }: {
-  phase: ThinkingPhase;
+  phase?: ThinkingPhase;
   message?: string;
   className?: string;
+  autoProgress?: boolean;
 }) {
-  const [currentNarration, setCurrentNarration] = useState(message || phaseNarrations[phase]?.[0] || "Procesando");
+  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
+  const [currentNarration, setCurrentNarration] = useState("");
   const [isTransitioning, setIsTransitioning] = useState(false);
   const narrationIndex = useRef(0);
-  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
-  const lastPhase = useRef(phase);
+  const phaseStartTime = useRef(Date.now());
+  const animationFrame = useRef<number | null>(null);
 
-  const updateNarration = useCallback(() => {
-    const narrations = phaseNarrations[phase] || phaseNarrations.thinking;
-    narrationIndex.current = (narrationIndex.current + 1) % narrations.length;
-    
-    setIsTransitioning(true);
-    setTimeout(() => {
-      setCurrentNarration(message || narrations[narrationIndex.current]);
-      setIsTransitioning(false);
-    }, 120);
-  }, [phase, message]);
-
-  useEffect(() => {
-    if (phase !== lastPhase.current) {
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-      
-      debounceTimer.current = setTimeout(() => {
-        lastPhase.current = phase;
-        narrationIndex.current = 0;
-        const narrations = phaseNarrations[phase] || phaseNarrations.thinking;
-        setIsTransitioning(true);
-        setTimeout(() => {
-          setCurrentNarration(message || narrations[0]);
-          setIsTransitioning(false);
-        }, 120);
-      }, 200);
-    }
-    
-    return () => {
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-    };
-  }, [phase, message]);
+  const currentPhase = phase || phaseSequence[currentPhaseIndex];
+  const narrations = phaseNarrations[currentPhase] || phaseNarrations.searching;
 
   useEffect(() => {
     if (message) {
@@ -131,76 +100,128 @@ const PhaseNarrator = memo(function PhaseNarrator({
       setTimeout(() => {
         setCurrentNarration(message);
         setIsTransitioning(false);
-      }, 120);
+      }, 100);
       return;
     }
 
-    const interval = setInterval(updateNarration, 2000);
-    return () => clearInterval(interval);
-  }, [message, updateNarration]);
+    setCurrentNarration(narrations[0]);
+    narrationIndex.current = 0;
+
+    const narrationInterval = setInterval(() => {
+      narrationIndex.current = (narrationIndex.current + 1) % narrations.length;
+      setIsTransitioning(true);
+      setTimeout(() => {
+        setCurrentNarration(narrations[narrationIndex.current]);
+        setIsTransitioning(false);
+      }, 100);
+    }, 1800);
+
+    return () => clearInterval(narrationInterval);
+  }, [currentPhase, message, narrations]);
+
+  useEffect(() => {
+    if (!autoProgress || phase) return;
+
+    phaseStartTime.current = Date.now();
+    
+    const progressPhase = () => {
+      const elapsed = Date.now() - phaseStartTime.current;
+      const currentPhaseDuration = phaseDurations[phaseSequence[currentPhaseIndex]];
+      
+      if (elapsed >= currentPhaseDuration && currentPhaseIndex < phaseSequence.length - 2) {
+        setCurrentPhaseIndex(prev => prev + 1);
+        phaseStartTime.current = Date.now();
+      }
+      
+      animationFrame.current = requestAnimationFrame(progressPhase);
+    };
+    
+    animationFrame.current = requestAnimationFrame(progressPhase);
+    
+    return () => {
+      if (animationFrame.current) {
+        cancelAnimationFrame(animationFrame.current);
+      }
+    };
+  }, [autoProgress, phase, currentPhaseIndex]);
+
+  useEffect(() => {
+    setCurrentPhaseIndex(0);
+    phaseStartTime.current = Date.now();
+  }, []);
 
   return (
-    <div className={cn("phase-narrator-container relative inline-block", className)}>
+    <div className={cn("phase-narrator-wrapper", className)}>
       <span 
         className={cn(
-          "phase-narrator-text text-sm font-medium text-foreground/70 relative inline-block",
-          isTransitioning && "phase-narrator-exit"
+          "phase-narrator-text",
+          isTransitioning && "transitioning"
         )}
       >
         {currentNarration}
       </span>
 
       <style>{`
-        .phase-narrator-container {
+        .phase-narrator-wrapper {
           position: relative;
-          overflow: hidden;
+          display: inline-block;
         }
         
         .phase-narrator-text {
+          font-size: 0.875rem;
+          font-weight: 500;
           display: inline-block;
           position: relative;
           background: linear-gradient(
             90deg,
-            currentColor 0%,
-            currentColor 40%,
-            rgba(59, 130, 246, 0.8) 50%,
-            currentColor 60%,
-            currentColor 100%
+            rgba(100, 100, 100, 0.8) 0%,
+            rgba(100, 100, 100, 0.8) 35%,
+            rgba(59, 130, 246, 1) 50%,
+            rgba(100, 100, 100, 0.8) 65%,
+            rgba(100, 100, 100, 0.8) 100%
           );
-          background-size: 200% 100%;
+          background-size: 250% 100%;
           -webkit-background-clip: text;
           background-clip: text;
           -webkit-text-fill-color: transparent;
-          animation: shimmer-text 1.5s ease-in-out infinite;
+          animation: lightning-shimmer 1.2s ease-in-out infinite;
+          transition: opacity 0.1s ease-out, transform 0.1s ease-out;
         }
         
-        .phase-narrator-exit {
+        .phase-narrator-text.transitioning {
           opacity: 0;
-          transform: translateY(-4px);
-          transition: all 0.12s ease-out;
+          transform: translateY(-3px);
         }
         
-        @keyframes shimmer-text {
+        @keyframes lightning-shimmer {
           0% {
-            background-position: 100% 0;
+            background-position: 150% 0;
           }
           100% {
-            background-position: -100% 0;
+            background-position: -50% 0;
           }
         }
         
         .dark .phase-narrator-text {
           background: linear-gradient(
             90deg,
-            rgba(255, 255, 255, 0.7) 0%,
-            rgba(255, 255, 255, 0.7) 40%,
+            rgba(180, 180, 180, 0.85) 0%,
+            rgba(180, 180, 180, 0.85) 35%,
             rgba(96, 165, 250, 1) 50%,
-            rgba(255, 255, 255, 0.7) 60%,
-            rgba(255, 255, 255, 0.7) 100%
+            rgba(180, 180, 180, 0.85) 65%,
+            rgba(180, 180, 180, 0.85) 100%
           );
-          background-size: 200% 100%;
+          background-size: 250% 100%;
           -webkit-background-clip: text;
           background-clip: text;
+        }
+        
+        @media (prefers-reduced-motion: reduce) {
+          .phase-narrator-text {
+            animation: none;
+            background: currentColor;
+            -webkit-text-fill-color: currentColor;
+          }
         }
       `}</style>
     </div>
@@ -208,22 +229,25 @@ const PhaseNarrator = memo(function PhaseNarrator({
 });
 
 export const ThinkingIndicator = memo(function ThinkingIndicator({
-  phase = "thinking",
+  phase,
   message,
   className,
   variant = "phase-narrator",
+  isSearching = false,
 }: ThinkingIndicatorProps) {
+
+  const effectivePhase = isSearching ? "searching" : phase;
 
   if (variant === "phase-narrator") {
     return (
       <div 
         className={cn(
-          "inline-flex items-center py-2 px-1",
+          "inline-flex items-center py-2",
           className
         )}
         data-testid="thinking-indicator"
       >
-        <PhaseNarrator phase={phase} message={message} />
+        <PhaseNarrator phase={effectivePhase} message={message} autoProgress={!effectivePhase} />
       </div>
     );
   }
@@ -231,7 +255,7 @@ export const ThinkingIndicator = memo(function ThinkingIndicator({
   if (variant === "inline") {
     return (
       <span className={cn("inline-flex items-center gap-1.5", className)}>
-        <PhaseNarrator phase={phase} message={message} />
+        <PhaseNarrator phase={effectivePhase} message={message} autoProgress={!effectivePhase} />
       </span>
     );
   }
@@ -239,19 +263,14 @@ export const ThinkingIndicator = memo(function ThinkingIndicator({
   if (variant === "minimal") {
     return (
       <div className={cn("flex items-center gap-2 py-2", className)}>
-        <PhaseNarrator phase={phase} message={message} />
+        <PhaseNarrator phase={effectivePhase} message={message} autoProgress={!effectivePhase} />
       </div>
     );
   }
 
   return (
-    <div
-      className={cn(
-        "flex items-center gap-3 py-2",
-        className
-      )}
-    >
-      <PhaseNarrator phase={phase} message={message} />
+    <div className={cn("flex items-center gap-3 py-2", className)}>
+      <PhaseNarrator phase={effectivePhase} message={message} autoProgress={!effectivePhase} />
     </div>
   );
 });
@@ -287,5 +306,4 @@ export const ThinkingDots = memo(function ThinkingDots({
   );
 });
 
-export { PhaseNarrator };
 export default ThinkingIndicator;
