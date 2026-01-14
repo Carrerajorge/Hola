@@ -29,6 +29,39 @@ Security is implemented with bcrypt password hashing, multi-tenant validation, a
 ### Scalability & Performance
 Enterprise-grade scalability and performance are achieved through Redis SSE Streaming for horizontal scaling, a Memory Cache Layer (LRU with optional Redis backend), Response Caching Middleware with ETag support, and Request Deduplication. Compression Middleware handles Gzip and Brotli. Circuit Breakers wrap external services with configurable timeouts and retries. Rate Limiting uses a sliding window algorithm. Graceful Shutdown ensures connection draining and WebSocket cleanup. A FastAPI SSE Backend provides a production-grade Python SSE microservice for agent tracing using Redis Streams, consumer groups, backpressure handling, token bucket rate limiting, optional authentication, Celery workers, circuit breakers, OpenTelemetry tracing, and health endpoints.
 
+### Production Robustness Systems
+The following production-grade systems ensure stability under high load:
+
+**Large Document Processor** (`server/lib/largeDocumentProcessor.ts`): Handles documents with 500k+ tokens via intelligent chunking (50k token max with semantic boundaries), streaming processing with AsyncGenerator, backpressure control (pauses at 80% heap usage), concurrency limiting via semaphore (3 concurrent), and memory limits (512MB default). Includes 26 Vitest tests for validation.
+
+**Dialogue Manager FSM** (`server/pipeline/dialogueManager.ts`): Corrected state machine with proper transitions (clarifying→clarifying allowed), state timeouts (30s), session cleanup for inactivity (1hr), and context reset on state changes.
+
+**Stage Watchdog with AbortController** (`server/pipeline/stageTimeouts.ts`): Real timeout propagation via AbortController per stage, abort signal chaining to downstream operations, and proper cleanup in finishRequest().
+
+**Memory Leak Prevention** (`server/agent/superAgent/tracing/RunController.ts`, `EventStore.ts`): Automatic cleanup of completed runs (5min timeout), buffer eviction (10k max events), proactive GC (60s intervals), and WeakRef-based instance tracking.
+
+**Tenant-Isolated Circuit Breaker** (`server/lib/circuitBreaker.ts`): Per (tenant, provider) isolation, 5-state FSM (CLOSED/OPEN/HALF_OPEN), LRU eviction (10k max breakers), and automatic cleanup of stale breakers.
+
+**PostgreSQL Health Checks** (`server/db.ts`): Proactive checks every 30s, 3-state health (HEALTHY/DEGRADED/UNHEALTHY), exponential backoff reconnection (1s→30s), and Prometheus metrics (db_health_status, db_query_latency_ms, db_connection_failures_total).
+
+**EventStore Batch Inserts** (`server/agent/superAgent/tracing/EventStore.ts`): UNNEST-based batch INSERT for performance, transactions with retry (3 attempts, 100ms→400ms backoff), and grouping by run_id.
+
+**Connection Heartbeat Manager** (`server/lib/connectionHeartbeat.ts`): 15s heartbeat intervals, zombie detection (3 missed beats), automatic cleanup, and SSE/WebSocket protocol support.
+
+**Context Compressor** (`server/lib/contextCompressor.ts`): 70% compression target via 4 strategies (summarization, deduplication, pruning, semantic clustering), 1hr summary cache, and preserves last 5 messages intact.
+
+**Semantic Cache** (`server/lib/semanticCache.ts`): Embedding-based similarity (0.92 threshold), LSH indexing for fast lookup, LRU eviction (10k entries), and batch embedding operations.
+
+**Graceful Degradation** (`server/lib/gracefulDegradation.ts`): 5 degradation levels (FULL→OFFLINE), fallback chains for LLM/DB/embeddings, automatic recovery when services heal, and Prometheus metrics.
+
+**Self-Healing System** (`server/lib/selfHealing.ts`): Automatic error diagnosis (transient/config/dependency/code_bug), healing actions (RETRY/RESTART/CLEAR_CACHE/RESET_CONNECTION/FALLBACK/ESCALATE), pattern detection (>3 errors in 5min), and escalation for unrecoverable errors.
+
+**OpenTelemetry Distributed Tracing** (`server/lib/tracing.ts`): TracerProvider with BatchSpanProcessor, auto-instrumentation (HTTP/Express/PostgreSQL), custom spans for LLM/DB/agent/pipeline operations, and 10% sampling in production.
+
+**Output Sanitizer** (`server/lib/outputSanitizer.ts`): PII detection (8 types: email, phone, SSN, credit cards with Luhn, names, addresses, DOB, tax IDs), secret detection (8 types: API keys, AWS keys, passwords, JWT, private keys, connection strings, OAuth tokens), and configurable actions (REDACT/MASK/BLOCK/LOG).
+
+**Backtracking Manager** (`server/lib/backtracking.ts`): Automatic checkpoints at key points, state restoration to last valid checkpoint, re-planning with failure avoidance constraints, and maximum 3 backtrack attempts.
+
 ### Data Storage
 PostgreSQL is used as the relational database, managed with Drizzle ORM. Client-side persistence leverages `localStorage` for chat history and preferences, and IndexedDB for background tasks and the offline queue.
 
