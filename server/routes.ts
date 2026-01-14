@@ -47,6 +47,7 @@ import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
 import { createToolExecutionRouter } from "./routes/toolExecutionRouter";
 import scientificSearchRouter from "./routes/scientificSearchRouter";
 import documentAnalysisRouter from "./routes/documentAnalysisRouter";
+import ragRouter from "./routes/ragRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
@@ -311,6 +312,7 @@ export async function registerRoutes(
   app.use("/api/execution", createToolExecutionRouter());
   app.use("/api/scientific", scientificSearchRouter);
   app.use("/api/document-analysis", documentAnalysisRouter);
+  app.use("/api/rag", ragRouter);
   app.use(createStripeRouter());
   app.use("/api", createRunController());
 
