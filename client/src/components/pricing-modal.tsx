@@ -83,7 +83,7 @@ const plans: PlanInfo[] = [
   {
     id: "plus",
     name: "Plus",
-    price: "$20",
+    price: "$10",
     priceId: "price_plus_monthly",
     description: "Descubre toda la experiencia",
     icon: <Star className="h-6 w-6" />,
@@ -104,8 +104,8 @@ const plans: PlanInfo[] = [
   {
     id: "pro",
     name: "Pro",
-    price: "$200",
-    priceId: "price_pro_monthly",
+    price: "$20",
+    priceId: "price_pro_yearly",
     description: "Maximiza tu productividad",
     icon: <Crown className="h-6 w-6" />,
     gradient: "from-amber-500 to-orange-600",
@@ -287,7 +287,9 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
                       {plan.price}
                     </span>
                     {plan.price !== "$0" && (
-                      <span className="text-gray-500 dark:text-gray-400">/mes</span>
+                      <span className="text-gray-500 dark:text-gray-400">
+                        {plan.id === "pro" ? "/año" : "/mes"}
+                      </span>
                     )}
                   </div>
                   <CardDescription className="mt-1">

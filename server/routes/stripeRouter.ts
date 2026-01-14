@@ -4,10 +4,10 @@ import { db } from "../db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
 
-const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number }> = {
-  price_go_monthly: { name: "Go", amount: 500 },
-  price_plus_monthly: { name: "Plus", amount: 2000 },
-  price_pro_monthly: { name: "Pro", amount: 20000 },
+const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interval?: string }> = {
+  price_go_monthly: { name: "Go", amount: 500, interval: "month" },
+  price_plus_monthly: { name: "Plus", amount: 1000, interval: "month" },
+  price_pro_yearly: { name: "Pro", amount: 2000, interval: "year" },
 };
 
 export function createStripeRouter() {
@@ -71,28 +71,55 @@ export function createStripeRouter() {
 
   router.get("/api/stripe/price-ids", async (req, res) => {
     try {
-      const result = await db.execute(sql`
-        SELECT 
-          p.name as product_name,
-          pr.id as price_id,
-          pr.unit_amount
-        FROM stripe.products p
-        LEFT JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true
-        WHERE p.active = true
-        ORDER BY pr.unit_amount ASC
-      `);
-
       const priceMapping: Record<string, string> = {};
-      for (const row of result.rows as any[]) {
-        const productName = (row.product_name || "").toLowerCase();
-        const amount = row.unit_amount;
-        
-        if (productName.includes("go") || amount === 500) {
-          priceMapping.price_go_monthly = row.price_id;
-        } else if (productName.includes("plus") || amount === 2000) {
-          priceMapping.price_plus_monthly = row.price_id;
-        } else if (productName.includes("pro") || amount === 20000) {
-          priceMapping.price_pro_monthly = row.price_id;
+      
+      try {
+        const result = await db.execute(sql`
+          SELECT 
+            p.name as product_name,
+            pr.id as price_id,
+            pr.unit_amount
+          FROM stripe.products p
+          LEFT JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true
+          WHERE p.active = true
+          ORDER BY pr.unit_amount ASC
+        `);
+
+        for (const row of result.rows as any[]) {
+          const productName = (row.product_name || "").toLowerCase();
+          const amount = row.unit_amount;
+          
+          if (productName.includes("go") || amount === 500) {
+            priceMapping.price_go_monthly = row.price_id;
+          } else if (productName.includes("plus") || amount === 1000) {
+            priceMapping.price_plus_monthly = row.price_id;
+          } else if (productName.includes("pro") || amount === 2000) {
+            priceMapping.price_pro_yearly = row.price_id;
+          }
+        }
+      } catch (dbError) {
+        console.log("DB lookup failed, trying Stripe API directly");
+      }
+
+      if (Object.keys(priceMapping).length === 0) {
+        try {
+          const stripe = await getUncachableStripeClient();
+          const prices = await stripe.prices.list({ active: true, limit: 100 });
+          
+          for (const price of prices.data) {
+            const amount = price.unit_amount;
+            const interval = price.recurring?.interval;
+            
+            if (amount === 500 && interval === "month") {
+              priceMapping.price_go_monthly = price.id;
+            } else if (amount === 1000 && interval === "month") {
+              priceMapping.price_plus_monthly = price.id;
+            } else if (amount === 2000 && interval === "year") {
+              priceMapping.price_pro_yearly = price.id;
+            }
+          }
+        } catch (stripeError: any) {
+          console.error("Stripe API lookup failed:", stripeError.message);
         }
       }
 
@@ -154,6 +181,93 @@ export function createStripeRouter() {
     } catch (error: any) {
       console.error("Checkout error:", error);
       res.status(500).json({ error: "Failed to create checkout session" });
+    }
+  });
+
+  router.post("/api/stripe/create-products", async (req, res) => {
+    try {
+      const stripe = await getUncachableStripeClient();
+      const createdProducts: any[] = [];
+
+      const productsToCreate = [
+        {
+          name: "IliaGPT Go",
+          description: "Logra más con una IA más avanzada - 50 solicitudes por día",
+          priceAmount: 500,
+          interval: "month" as const,
+          metadata: { plan: "go" }
+        },
+        {
+          name: "IliaGPT Plus",
+          description: "Descubre toda la experiencia - 200 solicitudes por día",
+          priceAmount: 1000,
+          interval: "month" as const,
+          metadata: { plan: "plus" }
+        },
+        {
+          name: "IliaGPT Pro",
+          description: "Maximiza tu productividad - Mensajes ilimitados",
+          priceAmount: 2000,
+          interval: "year" as const,
+          metadata: { plan: "pro" }
+        }
+      ];
+
+      for (const productData of productsToCreate) {
+        const existingProducts = await stripe.products.search({
+          query: `name:'${productData.name}'`
+        });
+
+        let product;
+        if (existingProducts.data.length > 0) {
+          product = existingProducts.data[0];
+        } else {
+          product = await stripe.products.create({
+            name: productData.name,
+            description: productData.description,
+            metadata: productData.metadata
+          });
+        }
+
+        const existingPrices = await stripe.prices.list({
+          product: product.id,
+          active: true
+        });
+
+        let price;
+        const matchingPrice = existingPrices.data.find(
+          p => p.unit_amount === productData.priceAmount && 
+               p.recurring?.interval === productData.interval
+        );
+
+        if (matchingPrice) {
+          price = matchingPrice;
+        } else {
+          price = await stripe.prices.create({
+            product: product.id,
+            unit_amount: productData.priceAmount,
+            currency: "usd",
+            recurring: { interval: productData.interval }
+          });
+        }
+
+        createdProducts.push({
+          productId: product.id,
+          productName: product.name,
+          priceId: price.id,
+          amount: price.unit_amount,
+          interval: price.recurring?.interval
+        });
+      }
+
+      res.json({ 
+        success: true, 
+        message: "Productos creados exitosamente",
+        products: createdProducts 
+      });
+    } catch (error: any) {
+      console.error("Error creating products:", error);
+      res.status(500).json({ error: error.message || "Failed to create products" });
     }
   });
 
