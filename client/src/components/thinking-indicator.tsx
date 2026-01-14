@@ -174,19 +174,22 @@ export const PhaseNarrator = memo(function PhaseNarrator({
           position: relative;
           background: linear-gradient(
             90deg,
-            rgba(100, 100, 100, 0.8) 0%,
-            rgba(100, 100, 100, 0.8) 30%,
-            rgba(56, 189, 248, 1) 42%,
-            rgba(59, 130, 246, 1) 50%,
-            rgba(56, 189, 248, 1) 58%,
-            rgba(100, 100, 100, 0.8) 70%,
-            rgba(100, 100, 100, 0.8) 100%
+            rgba(120, 120, 120, 0.85) 0%,
+            rgba(120, 120, 120, 0.85) 25%,
+            rgba(14, 165, 233, 1) 38%,
+            rgba(56, 189, 248, 1) 45%,
+            rgba(255, 255, 255, 1) 50%,
+            rgba(56, 189, 248, 1) 55%,
+            rgba(14, 165, 233, 1) 62%,
+            rgba(120, 120, 120, 0.85) 75%,
+            rgba(120, 120, 120, 0.85) 100%
           );
-          background-size: 280% 100%;
+          background-size: 300% 100%;
           -webkit-background-clip: text;
           background-clip: text;
           -webkit-text-fill-color: transparent;
           animation: lightning-shimmer 2.7s ease-in-out infinite;
+          filter: drop-shadow(0 0 2px rgba(56, 189, 248, 0.3));
           transition: opacity 0.1s ease-out, transform 0.1s ease-out;
         }
         
@@ -207,17 +210,20 @@ export const PhaseNarrator = memo(function PhaseNarrator({
         .dark .phase-narrator-text {
           background: linear-gradient(
             90deg,
-            rgba(200, 200, 200, 0.9) 0%,
-            rgba(200, 200, 200, 0.9) 30%,
-            rgba(125, 211, 252, 1) 42%,
-            rgba(96, 165, 250, 1) 50%,
-            rgba(125, 211, 252, 1) 58%,
-            rgba(200, 200, 200, 0.9) 70%,
-            rgba(200, 200, 200, 0.9) 100%
+            rgba(210, 210, 210, 0.9) 0%,
+            rgba(210, 210, 210, 0.9) 25%,
+            rgba(56, 189, 248, 1) 38%,
+            rgba(125, 211, 252, 1) 45%,
+            rgba(255, 255, 255, 1) 50%,
+            rgba(125, 211, 252, 1) 55%,
+            rgba(56, 189, 248, 1) 62%,
+            rgba(210, 210, 210, 0.9) 75%,
+            rgba(210, 210, 210, 0.9) 100%
           );
-          background-size: 280% 100%;
+          background-size: 300% 100%;
           -webkit-background-clip: text;
           background-clip: text;
+          filter: drop-shadow(0 0 3px rgba(125, 211, 252, 0.5));
         }
         
         @media (prefers-reduced-motion: reduce) {
