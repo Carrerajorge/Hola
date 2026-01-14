@@ -97,38 +97,57 @@ export class EventStore {
     const events = [...this.buffer];
     this.buffer = [];
 
-    try {
-      for (const event of events) {
-        await db.execute(sql`
-          INSERT INTO trace_events (
-            run_id, seq, trace_id, span_id, parent_span_id, node_id,
-            attempt_id, agent, event_type, phase, message, status,
-            progress, metrics, evidence, ts
-          ) VALUES (
-            ${event.run_id},
-            ${event.seq},
-            ${event.trace_id},
-            ${event.span_id},
-            ${event.parent_span_id},
-            ${event.node_id},
-            ${event.attempt_id},
-            ${event.agent},
-            ${event.event_type},
-            ${event.phase ?? null},
-            ${event.message},
-            ${event.status ?? null},
-            ${event.progress ?? null},
-            ${JSON.stringify(event.metrics ?? {})},
-            ${JSON.stringify(event.evidence ?? {})},
-            ${event.ts}
-          )
-          ON CONFLICT (run_id, seq) DO NOTHING
-        `);
+    const maxRetries = 3;
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        for (const event of events) {
+          await db.execute(sql`
+            INSERT INTO trace_events (
+              run_id, seq, trace_id, span_id, parent_span_id, node_id,
+              attempt_id, agent, event_type, phase, message, status,
+              progress, metrics, evidence, ts
+            ) VALUES (
+              ${event.run_id},
+              ${event.seq},
+              ${event.trace_id},
+              ${event.span_id},
+              ${event.parent_span_id},
+              ${event.node_id},
+              ${event.attempt_id},
+              ${event.agent},
+              ${event.event_type},
+              ${event.phase ?? null},
+              ${event.message},
+              ${event.status ?? null},
+              ${event.progress ?? null},
+              ${JSON.stringify(event.metrics ?? {})},
+              ${JSON.stringify(event.evidence ?? {})},
+              ${event.ts}
+            )
+            ON CONFLICT (run_id, seq) DO NOTHING
+          `);
+        }
+        return;
+      } catch (error: any) {
+        lastError = error;
+        const isConnectionError = error?.code === '57P01' || 
+          error?.message?.includes('terminating connection') ||
+          error?.message?.includes('Connection terminated');
+        
+        if (isConnectionError && attempt < maxRetries - 1) {
+          const delay = Math.pow(2, attempt) * 100;
+          console.warn(`[EventStore] Connection error, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        break;
       }
-    } catch (error) {
-      console.error("[EventStore] Flush error:", error);
-      this.buffer.unshift(...events);
     }
+
+    console.error("[EventStore] Flush failed after retries:", lastError?.message || lastError);
+    this.buffer.unshift(...events);
   }
 
   async getEvents(runId: string, fromSeq: number = 0, limit: number = 1000): Promise<TraceEvent[]> {

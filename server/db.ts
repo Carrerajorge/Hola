@@ -22,11 +22,21 @@ if (!databaseUrl) {
 
 const pool = new Pool({
   connectionString: databaseUrl,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
 });
 
-// Test database connection on startup
-pool.on('error', (err) => {
-  console.error('[DB] Unexpected error on idle client:', err);
+pool.on('error', (err: any) => {
+  if (err.code === '57P01') {
+    console.warn('[DB] Connection terminated by administrator, pool will reconnect automatically');
+  } else {
+    console.error('[DB] Unexpected error on idle client:', err.message || err);
+  }
+});
+
+pool.on('connect', () => {
+  console.log('[DB] New client connected to pool');
 });
 
 // Export pool for raw queries if needed
