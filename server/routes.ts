@@ -45,6 +45,7 @@ import superAgentRouter from "./routes/superAgentRoutes";
 import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
 import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
 import { createToolExecutionRouter } from "./routes/toolExecutionRouter";
+import scientificSearchRouter from "./routes/scientificSearchRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
@@ -307,6 +308,7 @@ export async function registerRoutes(
   app.use("/api", superAgentRouter);
   app.use("/api", createPythonToolsRouter());
   app.use("/api/execution", createToolExecutionRouter());
+  app.use("/api/scientific", scientificSearchRouter);
   app.use(createStripeRouter());
   app.use("/api", createRunController());
 
