@@ -29,6 +29,18 @@ class SecureCommandExecutor:
     MAX_ARG_LEN = 500
     ALLOWED_DIRS: Tuple[str, ...] = ("/tmp", "/home", "/var/log")
     
+    ALLOWED_EXECUTABLES: frozenset = frozenset({
+        "/bin/ls",
+        "/bin/cat",
+        "/bin/grep",
+        "/usr/bin/find",
+        "/bin/echo",
+        "/bin/pwd",
+        "/usr/bin/head",
+        "/usr/bin/tail",
+        "/usr/bin/wc",
+    })
+    
     @staticmethod
     def _sanitize_arg(arg: str) -> Optional[str]:
         """Validate and sanitize a single argument. Returns None if invalid."""
@@ -66,12 +78,18 @@ class SecureCommandExecutor:
     
     @staticmethod
     async def _run_command(
-        cmd_path: str,  # Must be a literal string constant
+        cmd_path: str,
         args: List[str],
         cwd: Optional[str],
         timeout: int
     ) -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
-        """Execute command with validated arguments."""
+        """Execute command with validated arguments.
+        
+        Security: cmd_path must be in ALLOWED_EXECUTABLES whitelist.
+        """
+        if cmd_path not in SecureCommandExecutor.ALLOWED_EXECUTABLES:
+            return False, None, f"Executable not allowed: {cmd_path}", None
+        
         valid, clean_args = SecureCommandExecutor._validate_args(args)
         if not valid:
             return False, None, "Invalid arguments", None
