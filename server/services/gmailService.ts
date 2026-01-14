@@ -93,8 +93,20 @@ async function getGmailClientForUser(userId: string): Promise<gmail_v1.Gmail> {
 
       oauth2Client.setCredentials(credentials);
     } catch (error: any) {
-      console.error('[Gmail] Token refresh failed:', error.message);
-      throw new Error('Gmail token expired. Please reconnect.');
+      const errorMsg = error?.message || String(error);
+      const isInvalidClient = errorMsg.includes('invalid_client');
+      const isInvalidGrant = errorMsg.includes('invalid_grant');
+      
+      if (isInvalidClient) {
+        console.warn('[Gmail OAuth] Client credentials invalid - check GOOGLE_CLIENT_ID/SECRET configuration');
+      } else if (isInvalidGrant) {
+        console.warn('[Gmail OAuth] Refresh token revoked or expired for user:', userId);
+        await storage.deleteGmailOAuthToken(userId);
+      } else {
+        console.warn('[Gmail OAuth] Token refresh failed:', errorMsg.substring(0, 100));
+      }
+      
+      throw new Error('Gmail connection expired. Please reconnect your Gmail account.');
     }
   } else {
     oauth2Client.setCredentials({
