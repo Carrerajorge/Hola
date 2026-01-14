@@ -29,18 +29,6 @@ class SecureCommandExecutor:
     MAX_ARG_LEN = 500
     ALLOWED_DIRS: Tuple[str, ...] = ("/tmp", "/home", "/var/log")
     
-    ALLOWED_EXECUTABLES: frozenset = frozenset({
-        "/bin/ls",
-        "/bin/cat",
-        "/bin/grep",
-        "/usr/bin/find",
-        "/bin/echo",
-        "/bin/pwd",
-        "/usr/bin/head",
-        "/usr/bin/tail",
-        "/usr/bin/wc",
-    })
-    
     @staticmethod
     def _sanitize_arg(arg: str) -> Optional[str]:
         """Validate and sanitize a single argument. Returns None if invalid."""
@@ -77,36 +65,31 @@ class SecureCommandExecutor:
         return normalized
     
     @staticmethod
-    async def _run_command(
-        cmd_path: str,
+    def _prepare_execution(
         args: List[str],
-        cwd: Optional[str],
-        timeout: int
-    ) -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
-        """Execute command with validated arguments.
+        cwd: Optional[str]
+    ) -> Tuple[bool, List[str], Optional[str], Optional[str]]:
+        """Validate arguments and working directory before execution.
         
-        Security: cmd_path must be in ALLOWED_EXECUTABLES whitelist.
+        Returns: (success, clean_args, safe_cwd, error_message)
         """
-        if cmd_path not in SecureCommandExecutor.ALLOWED_EXECUTABLES:
-            return False, None, f"Executable not allowed: {cmd_path}", None
-        
         valid, clean_args = SecureCommandExecutor._validate_args(args)
         if not valid:
-            return False, None, "Invalid arguments", None
+            return False, [], None, "Invalid arguments"
         
         safe_cwd = SecureCommandExecutor._validate_cwd(cwd)
         if cwd is not None and safe_cwd is None:
-            return False, None, "Invalid working directory", None
+            return False, [], None, "Invalid working directory"
         
+        return True, clean_args, safe_cwd, None
+
+    @staticmethod
+    async def _execute_process(
+        proc: asyncio.subprocess.Process,
+        timeout: int
+    ) -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
+        """Handle process communication and result extraction."""
         try:
-            proc = await asyncio.create_subprocess_exec(
-                cmd_path,
-                *clean_args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=safe_cwd,
-                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
-            )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), 
                 timeout=timeout
@@ -119,53 +102,177 @@ class SecureCommandExecutor:
             )
         except asyncio.TimeoutError:
             return False, None, "Command timed out", None
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            return False, None, str(e), None
 
     @staticmethod
     async def exec_ls(args: List[str], cwd: Optional[str], timeout: int):
         """Execute /bin/ls with validated arguments."""
-        return await SecureCommandExecutor._run_command("/bin/ls", args, cwd, timeout)
+        valid, clean_args, safe_cwd, error = SecureCommandExecutor._prepare_execution(args, cwd)
+        if not valid:
+            return False, None, error, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/ls",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            return await SecureCommandExecutor._execute_process(proc, timeout)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
     
     @staticmethod
     async def exec_cat(args: List[str], cwd: Optional[str], timeout: int):
         """Execute /bin/cat with validated arguments."""
-        return await SecureCommandExecutor._run_command("/bin/cat", args, cwd, timeout)
+        valid, clean_args, safe_cwd, error = SecureCommandExecutor._prepare_execution(args, cwd)
+        if not valid:
+            return False, None, error, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/cat",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            return await SecureCommandExecutor._execute_process(proc, timeout)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
     
     @staticmethod
     async def exec_grep(args: List[str], cwd: Optional[str], timeout: int):
         """Execute /bin/grep with validated arguments."""
-        return await SecureCommandExecutor._run_command("/bin/grep", args, cwd, timeout)
+        valid, clean_args, safe_cwd, error = SecureCommandExecutor._prepare_execution(args, cwd)
+        if not valid:
+            return False, None, error, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/grep",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            return await SecureCommandExecutor._execute_process(proc, timeout)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
     
     @staticmethod
     async def exec_find(args: List[str], cwd: Optional[str], timeout: int):
         """Execute /usr/bin/find with validated arguments."""
-        return await SecureCommandExecutor._run_command("/usr/bin/find", args, cwd, timeout)
+        valid, clean_args, safe_cwd, error = SecureCommandExecutor._prepare_execution(args, cwd)
+        if not valid:
+            return False, None, error, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/usr/bin/find",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            return await SecureCommandExecutor._execute_process(proc, timeout)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
     
     @staticmethod
     async def exec_echo(args: List[str], cwd: Optional[str], timeout: int):
         """Execute /bin/echo with validated arguments."""
-        return await SecureCommandExecutor._run_command("/bin/echo", args, cwd, timeout)
+        valid, clean_args, safe_cwd, error = SecureCommandExecutor._prepare_execution(args, cwd)
+        if not valid:
+            return False, None, error, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/echo",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            return await SecureCommandExecutor._execute_process(proc, timeout)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
     
     @staticmethod
     async def exec_pwd(args: List[str], cwd: Optional[str], timeout: int):
         """Execute /bin/pwd with validated arguments."""
-        return await SecureCommandExecutor._run_command("/bin/pwd", args, cwd, timeout)
+        valid, clean_args, safe_cwd, error = SecureCommandExecutor._prepare_execution(args, cwd)
+        if not valid:
+            return False, None, error, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/pwd",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            return await SecureCommandExecutor._execute_process(proc, timeout)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
     
     @staticmethod
     async def exec_head(args: List[str], cwd: Optional[str], timeout: int):
         """Execute /usr/bin/head with validated arguments."""
-        return await SecureCommandExecutor._run_command("/usr/bin/head", args, cwd, timeout)
+        valid, clean_args, safe_cwd, error = SecureCommandExecutor._prepare_execution(args, cwd)
+        if not valid:
+            return False, None, error, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/usr/bin/head",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            return await SecureCommandExecutor._execute_process(proc, timeout)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
     
     @staticmethod
     async def exec_tail(args: List[str], cwd: Optional[str], timeout: int):
         """Execute /usr/bin/tail with validated arguments."""
-        return await SecureCommandExecutor._run_command("/usr/bin/tail", args, cwd, timeout)
+        valid, clean_args, safe_cwd, error = SecureCommandExecutor._prepare_execution(args, cwd)
+        if not valid:
+            return False, None, error, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/usr/bin/tail",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            return await SecureCommandExecutor._execute_process(proc, timeout)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
     
     @staticmethod
     async def exec_wc(args: List[str], cwd: Optional[str], timeout: int):
         """Execute /usr/bin/wc with validated arguments."""
-        return await SecureCommandExecutor._run_command("/usr/bin/wc", args, cwd, timeout)
+        valid, clean_args, safe_cwd, error = SecureCommandExecutor._prepare_execution(args, cwd)
+        if not valid:
+            return False, None, error, None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/usr/bin/wc",
+                *clean_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=safe_cwd,
+                env={"PATH": "/bin:/usr/bin", "HOME": "/tmp", "LANG": "C.UTF-8"}
+            )
+            return await SecureCommandExecutor._execute_process(proc, timeout)
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            return False, None, str(e), None
 
 
 # Command dispatcher mapping - only these commands can be executed
