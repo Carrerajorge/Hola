@@ -3,7 +3,7 @@ import mammoth from "mammoth";
 import path from "path";
 import { createRequire } from "module";
 import officeParser from "officeparser";
-import { ocrService } from "./ocrService";
+import { performOCR } from "./ocrService";
 import * as XLSX from "xlsx";
 
 // pdf-parse is CommonJS, use createRequire for ESM compatibility
@@ -816,11 +816,70 @@ export function validateFileSize(buffer: Buffer): { valid: boolean; error?: stri
   return { valid: true };
 }
 
+export async function extractContent(buffer: Buffer, mimeType: string): Promise<string> {
+  const fileType = await detectFileType(buffer, mimeType);
+  if (!fileType) {
+    throw new Error('Unsupported file type');
+  }
+
+  try {
+    switch (fileType) {
+      case 'pdf':
+        const pdfData = await pdfParse(buffer);
+        return pdfData.text || '';
+      
+      case 'docx':
+        const docResult = await mammoth.extractRawText({ buffer });
+        return docResult.value || '';
+      
+      case 'xlsx':
+      case 'xls':
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+        const sheets: string[] = [];
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          sheets.push(`=== ${sheetName} ===\n${csv}`);
+        }
+        return sheets.join('\n\n');
+      
+      case 'csv':
+      case 'tsv':
+        return buffer.toString('utf-8');
+      
+      case 'pptx':
+      case 'ppt':
+        const pptText = await officeParser.parseOfficeAsync(buffer);
+        return pptText || '';
+      
+      case 'rtf':
+        const rtfText = await officeParser.parseOfficeAsync(buffer);
+        return rtfText || '';
+      
+      case 'png':
+      case 'jpeg':
+      case 'gif':
+      case 'bmp':
+      case 'tiff':
+      case 'webp':
+        const ocrResult = await performOCR(buffer);
+        return ocrResult.text || '';
+      
+      default:
+        throw new Error(`Cannot extract content from file type: ${fileType}`);
+    }
+  } catch (error) {
+    console.error(`[DocumentIngestion] Content extraction failed for ${fileType}:`, error);
+    throw error;
+  }
+}
+
 export const documentIngestion = {
   detectFileType,
   extractMetadata,
   parseDocument,
   validateFileSize,
+  extractContent,
   sanitizeFileName,
   MAX_FILE_SIZE,
   PREVIEW_ROW_LIMIT,
