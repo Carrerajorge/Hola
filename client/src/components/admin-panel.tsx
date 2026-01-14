@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -129,23 +129,85 @@ function DashboardSection() {
   );
 }
 
+interface AdminUser {
+  id: string;
+  email: string | null;
+  name: string | null;
+  lastName: string | null;
+  plan: string | null;
+  role: string | null;
+  status: string | null;
+  dailyRequestsUsed: number | null;
+  dailyRequestsLimit: number | null;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  createdAt: Date | null;
+}
+
 function UsersSection() {
   const [searchQuery, setSearchQuery] = useState("");
-  const users = [
-    { id: 1, name: "Carlos García", email: "carlos@empresa.com", plan: "Enterprise", status: "active", queries: 1247 },
-    { id: 2, name: "María López", email: "maria@startup.io", plan: "Pro", status: "active", queries: 892 },
-    { id: 3, name: "Juan Martínez", email: "juan@tech.com", plan: "Basic", status: "inactive", queries: 234 },
-    { id: 4, name: "Ana Rodríguez", email: "ana@corp.es", plan: "Enterprise", status: "active", queries: 2341 },
-    { id: 5, name: "Pedro Sánchez", email: "pedro@mail.com", plan: "Free", status: "active", queries: 45 },
-  ];
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch("/api/admin/users-list", { credentials: "include" });
+      if (response.ok) {
+        const data = await response.json();
+        setUsers(data.users || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch users:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateUserPlan = async (userId: string, plan: string) => {
+    try {
+      setUpdatingUserId(userId);
+      const response = await fetch(`/api/admin/user/${userId}/plan`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ plan })
+      });
+      if (response.ok) {
+        setUsers(prev => prev.map(u => u.id === userId ? { ...u, plan } : u));
+      }
+    } catch (error) {
+      console.error("Failed to update user plan:", error);
+    } finally {
+      setUpdatingUserId(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const filteredUsers = users.filter(u => 
+    (u.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+     u.email?.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const planOptions = ["free", "go", "plus", "pro"];
+  const planColors: Record<string, string> = {
+    free: "bg-gray-100 text-gray-700",
+    go: "bg-purple-100 text-purple-700",
+    plus: "bg-blue-100 text-blue-700",
+    pro: "bg-green-100 text-green-700"
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Users</h2>
-        <Button size="sm" data-testid="button-add-user">
-          <Plus className="h-4 w-4 mr-2" />
-          Añadir
+        <h2 className="text-lg font-medium">Usuarios ({users.length})</h2>
+        <Button size="sm" onClick={fetchUsers} data-testid="button-refresh-users">
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Actualizar
         </Button>
       </div>
       <div className="flex items-center gap-2">
@@ -160,31 +222,69 @@ function UsersSection() {
           />
         </div>
       </div>
-      <div className="rounded-lg border">
-        <div className="grid grid-cols-5 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
-          <span>Usuario</span>
-          <span>Plan</span>
-          <span>Estado</span>
-          <span>Consultas</span>
-          <span></span>
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
-        {users.filter(u => u.name.toLowerCase().includes(searchQuery.toLowerCase()) || u.email.toLowerCase().includes(searchQuery.toLowerCase())).map((user) => (
-          <div key={user.id} className="grid grid-cols-5 gap-4 p-3 border-b last:border-0 items-center text-sm">
-            <div>
-              <p className="font-medium">{user.name}</p>
-              <p className="text-xs text-muted-foreground">{user.email}</p>
-            </div>
-            <Badge variant="secondary" className="w-fit">{user.plan}</Badge>
-            <Badge variant={user.status === "active" ? "default" : "outline"} className="w-fit">
-              {user.status === "active" ? "Activo" : "Inactivo"}
-            </Badge>
-            <span>{user.queries.toLocaleString()}</span>
-            <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
+      ) : (
+        <div className="rounded-lg border">
+          <div className="grid grid-cols-6 gap-4 p-3 border-b bg-muted/50 text-xs font-medium text-muted-foreground">
+            <span>Usuario</span>
+            <span>Plan</span>
+            <span>Estado</span>
+            <span>Uso diario</span>
+            <span>Suscripción</span>
+            <span>Cambiar Plan</span>
           </div>
-        ))}
-      </div>
+          {filteredUsers.map((user) => (
+            <div key={user.id} className="grid grid-cols-6 gap-4 p-3 border-b last:border-0 items-center text-sm">
+              <div>
+                <p className="font-medium">{user.name || user.email?.split("@")[0] || "Usuario"}</p>
+                <p className="text-xs text-muted-foreground truncate">{user.email || "Sin email"}</p>
+              </div>
+              <Badge 
+                variant="secondary" 
+                className={cn("w-fit uppercase text-xs", planColors[user.plan || "free"])}
+              >
+                {user.plan || "free"}
+              </Badge>
+              <Badge variant={user.status === "active" ? "default" : "outline"} className="w-fit">
+                {user.status === "active" ? "Activo" : user.status || "Pendiente"}
+              </Badge>
+              <span className="text-xs">
+                {user.dailyRequestsLimit === -1 ? (
+                  <span className="text-green-600">Ilimitado</span>
+                ) : (
+                  `${user.dailyRequestsUsed || 0} / ${user.dailyRequestsLimit || 3}`
+                )}
+              </span>
+              <span className="text-xs">
+                {user.stripeSubscriptionId ? (
+                  <Badge variant="outline" className="bg-green-50 text-green-700 text-xs">Stripe</Badge>
+                ) : (
+                  <span className="text-muted-foreground">Manual</span>
+                )}
+              </span>
+              <select
+                className="h-8 px-2 text-xs border rounded-md bg-background disabled:opacity-50"
+                value={user.plan || "free"}
+                onChange={(e) => updateUserPlan(user.id, e.target.value)}
+                disabled={updatingUserId === user.id}
+                data-testid={`select-plan-${user.id}`}
+              >
+                {planOptions.map(plan => (
+                  <option key={plan} value={plan}>{plan.toUpperCase()}</option>
+                ))}
+              </select>
+            </div>
+          ))}
+          {filteredUsers.length === 0 && (
+            <div className="p-8 text-center text-muted-foreground text-sm">
+              No se encontraron usuarios
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

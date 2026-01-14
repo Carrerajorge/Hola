@@ -24,21 +24,32 @@ import { authStorage } from "../replit_integrations/auth/storage";
 import { getSeedStatus } from "../seed-production";
 import { usageQuotaService } from "../services/usageQuotaService";
 
+const ADMIN_EMAIL = "carrerajorge874@gmail.com";
+
 async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
     const userReq = req as any;
     const userEmail = userReq.user?.claims?.email;
+    const userId = userReq.user?.claims?.sub;
     
-    if (!userEmail || userEmail !== 'carrerajorge874@gmail.com') {
+    let isAdmin = userEmail === ADMIN_EMAIL;
+    
+    if (!isAdmin && userId) {
+      const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
+      isAdmin = user?.role === "admin";
+    }
+    
+    if (!isAdmin) {
       await storage.createAuditLog({
         action: "admin_access_denied",
         resource: "admin_panel",
-        details: { email: userEmail, path: req.path }
+        details: { email: userEmail, userId, path: req.path }
       });
       return res.status(403).json({ error: "Admin access restricted" });
     }
     next();
   } catch (error) {
+    console.error("[Admin] Authorization check failed:", error);
     return res.status(500).json({ error: "Authorization check failed" });
   }
 }

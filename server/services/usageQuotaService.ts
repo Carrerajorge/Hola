@@ -133,6 +133,7 @@ export class UsageQuotaService {
 
     const isAdmin = user.email === ADMIN_EMAIL || user.role === "admin";
     const plan = isAdmin ? "admin" : (user.plan || "free");
+    const isPaid = plan !== "free" && plan !== "admin";
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
 
     if (isAdmin || planLimits.dailyRequests === -1) {
@@ -143,8 +144,8 @@ export class UsageQuotaService {
         resetAt: null,
         plan,
         isAdmin,
-        isPaid: plan !== "free"
-      } as UsageCheckResult;
+        isPaid: isPaid || isAdmin
+      };
     }
 
     const now = new Date();
@@ -162,7 +163,9 @@ export class UsageQuotaService {
       remaining,
       limit: planLimits.dailyRequests,
       resetAt: user.dailyRequestsResetAt,
-      plan
+      plan,
+      isAdmin: false,
+      isPaid: isPaid
     };
   }
 
@@ -173,6 +176,8 @@ export class UsageQuotaService {
       .set({
         plan,
         dailyRequestsLimit: planLimits.dailyRequests,
+        dailyRequestsUsed: 0,
+        dailyRequestsResetAt: null,
         updatedAt: new Date()
       })
       .where(eq(users.id, userId));
