@@ -30,24 +30,23 @@ const phaseSequence: ThinkingPhase[] = [
 
 const phaseNarrations: Record<ThinkingPhase, string[]> = {
   connecting: [
-    "Conectando con servidores",
-    "Inicializando búsqueda"
+    "Preparando respuesta",
+    "Iniciando"
   ],
   searching: [
-    "Buscando en la web",
-    "Explorando fuentes científicas",
-    "Consultando bases de datos",
-    "Recopilando artículos"
+    "Analizando solicitud",
+    "Procesando consulta",
+    "Preparando información"
   ],
   analyzing: [
-    "Analizando resultados",
-    "Evaluando relevancia",
-    "Filtrando información"
+    "Analizando contexto",
+    "Evaluando opciones",
+    "Procesando"
   ],
   processing: [
-    "Procesando contenido",
-    "Extrayendo datos clave",
-    "Organizando información"
+    "Procesando",
+    "Organizando ideas",
+    "Preparando contenido"
   ],
   generating: [
     "Preparando respuesta",
@@ -55,11 +54,11 @@ const phaseNarrations: Record<ThinkingPhase, string[]> = {
   ],
   responding: [
     "Generando respuesta",
-    "Escribiendo contenido"
+    "Escribiendo"
   ],
   finalizing: [
     "Finalizando",
-    "Completando respuesta"
+    "Completando"
   ]
 };
 
@@ -172,24 +171,22 @@ export const PhaseNarrator = memo(function PhaseNarrator({
           font-weight: 500;
           display: inline-block;
           position: relative;
+          color: rgb(100, 100, 100);
           background: linear-gradient(
             90deg,
-            rgba(120, 120, 120, 0.85) 0%,
-            rgba(120, 120, 120, 0.85) 25%,
-            rgba(14, 165, 233, 1) 38%,
-            rgba(56, 189, 248, 1) 45%,
-            rgba(255, 255, 255, 1) 50%,
-            rgba(56, 189, 248, 1) 55%,
-            rgba(14, 165, 233, 1) 62%,
-            rgba(120, 120, 120, 0.85) 75%,
-            rgba(120, 120, 120, 0.85) 100%
+            transparent 0%,
+            transparent 40%,
+            rgba(0, 180, 255, 1) 48%,
+            rgba(0, 210, 255, 1) 50%,
+            rgba(0, 180, 255, 1) 52%,
+            transparent 60%,
+            transparent 100%
           );
-          background-size: 300% 100%;
+          background-size: 250% 100%;
+          background-repeat: no-repeat;
           -webkit-background-clip: text;
           background-clip: text;
-          -webkit-text-fill-color: transparent;
-          animation: lightning-shimmer 2.7s ease-in-out infinite;
-          filter: drop-shadow(0 0 2px rgba(56, 189, 248, 0.3));
+          animation: lightning-flash 1.8s ease-in-out infinite;
           transition: opacity 0.1s ease-out, transform 0.1s ease-out;
         }
         
@@ -198,7 +195,7 @@ export const PhaseNarrator = memo(function PhaseNarrator({
           transform: translateY(-3px);
         }
         
-        @keyframes lightning-shimmer {
+        @keyframes lightning-flash {
           0% {
             background-position: 150% 0;
           }
@@ -208,22 +205,21 @@ export const PhaseNarrator = memo(function PhaseNarrator({
         }
         
         .dark .phase-narrator-text {
+          color: rgb(180, 180, 180);
           background: linear-gradient(
             90deg,
-            rgba(210, 210, 210, 0.9) 0%,
-            rgba(210, 210, 210, 0.9) 25%,
-            rgba(56, 189, 248, 1) 38%,
-            rgba(125, 211, 252, 1) 45%,
-            rgba(255, 255, 255, 1) 50%,
-            rgba(125, 211, 252, 1) 55%,
-            rgba(56, 189, 248, 1) 62%,
-            rgba(210, 210, 210, 0.9) 75%,
-            rgba(210, 210, 210, 0.9) 100%
+            transparent 0%,
+            transparent 40%,
+            rgba(0, 200, 255, 1) 48%,
+            rgba(50, 230, 255, 1) 50%,
+            rgba(0, 200, 255, 1) 52%,
+            transparent 60%,
+            transparent 100%
           );
-          background-size: 300% 100%;
+          background-size: 250% 100%;
+          background-repeat: no-repeat;
           -webkit-background-clip: text;
           background-clip: text;
-          filter: drop-shadow(0 0 3px rgba(125, 211, 252, 0.5));
         }
         
         @media (prefers-reduced-motion: reduce) {
