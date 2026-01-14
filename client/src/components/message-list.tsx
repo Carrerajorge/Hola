@@ -2513,7 +2513,7 @@ export function MessageList({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             data-testid="thinking-indicator-virtualized"
-            className="flex w-full max-w-3xl mx-auto gap-4 justify-start px-1"
+            className="flex w-full max-w-3xl mx-auto gap-4 justify-start px-4"
             style={{
               position: 'absolute',
               top: 0,
@@ -2523,7 +2523,7 @@ export function MessageList({
             }}
           >
             <PhaseNarrator 
-              phase={aiState === "thinking" ? "thinking" : "generating"} 
+              phase={aiState === "thinking" ? "searching" : "responding"} 
             />
           </motion.div>
         )}
@@ -2628,10 +2628,10 @@ export function MessageList({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           data-testid="thinking-indicator-standard"
-          className="flex w-full max-w-3xl mx-auto gap-4 justify-start px-1"
+          className="flex w-full max-w-3xl mx-auto gap-4 justify-start px-4"
         >
           <PhaseNarrator 
-            phase={aiState === "thinking" ? "thinking" : "generating"} 
+            phase={aiState === "thinking" ? "searching" : "responding"} 
           />
         </motion.div>
       )}

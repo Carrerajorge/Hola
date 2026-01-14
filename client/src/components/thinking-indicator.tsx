@@ -10,7 +10,8 @@ type ThinkingPhase =
   | "browsing"
   | "connecting"
   | "processing"
-  | "verifying";
+  | "verifying"
+  | "responding";
 
 interface ThinkingIndicatorProps {
   phase?: ThinkingPhase;
@@ -21,15 +22,15 @@ interface ThinkingIndicatorProps {
 
 const phaseNarrations: Record<ThinkingPhase, string[]> = {
   thinking: [
-    "Procesando tu solicitud",
+    "Procesando solicitud",
     "Analizando contexto",
     "Preparando respuesta"
   ],
   searching: [
-    "Buscando fuentes",
-    "Explorando resultados",
-    "Encontrando información",
-    "Consultando bases de datos"
+    "Buscando en la web",
+    "Explorando fuentes",
+    "Consultando bases de datos",
+    "Recopilando información"
   ],
   analyzing: [
     "Analizando contenido",
@@ -40,6 +41,11 @@ const phaseNarrations: Record<ThinkingPhase, string[]> = {
     "Generando respuesta",
     "Construyendo contenido",
     "Finalizando"
+  ],
+  responding: [
+    "Escribiendo respuesta",
+    "Procesando información",
+    "Generando contenido"
   ],
   coding: [
     "Escribiendo código",
@@ -77,21 +83,21 @@ const PhaseNarrator = memo(function PhaseNarrator({
   message?: string;
   className?: string;
 }) {
-  const [currentNarration, setCurrentNarration] = useState(message || phaseNarrations[phase][0]);
+  const [currentNarration, setCurrentNarration] = useState(message || phaseNarrations[phase]?.[0] || "Procesando");
   const [isTransitioning, setIsTransitioning] = useState(false);
   const narrationIndex = useRef(0);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   const lastPhase = useRef(phase);
 
   const updateNarration = useCallback(() => {
-    const narrations = phaseNarrations[phase];
+    const narrations = phaseNarrations[phase] || phaseNarrations.thinking;
     narrationIndex.current = (narrationIndex.current + 1) % narrations.length;
     
     setIsTransitioning(true);
     setTimeout(() => {
       setCurrentNarration(message || narrations[narrationIndex.current]);
       setIsTransitioning(false);
-    }, 150);
+    }, 120);
   }, [phase, message]);
 
   useEffect(() => {
@@ -103,12 +109,13 @@ const PhaseNarrator = memo(function PhaseNarrator({
       debounceTimer.current = setTimeout(() => {
         lastPhase.current = phase;
         narrationIndex.current = 0;
+        const narrations = phaseNarrations[phase] || phaseNarrations.thinking;
         setIsTransitioning(true);
         setTimeout(() => {
-          setCurrentNarration(message || phaseNarrations[phase][0]);
+          setCurrentNarration(message || narrations[0]);
           setIsTransitioning(false);
-        }, 150);
-      }, 300);
+        }, 120);
+      }, 200);
     }
     
     return () => {
@@ -124,56 +131,76 @@ const PhaseNarrator = memo(function PhaseNarrator({
       setTimeout(() => {
         setCurrentNarration(message);
         setIsTransitioning(false);
-      }, 150);
+      }, 120);
       return;
     }
 
-    const interval = setInterval(updateNarration, 2500);
+    const interval = setInterval(updateNarration, 2000);
     return () => clearInterval(interval);
   }, [message, updateNarration]);
 
   return (
-    <div className={cn("relative overflow-hidden", className)}>
-      <div className="phase-narrator-shimmer absolute inset-0 pointer-events-none" />
-      
+    <div className={cn("phase-narrator-container relative inline-block", className)}>
       <span 
         className={cn(
-          "text-sm text-muted-foreground/80 font-medium transition-all duration-150",
-          isTransitioning ? "opacity-0 translate-y-1" : "opacity-100 translate-y-0"
+          "phase-narrator-text text-sm font-medium text-foreground/70 relative inline-block",
+          isTransitioning && "phase-narrator-exit"
         )}
       >
         {currentNarration}
       </span>
 
       <style>{`
-        .phase-narrator-shimmer::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: -100%;
-          width: 50%;
-          height: 100%;
-          background: linear-gradient(
-            90deg,
-            transparent 0%,
-            rgba(255,255,255,0.08) 50%,
-            transparent 100%
-          );
-          animation: shimmer-pass 2.5s ease-in-out infinite;
+        .phase-narrator-container {
+          position: relative;
+          overflow: hidden;
         }
         
-        @keyframes shimmer-pass {
-          0% { left: -50%; }
-          100% { left: 150%; }
-        }
-        
-        .dark .phase-narrator-shimmer::before {
+        .phase-narrator-text {
+          display: inline-block;
+          position: relative;
           background: linear-gradient(
             90deg,
-            transparent 0%,
-            rgba(255,255,255,0.05) 50%,
-            transparent 100%
+            currentColor 0%,
+            currentColor 40%,
+            rgba(59, 130, 246, 0.8) 50%,
+            currentColor 60%,
+            currentColor 100%
           );
+          background-size: 200% 100%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          animation: shimmer-text 1.5s ease-in-out infinite;
+        }
+        
+        .phase-narrator-exit {
+          opacity: 0;
+          transform: translateY(-4px);
+          transition: all 0.12s ease-out;
+        }
+        
+        @keyframes shimmer-text {
+          0% {
+            background-position: 100% 0;
+          }
+          100% {
+            background-position: -100% 0;
+          }
+        }
+        
+        .dark .phase-narrator-text {
+          background: linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0.7) 0%,
+            rgba(255, 255, 255, 0.7) 40%,
+            rgba(96, 165, 250, 1) 50%,
+            rgba(255, 255, 255, 0.7) 60%,
+            rgba(255, 255, 255, 0.7) 100%
+          );
+          background-size: 200% 100%;
+          -webkit-background-clip: text;
+          background-clip: text;
         }
       `}</style>
     </div>
