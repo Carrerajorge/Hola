@@ -13,22 +13,33 @@ interface SearchOptions {
   publicationTypes?: string[];
 }
 
-export class ScientificSearchOrchestrator extends EventEmitter {
-  private articles: ScientificArticle[] = [];
-  private sourceStats: Map<string, { count: number; status: "success" | "error" | "timeout" }> = new Map();
+interface SearchContext {
+  articles: ScientificArticle[];
+  sourceStats: Map<string, { count: number; status: "success" | "error" | "timeout" }>;
+  emitter: EventEmitter;
+}
 
-  async search(
+export function createScientificSearchOrchestrator() {
+  async function search(
     query: string,
-    options: SearchOptions = {}
+    options: SearchOptions = {},
+    onProgress?: (event: SearchProgressEvent) => void
   ): Promise<ScientificSearchResult> {
     const startTime = Date.now();
     const maxResults = options.maxResults || 50;
     const sources = options.sources || ["all"];
     
-    this.articles = [];
-    this.sourceStats.clear();
+    const ctx: SearchContext = {
+      articles: [],
+      sourceStats: new Map(),
+      emitter: new EventEmitter(),
+    };
 
-    this.emitProgress({
+    if (onProgress) {
+      ctx.emitter.on("progress", onProgress);
+    }
+
+    emitProgress(ctx, {
       type: "searching",
       source: "Orquestador",
       articlesFound: 0,
@@ -45,11 +56,11 @@ export class ScientificSearchOrchestrator extends EventEmitter {
     for (const source of useSources) {
       if (source === "pubmed") {
         searchPromises.push(
-          pubmedService.search(query, maxResults, (event) => this.handleSourceProgress(event))
+          pubmedService.search(query, maxResults, (event) => handleSourceProgress(ctx, event))
         );
       } else if (source === "scielo") {
         searchPromises.push(
-          scieloService.search(query, maxResults, (event) => this.handleSourceProgress(event))
+          scieloService.search(query, maxResults, (event) => handleSourceProgress(ctx, event))
         );
       }
     }
@@ -61,30 +72,30 @@ export class ScientificSearchOrchestrator extends EventEmitter {
       const source = useSources[i];
       
       if (result.status === "fulfilled") {
-        this.articles.push(...result.value);
-        this.sourceStats.set(source, { 
+        ctx.articles.push(...result.value);
+        ctx.sourceStats.set(source, { 
           count: result.value.length, 
           status: "success" 
         });
       } else {
-        this.sourceStats.set(source, { 
+        ctx.sourceStats.set(source, { 
           count: 0, 
           status: "error" 
         });
       }
     }
 
-    const uniqueArticles = this.deduplicateArticles(this.articles);
+    const uniqueArticles = deduplicateArticles(ctx.articles);
     
-    let filteredArticles = this.applyFilters(uniqueArticles, options);
+    let filteredArticles = applyFilters(uniqueArticles, options);
     
-    filteredArticles = this.sortByRelevance(filteredArticles);
+    filteredArticles = sortByRelevance(filteredArticles);
     
     filteredArticles = filteredArticles.slice(0, maxResults);
 
     const searchDuration = Date.now() - startTime;
 
-    this.emitProgress({
+    emitProgress(ctx, {
       type: "complete",
       source: "Orquestador",
       articlesFound: filteredArticles.length,
@@ -93,11 +104,13 @@ export class ScientificSearchOrchestrator extends EventEmitter {
       timestamp: Date.now(),
     });
 
+    ctx.emitter.removeAllListeners();
+
     return {
       query,
       totalResults: filteredArticles.length,
       articles: filteredArticles,
-      sources: Array.from(this.sourceStats.entries()).map(([name, stats]) => ({
+      sources: Array.from(ctx.sourceStats.entries()).map(([name, stats]) => ({
         name,
         count: stats.count,
         status: stats.status,
@@ -113,14 +126,14 @@ export class ScientificSearchOrchestrator extends EventEmitter {
     };
   }
 
-  private handleSourceProgress(event: SearchProgressEvent): void {
-    this.emitProgress(event);
+  function handleSourceProgress(ctx: SearchContext, event: SearchProgressEvent): void {
+    emitProgress(ctx, event);
     
     if (event.type === "filtering" || event.type === "found") {
-      const totalSoFar = Array.from(this.sourceStats.values())
+      const totalSoFar = Array.from(ctx.sourceStats.values())
         .reduce((sum, s) => sum + s.count, 0) + event.articlesFound;
       
-      this.emitProgress({
+      emitProgress(ctx, {
         type: "filtering",
         source: "Total",
         articlesFound: totalSoFar,
@@ -131,7 +144,7 @@ export class ScientificSearchOrchestrator extends EventEmitter {
     }
   }
 
-  private deduplicateArticles(articles: ScientificArticle[]): ScientificArticle[] {
+  function deduplicateArticles(articles: ScientificArticle[]): ScientificArticle[] {
     const seen = new Map<string, ScientificArticle>();
     
     for (const article of articles) {
@@ -143,8 +156,8 @@ export class ScientificSearchOrchestrator extends EventEmitter {
         seen.set(key, article);
       } else {
         const existing = seen.get(key)!;
-        if (this.hasMoreData(article, existing)) {
-          seen.set(key, this.mergeArticles(existing, article));
+        if (hasMoreData(article, existing)) {
+          seen.set(key, mergeArticles(existing, article));
         }
       }
     }
@@ -152,13 +165,13 @@ export class ScientificSearchOrchestrator extends EventEmitter {
     return Array.from(seen.values());
   }
 
-  private hasMoreData(a: ScientificArticle, b: ScientificArticle): boolean {
+  function hasMoreData(a: ScientificArticle, b: ScientificArticle): boolean {
     const scoreA = (a.abstract ? 1 : 0) + (a.doi ? 1 : 0) + (a.citationCount ? 1 : 0);
     const scoreB = (b.abstract ? 1 : 0) + (b.doi ? 1 : 0) + (b.citationCount ? 1 : 0);
     return scoreA > scoreB;
   }
 
-  private mergeArticles(existing: ScientificArticle, newArticle: ScientificArticle): ScientificArticle {
+  function mergeArticles(existing: ScientificArticle, newArticle: ScientificArticle): ScientificArticle {
     return {
       ...existing,
       abstract: existing.abstract || newArticle.abstract,
@@ -170,7 +183,7 @@ export class ScientificSearchOrchestrator extends EventEmitter {
     };
   }
 
-  private applyFilters(articles: ScientificArticle[], options: SearchOptions): ScientificArticle[] {
+  function applyFilters(articles: ScientificArticle[], options: SearchOptions): ScientificArticle[] {
     return articles.filter(article => {
       if (options.yearFrom && article.year && article.year < options.yearFrom) {
         return false;
@@ -196,15 +209,15 @@ export class ScientificSearchOrchestrator extends EventEmitter {
     });
   }
 
-  private sortByRelevance(articles: ScientificArticle[]): ScientificArticle[] {
+  function sortByRelevance(articles: ScientificArticle[]): ScientificArticle[] {
     return articles.sort((a, b) => {
-      const scoreA = this.calculateRelevanceScore(a);
-      const scoreB = this.calculateRelevanceScore(b);
+      const scoreA = calculateRelevanceScore(a);
+      const scoreB = calculateRelevanceScore(b);
       return scoreB - scoreA;
     });
   }
 
-  private calculateRelevanceScore(article: ScientificArticle): number {
+  function calculateRelevanceScore(article: ScientificArticle): number {
     let score = 0;
     
     const currentYear = new Date().getFullYear();
@@ -233,17 +246,22 @@ export class ScientificSearchOrchestrator extends EventEmitter {
     return score;
   }
 
-  private emitProgress(event: SearchProgressEvent): void {
-    this.emit("progress", event);
+  function emitProgress(ctx: SearchContext, event: SearchProgressEvent): void {
+    ctx.emitter.emit("progress", event);
   }
 
-  generateBibliography(articles: ScientificArticle[]): string {
+  function generateBibliography(articles: ScientificArticle[]): string {
     const citations = articles
       .map((article, index) => `${index + 1}. ${generateAPA7Citation(article)}`)
       .join("\n\n");
     
     return `## Referencias (APA 7ma Edición)\n\n${citations}`;
   }
+
+  return {
+    search,
+    generateBibliography,
+  };
 }
 
-export const scientificSearchOrchestrator = new ScientificSearchOrchestrator();
+export const scientificSearchOrchestrator = createScientificSearchOrchestrator();

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { scientificSearchOrchestrator } from "../services/scientificSearchOrchestrator";
+import { createScientificSearchOrchestrator } from "../services/scientificSearchOrchestrator";
 import { scientificExcelGenerator } from "../services/scientificExcelGenerator";
 import { scientificWordGenerator } from "../services/scientificWordGenerator";
 import { SearchProgressEvent, ScientificSearchResult } from "@shared/scientificArticleSchema";
@@ -27,19 +27,21 @@ router.get("/search/stream", async (req: Request, res: Response) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
 
-  const progressHandler = (event: SearchProgressEvent) => {
-    sendEvent("progress", event);
-  };
-
-  scientificSearchOrchestrator.on("progress", progressHandler);
+  const orchestrator = createScientificSearchOrchestrator();
 
   try {
-    const result = await scientificSearchOrchestrator.search(query, {
-      maxResults,
-      sources: sources as any,
-      yearFrom,
-      yearTo,
-    });
+    const result = await orchestrator.search(
+      query,
+      {
+        maxResults,
+        sources: sources as any,
+        yearFrom,
+        yearTo,
+      },
+      (event: SearchProgressEvent) => {
+        sendEvent("progress", event);
+      }
+    );
 
     sendEvent("complete", result);
   } catch (error) {
@@ -47,7 +49,6 @@ router.get("/search/stream", async (req: Request, res: Response) => {
       message: error instanceof Error ? error.message : "Error desconocido",
     });
   } finally {
-    scientificSearchOrchestrator.off("progress", progressHandler);
     res.end();
   }
 });
@@ -60,7 +61,9 @@ router.post("/search", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Query is required" });
     }
 
-    const result = await scientificSearchOrchestrator.search(query, {
+    const orchestrator = createScientificSearchOrchestrator();
+    
+    const result = await orchestrator.search(query, {
       maxResults,
       sources,
       yearFrom,
