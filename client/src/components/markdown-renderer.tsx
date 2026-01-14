@@ -142,16 +142,31 @@ interface MarkdownErrorBoundaryProps {
 interface MarkdownErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
+  lastFallbackContent?: string;
 }
 
 export class MarkdownErrorBoundary extends Component<MarkdownErrorBoundaryProps, MarkdownErrorBoundaryState> {
   constructor(props: MarkdownErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, lastFallbackContent: props.fallbackContent };
   }
 
-  static getDerivedStateFromError(error: Error): MarkdownErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<MarkdownErrorBoundaryState> {
     return { hasError: true, error };
+  }
+
+  static getDerivedStateFromProps(
+    nextProps: MarkdownErrorBoundaryProps,
+    prevState: MarkdownErrorBoundaryState
+  ): Partial<MarkdownErrorBoundaryState> | null {
+    if (nextProps.fallbackContent !== prevState.lastFallbackContent) {
+      return {
+        hasError: false,
+        error: null,
+        lastFallbackContent: nextProps.fallbackContent,
+      };
+    }
+    return null;
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -159,7 +174,15 @@ export class MarkdownErrorBoundary extends Component<MarkdownErrorBoundaryProps,
       error: error.message,
       stack: error.stack,
       componentStack: errorInfo.componentStack,
+      fallbackContent: this.props.fallbackContent?.substring(0, 100),
     });
+  }
+
+  componentDidUpdate(prevProps: MarkdownErrorBoundaryProps) {
+    if (prevProps.fallbackContent !== this.props.fallbackContent && this.state.hasError) {
+      console.log('[MarkdownErrorBoundary] Content changed, resetting error state');
+      this.setState({ hasError: false, error: null });
+    }
   }
 
   handleRetry = () => {
