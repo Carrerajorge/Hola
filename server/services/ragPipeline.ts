@@ -152,9 +152,12 @@ export async function generateEmbeddingGemini(text: string): Promise<number[]> {
     const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
     const result = await genAI.models.embedContent({
       model: 'text-embedding-004',
-      contents: text.slice(0, 8000)
+      contents: [{ role: 'user', parts: [{ text: text.slice(0, 8000) }] }]
     });
     
+    if (result.embeddings?.[0]?.values) {
+      return result.embeddings[0].values;
+    }
     if (result.embedding?.values) {
       return result.embedding.values;
     }

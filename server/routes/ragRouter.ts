@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { ragPipeline } from '../services/ragPipeline';
 import { visualRetrieval } from '../services/visualRetrieval';
+import { advancedRAG } from '../services/advancedRAG';
+import { ragFeedback } from '../services/ragFeedback';
 import { db } from '../db';
 import { files, fileChunks } from '@shared/schema';
 import { eq, inArray } from 'drizzle-orm';
@@ -380,6 +382,334 @@ router.post('/reindex-all', async (req: Request, res: Response) => {
     console.error('[RAG Router] Reindex error:', error);
     res.status(500).json({ 
       error: 'Failed to reindex files',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+router.post('/advanced/query', async (req: Request, res: Response) => {
+  try {
+    const { 
+      query, 
+      fileIds, 
+      topK = 5, 
+      language = 'es',
+      useMultiHop = false,
+      useCompression = true,
+      useCache = true
+    } = req.body;
+
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+
+    if (!fileIds || !Array.isArray(fileIds) || fileIds.length === 0) {
+      return res.status(400).json({ error: 'fileIds array is required' });
+    }
+
+    const startTime = Date.now();
+    
+    const result = await advancedRAG.fullRAGPipeline(query, fileIds, {
+      topK,
+      language,
+      useMultiHop,
+      useCompression,
+      useCache
+    });
+
+    res.json({
+      success: true,
+      query,
+      answer: result.answer,
+      confidence: result.confidence,
+      citations: result.citations,
+      suggestedFollowups: result.suggestedFollowups,
+      tables: result.tables,
+      reasoning: result.reasoning,
+      chunksRetrieved: result.chunks.length,
+      processingTimeMs: Date.now() - startTime
+    });
+  } catch (error) {
+    console.error('[RAG Router] Advanced query error:', error);
+    res.status(500).json({ 
+      error: 'Failed to process advanced query',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+router.post('/advanced/answer-stream', async (req: Request, res: Response) => {
+  try {
+    const { 
+      query, 
+      fileIds, 
+      topK = 5, 
+      language = 'es',
+      useMultiHop = false,
+      sessionId
+    } = req.body;
+
+    if (!query || !fileIds || fileIds.length === 0) {
+      return res.status(400).json({ error: 'Query and fileIds are required' });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const expansion = await advancedRAG.expandQuery(query);
+    res.write(`data: ${JSON.stringify({ type: 'expansion', data: { 
+      subQueries: expansion.subQueries.length,
+      keywords: expansion.keywords.slice(0, 5)
+    }})}\n\n`);
+
+    let chunks;
+    let reasoning: string[] = [];
+    
+    if (useMultiHop) {
+      const multiHopResult = await advancedRAG.multiHopRetrieval(query, fileIds);
+      chunks = multiHopResult.chunks;
+      reasoning = multiHopResult.reasoning;
+      res.write(`data: ${JSON.stringify({ type: 'reasoning', data: reasoning })}\n\n`);
+    } else {
+      chunks = await advancedRAG.hybridRetrieveAdvanced(query, fileIds, expansion, { topK: topK * 2 });
+    }
+
+    chunks = await advancedRAG.crossEncoderRerank(query, chunks, topK);
+    
+    res.write(`data: ${JSON.stringify({ 
+      type: 'context', 
+      data: { 
+        chunksRetrieved: chunks.length,
+        citations: chunks.map(c => ({
+          pageNumber: c.pageNumber,
+          sectionTitle: c.sectionTitle,
+          score: c.score
+        }))
+      }
+    })}\n\n`);
+
+    if (sessionId) {
+      ragFeedback.recordImplicitSignals(
+        query,
+        chunks.map((c, i) => ({ id: c.id, position: i })),
+        null,
+        sessionId
+      );
+    }
+
+    const { answer, citations, suggestedFollowups, confidence } = 
+      await advancedRAG.generateAnswerWithCitations(query, chunks, { language });
+
+    const words = answer.split(/\s+/);
+    for (let i = 0; i < words.length; i += 5) {
+      const chunk = words.slice(i, i + 5).join(' ') + ' ';
+      res.write(`data: ${JSON.stringify({ type: 'token', data: chunk })}\n\n`);
+      await new Promise(r => setTimeout(r, 20));
+    }
+
+    res.write(`data: ${JSON.stringify({ 
+      type: 'complete', 
+      data: {
+        citations,
+        suggestedFollowups,
+        confidence,
+        chunkIds: chunks.map(c => c.id)
+      }
+    })}\n\n`);
+
+    res.write('data: [DONE]\n\n');
+    res.end();
+  } catch (error) {
+    console.error('[RAG Router] Advanced stream error:', error);
+    res.write(`data: ${JSON.stringify({ type: 'error', data: error instanceof Error ? error.message : 'Unknown error' })}\n\n`);
+    res.end();
+  }
+});
+
+router.post('/advanced/expand-query', async (req: Request, res: Response) => {
+  try {
+    const { query } = req.body;
+
+    if (!query) {
+      return res.status(400).json({ error: 'Query is required' });
+    }
+
+    const expansion = await advancedRAG.expandQuery(query);
+
+    res.json({
+      success: true,
+      original: query,
+      hypotheticalDocument: expansion.hypothetical.slice(0, 500),
+      subQueries: expansion.subQueries,
+      keywords: expansion.keywords,
+      extractedFilters: expansion.filters
+    });
+  } catch (error) {
+    console.error('[RAG Router] Expand query error:', error);
+    res.status(500).json({ 
+      error: 'Failed to expand query',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+router.post('/advanced/multi-hop', async (req: Request, res: Response) => {
+  try {
+    const { query, fileIds, maxHops = 3 } = req.body;
+
+    if (!query || !fileIds || fileIds.length === 0) {
+      return res.status(400).json({ error: 'Query and fileIds are required' });
+    }
+
+    const result = await advancedRAG.multiHopRetrieval(query, fileIds, maxHops);
+
+    res.json({
+      success: true,
+      query,
+      reasoning: result.reasoning,
+      chunksRetrieved: result.chunks.length,
+      chunks: result.chunks.map(c => ({
+        id: c.id,
+        content: c.content.slice(0, 300),
+        pageNumber: c.pageNumber,
+        score: c.score,
+        vectorScore: c.vectorScore,
+        bm25Score: c.bm25Score
+      }))
+    });
+  } catch (error) {
+    console.error('[RAG Router] Multi-hop error:', error);
+    res.status(500).json({ 
+      error: 'Failed to perform multi-hop retrieval',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+router.post('/feedback/signal', async (req: Request, res: Response) => {
+  try {
+    const { query, chunkId, signal, sessionId, metadata } = req.body;
+
+    if (!query || !chunkId || !signal || !sessionId) {
+      return res.status(400).json({ 
+        error: 'query, chunkId, signal, and sessionId are required' 
+      });
+    }
+
+    const validSignals = ['click', 'dwell', 'copy', 'cite', 'thumbsUp', 'thumbsDown'];
+    if (!validSignals.includes(signal)) {
+      return res.status(400).json({ 
+        error: `Invalid signal. Must be one of: ${validSignals.join(', ')}` 
+      });
+    }
+
+    ragFeedback.recordFeedback(query, chunkId, signal, sessionId, metadata);
+
+    res.json({ success: true, message: 'Feedback recorded' });
+  } catch (error) {
+    console.error('[RAG Router] Feedback signal error:', error);
+    res.status(500).json({ 
+      error: 'Failed to record feedback',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+router.post('/feedback/answer', async (req: Request, res: Response) => {
+  try {
+    const { query, chunkIds, rating, sessionId } = req.body;
+
+    if (!query || !chunkIds || !rating || !sessionId) {
+      return res.status(400).json({ 
+        error: 'query, chunkIds, rating, and sessionId are required' 
+      });
+    }
+
+    if (!['thumbsUp', 'thumbsDown'].includes(rating)) {
+      return res.status(400).json({ 
+        error: 'rating must be thumbsUp or thumbsDown' 
+      });
+    }
+
+    ragFeedback.recordAnswerFeedback(query, chunkIds, rating, sessionId);
+
+    res.json({ success: true, message: 'Answer feedback recorded' });
+  } catch (error) {
+    console.error('[RAG Router] Answer feedback error:', error);
+    res.status(500).json({ 
+      error: 'Failed to record answer feedback',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+router.get('/feedback/stats', async (req: Request, res: Response) => {
+  try {
+    const stats = ragFeedback.getFeedbackStats();
+    res.json({ success: true, ...stats });
+  } catch (error) {
+    console.error('[RAG Router] Feedback stats error:', error);
+    res.status(500).json({ 
+      error: 'Failed to get feedback stats',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+router.post('/advanced/index', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+
+    const { fileId } = req.body;
+    if (!fileId) {
+      return res.status(400).json({ error: 'fileId is required' });
+    }
+
+    const basicResult = await ragPipeline.indexDocument(
+      fileId,
+      req.file.buffer,
+      req.file.mimetype,
+      req.file.originalname
+    );
+
+    const existingChunks = await db
+      .select()
+      .from(fileChunks)
+      .where(eq(fileChunks.fileId, fileId));
+
+    let embeddingsGenerated = 0;
+    for (const chunk of existingChunks) {
+      if (!chunk.embedding) {
+        try {
+          const embedding = await ragPipeline.generateEmbeddingGemini(chunk.content);
+          if (embedding && embedding.length > 0) {
+            await db
+              .update(fileChunks)
+              .set({ embedding })
+              .where(eq(fileChunks.id, chunk.id));
+            embeddingsGenerated++;
+          }
+        } catch (err) {
+          console.error(`[RAG Router] Failed to generate embedding for chunk ${chunk.id}:`, err);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      fileId,
+      fileName: req.file.originalname,
+      chunksCreated: basicResult.chunksCreated,
+      embeddingsGenerated,
+      processingTimeMs: basicResult.processingTimeMs
+    });
+  } catch (error) {
+    console.error('[RAG Router] Advanced index error:', error);
+    res.status(500).json({ 
+      error: 'Failed to index document with advanced chunking',
       details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
