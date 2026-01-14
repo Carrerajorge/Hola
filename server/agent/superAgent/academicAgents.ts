@@ -4,6 +4,22 @@ import { doiCache } from "./academicPipeline";
 
 const RELEVANCE_THRESHOLD = 0.72;
 
+const LATAM_COUNTRIES = new Set([
+  "Mexico", "México", "Brazil", "Brasil", "Argentina", "Colombia", 
+  "Peru", "Perú", "Venezuela", "Chile", "Ecuador", "Guatemala", 
+  "Cuba", "Bolivia", "Dominican Republic", "Honduras", "Paraguay",
+  "El Salvador", "Nicaragua", "Costa Rica", "Panama", "Panamá",
+  "Uruguay", "Puerto Rico", "Jamaica", "Trinidad and Tobago",
+  "MX", "BR", "AR", "CO", "PE", "VE", "CL", "EC", "GT", "CU", 
+  "BO", "DO", "HN", "PY", "SV", "NI", "CR", "PA", "UY", "PR", "JM", "TT"
+]);
+
+export function isLatamCountry(country: string): boolean {
+  if (!country) return false;
+  const normalized = country.trim();
+  return LATAM_COUNTRIES.has(normalized);
+}
+
 class Semaphore {
   private permits: number;
   private queue: (() => void)[] = [];
@@ -126,7 +142,10 @@ export function checkRelevance(candidate: AcademicCandidate): RelevanceResult {
   };
 }
 
-export function filterByRelevanceAgent(candidates: AcademicCandidate[]): AcademicCandidate[] {
+export function filterByRelevanceAgent(
+  candidates: AcademicCandidate[],
+  options?: { latamOnly?: boolean }
+): AcademicCandidate[] {
   console.log(`[RelevanceAgent] Filtering ${candidates.length} candidates...`);
   
   const passed: AcademicCandidate[] = [];
@@ -152,6 +171,12 @@ export function filterByRelevanceAgent(candidates: AcademicCandidate[]): Academi
     for (const f of failed) {
       console.log(`[RelevanceAgent] Rejected: "${f.title}..." - ${f.reason}`);
     }
+  }
+
+  if (options?.latamOnly) {
+    const latamFiltered = passed.filter(c => isLatamCountry(c.country));
+    console.log(`[RelevanceAgent] LATAM filter: ${passed.length} -> ${latamFiltered.length}`);
+    return latamFiltered;
   }
 
   return passed;

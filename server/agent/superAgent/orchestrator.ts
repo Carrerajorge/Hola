@@ -233,6 +233,17 @@ export class SuperAgentOrchestrator extends EventEmitter {
     return patterns.some(p => p.test(prompt));
   }
 
+  private isLatamOnlyRequest(prompt: string): boolean {
+    const patterns = [
+      /\b(latinoam[eé]rica|latinoamerica|latin\s*america)\b/i,
+      /\b(solo\s+de\s+latinoam[eé]rica|only\s+from\s+latin\s*america)\b/i,
+      /\b(pa[ií]ses\s+latinoamericanos|latin\s*american\s+countries)\b/i,
+      /\b(am[eé]rica\s+latina)\b/i,
+      /\b(latam)\b/i,
+    ];
+    return patterns.some(p => p.test(prompt));
+  }
+
   private extractYearRange(prompt: string): { start?: number; end?: number } {
     const match = prompt.match(/(?:del|from)\s+(\d{4})\s+(?:al|to|hasta)\s+(\d{4})/i);
     if (match) {
@@ -280,11 +291,12 @@ export class SuperAgentOrchestrator extends EventEmitter {
     
     const searchTopic = this.extractSearchTopic(prompt);
     const yearRange = this.extractYearRange(prompt);
+    const isLatamOnly = this.isLatamOnlyRequest(prompt);
     
     this.emitSSE("tool_call", {
       id: "tc_signals_openalex",
       tool: "academic_pipeline",
-      input: { query: searchTopic, target: targetCount, yearRange },
+      input: { query: searchTopic, target: targetCount, yearRange, regionFilter: isLatamOnly ? "latam" : "global" },
     });
 
     this.emitSSE("progress", {
@@ -365,6 +377,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
         yearStart: yearRange.start || 2020,
         yearEnd: yearRange.end || 2025,
         maxSearchIterations: 4,
+        regionFilter: isLatamOnly ? "latam" : "global",
       });
 
     } catch (error: any) {

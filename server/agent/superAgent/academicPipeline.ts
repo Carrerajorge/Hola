@@ -19,6 +19,7 @@ export interface PipelineConfig {
   maxRetries: number;
   verificationConcurrency: number;
   maxSearchIterations: number;
+  regionFilter?: "latam" | "global";
 }
 
 const DEFAULT_CONFIG: PipelineConfig = {
@@ -97,6 +98,22 @@ function extractKeyTerms(topic: string): string[] {
     "chatarra": "scrap",
     "compresión": "compressive",
     "tracción": "tensile",
+    "economía": "economy",
+    "economia": "economy",
+    "circular": "circular",
+    "cadena": "chain",
+    "suministro": "supply",
+    "exportadora": "exporting",
+    "exportadoras": "exporting",
+    "empresa": "company",
+    "empresas": "companies",
+    "impacto": "impact",
+    "sostenible": "sustainable",
+    "sustentable": "sustainable",
+    "reciclaje": "recycling",
+    "residuos": "waste",
+    "logística": "logistics",
+    "logistica": "logistics",
   };
 
   const words = topic.toLowerCase().split(/\s+/);
@@ -255,7 +272,7 @@ export async function runAcademicPipeline(
 
     emitter.emit("pipeline_phase", { phase: "relevance", status: "starting" });
     
-    const relevant = filterByRelevanceAgent(deduplicated);
+    const relevant = filterByRelevanceAgent(deduplicated, { latamOnly: cfg.regionFilter === "latam" });
     console.log(`[AcademicPipeline] After relevance filter: ${relevant.length}`);
     
     const lowRelevanceCount = deduplicated.length - relevant.length;
