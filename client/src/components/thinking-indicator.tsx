@@ -184,7 +184,7 @@ export const PhaseNarrator = memo(function PhaseNarrator({
           -webkit-background-clip: text;
           background-clip: text;
           -webkit-text-fill-color: transparent;
-          animation: lightning-shimmer 1.2s ease-in-out infinite;
+          animation: lightning-shimmer 2.4s ease-in-out infinite;
           transition: opacity 0.1s ease-out, transform 0.1s ease-out;
         }
         
