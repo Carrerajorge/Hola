@@ -27,6 +27,7 @@ import type { z } from "zod";
 type AttachmentSpec = z.infer<typeof AttachmentSpecSchema>;
 
 import type { Response } from "express";
+import { usageQuotaService, type UsageCheckResult } from "../services/usageQuotaService";
 
 type ErrorCategory = 'network' | 'rate_limit' | 'api_error' | 'validation' | 'auth' | 'timeout' | 'unknown';
 
@@ -191,6 +192,22 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
 
       const user = (req as any).user;
       const userId = user?.claims?.sub;
+
+      if (userId) {
+        const usageCheck = await usageQuotaService.checkAndIncrementUsage(userId);
+        if (!usageCheck.allowed) {
+          return res.status(402).json({
+            error: usageCheck.message || "Límite de solicitudes alcanzado",
+            code: "QUOTA_EXCEEDED",
+            quota: {
+              remaining: usageCheck.remaining,
+              limit: usageCheck.limit,
+              resetAt: usageCheck.resetAt,
+              plan: usageCheck.plan
+            }
+          });
+        }
+      }
 
       // GPT Session Contract Resolution
       // Priority: session_id (reuse existing) > gptId (create new) > gptConfig (legacy)

@@ -57,6 +57,11 @@ export const users = pgTable("users", {
   internalNotes: text("internal_notes"),
   tags: text("tags").array(),
   subscriptionExpiresAt: timestamp("subscription_expires_at"),
+  dailyRequestsUsed: integer("daily_requests_used").default(0),
+  dailyRequestsLimit: integer("daily_requests_limit").default(3),
+  dailyRequestsResetAt: timestamp("daily_requests_reset_at"),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
