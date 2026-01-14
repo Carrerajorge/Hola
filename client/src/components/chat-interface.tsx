@@ -1018,8 +1018,28 @@ export function ChatInterface({
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number; resetAt: string | null; plan: string } | null>(null);
+  const [userPlanInfo, setUserPlanInfo] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    const fetchUserPlanInfo = async () => {
+      try {
+        const response = await fetch("/api/user/usage", { credentials: "include" });
+        if (response.ok) {
+          const data = await response.json();
+          setUserPlanInfo({ 
+            plan: data.plan, 
+            isAdmin: data.isAdmin, 
+            isPaid: data.plan !== "free" 
+          });
+        }
+      } catch (error) {
+        console.error("Failed to fetch user plan info:", error);
+      }
+    };
+    fetchUserPlanInfo();
+  }, [user?.id]);
   
   const agentMode = useAgentMode(chatId || "");
   
@@ -5130,17 +5150,19 @@ IMPORTANTE:
           )}
         </div>
         <div className="flex items-center gap-0.5 sm:gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            className="hidden sm:flex rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
-            onClick={() => setIsUpgradeDialogOpen(true)}
-            data-testid="button-upgrade-header"
-          >
-            <Sparkles className="h-3 w-3 text-primary" />
-            <span className="hidden md:inline">Mejorar el plan a Go</span>
-            <span className="md:hidden">Upgrade</span>
-          </Button>
+          {(!userPlanInfo || (userPlanInfo.plan === "free" && !userPlanInfo.isAdmin && !userPlanInfo.isPaid)) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="hidden sm:flex rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
+              onClick={() => setIsUpgradeDialogOpen(true)}
+              data-testid="button-upgrade-header"
+            >
+              <Sparkles className="h-3 w-3 text-primary" />
+              <span className="hidden md:inline">Mejorar el plan a Go</span>
+              <span className="md:hidden">Upgrade</span>
+            </Button>
+          )}
           {chatId && !chatId.startsWith("pending-") ? (
             <ShareChatDialog chatId={chatId} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
               <Button variant="ghost" size="icon" data-testid="button-share-chat">
