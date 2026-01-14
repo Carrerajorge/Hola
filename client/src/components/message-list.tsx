@@ -87,6 +87,7 @@ import { NewsCards, SourcesList } from "@/components/news-cards";
 import { SuperAgentDisplay } from "@/components/super-agent-display";
 import { useSuperAgentRun } from "@/stores/super-agent-store";
 import { LiveExecutionConsole } from "@/components/live-execution-console";
+import { PhaseNarrator } from "@/components/thinking-indicator";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -2506,13 +2507,13 @@ export function MessageList({
           </motion.div>
         )}
 
-        {/* Regular thinking/responding spinner - only when uiPhase is 'thinking' or 'idle' and no Super Agent (virtualized) */}
+        {/* Phase narrator - ultra minimal thinking indicator (virtualized) */}
         {aiState !== "idle" && !streamingContent && variant === "default" && uiPhase !== 'console' && (
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             data-testid="thinking-indicator-virtualized"
-            className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
+            className="flex w-full max-w-3xl mx-auto gap-4 justify-start px-1"
             style={{
               position: 'absolute',
               top: 0,
@@ -2521,49 +2522,9 @@ export function MessageList({
               transform: `translateY(${virtualizer.getTotalSize()}px)`,
             }}
           >
-            <div className="flex items-center gap-3 py-3 px-5 text-sm text-muted-foreground bg-gradient-to-r from-muted/40 to-muted/20 rounded-2xl border border-border/30 shadow-sm">
-              <div className="flex gap-1.5">
-                <motion.span
-                  className="w-2.5 h-2.5 bg-primary rounded-full"
-                  animate={{ 
-                    scale: [1, 1.2, 1],
-                    opacity: [0.5, 1, 0.5] 
-                  }}
-                  transition={{ 
-                    duration: 1,
-                    repeat: Infinity,
-                    delay: 0 
-                  }}
-                />
-                <motion.span
-                  className="w-2.5 h-2.5 bg-primary rounded-full"
-                  animate={{ 
-                    scale: [1, 1.2, 1],
-                    opacity: [0.5, 1, 0.5] 
-                  }}
-                  transition={{ 
-                    duration: 1,
-                    repeat: Infinity,
-                    delay: 0.2 
-                  }}
-                />
-                <motion.span
-                  className="w-2.5 h-2.5 bg-primary rounded-full"
-                  animate={{ 
-                    scale: [1, 1.2, 1],
-                    opacity: [0.5, 1, 0.5] 
-                  }}
-                  transition={{ 
-                    duration: 1,
-                    repeat: Infinity,
-                    delay: 0.4 
-                  }}
-                />
-              </div>
-              <span className="font-medium text-foreground/80">
-                {aiState === "thinking" ? "Pensando..." : "Escribiendo..."}
-              </span>
-            </div>
+            <PhaseNarrator 
+              phase={aiState === "thinking" ? "thinking" : "generating"} 
+            />
           </motion.div>
         )}
       </div>
@@ -2661,57 +2622,17 @@ export function MessageList({
         </motion.div>
       )}
 
-      {/* Regular thinking/responding spinner - only when uiPhase is 'thinking' or 'idle' and no Super Agent */}
+      {/* Phase narrator - ultra minimal thinking indicator (standard) */}
       {aiState !== "idle" && !streamingContent && variant === "default" && uiPhase !== 'console' && (
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           data-testid="thinking-indicator-standard"
-          className="flex w-full max-w-3xl mx-auto gap-4 justify-start"
+          className="flex w-full max-w-3xl mx-auto gap-4 justify-start px-1"
         >
-          <div className="flex items-center gap-3 py-3 px-5 text-sm text-muted-foreground bg-gradient-to-r from-muted/40 to-muted/20 rounded-2xl border border-border/30 shadow-sm">
-            <div className="flex gap-1.5">
-              <motion.span
-                className="w-2.5 h-2.5 bg-primary rounded-full"
-                animate={{ 
-                  scale: [1, 1.2, 1],
-                  opacity: [0.5, 1, 0.5] 
-                }}
-                transition={{ 
-                  duration: 1,
-                  repeat: Infinity,
-                  delay: 0 
-                }}
-              />
-              <motion.span
-                className="w-2.5 h-2.5 bg-primary rounded-full"
-                animate={{ 
-                  scale: [1, 1.2, 1],
-                  opacity: [0.5, 1, 0.5] 
-                }}
-                transition={{ 
-                  duration: 1,
-                  repeat: Infinity,
-                  delay: 0.2 
-                }}
-              />
-              <motion.span
-                className="w-2.5 h-2.5 bg-primary rounded-full"
-                animate={{ 
-                  scale: [1, 1.2, 1],
-                  opacity: [0.5, 1, 0.5] 
-                }}
-                transition={{ 
-                  duration: 1,
-                  repeat: Infinity,
-                  delay: 0.4 
-                }}
-              />
-            </div>
-            <span className="font-medium text-foreground/80">
-              {aiState === "thinking" ? "Pensando..." : "Escribiendo..."}
-            </span>
-          </div>
+          <PhaseNarrator 
+            phase={aiState === "thinking" ? "thinking" : "generating"} 
+          />
         </motion.div>
       )}
     </>
