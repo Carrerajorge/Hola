@@ -414,7 +414,11 @@ export function Sidebar({
   });
   
   return (
-    <div className={cn("flex h-screen w-[280px] flex-col liquid-sidebar-light dark:liquid-sidebar text-sidebar-foreground", className)}>
+    <nav 
+      className={cn("flex h-screen w-[280px] flex-col liquid-sidebar-light dark:liquid-sidebar text-sidebar-foreground", className)}
+      aria-label="Navegación principal y chats"
+      role="navigation"
+    >
       <div className="flex h-14 items-center justify-between px-4 py-2">
         <div className="flex items-center gap-2">
           <IliaGPTLogo size={32} />
@@ -836,6 +840,6 @@ export function Sidebar({
         onOpenChange={setIsSettingsOpen}
       />
 
-    </div>
+    </nav>
   );
 }

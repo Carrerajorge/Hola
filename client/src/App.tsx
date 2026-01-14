@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { SettingsProvider } from "@/contexts/SettingsContext";
 import { ModelAvailabilityProvider } from "@/contexts/ModelAvailabilityContext";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
@@ -12,6 +12,13 @@ import { useChats } from "@/hooks/use-chats";
 import { SearchModal } from "@/components/search-modal";
 import { ToolCatalog } from "@/components/tool-catalog";
 import Home from "@/pages/home";
+import { Loader2 } from "lucide-react";
+
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-screen">
+    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+  </div>
+);
 
 function ChatPageRedirect() {
   const params = useParams<{ id: string }>();
@@ -26,21 +33,22 @@ function ChatPageRedirect() {
   
   return <Home />;
 }
-import ProfilePage from "@/pages/profile";
-import BillingPage from "@/pages/billing";
-import SettingsPage from "@/pages/settings";
-import PrivacyPage from "@/pages/privacy";
-import AdminPage from "@/pages/admin";
-import SystemHealthPage from "@/pages/admin/SystemHealth";
-import WorkspaceSettingsPage from "@/pages/workspace-settings";
-import WorkspacePage from "@/pages/workspace";
-import SkillsPage from "@/pages/skills";
-import SpreadsheetAnalyzerPage from "@/pages/SpreadsheetAnalyzer";
-import MonitoringDashboard from "@/pages/MonitoringDashboard";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import LandingPage from "@/pages/landing";
 import NotFound from "@/pages/not-found";
+
+const ProfilePage = lazy(() => import("@/pages/profile"));
+const BillingPage = lazy(() => import("@/pages/billing"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
+const PrivacyPage = lazy(() => import("@/pages/privacy"));
+const AdminPage = lazy(() => import("@/pages/admin"));
+const SystemHealthPage = lazy(() => import("@/pages/admin/SystemHealth"));
+const WorkspaceSettingsPage = lazy(() => import("@/pages/workspace-settings"));
+const WorkspacePage = lazy(() => import("@/pages/workspace"));
+const SkillsPage = lazy(() => import("@/pages/skills"));
+const SpreadsheetAnalyzerPage = lazy(() => import("@/pages/SpreadsheetAnalyzer"));
+const MonitoringDashboard = lazy(() => import("@/pages/MonitoringDashboard"));
 
 function AuthCallbackHandler() {
   useEffect(() => {
@@ -129,25 +137,27 @@ function GlobalKeyboardShortcuts() {
 
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route path="/chat/:id" component={ChatPageRedirect} />
-      <Route path="/welcome" component={LandingPage} />
-      <Route path="/login" component={LoginPage} />
-      <Route path="/signup" component={SignupPage} />
-      <Route path="/profile" component={ProfilePage} />
-      <Route path="/billing" component={BillingPage} />
-      <Route path="/settings" component={SettingsPage} />
-      <Route path="/privacy" component={PrivacyPage} />
-      <Route path="/admin" component={AdminPage} />
-      <Route path="/admin/health" component={SystemHealthPage} />
-      <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
-      <Route path="/workspace" component={WorkspacePage} />
-      <Route path="/skills" component={SkillsPage} />
-      <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
-      <Route path="/monitoring" component={MonitoringDashboard} />
-      <Route component={NotFound} />
-    </Switch>
+    <Suspense fallback={<PageLoader />}>
+      <Switch>
+        <Route path="/" component={Home} />
+        <Route path="/chat/:id" component={ChatPageRedirect} />
+        <Route path="/welcome" component={LandingPage} />
+        <Route path="/login" component={LoginPage} />
+        <Route path="/signup" component={SignupPage} />
+        <Route path="/profile" component={ProfilePage} />
+        <Route path="/billing" component={BillingPage} />
+        <Route path="/settings" component={SettingsPage} />
+        <Route path="/privacy" component={PrivacyPage} />
+        <Route path="/admin" component={AdminPage} />
+        <Route path="/admin/health" component={SystemHealthPage} />
+        <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
+        <Route path="/workspace" component={WorkspacePage} />
+        <Route path="/skills" component={SkillsPage} />
+        <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
+        <Route path="/monitoring" component={MonitoringDashboard} />
+        <Route component={NotFound} />
+      </Switch>
+    </Suspense>
   );
 }
 
