@@ -175,16 +175,18 @@ export const PhaseNarrator = memo(function PhaseNarrator({
           background: linear-gradient(
             90deg,
             rgba(100, 100, 100, 0.8) 0%,
-            rgba(100, 100, 100, 0.8) 35%,
+            rgba(100, 100, 100, 0.8) 30%,
+            rgba(56, 189, 248, 1) 42%,
             rgba(59, 130, 246, 1) 50%,
-            rgba(100, 100, 100, 0.8) 65%,
+            rgba(56, 189, 248, 1) 58%,
+            rgba(100, 100, 100, 0.8) 70%,
             rgba(100, 100, 100, 0.8) 100%
           );
-          background-size: 250% 100%;
+          background-size: 280% 100%;
           -webkit-background-clip: text;
           background-clip: text;
           -webkit-text-fill-color: transparent;
-          animation: lightning-shimmer 2.4s ease-in-out infinite;
+          animation: lightning-shimmer 2.7s ease-in-out infinite;
           transition: opacity 0.1s ease-out, transform 0.1s ease-out;
         }
         
@@ -205,13 +207,15 @@ export const PhaseNarrator = memo(function PhaseNarrator({
         .dark .phase-narrator-text {
           background: linear-gradient(
             90deg,
-            rgba(180, 180, 180, 0.85) 0%,
-            rgba(180, 180, 180, 0.85) 35%,
+            rgba(200, 200, 200, 0.9) 0%,
+            rgba(200, 200, 200, 0.9) 30%,
+            rgba(125, 211, 252, 1) 42%,
             rgba(96, 165, 250, 1) 50%,
-            rgba(180, 180, 180, 0.85) 65%,
-            rgba(180, 180, 180, 0.85) 100%
+            rgba(125, 211, 252, 1) 58%,
+            rgba(200, 200, 200, 0.9) 70%,
+            rgba(200, 200, 200, 0.9) 100%
           );
-          background-size: 250% 100%;
+          background-size: 280% 100%;
           -webkit-background-clip: text;
           background-clip: text;
         }
