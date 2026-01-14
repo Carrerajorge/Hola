@@ -12,6 +12,7 @@ import { complexityAnalyzer } from "../services/complexityAnalyzer";
 import { checkDynamicEscalation } from "../services/router";
 import { pareOrchestrator, type RoutingDecision } from "../services/pare";
 import { runAgent, type AgentState } from "../services/agentRunner";
+import { intentEnginePipeline, stateManager } from "../intent-engine";
 
 const analyzeRequestSchema = z.object({
   messageId: z.string().optional(),
@@ -421,6 +422,108 @@ export function createChatRoutes(): Router {
     } catch (error: any) {
       console.error("[ChatRoutes] Get analysis error:", error);
       res.status(500).json({ error: error.message || "Failed to get analysis" });
+    }
+  });
+
+  const intentRequestSchema = z.object({
+    message: z.string().min(1, "Message cannot be empty"),
+    sessionId: z.string().optional(),
+    userId: z.string().optional(),
+    skipQualityGate: z.boolean().optional().default(false),
+    skipSelfHeal: z.boolean().optional().default(false),
+  });
+
+  router.post("/intent/process", async (req: Request, res: Response) => {
+    try {
+      const validation = intentRequestSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          error: "Invalid request body", 
+          details: validation.error.message 
+        });
+      }
+
+      const { message, sessionId, userId, skipQualityGate, skipSelfHeal } = validation.data;
+      
+      const result = await intentEnginePipeline.process(message, {
+        sessionId: sessionId || `session_${Date.now()}`,
+        userId: userId || 'anonymous',
+        skipQualityGate,
+        skipSelfHeal,
+      });
+
+      res.json({
+        success: result.success,
+        output: result.output,
+        intent: result.context.intentClassification?.intent,
+        confidence: result.context.intentClassification?.confidence,
+        constraints: result.context.constraints,
+        qualityScore: result.qualityScore,
+        repairAttempts: result.repairAttempts,
+        processingTimeMs: result.processingTimeMs,
+        error: result.error,
+      });
+    } catch (error: any) {
+      console.error("[ChatRoutes] Intent engine error:", error);
+      res.status(500).json({ error: error.message || "Failed to process intent" });
+    }
+  });
+
+  router.post("/intent/analyze", async (req: Request, res: Response) => {
+    try {
+      const { message } = req.body;
+      if (!message || typeof message !== 'string') {
+        return res.status(400).json({ error: "Message is required" });
+      }
+
+      const analysis = await intentEnginePipeline.analyzeOnly(message);
+
+      res.json({
+        normalizedInput: {
+          language: analysis.normalizedInput.language,
+          entities: analysis.normalizedInput.entities,
+          metadata: analysis.normalizedInput.metadata,
+        },
+        intent: analysis.intent,
+        constraints: analysis.constraints,
+      });
+    } catch (error: any) {
+      console.error("[ChatRoutes] Intent analysis error:", error);
+      res.status(500).json({ error: error.message || "Failed to analyze intent" });
+    }
+  });
+
+  router.get("/intent/session/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const session = stateManager.getSession(sessionId);
+
+      if (!session) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+
+      res.json({
+        sessionId: session.sessionId,
+        domain: session.domain,
+        constraints: session.constraints,
+        historyLength: session.history.length,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+      });
+    } catch (error: any) {
+      console.error("[ChatRoutes] Get session error:", error);
+      res.status(500).json({ error: error.message || "Failed to get session" });
+    }
+  });
+
+  router.delete("/intent/session/:sessionId", async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      intentEnginePipeline.resetSession(sessionId);
+      res.json({ success: true, message: "Session reset" });
+    } catch (error: any) {
+      console.error("[ChatRoutes] Reset session error:", error);
+      res.status(500).json({ error: error.message || "Failed to reset session" });
     }
   });
 
