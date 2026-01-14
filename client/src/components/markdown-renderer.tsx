@@ -36,9 +36,9 @@ const InlineSourceBadge = memo(function InlineSourceBadge({ name, url }: { name:
         className={cn(
           "inline-flex items-center gap-1 px-2 py-0.5 ml-1",
           "text-xs font-medium rounded-full",
-          "bg-muted/80 hover:bg-accent",
-          "border border-border/50 hover:border-primary/40",
-          "text-muted-foreground hover:text-foreground",
+          "bg-sky-500/10 hover:bg-sky-500/20",
+          "border border-sky-500/30 hover:border-sky-500/50",
+          "text-sky-500 hover:text-sky-400",
           "transition-all duration-200 cursor-pointer",
           "no-underline hover:no-underline"
         )}
