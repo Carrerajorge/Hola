@@ -811,9 +811,12 @@ function isSimpleContent(text: string): boolean {
   if (!text || text.length < 5) return true;
   const hasCodeBlocks = /```[\s\S]*```|`[^`]+`/.test(text);
   const hasMath = /\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$|\\[[\s\S]+?\\]|\\([\s\S]+?\\)/.test(text);
-  const hasComplexMarkdown = /^#{1,6}\s|^\s*[-*+]\s|\|.*\|.*\||!\[.*\]\(.*\)/.test(text);
-  const hasLinks = /\[.*\]\(.*\)/.test(text);
-  return !hasCodeBlocks && !hasMath && !hasComplexMarkdown && !hasLinks;
+  const hasComplexMarkdown = /^#{1,6}\s|^\s*[-*+]\s|\|.*\|.*\||!\[.*\]\(.*\)/m.test(text);
+  const hasLinks = /\[.*?\]\(.*?\)/.test(text);
+  const hasBold = /\*\*[^*]+\*\*|__[^_]+__/.test(text);
+  const hasItalic = /\*[^*]+\*|_[^_]+_/.test(text);
+  const hasSourceBadges = /__SOURCE__/.test(text);
+  return !hasCodeBlocks && !hasMath && !hasComplexMarkdown && !hasLinks && !hasBold && !hasItalic && !hasSourceBadges;
 }
 
 function SafeSimpleRenderer({ content, className }: { content: string; className?: string }) {

@@ -99,3 +99,46 @@
 .rst-content .role-code { @apply font-mono text-sm bg-muted px-1 rounded; }
 .rst-content .role-emphasis { @apply italic; }
 .rst-content .role-strong { @apply font-bold; }
+
+/* Link styles - celeste/sky blue */
+.prose a {
+  @apply text-sky-500 hover:text-sky-400 hover:underline transition-colors;
+}
+
+.prose a:visited {
+  @apply text-sky-600;
+}
+
+/* Strong/Bold text */
+.prose strong,
+.prose b {
+  @apply font-semibold text-foreground;
+}
+
+/* Emphasis/Italic text */
+.prose em,
+.prose i {
+  @apply italic;
+}
+
+/* Headings */
+.prose h1 {
+  @apply text-xl font-bold mb-3 mt-4;
+}
+
+.prose h2 {
+  @apply text-lg font-bold mb-2 mt-3;
+}
+
+.prose h3 {
+  @apply text-base font-semibold mb-2 mt-2;
+}
+
+.prose h4 {
+  @apply text-sm font-semibold mb-2 mt-2;
+}
+
+/* Paragraphs */
+.prose p {
+  @apply mb-3 leading-relaxed;
+}
