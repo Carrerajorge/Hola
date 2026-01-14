@@ -435,6 +435,77 @@ export function useChats() {
                 };
               })
             }));
+            
+            // CRITICAL FIX: Reconcile pending chats that were never synced to server
+            // This happens when user creates a chat, sends a message, but the server sync fails
+            const pendingChats = restored.filter((c: Chat) => c.id.startsWith(PENDING_CHAT_PREFIX) && c.messages.length > 0);
+            if (pendingChats.length > 0) {
+              console.log(`[Reconcile] Found ${pendingChats.length} pending chats to sync`);
+              
+              // Reconcile each pending chat asynchronously but sequentially to avoid session conflicts
+              (async () => {
+                for (const pendingChat of pendingChats) {
+                  try {
+                    // Get first user message for title
+                    const firstUserMsg = pendingChat.messages.find((m: Message) => m.role === 'user');
+                    const title = firstUserMsg?.content?.slice(0, 30) + (firstUserMsg?.content && firstUserMsg.content.length > 30 ? '...' : '') || 'Nuevo Chat';
+                    
+                    // Create chat with all messages in a single atomic request
+                    const messagesToSync = pendingChat.messages.map(msg => ({
+                      role: msg.role,
+                      content: msg.content,
+                      requestId: msg.requestId,
+                      userMessageId: msg.userMessageId,
+                      attachments: msg.attachments
+                    }));
+                    
+                    const res = await fetch("/api/chats", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ title, messages: messagesToSync })
+                    });
+                    
+                    if (res.ok) {
+                      const serverChat = await res.json();
+                      const realChatId = serverChat.id;
+                      const wasAlreadyExisting = serverChat.alreadyExists;
+                      
+                      console.log(`[Reconcile] ${wasAlreadyExisting ? 'Found existing' : 'Created'} server chat ${realChatId} for pending ${pendingChat.id} with ${messagesToSync.length} messages`);
+                      
+                      // Map pending ID to real ID
+                      pendingToRealIdMap.set(pendingChat.id, realChatId);
+                      
+                      // Update chat ID in state
+                      setChats(prev => prev.map(c => 
+                        c.id === pendingChat.id ? { ...c, id: realChatId } : c
+                      ));
+                      
+                      // Update active chat ID if it was the pending one
+                      setActiveChatId(prev => prev === pendingChat.id ? realChatId : prev);
+                      
+                      // Remove pending chat from localStorage after successful sync
+                      const stored = localStorage.getItem(STORAGE_KEY);
+                      if (stored) {
+                        try {
+                          const storedChats = JSON.parse(stored);
+                          const updatedStoredChats = storedChats.filter((c: Chat) => c.id !== pendingChat.id);
+                          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedStoredChats));
+                        } catch (e) {
+                          // Ignore localStorage errors
+                        }
+                      }
+                      
+                      console.log(`[Reconcile] Successfully synced pending chat to ${realChatId}`);
+                    } else {
+                      console.warn(`[Reconcile] Failed to create chat on server:`, await res.text());
+                    }
+                  } catch (err) {
+                    console.error(`[Reconcile] Error reconciling pending chat ${pendingChat.id}:`, err);
+                  }
+                }
+              })();
+            }
+            
             setChats(restored);
             // Only auto-select first chat if user hasn't manually selected/deselected
             if (!userHasSelectedRef.current && !activeChatId && restored.length > 0) {

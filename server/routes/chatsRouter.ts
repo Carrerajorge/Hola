@@ -22,12 +22,58 @@ export function createChatsRouter() {
 
   router.post("/chats", async (req, res) => {
     try {
-      const { title } = req.body;
+      const { title, messages } = req.body;
       const userId = getOrCreateSecureUserId(req);
       
+      // If messages provided with requestIds, check if any already exist (reconciliation scenario)
+      if (messages && Array.isArray(messages) && messages.length > 0) {
+        // Check first message's requestId to detect duplicate reconciliation attempts
+        const firstMsgWithRequestId = messages.find((m: any) => m.requestId);
+        if (firstMsgWithRequestId?.requestId) {
+          const existingMsg = await storage.findMessageByRequestId(firstMsgWithRequestId.requestId);
+          if (existingMsg) {
+            // Chat already exists with this message, return existing chat
+            const existingChat = await storage.getChat(existingMsg.chatId);
+            if (existingChat) {
+              const existingMessages = await storage.getChatMessages(existingChat.id);
+              return res.json({ ...existingChat, messages: existingMessages, alreadyExists: true });
+            }
+          }
+        }
+        
+        // Create chat with messages atomically using transaction
+        const result = await storage.createChatWithMessages(
+          { title: title || "New Chat", userId },
+          messages.map((msg: any) => ({
+            role: msg.role,
+            content: msg.content,
+            requestId: msg.requestId,
+            userMessageId: msg.userMessageId,
+            attachments: msg.attachments
+          }))
+        );
+        return res.json({ ...result.chat, messages: result.messages });
+      }
+      
+      // Simple chat creation without messages
       const chat = await storage.createChat({ title: title || "New Chat", userId });
       res.json(chat);
     } catch (error: any) {
+      // Handle duplicate key constraint gracefully
+      if (error.code === '23505' && error.constraint?.includes('request')) {
+        // Duplicate requestId - try to find and return existing chat
+        const requestId = req.body.messages?.find((m: any) => m.requestId)?.requestId;
+        if (requestId) {
+          const existingMsg = await storage.findMessageByRequestId(requestId);
+          if (existingMsg) {
+            const existingChat = await storage.getChat(existingMsg.chatId);
+            if (existingChat) {
+              const existingMessages = await storage.getChatMessages(existingChat.id);
+              return res.json({ ...existingChat, messages: existingMessages, alreadyExists: true });
+            }
+          }
+        }
+      }
       res.status(500).json({ error: error.message });
     }
   });

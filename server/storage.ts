@@ -131,6 +131,7 @@ export interface IStorage {
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessages(chatId: string): Promise<ChatMessage[]>;
   updateChatMessageContent(id: string, content: string, status: string): Promise<ChatMessage | undefined>;
+  createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }>;
   // Chat Run operations (for idempotent message processing)
   createChatRun(run: InsertChatRun): Promise<ChatRun>;
   getChatRun(id: string): Promise<ChatRun | undefined>;
@@ -645,6 +646,29 @@ export class MemStorage implements IStorage {
       .where(eq(chatMessages.id, id))
       .returning();
     return result;
+  }
+
+  async createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }> {
+    return db.transaction(async (tx) => {
+      // Create chat first
+      const [createdChat] = await tx.insert(chats).values(chat).returning();
+      
+      // Insert all messages with the chatId
+      const savedMessages: ChatMessage[] = [];
+      for (const msg of messages) {
+        const [savedMsg] = await tx.insert(chatMessages).values({
+          chatId: createdChat.id,
+          role: msg.role!,
+          content: msg.content!,
+          requestId: msg.requestId,
+          userMessageId: msg.userMessageId,
+          attachments: msg.attachments
+        }).returning();
+        savedMessages.push(savedMsg);
+      }
+      
+      return { chat: createdChat, messages: savedMessages };
+    });
   }
 
   async saveDocumentToChat(chatId: string, document: { type: string; title: string; content: string }): Promise<ChatMessage> {
