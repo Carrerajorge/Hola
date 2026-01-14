@@ -7,7 +7,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
-import { Check, Copy, Loader2, Download, Maximize2, Minimize2, FileText, FileSpreadsheet, Presentation, ChevronRight, AlertTriangle, RefreshCw, Globe, ExternalLink } from "lucide-react";
+import { Check, Copy, Loader2, Download, Maximize2, Minimize2, FileText, FileSpreadsheet, Presentation, ChevronRight, Globe, ExternalLink } from "lucide-react";
 import { preprocessMathInMarkdown } from "@/lib/mathParser";
 import { CodeBlockShell } from "./code-block-shell";
 import { isLanguageRunnable } from "@/lib/sandboxApi";
@@ -170,56 +170,21 @@ export class MarkdownErrorBoundary extends Component<MarkdownErrorBoundaryProps,
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('[MarkdownErrorBoundary] Rendering error caught:', {
-      error: error.message,
-      stack: error.stack,
-      componentStack: errorInfo.componentStack,
-      fallbackContent: this.props.fallbackContent?.substring(0, 100),
-    });
+    console.warn('[MarkdownErrorBoundary] Rendering error (silent fallback):', error.message);
   }
 
   componentDidUpdate(prevProps: MarkdownErrorBoundaryProps) {
     if (prevProps.fallbackContent !== this.props.fallbackContent && this.state.hasError) {
-      console.log('[MarkdownErrorBoundary] Content changed, resetting error state');
       this.setState({ hasError: false, error: null });
     }
   }
 
-  handleRetry = () => {
-    this.setState({ hasError: false, error: null });
-  };
-
   render() {
     if (this.state.hasError) {
+      const content = this.props.fallbackContent || '';
       return (
-        <div 
-          className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 p-4"
-          data-testid="markdown-error-fallback"
-        >
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                Error al renderizar el contenido
-              </p>
-              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                Hubo un problema al mostrar este mensaje. Mostrando contenido sin formato.
-              </p>
-              {this.props.fallbackContent && (
-                <pre className="mt-3 text-xs text-muted-foreground bg-muted/50 rounded p-3 overflow-x-auto whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
-                  {this.props.fallbackContent}
-                </pre>
-              )}
-              <button
-                onClick={this.handleRetry}
-                className="mt-3 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 hover:underline"
-                data-testid="button-retry-render"
-              >
-                <RefreshCw className="h-3 w-3" />
-                Reintentar
-              </button>
-            </div>
-          </div>
+        <div className="whitespace-pre-wrap break-words">
+          {content}
         </div>
       );
     }
@@ -995,31 +960,21 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     return null;
   }
 
-  if (renderError) {
-    return <SafeSimpleRenderer content={content} className={className} />;
+  if (renderError || isSimple) {
+    return <SafeSimpleRenderer content={processedContent || content} className={className} />;
   }
 
-  if (isSimple) {
-    return <SafeSimpleRenderer content={processedContent} className={className} />;
-  }
-
-  try {
-    return (
-      <div className={cn("prose prose-sm dark:prose-invert max-w-none", className)} data-testid="markdown-renderer">
-        <ReactMarkdown
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
-          components={components}
-        >
-          {processedContent}
-        </ReactMarkdown>
-      </div>
-    );
-  } catch (error) {
-    console.error('[MarkdownRenderer] Render error:', error);
-    setRenderError(error as Error);
-    return <SafeSimpleRenderer content={content} className={className} />;
-  }
+  return (
+    <div className={cn("prose prose-sm dark:prose-invert max-w-none", className)} data-testid="markdown-renderer">
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={components}
+      >
+        {processedContent}
+      </ReactMarkdown>
+    </div>
+  );
 });
 
 export default MarkdownRenderer;
