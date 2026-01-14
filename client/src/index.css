@@ -5,6 +5,8 @@
 @import "./styles/markdown.css";
 @import "./styles/animations.css";
 @import "./styles/mobile.css";
+@import "./styles/micro-animations.css";
+@import "./styles/accessibility.css";
 
 @custom-variant dark (&:is(.dark *));
 
