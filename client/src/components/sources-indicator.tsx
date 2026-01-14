@@ -16,7 +16,7 @@ export const SourcesIndicator = memo(function SourcesIndicator({
 }: SourcesIndicatorProps) {
   if (!sources || sources.length === 0) return null;
 
-  const displayedSources = sources.slice(0, 3);
+  const displayedSources = sources.slice(0, 5);
   const remainingCount = sources.length - displayedSources.length;
 
   return (

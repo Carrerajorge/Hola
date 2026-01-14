@@ -1134,7 +1134,7 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
           const isAcademic = needsAcademicSearch(lastUserMessage.content);
           
           if (isAcademic) {
-            const scholarResults = await searchScholar(lastUserMessage.content, 5);
+            const scholarResults = await searchScholar(lastUserMessage.content, 15);
             if (scholarResults.length > 0) {
               webSources = scholarResults.filter(r => r.url).map(r => 
                 extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
@@ -1143,11 +1143,11 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
           }
           
           // Always do web search for general results
-          const searchResults = await searchWeb(lastUserMessage.content);
+          const searchResults = await searchWeb(lastUserMessage.content, 20);
           if (searchResults.results.length > 0) {
             webSources = [
               ...webSources,
-              ...searchResults.results.slice(0, 8).map(r => 
+              ...searchResults.results.slice(0, 15).map(r => 
                 extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
               )
             ];
@@ -1160,7 +1160,7 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
         }
         
         // Build rich context for LLM with full snippets
-        const topSources = webSources.slice(0, 5);
+        const topSources = webSources.slice(0, 12);
         console.log(`[ChatService] Building response with ${topSources.length} sources`);
         
         const richContext = topSources.map((s, i) => 
@@ -1204,7 +1204,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
         return {
           content: llmResponse.content,
           role: "assistant",
-          webSources: webSources.slice(0, 8)
+          webSources: webSources.slice(0, 15)
         };
       } catch (error) {
         console.error("[ChatService] IMMEDIATE SEARCH ERROR:", error);
@@ -1466,7 +1466,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   if (allowWebSearch && lastUserMessage && needsAcademicSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
     console.log(`[ChatService:WebSearch] Academic search triggered`);
     try {
-      const scholarResults = await searchScholar(lastUserMessage.content, 5);
+      const scholarResults = await searchScholar(lastUserMessage.content, 15);
       
       if (scholarResults.length > 0) {
         webSearchInfo = "\n\n**Artículos académicos encontrados en Google Scholar:**\n" +
@@ -1485,8 +1485,8 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   } else if (allowWebSearch && lastUserMessage && needsWebSearch(lastUserMessage.content) && (forceWebSearch || featureFlags.webSearchAuto)) {
     console.log(`[ChatService:WebSearch] Web search triggered`);
     try {
-      // Request more sources (15) for richer citations
-      const searchResults = await searchWeb(lastUserMessage.content, 15);
+      // Request more sources (20) for richer citations
+      const searchResults = await searchWeb(lastUserMessage.content, 20);
       
       // Include ALL sources found for citations (not just those with extracted content)
       if (searchResults.results.length > 0) {
