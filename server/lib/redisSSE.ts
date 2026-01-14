@@ -5,6 +5,7 @@
 import { Response } from "express";
 import { createClient, RedisClientType } from "redis";
 import { randomUUID } from "crypto";
+import { getHeartbeatManager, getConnectionStats as getHBStats } from "./connectionHeartbeat";
 
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 const SESSION_TTL = parseInt(process.env.SESSION_TTL_SECONDS || "3600", 10);
@@ -254,6 +255,14 @@ class RedisSSEManager {
 
     this.activeConnections.get(sessionId)!.add(res);
 
+    const connectionId = `sse:${sessionId}:${Date.now()}`;
+    getHeartbeatManager().registerConnection(
+      connectionId,
+      "sse",
+      () => this.disconnectClient(sessionId, res, "zombie_detected"),
+      res
+    );
+
     const timeout = setTimeout(() => {
       this.disconnectClient(sessionId, res, "timeout");
     }, SSE_CLIENT_TIMEOUT);
@@ -261,6 +270,7 @@ class RedisSSEManager {
     this.connectionTimeouts.set(res, timeout);
 
     res.on("close", () => {
+      getHeartbeatManager().unregisterConnection(connectionId);
       this.disconnectClient(sessionId, res, "client_closed");
     });
 
@@ -342,4 +352,13 @@ export async function initializeRedisSSE(): Promise<void> {
 
 export function isRedisSSEAvailable(): boolean {
   return redisSSE.isInitialized();
+}
+
+export function getSSEConnectionStats() {
+  return {
+    redis: {
+      totalConnections: redisSSE.getTotalActiveConnections(),
+    },
+    heartbeat: getHBStats(),
+  };
 }

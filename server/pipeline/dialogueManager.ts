@@ -70,7 +70,7 @@ const VALID_TRANSITIONS: Record<DialogueState, DialogueState[]> = {
   analyzing: ["retrieving", "generating", "clarifying", "fallback", "error_degraded", "timeout"],
   retrieving: ["generating", "clarifying", "fallback", "error_degraded", "timeout"],
   generating: ["success", "clarifying", "fallback", "error_degraded", "timeout"],
-  clarifying: ["idle", "analyzing", "fallback", "timeout"],
+  clarifying: ["idle", "analyzing", "clarifying", "fallback", "timeout"],
   success: ["idle"],
   fallback: ["idle", "success"],
   error_degraded: ["idle"],
@@ -80,10 +80,10 @@ const VALID_TRANSITIONS: Record<DialogueState, DialogueState[]> = {
 const STATE_DESCRIPTIONS: Record<DialogueState, string> = {
   idle: "Esperando mensaje del usuario",
   preprocessing: "Normalizando y validando entrada",
-  analyzing: "Analizando intenci\u00f3n y extrayendo entidades",
-  retrieving: "Buscando informaci\u00f3n relevante",
+  analyzing: "Analizando intención y extrayendo entidades",
+  retrieving: "Buscando información relevante",
   generating: "Generando respuesta",
-  clarifying: "Pidiendo aclaraci\u00f3n al usuario",
+  clarifying: "Pidiendo aclaración al usuario",
   success: "Respuesta entregada exitosamente",
   fallback: "Usando respuesta de respaldo",
   error_degraded: "Error - modo degradado",
@@ -94,13 +94,18 @@ interface FSMConfig {
   maxClarificationAttempts: number;
   confidenceThresholdOk: number;
   confidenceThresholdClarify: number;
+  stateTimeoutMs: number;
 }
 
 const DEFAULT_FSM_CONFIG: FSMConfig = {
   maxClarificationAttempts: 3,
   confidenceThresholdOk: 0.70,
-  confidenceThresholdClarify: 0.40
+  confidenceThresholdClarify: 0.40,
+  stateTimeoutMs: 30000
 };
+
+const SESSION_INACTIVITY_THRESHOLD_MS = 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
 export class DialogueManager extends EventEmitter {
   private state: DialogueState = "idle";
@@ -108,6 +113,8 @@ export class DialogueManager extends EventEmitter {
   private history: TransitionEvent[] = [];
   private config: FSMConfig;
   private stateEnteredAt: number = Date.now();
+  private lastActivityAt: number = Date.now();
+  private stateTimeoutTimer: NodeJS.Timeout | null = null;
 
   constructor(sessionId: string, config?: Partial<FSMConfig>) {
     super();
@@ -121,6 +128,45 @@ export class DialogueManager extends EventEmitter {
       clarificationAttempts: 0
     };
     this.setMaxListeners(50);
+    this.startStateTimeout();
+  }
+
+  private startStateTimeout(): void {
+    this.clearStateTimeout();
+    if (this.state !== "idle" && this.state !== "success") {
+      this.stateTimeoutTimer = setTimeout(() => {
+        this.handleStateTimeout();
+      }, this.config.stateTimeoutMs);
+    }
+  }
+
+  private clearStateTimeout(): void {
+    if (this.stateTimeoutTimer) {
+      clearTimeout(this.stateTimeoutTimer);
+      this.stateTimeoutTimer = null;
+    }
+  }
+
+  private handleStateTimeout(): void {
+    console.warn(`[DialogueManager] State timeout in state: ${this.state} after ${this.config.stateTimeoutMs}ms`);
+    this.emit("state_timeout", {
+      state: this.state,
+      duration: this.getStateDurationMs(),
+      sessionId: this.context.sessionId
+    });
+    this.forceTransition("fallback", "state_timeout_exceeded");
+  }
+
+  private updateActivity(): void {
+    this.lastActivityAt = Date.now();
+  }
+
+  getLastActivityAt(): number {
+    return this.lastActivityAt;
+  }
+
+  isStale(thresholdMs: number = SESSION_INACTIVITY_THRESHOLD_MS): boolean {
+    return Date.now() - this.lastActivityAt > thresholdMs;
   }
 
   getState(): DialogueState {
@@ -144,7 +190,46 @@ export class DialogueManager extends EventEmitter {
     return validTargets.includes(targetState);
   }
 
+  private resetContextOnTransition(targetState: DialogueState): void {
+    switch (targetState) {
+      case "idle":
+        break;
+      case "success":
+        this.resetClarificationAttempts();
+        this.clearSlots();
+        break;
+      case "fallback":
+        this.context.pendingClarification = false;
+        break;
+      case "preprocessing":
+        break;
+      case "clarifying":
+        break;
+      default:
+        break;
+    }
+  }
+
   transition(targetState: DialogueState, trigger: string, metadata?: Record<string, any>): boolean {
+    this.updateActivity();
+
+    if (this.state === "clarifying" && targetState === "clarifying") {
+      this.context.clarificationAttempts++;
+      this.emit("clarification_retry", {
+        attempts: this.context.clarificationAttempts,
+        maxAttempts: this.config.maxClarificationAttempts
+      });
+      console.log(`[DialogueManager] clarifying -> clarifying (attempt ${this.context.clarificationAttempts})`);
+      
+      if (this.context.clarificationAttempts >= this.config.maxClarificationAttempts) {
+        return this.transition("fallback", "max_clarification_exceeded", metadata);
+      }
+      
+      this.stateEnteredAt = Date.now();
+      this.startStateTimeout();
+      return true;
+    }
+
     if (!this.canTransitionTo(targetState)) {
       this.emit("invalid_transition", {
         from: this.state,
@@ -155,6 +240,8 @@ export class DialogueManager extends EventEmitter {
       console.warn(`[DialogueManager] Invalid transition: ${this.state} -> ${targetState} (trigger: ${trigger})`);
       return false;
     }
+
+    this.resetContextOnTransition(targetState);
 
     const event: TransitionEvent = {
       fromState: this.state,
@@ -169,6 +256,9 @@ export class DialogueManager extends EventEmitter {
     this.state = targetState;
     this.stateEnteredAt = Date.now();
 
+    this.clearStateTimeout();
+    this.startStateTimeout();
+
     this.emit("state_changed", {
       previousState,
       currentState: this.state,
@@ -180,7 +270,39 @@ export class DialogueManager extends EventEmitter {
     return true;
   }
 
+  forceTransition(targetState: DialogueState, trigger: string, metadata?: Record<string, any>): boolean {
+    this.updateActivity();
+    this.clearStateTimeout();
+
+    const event: TransitionEvent = {
+      fromState: this.state,
+      toState: targetState,
+      trigger: `force_${trigger}`,
+      timestamp: Date.now(),
+      metadata: { ...metadata, forced: true }
+    };
+
+    this.history.push(event);
+    const previousState = this.state;
+    this.state = targetState;
+    this.stateEnteredAt = Date.now();
+
+    this.resetContextOnTransition(targetState);
+    this.startStateTimeout();
+
+    this.emit("forced_transition", {
+      previousState,
+      currentState: this.state,
+      trigger,
+      metadata
+    });
+
+    console.log(`[DialogueManager] FORCED: ${previousState} -> ${this.state} (${trigger})`);
+    return true;
+  }
+
   startNewTurn(requestId?: string): void {
+    this.updateActivity();
     this.context.requestId = requestId || randomUUID();
     this.context.turnCount++;
     if (this.state !== "idle") {
@@ -227,6 +349,8 @@ export class DialogueManager extends EventEmitter {
   }
 
   handleSuccess(): void {
+    this.resetClarificationAttempts();
+    this.clearSlots();
     this.context.pendingClarification = false;
     this.transition("success", "response_delivered");
   }
@@ -237,6 +361,7 @@ export class DialogueManager extends EventEmitter {
   }
 
   updateSlot(key: string, value: any): void {
+    this.updateActivity();
     this.context.confirmedSlots[key] = value;
     this.emit("slot_updated", { key, value });
   }
@@ -261,11 +386,14 @@ export class DialogueManager extends EventEmitter {
       clarificationAttempts: this.context.clarificationAttempts,
       slotsCount: Object.keys(this.context.confirmedSlots).length,
       transitionCount: this.history.length,
-      stateDurationMs: this.getStateDurationMs()
+      stateDurationMs: this.getStateDurationMs(),
+      lastActivityAt: this.lastActivityAt,
+      isStale: this.isStale()
     };
   }
 
   reset(): void {
+    this.clearStateTimeout();
     this.state = "idle";
     this.context = {
       sessionId: this.context.sessionId,
@@ -277,24 +405,96 @@ export class DialogueManager extends EventEmitter {
     };
     this.history = [];
     this.stateEnteredAt = Date.now();
+    this.lastActivityAt = Date.now();
+  }
+
+  destroy(): void {
+    this.clearStateTimeout();
+    this.removeAllListeners();
   }
 }
 
 const dialogueManagers = new Map<string, DialogueManager>();
+let cleanupIntervalId: NodeJS.Timeout | null = null;
 
 export function getDialogueManager(sessionId: string): DialogueManager {
   let manager = dialogueManagers.get(sessionId);
   if (!manager) {
     manager = new DialogueManager(sessionId);
     dialogueManagers.set(sessionId, manager);
+    
+    if (!cleanupIntervalId) {
+      startCleanupInterval();
+    }
   }
   return manager;
 }
 
 export function clearDialogueManager(sessionId: string): void {
-  dialogueManagers.delete(sessionId);
+  const manager = dialogueManagers.get(sessionId);
+  if (manager) {
+    manager.destroy();
+    dialogueManagers.delete(sessionId);
+  }
 }
 
 export function getAllDialogueMetrics(): Record<string, any>[] {
   return Array.from(dialogueManagers.values()).map(m => m.getMetrics());
+}
+
+export function getActiveSessionCount(): number {
+  return dialogueManagers.size;
+}
+
+export function cleanupStaleSessions(thresholdMs: number = SESSION_INACTIVITY_THRESHOLD_MS): number {
+  let cleanedCount = 0;
+  const now = Date.now();
+
+  for (const [sessionId, manager] of dialogueManagers.entries()) {
+    if (manager.isStale(thresholdMs)) {
+      console.log(`[DialogueManager] Cleaning up stale session: ${sessionId} (inactive for ${Math.round((now - manager.getLastActivityAt()) / 1000)}s)`);
+      manager.emit("session_expired", {
+        sessionId,
+        lastActivityAt: manager.getLastActivityAt(),
+        inactiveDurationMs: now - manager.getLastActivityAt()
+      });
+      manager.destroy();
+      dialogueManagers.delete(sessionId);
+      cleanedCount++;
+    }
+  }
+
+  if (cleanedCount > 0) {
+    console.log(`[DialogueManager] Cleaned up ${cleanedCount} stale sessions. Active: ${dialogueManagers.size}`);
+  }
+
+  return cleanedCount;
+}
+
+function startCleanupInterval(): void {
+  if (cleanupIntervalId) {
+    clearInterval(cleanupIntervalId);
+  }
+  cleanupIntervalId = setInterval(() => {
+    cleanupStaleSessions();
+  }, CLEANUP_INTERVAL_MS);
+  
+  if (cleanupIntervalId.unref) {
+    cleanupIntervalId.unref();
+  }
+}
+
+export function stopCleanupInterval(): void {
+  if (cleanupIntervalId) {
+    clearInterval(cleanupIntervalId);
+    cleanupIntervalId = null;
+  }
+}
+
+export function clearAllDialogueManagers(): void {
+  for (const manager of dialogueManagers.values()) {
+    manager.destroy();
+  }
+  dialogueManagers.clear();
+  stopCleanupInterval();
 }

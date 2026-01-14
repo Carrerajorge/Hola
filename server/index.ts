@@ -7,10 +7,13 @@ import { requestLoggerMiddleware } from "./middleware/requestLogger";
 import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
-import { verifyDatabaseConnection } from "./db";
+import { verifyDatabaseConnection, startHealthChecks, stopHealthChecks, drainConnections } from "./db";
 import { securityHeaders, apiSecurityHeaders } from "./middleware/securityHeaders";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
 import { pythonServiceManager } from "./lib/pythonServiceManager";
+import { initTracing, shutdownTracing, getTracingMetrics } from "./lib/tracing";
+
+initTracing();
 
 const app = express();
 const httpServer = createServer(app);
@@ -107,6 +110,8 @@ app.use((req, res, next) => {
   
   if (dbConnected) {
     log("Database connection verified successfully");
+    startHealthChecks();
+    log("Database health checks started");
   } else {
     log("[WARNING] Database connection failed - some features may not work");
   }
@@ -153,7 +158,11 @@ app.use((req, res, next) => {
 
       // Register database cleanup
       registerCleanup(async () => {
-        log("Closing database connections...");
+        log("Stopping database health checks...");
+        stopHealthChecks();
+        log("Draining database connections...");
+        await drainConnections();
+        log("Database cleanup complete");
       });
 
       // Register Python service cleanup
@@ -163,6 +172,16 @@ app.use((req, res, next) => {
           pythonServiceManager.stop();
         });
       }
+
+      // Register OpenTelemetry tracing cleanup
+      registerCleanup(async () => {
+        log("Shutting down OpenTelemetry tracing...");
+        await shutdownTracing();
+        log("OpenTelemetry tracing shutdown complete");
+      });
+
+      const tracingStatus = getTracingMetrics();
+      log(`OpenTelemetry: initialized=${tracingStatus.isInitialized}, sampleRate=${tracingStatus.sampleRate * 100}%`);
 
       log("Graceful shutdown handler configured");
     },

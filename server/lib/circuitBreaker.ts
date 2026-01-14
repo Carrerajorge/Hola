@@ -1,8 +1,587 @@
-import { CircuitBreaker, CircuitState, CircuitBreakerError, getCircuitBreaker } from "../utils/circuitBreaker";
+import { EventEmitter } from "events";
 import { createLogger } from "./structuredLogger";
 import { recordConnectorUsage } from "./connectorMetrics";
 
-const logger = createLogger("circuit-breaker-wrapper");
+const logger = createLogger("tenant-circuit-breaker");
+
+// ===== Types =====
+export enum CircuitState {
+  CLOSED = "CLOSED",
+  OPEN = "OPEN",
+  HALF_OPEN = "HALF_OPEN",
+}
+
+export interface CircuitBreakerConfig {
+  failureThreshold: number;
+  successThreshold: number;
+  timeout: number;
+  resetTimeout: number;
+}
+
+export interface CircuitStats {
+  state: CircuitState;
+  failures: number;
+  successes: number;
+  consecutiveSuccesses: number;
+  totalRequests: number;
+  lastFailureTime: number | null;
+  lastSuccessTime: number | null;
+  lastStateChange: number;
+  lastActivityTime: number;
+  openedAt: number | null;
+  tenantId: string;
+  provider: string;
+}
+
+export interface CircuitBreakerEvents {
+  circuit_opened: { tenantId: string; provider: string; failures: number };
+  circuit_closed: { tenantId: string; provider: string };
+  circuit_half_open: { tenantId: string; provider: string };
+}
+
+// ===== Configuration Defaults =====
+const DEFAULT_CONFIG: CircuitBreakerConfig = {
+  failureThreshold: 5,
+  successThreshold: 3,
+  timeout: 30000, // 30s in OPEN before HALF_OPEN
+  resetTimeout: 300000, // 5 minutes of inactivity resets stats
+};
+
+// ===== Event Emitter =====
+class CircuitBreakerEventEmitter extends EventEmitter {
+  emit<K extends keyof CircuitBreakerEvents>(
+    event: K,
+    payload: CircuitBreakerEvents[K]
+  ): boolean {
+    return super.emit(event, payload);
+  }
+
+  on<K extends keyof CircuitBreakerEvents>(
+    event: K,
+    listener: (payload: CircuitBreakerEvents[K]) => void
+  ): this {
+    return super.on(event, listener);
+  }
+
+  once<K extends keyof CircuitBreakerEvents>(
+    event: K,
+    listener: (payload: CircuitBreakerEvents[K]) => void
+  ): this {
+    return super.once(event, listener);
+  }
+}
+
+export const circuitBreakerEvents = new CircuitBreakerEventEmitter();
+
+// ===== Error Class =====
+export class CircuitBreakerOpenError extends Error {
+  constructor(
+    message: string,
+    public readonly tenantId: string,
+    public readonly provider: string
+  ) {
+    super(message);
+    this.name = "CircuitBreakerOpenError";
+  }
+}
+
+// ===== Tenant Circuit Breaker =====
+export class TenantCircuitBreaker {
+  private state: CircuitState = CircuitState.CLOSED;
+  private failures: number = 0;
+  private successes: number = 0;
+  private consecutiveSuccesses: number = 0;
+  private totalRequests: number = 0;
+  private lastFailureTime: number | null = null;
+  private lastSuccessTime: number | null = null;
+  private lastStateChange: number = Date.now();
+  private lastActivityTime: number = Date.now();
+  private openedAt: number | null = null;
+  private halfOpenAttempts: number = 0;
+
+  constructor(
+    public readonly tenantId: string,
+    public readonly provider: string,
+    private readonly config: CircuitBreakerConfig = DEFAULT_CONFIG
+  ) {}
+
+  async execute<T>(operation: () => Promise<T>): Promise<T> {
+    this.lastActivityTime = Date.now();
+    this.checkResetTimeout();
+    this.checkStateTransition();
+
+    if (!this.canExecute()) {
+      throw new CircuitBreakerOpenError(
+        `Circuit breaker is OPEN for tenant ${this.tenantId}, provider ${this.provider}`,
+        this.tenantId,
+        this.provider
+      );
+    }
+
+    this.totalRequests++;
+
+    if (this.state === CircuitState.HALF_OPEN) {
+      this.halfOpenAttempts++;
+    }
+
+    const startTime = Date.now();
+    try {
+      const result = await operation();
+      this.recordSuccess();
+      recordConnectorUsage(`cb:${this.tenantId}:${this.provider}` as any, Date.now() - startTime, true);
+      return result;
+    } catch (error) {
+      this.recordFailure();
+      recordConnectorUsage(`cb:${this.tenantId}:${this.provider}` as any, Date.now() - startTime, false);
+      throw error;
+    }
+  }
+
+  private canExecute(): boolean {
+    this.checkStateTransition();
+    
+    if (this.state === CircuitState.CLOSED) {
+      return true;
+    }
+    
+    if (this.state === CircuitState.OPEN) {
+      return false;
+    }
+    
+    // HALF_OPEN: allow limited requests to test if service recovered
+    return true;
+  }
+
+  private checkStateTransition(): void {
+    if (this.state === CircuitState.OPEN && this.openedAt) {
+      const timeSinceOpen = Date.now() - this.openedAt;
+      if (timeSinceOpen >= this.config.timeout) {
+        this.transitionTo(CircuitState.HALF_OPEN);
+      }
+    }
+  }
+
+  private checkResetTimeout(): void {
+    const timeSinceActivity = Date.now() - this.lastActivityTime;
+    if (timeSinceActivity >= this.config.resetTimeout) {
+      this.resetStats();
+    }
+  }
+
+  private resetStats(): void {
+    this.failures = 0;
+    this.successes = 0;
+    this.consecutiveSuccesses = 0;
+    this.halfOpenAttempts = 0;
+    if (this.state !== CircuitState.CLOSED) {
+      this.transitionTo(CircuitState.CLOSED);
+    }
+  }
+
+  private recordSuccess(): void {
+    this.successes++;
+    this.consecutiveSuccesses++;
+    this.lastSuccessTime = Date.now();
+    this.lastActivityTime = Date.now();
+
+    if (this.state === CircuitState.HALF_OPEN) {
+      if (this.consecutiveSuccesses >= this.config.successThreshold) {
+        this.transitionTo(CircuitState.CLOSED);
+      }
+    } else if (this.state === CircuitState.CLOSED) {
+      // Decay failures on success in closed state
+      this.failures = Math.max(0, this.failures - 1);
+    }
+  }
+
+  private recordFailure(): void {
+    this.failures++;
+    this.consecutiveSuccesses = 0;
+    this.lastFailureTime = Date.now();
+    this.lastActivityTime = Date.now();
+
+    if (this.state === CircuitState.HALF_OPEN) {
+      // Any failure in HALF_OPEN immediately opens circuit
+      this.transitionTo(CircuitState.OPEN);
+    } else if (this.state === CircuitState.CLOSED) {
+      if (this.failures >= this.config.failureThreshold) {
+        this.transitionTo(CircuitState.OPEN);
+      }
+    }
+  }
+
+  private transitionTo(newState: CircuitState): void {
+    const oldState = this.state;
+    if (oldState === newState) return;
+
+    this.state = newState;
+    this.lastStateChange = Date.now();
+
+    if (newState === CircuitState.OPEN) {
+      this.openedAt = Date.now();
+      this.halfOpenAttempts = 0;
+      circuitBreakerEvents.emit("circuit_opened", {
+        tenantId: this.tenantId,
+        provider: this.provider,
+        failures: this.failures,
+      });
+      logger.warn(`Circuit OPENED`, {
+        tenantId: this.tenantId,
+        provider: this.provider,
+        failures: this.failures,
+      });
+    } else if (newState === CircuitState.HALF_OPEN) {
+      this.halfOpenAttempts = 0;
+      this.consecutiveSuccesses = 0;
+      circuitBreakerEvents.emit("circuit_half_open", {
+        tenantId: this.tenantId,
+        provider: this.provider,
+      });
+      logger.info(`Circuit HALF_OPEN`, {
+        tenantId: this.tenantId,
+        provider: this.provider,
+      });
+    } else if (newState === CircuitState.CLOSED) {
+      this.openedAt = null;
+      this.failures = 0;
+      this.consecutiveSuccesses = 0;
+      this.halfOpenAttempts = 0;
+      circuitBreakerEvents.emit("circuit_closed", {
+        tenantId: this.tenantId,
+        provider: this.provider,
+      });
+      logger.info(`Circuit CLOSED`, {
+        tenantId: this.tenantId,
+        provider: this.provider,
+      });
+    }
+  }
+
+  getState(): CircuitState {
+    this.checkStateTransition();
+    return this.state;
+  }
+
+  getStats(): CircuitStats {
+    this.checkStateTransition();
+    return {
+      state: this.state,
+      failures: this.failures,
+      successes: this.successes,
+      consecutiveSuccesses: this.consecutiveSuccesses,
+      totalRequests: this.totalRequests,
+      lastFailureTime: this.lastFailureTime,
+      lastSuccessTime: this.lastSuccessTime,
+      lastStateChange: this.lastStateChange,
+      lastActivityTime: this.lastActivityTime,
+      openedAt: this.openedAt,
+      tenantId: this.tenantId,
+      provider: this.provider,
+    };
+  }
+
+  reset(): void {
+    this.failures = 0;
+    this.successes = 0;
+    this.consecutiveSuccesses = 0;
+    this.totalRequests = 0;
+    this.lastFailureTime = null;
+    this.lastSuccessTime = null;
+    this.openedAt = null;
+    this.halfOpenAttempts = 0;
+    this.lastActivityTime = Date.now();
+    
+    if (this.state !== CircuitState.CLOSED) {
+      this.transitionTo(CircuitState.CLOSED);
+    }
+    this.lastStateChange = Date.now();
+  }
+
+  forceOpen(): void {
+    if (this.state !== CircuitState.OPEN) {
+      this.transitionTo(CircuitState.OPEN);
+    }
+  }
+
+  forceClose(): void {
+    if (this.state !== CircuitState.CLOSED) {
+      this.transitionTo(CircuitState.CLOSED);
+    }
+  }
+
+  getLastActivityTime(): number {
+    return this.lastActivityTime;
+  }
+}
+
+// ===== LRU Entry for Registry =====
+interface LRUEntry {
+  key: string;
+  breaker: TenantCircuitBreaker;
+  prev: LRUEntry | null;
+  next: LRUEntry | null;
+}
+
+// ===== Circuit Breaker Registry =====
+export class CircuitBreakerRegistry {
+  private breakers: Map<string, LRUEntry> = new Map();
+  private head: LRUEntry | null = null;
+  private tail: LRUEntry | null = null;
+  private cleanupInterval: NodeJS.Timeout | null = null;
+
+  private readonly maxBreakers: number;
+  private readonly staleTimeoutMs: number;
+  private readonly cleanupIntervalMs: number;
+  private readonly defaultConfig: CircuitBreakerConfig;
+
+  constructor(options?: {
+    maxBreakers?: number;
+    staleTimeoutMs?: number;
+    cleanupIntervalMs?: number;
+    defaultConfig?: Partial<CircuitBreakerConfig>;
+  }) {
+    this.maxBreakers = options?.maxBreakers ?? 10000;
+    this.staleTimeoutMs = options?.staleTimeoutMs ?? 300000; // 5 minutes
+    this.cleanupIntervalMs = options?.cleanupIntervalMs ?? 300000; // 5 minutes
+    this.defaultConfig = { ...DEFAULT_CONFIG, ...options?.defaultConfig };
+
+    this.startCleanupInterval();
+  }
+
+  private generateKey(tenantId: string, provider: string): string {
+    return `${tenantId}:${provider}`;
+  }
+
+  getBreaker(
+    tenantId: string,
+    provider: string,
+    config?: Partial<CircuitBreakerConfig>
+  ): TenantCircuitBreaker {
+    const key = this.generateKey(tenantId, provider);
+    const entry = this.breakers.get(key);
+
+    if (entry) {
+      this.moveToHead(entry);
+      return entry.breaker;
+    }
+
+    // Evict if at capacity
+    if (this.breakers.size >= this.maxBreakers) {
+      this.evictLRU();
+    }
+
+    const breaker = new TenantCircuitBreaker(
+      tenantId,
+      provider,
+      { ...this.defaultConfig, ...config }
+    );
+
+    const newEntry: LRUEntry = {
+      key,
+      breaker,
+      prev: null,
+      next: null,
+    };
+
+    this.breakers.set(key, newEntry);
+    this.addToHead(newEntry);
+
+    return breaker;
+  }
+
+  private addToHead(entry: LRUEntry): void {
+    entry.prev = null;
+    entry.next = this.head;
+
+    if (this.head) {
+      this.head.prev = entry;
+    }
+
+    this.head = entry;
+
+    if (!this.tail) {
+      this.tail = entry;
+    }
+  }
+
+  private removeEntry(entry: LRUEntry): void {
+    if (entry.prev) {
+      entry.prev.next = entry.next;
+    } else {
+      this.head = entry.next;
+    }
+
+    if (entry.next) {
+      entry.next.prev = entry.prev;
+    } else {
+      this.tail = entry.prev;
+    }
+
+    entry.prev = null;
+    entry.next = null;
+  }
+
+  private moveToHead(entry: LRUEntry): void {
+    if (entry === this.head) return;
+    this.removeEntry(entry);
+    this.addToHead(entry);
+  }
+
+  private evictLRU(): void {
+    if (!this.tail) return;
+
+    const evictedKey = this.tail.key;
+    const evictedEntry = this.tail;
+
+    this.removeEntry(evictedEntry);
+    this.breakers.delete(evictedKey);
+
+    logger.debug(`Evicted LRU breaker: ${evictedKey}`);
+  }
+
+  getAllStats(): Record<string, CircuitStats> {
+    const stats: Record<string, CircuitStats> = {};
+
+    Array.from(this.breakers.entries()).forEach(([key, entry]) => {
+      stats[key] = entry.breaker.getStats();
+    });
+
+    return stats;
+  }
+
+  resetAll(): void {
+    Array.from(this.breakers.values()).forEach((entry) => {
+      entry.breaker.reset();
+    });
+    logger.info(`Reset all ${this.breakers.size} breakers`);
+  }
+
+  cleanupStale(): number {
+    const now = Date.now();
+    const staleKeys: string[] = [];
+
+    Array.from(this.breakers.entries()).forEach(([key, entry]) => {
+      const timeSinceActivity = now - entry.breaker.getLastActivityTime();
+      if (timeSinceActivity >= this.staleTimeoutMs) {
+        staleKeys.push(key);
+      }
+    });
+
+    for (const key of staleKeys) {
+      const entry = this.breakers.get(key);
+      if (entry) {
+        this.removeEntry(entry);
+        this.breakers.delete(key);
+      }
+    }
+
+    if (staleKeys.length > 0) {
+      logger.info(`Cleaned up ${staleKeys.length} stale breakers`);
+    }
+
+    return staleKeys.length;
+  }
+
+  private startCleanupInterval(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupStale();
+    }, this.cleanupIntervalMs);
+
+    // Don't prevent process exit
+    if (this.cleanupInterval.unref) {
+      this.cleanupInterval.unref();
+    }
+  }
+
+  stopCleanupInterval(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+  }
+
+  getSize(): number {
+    return this.breakers.size;
+  }
+
+  hasBreaker(tenantId: string, provider: string): boolean {
+    return this.breakers.has(this.generateKey(tenantId, provider));
+  }
+
+  removeBreaker(tenantId: string, provider: string): boolean {
+    const key = this.generateKey(tenantId, provider);
+    const entry = this.breakers.get(key);
+
+    if (entry) {
+      this.removeEntry(entry);
+      this.breakers.delete(key);
+      return true;
+    }
+
+    return false;
+  }
+
+  getMetrics(): {
+    totalBreakers: number;
+    maxBreakers: number;
+    byState: Record<CircuitState, number>;
+    oldestActivity: number | null;
+    newestActivity: number | null;
+  } {
+    const byState: Record<CircuitState, number> = {
+      [CircuitState.CLOSED]: 0,
+      [CircuitState.OPEN]: 0,
+      [CircuitState.HALF_OPEN]: 0,
+    };
+
+    let oldestActivity: number | null = null;
+    let newestActivity: number | null = null;
+
+    Array.from(this.breakers.values()).forEach((entry) => {
+      const stats = entry.breaker.getStats();
+      byState[stats.state]++;
+
+      if (oldestActivity === null || stats.lastActivityTime < oldestActivity) {
+        oldestActivity = stats.lastActivityTime;
+      }
+      if (newestActivity === null || stats.lastActivityTime > newestActivity) {
+        newestActivity = stats.lastActivityTime;
+      }
+    });
+
+    return {
+      totalBreakers: this.breakers.size,
+      maxBreakers: this.maxBreakers,
+      byState,
+      oldestActivity,
+      newestActivity,
+    };
+  }
+}
+
+// ===== Global Registry Instance =====
+const globalRegistry = new CircuitBreakerRegistry();
+
+export function getCircuitBreaker(
+  tenantId: string,
+  provider: string,
+  config?: Partial<CircuitBreakerConfig>
+): TenantCircuitBreaker {
+  return globalRegistry.getBreaker(tenantId, provider, config);
+}
+
+export function getGlobalRegistry(): CircuitBreakerRegistry {
+  return globalRegistry;
+}
+
+export { DEFAULT_CONFIG as DEFAULT_CIRCUIT_BREAKER_CONFIG };
+
+// ===== Legacy Compatibility Layer =====
+// Re-export for backward compatibility with existing code
 
 export interface ServiceCircuitConfig {
   name: string;
@@ -61,7 +640,7 @@ function calculateRetryDelay(attempt: number, baseDelay: number): number {
 }
 
 export class ServiceCircuitBreaker<T = any> {
-  private breaker: CircuitBreaker;
+  private breaker: TenantCircuitBreaker;
   private config: Required<Omit<ServiceCircuitConfig, "fallback" | "onSuccess" | "onFailure" | "onStateChange">> & 
     Pick<ServiceCircuitConfig, "fallback" | "onSuccess" | "onFailure" | "onStateChange">;
   private metrics: {
@@ -89,14 +668,28 @@ export class ServiceCircuitBreaker<T = any> {
       onStateChange: config.onStateChange,
     };
 
-    this.breaker = getCircuitBreaker(this.config.name, {
+    this.breaker = getCircuitBreaker("__legacy__", this.config.name, {
       failureThreshold: this.config.failureThreshold,
-      resetTimeout: this.config.resetTimeout,
-      halfOpenMaxCalls: this.config.halfOpenMaxCalls,
-      onStateChange: (from, to) => {
-        logger.info(`Circuit breaker state change: ${this.config.name}`, { from, to });
-        this.config.onStateChange?.(from, to);
-      },
+      successThreshold: 3,
+      timeout: this.config.resetTimeout,
+      resetTimeout: 300000,
+    });
+
+    // Register state change listener
+    circuitBreakerEvents.on("circuit_opened", (data) => {
+      if (data.provider === this.config.name && data.tenantId === "__legacy__") {
+        this.config.onStateChange?.("CLOSED", "OPEN");
+      }
+    });
+    circuitBreakerEvents.on("circuit_closed", (data) => {
+      if (data.provider === this.config.name && data.tenantId === "__legacy__") {
+        this.config.onStateChange?.("HALF_OPEN", "CLOSED");
+      }
+    });
+    circuitBreakerEvents.on("circuit_half_open", (data) => {
+      if (data.provider === this.config.name && data.tenantId === "__legacy__") {
+        this.config.onStateChange?.("OPEN", "HALF_OPEN");
+      }
     });
 
     this.metrics = {
@@ -176,10 +769,9 @@ export class ServiceCircuitBreaker<T = any> {
       recordConnectorUsage(this.config.name as any, latencyMs, false);
       this.config.onFailure?.(error, latencyMs);
 
-      if (error instanceof CircuitBreakerError) {
+      if (error instanceof CircuitBreakerOpenError) {
         logger.warn(`Circuit open for ${opName}`, {
-          state: error.state,
-          nextAttemptAt: error.nextAttemptAt,
+          state: this.breaker.getState(),
         });
       } else {
         logger.error(`Service call failed: ${opName}`, {
@@ -288,4 +880,5 @@ export const geminiCircuitBreaker = createServiceCircuitBreaker({
   retryDelay: 1000,
 });
 
-export { CircuitState, CircuitBreakerError };
+// Alias for backward compatibility
+export { CircuitBreakerOpenError as CircuitBreakerError };

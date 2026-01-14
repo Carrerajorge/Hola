@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { TraceEmitter, createTraceEmitter } from "./TraceEmitter";
 import { getStreamGateway } from "./StreamGateway";
-import { getEventStore, initializeEventStore } from "./EventStore";
+import { getEventStore, initializeEventStore, cleanupDeadEventStores } from "./EventStore";
 import { ProgressModel, createProgressModel } from "./ProgressModel";
 import { ContractGuard, createContractGuard } from "./ContractGuard";
 import { runAcademicPipeline, candidatesToSourceSignals } from "../academicPipeline";
@@ -25,14 +25,212 @@ interface RunContext {
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   createdAt: number;
   completedAt?: number;
+  lastActivityAt: number;
+  cleanupTimer?: NodeJS.Timeout;
   error?: string;
   artifacts: Array<{ id: string; type: string; name: string; url: string }>;
 }
 
+interface RunControllerConfig {
+  maxConcurrentRuns: number;
+  runCleanupTimeoutMs: number;
+  gcIntervalMs: number;
+  maxInactiveMs: number;
+}
+
+interface RunControllerMetrics {
+  activeRuns: number;
+  completedRuns: number;
+  failedRuns: number;
+  cleanedRuns: number;
+  rejectedRuns: number;
+  memoryUsageBytes: number;
+  lastGCAt: number;
+}
+
+const DEFAULT_CONFIG: RunControllerConfig = {
+  maxConcurrentRuns: 50,
+  runCleanupTimeoutMs: 5 * 60 * 1000,
+  gcIntervalMs: 60 * 1000,
+  maxInactiveMs: 10 * 60 * 1000,
+};
+
 const activeRuns: Map<string, RunContext> = new Map();
+const runControllerEmitter = new EventEmitter();
+let config = { ...DEFAULT_CONFIG };
+let gcTimer: NodeJS.Timeout | null = null;
+let metrics: RunControllerMetrics = {
+  activeRuns: 0,
+  completedRuns: 0,
+  failedRuns: 0,
+  cleanedRuns: 0,
+  rejectedRuns: 0,
+  memoryUsageBytes: 0,
+  lastGCAt: 0,
+};
+
+function startGCTimer(): void {
+  if (gcTimer) return;
+  
+  gcTimer = setInterval(() => {
+    runGarbageCollection();
+  }, config.gcIntervalMs);
+
+  if (gcTimer.unref) {
+    gcTimer.unref();
+  }
+}
+
+function stopGCTimer(): void {
+  if (gcTimer) {
+    clearInterval(gcTimer);
+    gcTimer = null;
+  }
+}
+
+function runGarbageCollection(): void {
+  const now = Date.now();
+  const beforeCount = activeRuns.size;
+  let cleaned = 0;
+  let freedMemory = 0;
+
+  for (const [runId, context] of activeRuns) {
+    const isCompleted = context.status === "completed" || context.status === "failed" || context.status === "cancelled";
+    const inactiveTime = now - context.lastActivityAt;
+    const completedTime = context.completedAt ? now - context.completedAt : 0;
+
+    const shouldCleanup = 
+      (isCompleted && completedTime > config.runCleanupTimeoutMs) ||
+      (!isCompleted && inactiveTime > config.maxInactiveMs);
+
+    if (shouldCleanup) {
+      const memBefore = estimateContextMemory(context);
+      cleanupRun(runId, "gc");
+      freedMemory += memBefore;
+      cleaned++;
+    }
+  }
+
+  const eventStoresCleaned = cleanupDeadEventStores();
+
+  metrics.lastGCAt = now;
+  metrics.cleanedRuns += cleaned;
+  metrics.activeRuns = activeRuns.size;
+  metrics.memoryUsageBytes = estimateTotalMemory();
+
+  if (cleaned > 0 || eventStoresCleaned > 0) {
+    console.log(`[RunController] GC: cleaned ${cleaned} runs, ${eventStoresCleaned} event stores, freed ~${Math.round(freedMemory / 1024)}KB`);
+    
+    runControllerEmitter.emit("gc_complete", {
+      cleanedRuns: cleaned,
+      cleanedEventStores: eventStoresCleaned,
+      freedMemoryBytes: freedMemory,
+      activeRuns: activeRuns.size,
+      timestamp: now,
+    });
+  }
+}
+
+function estimateContextMemory(context: RunContext): number {
+  const baseSize = 2048;
+  const artifactSize = context.artifacts.length * 256;
+  const errorSize = context.error?.length ?? 0;
+  return baseSize + artifactSize + errorSize;
+}
+
+function estimateTotalMemory(): number {
+  let total = 0;
+  for (const context of activeRuns.values()) {
+    total += estimateContextMemory(context);
+  }
+  return total;
+}
+
+function cleanupRun(runId: string, reason: "gc" | "timeout" | "manual" | "completion"): void {
+  const context = activeRuns.get(runId);
+  if (!context) return;
+
+  console.log(`[RunController] Cleaning up run ${runId} (reason: ${reason})`);
+
+  if (context.cleanupTimer) {
+    clearTimeout(context.cleanupTimer);
+    context.cleanupTimer = undefined;
+  }
+
+  const gateway = getStreamGateway();
+  gateway.unregisterRun(runId);
+
+  activeRuns.delete(runId);
+
+  runControllerEmitter.emit("run_cleanup", {
+    runId,
+    reason,
+    status: context.status,
+    duration: context.completedAt 
+      ? context.completedAt - context.createdAt 
+      : Date.now() - context.createdAt,
+    timestamp: Date.now(),
+  });
+
+  metrics.activeRuns = activeRuns.size;
+}
+
+function scheduleCleanup(context: RunContext): void {
+  if (context.cleanupTimer) {
+    clearTimeout(context.cleanupTimer);
+  }
+
+  context.cleanupTimer = setTimeout(() => {
+    cleanupRun(context.runId, "timeout");
+  }, config.runCleanupTimeoutMs);
+
+  if (context.cleanupTimer.unref) {
+    context.cleanupTimer.unref();
+  }
+}
+
+export function cleanupCompletedRuns(): { cleaned: number; remaining: number } {
+  const now = Date.now();
+  let cleaned = 0;
+
+  for (const [runId, context] of activeRuns) {
+    const isCompleted = context.status === "completed" || context.status === "failed" || context.status === "cancelled";
+    
+    if (isCompleted) {
+      cleanupRun(runId, "manual");
+      cleaned++;
+    }
+  }
+
+  return { cleaned, remaining: activeRuns.size };
+}
+
+export function getRunControllerMetrics(): RunControllerMetrics {
+  return {
+    ...metrics,
+    activeRuns: activeRuns.size,
+    memoryUsageBytes: estimateTotalMemory(),
+  };
+}
+
+export function configureRunController(newConfig: Partial<RunControllerConfig>): void {
+  config = { ...config, ...newConfig };
+  
+  if (gcTimer) {
+    stopGCTimer();
+    startGCTimer();
+  }
+}
+
+export function onRunControllerEvent(event: string, callback: (...args: any[]) => void): () => void {
+  runControllerEmitter.on(event, callback);
+  return () => runControllerEmitter.off(event, callback);
+}
 
 export function createRunController(): Router {
   const router = Router();
+
+  startGCTimer();
 
   router.post("/runs", async (req: Request, res: Response) => {
     try {
@@ -40,6 +238,21 @@ export function createRunController(): Router {
 
       if (!prompt) {
         return res.status(400).json({ error: "prompt is required" });
+      }
+
+      const runningCount = Array.from(activeRuns.values())
+        .filter(ctx => ctx.status === "pending" || ctx.status === "running")
+        .length;
+
+      if (runningCount >= config.maxConcurrentRuns) {
+        metrics.rejectedRuns++;
+        console.warn(`[RunController] Rejected run: max concurrent runs (${config.maxConcurrentRuns}) exceeded`);
+        return res.status(429).json({
+          error: "Too many concurrent runs",
+          max_concurrent: config.maxConcurrentRuns,
+          current: runningCount,
+          retry_after_ms: 30000,
+        });
       }
 
       await initializeEventStore();
@@ -56,10 +269,12 @@ export function createRunController(): Router {
         contractGuard,
         status: "pending",
         createdAt: Date.now(),
+        lastActivityAt: Date.now(),
         artifacts: [],
       };
 
       activeRuns.set(runId, context);
+      metrics.activeRuns = activeRuns.size;
 
       const gateway = getStreamGateway();
       gateway.registerRun(runId, emitter);
@@ -96,6 +311,8 @@ export function createRunController(): Router {
       return res.status(404).json({ error: "Run not found" });
     }
 
+    context.lastActivityAt = Date.now();
+
     res.json({
       run_id: context.runId,
       status: context.status,
@@ -118,6 +335,10 @@ export function createRunController(): Router {
 
     const context = activeRuns.get(runId);
     
+    if (context) {
+      context.lastActivityAt = Date.now();
+    }
+
     if (!context) {
       const events = await getEventStore().getEvents(runId, lastEventId);
       if (events.length === 0) {
@@ -157,7 +378,10 @@ export function createRunController(): Router {
     }
 
     context.status = "cancelled";
+    context.completedAt = Date.now();
     context.emitter.emitRunFailed("Run cancelled by user", "CANCELLED", false);
+
+    scheduleCleanup(context);
 
     res.json({ run_id: runId, status: "cancelled" });
   });
@@ -169,9 +393,23 @@ export function createRunController(): Router {
       progress: ctx.progressModel.getProgress(),
       created_at: ctx.createdAt,
       completed_at: ctx.completedAt,
+      last_activity_at: ctx.lastActivityAt,
     }));
 
-    res.json({ runs, total: runs.length });
+    res.json({ runs, total: runs.length, metrics: getRunControllerMetrics() });
+  });
+
+  router.post("/runs/cleanup", async (req: Request, res: Response) => {
+    const result = cleanupCompletedRuns();
+    res.json({
+      message: `Cleaned up ${result.cleaned} completed runs`,
+      ...result,
+      metrics: getRunControllerMetrics(),
+    });
+  });
+
+  router.get("/runs/metrics", async (req: Request, res: Response) => {
+    res.json(getRunControllerMetrics());
   });
 
   return router;
@@ -206,10 +444,12 @@ async function executeRun(
         emitter.emitStepCompleted(step);
       }
     }
+    context.lastActivityAt = Date.now();
   };
 
   try {
     context.status = "running";
+    context.lastActivityAt = Date.now();
     
     const searchTopic = extractSearchTopic(prompt);
     
@@ -254,6 +494,8 @@ async function executeRun(
     let searchProgress = 0;
 
     pipelineEmitter.on("pipeline_phase", (data: any) => {
+      context.lastActivityAt = Date.now();
+      
       if (data.phase === "search") {
         searchProgress = Math.min(searchProgress + 10, 80);
         emitter.emitStepProgress('s2', searchProgress, `Searching: ${data.query || "..."}`, data.collected || 0, options.targetCount);
@@ -282,6 +524,7 @@ async function executeRun(
     });
 
     pipelineEmitter.on("search_progress", (data: any) => {
+      context.lastActivityAt = Date.now();
       const { provider, query_idx, query_total, found, candidates_total } = data;
       progressModel.addCollected(found);
       emitter.searchProgress("SearchAgent", {
@@ -297,6 +540,7 @@ async function executeRun(
     });
 
     pipelineEmitter.on("verify_progress", (data: any) => {
+      context.lastActivityAt = Date.now();
       const { checked, ok, dead } = data;
       progressModel.addVerified(ok);
       emitter.verifyProgress("VerificationAgent", { checked: checked || 0, ok: ok || 0, dead: dead || 0 });
@@ -304,6 +548,7 @@ async function executeRun(
     });
 
     pipelineEmitter.on("accepted_progress", (data: any) => {
+      context.lastActivityAt = Date.now();
       progressModel.addAccepted(data.accepted || 1);
       emitter.acceptedProgress("AcceptanceAgent", {
         accepted: data.accepted || 0,
@@ -312,6 +557,7 @@ async function executeRun(
     });
 
     pipelineEmitter.on("filter_progress", (data: any) => {
+      context.lastActivityAt = Date.now();
       emitter.filterProgress("FilterAgent", {
         regions: data.regions || [],
         geo_mismatch: data.geo_mismatch || 0,
@@ -322,6 +568,7 @@ async function executeRun(
     });
 
     pipelineEmitter.on("export_progress", (data: any) => {
+      context.lastActivityAt = Date.now();
       emitter.exportProgress("ExportAgent", {
         columns_count: data.columns_count || 0,
         rows_written: data.rows_written || 0,
@@ -397,6 +644,7 @@ async function executeRun(
 
     context.status = "completed";
     context.completedAt = Date.now();
+    metrics.completedRuns++;
 
     emitter.emitRunCompleted(4, 4, `Completed with ${result.articles.length} articles`);
 
@@ -405,14 +653,11 @@ async function executeRun(
     context.status = "failed";
     context.error = error.message;
     context.completedAt = Date.now();
+    metrics.failedRuns++;
 
     emitter.emitRunFailed(error.message, "EXECUTION_ERROR", false);
   } finally {
-    setTimeout(() => {
-      const gateway = getStreamGateway();
-      gateway.unregisterRun(context.runId);
-      activeRuns.delete(context.runId);
-    }, 60000);
+    scheduleCleanup(context);
   }
 }
 
