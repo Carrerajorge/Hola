@@ -22,6 +22,7 @@ import { createUserBodySchema, idParamSchema } from "../schemas/apiSchemas";
 import { isAuthenticated } from "../replit_integrations/auth/replitAuth";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { getSeedStatus } from "../seed-production";
+import { usageQuotaService } from "../services/usageQuotaService";
 
 async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
@@ -3197,6 +3198,66 @@ export function createAdminRouter() {
         message: error.message,
         databaseConfigured: !!process.env.DATABASE_URL,
       });
+    }
+  }));
+
+  router.get("/users-list", requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const allUsers = await db.select({
+        id: users.id,
+        email: users.email,
+        name: users.firstName,
+        lastName: users.lastName,
+        plan: users.plan,
+        role: users.role,
+        status: users.status,
+        dailyRequestsUsed: users.dailyRequestsUsed,
+        dailyRequestsLimit: users.dailyRequestsLimit,
+        stripeCustomerId: users.stripeCustomerId,
+        stripeSubscriptionId: users.stripeSubscriptionId,
+        createdAt: users.createdAt
+      }).from(users).orderBy(desc(users.createdAt)).limit(100);
+      
+      res.json({ users: allUsers });
+    } catch (error: any) {
+      console.error("[Admin] Failed to fetch users:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  }));
+
+  router.put("/user/:id/plan", requireAdmin, asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { plan } = req.body;
+      
+      if (!plan || !['free', 'go', 'plus', 'pro'].includes(plan)) {
+        return res.status(400).json({ error: "Invalid plan. Must be one of: free, go, plus, pro" });
+      }
+      
+      await usageQuotaService.updateUserPlan(id, plan);
+      
+      const [updatedUser] = await db.select({
+        id: users.id,
+        email: users.email,
+        plan: users.plan,
+        dailyRequestsLimit: users.dailyRequestsLimit
+      }).from(users).where(eq(users.id, id));
+      
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      await storage.createAuditLog({
+        action: "admin_update_user_plan",
+        resource: "user",
+        details: { userId: id, newPlan: plan }
+      });
+      
+      console.log(`[Admin] Updated user ${id} plan to ${plan}`);
+      res.json({ success: true, user: updatedUser });
+    } catch (error: any) {
+      console.error("[Admin] Failed to update user plan:", error);
+      res.status(500).json({ error: "Failed to update user plan" });
     }
   }));
 

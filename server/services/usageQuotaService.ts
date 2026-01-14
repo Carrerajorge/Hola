@@ -9,6 +9,8 @@ export interface UsageCheckResult {
   resetAt: Date | null;
   plan: string;
   message?: string;
+  isAdmin?: boolean;
+  isPaid?: boolean;
 }
 
 export interface PlanLimits {
@@ -21,7 +23,10 @@ const PLAN_LIMITS: Record<string, PlanLimits> = {
   go: { dailyRequests: 50, model: "grok-4-1-fast-non-reasoning" },
   plus: { dailyRequests: 200, model: "grok-4-1-fast-non-reasoning" },
   pro: { dailyRequests: -1, model: "grok-4-1-fast-non-reasoning" },
+  admin: { dailyRequests: -1, model: "grok-4-1-fast-non-reasoning" },
 };
+
+const ADMIN_EMAIL = "carrerajorge874@gmail.com";
 
 function getNextMidnight(): Date {
   const now = new Date();
@@ -46,10 +51,11 @@ export class UsageQuotaService {
       };
     }
 
-    const plan = user.plan || "free";
+    const isAdmin = user.email === ADMIN_EMAIL || user.role === "admin";
+    const plan = isAdmin ? "admin" : (user.plan || "free");
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
     
-    if (planLimits.dailyRequests === -1) {
+    if (isAdmin || planLimits.dailyRequests === -1) {
       return {
         allowed: true,
         remaining: -1,
@@ -125,17 +131,20 @@ export class UsageQuotaService {
       };
     }
 
-    const plan = user.plan || "free";
+    const isAdmin = user.email === ADMIN_EMAIL || user.role === "admin";
+    const plan = isAdmin ? "admin" : (user.plan || "free");
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
 
-    if (planLimits.dailyRequests === -1) {
+    if (isAdmin || planLimits.dailyRequests === -1) {
       return {
         allowed: true,
         remaining: -1,
         limit: -1,
         resetAt: null,
-        plan
-      };
+        plan,
+        isAdmin,
+        isPaid: plan !== "free"
+      } as UsageCheckResult;
     }
 
     const now = new Date();
