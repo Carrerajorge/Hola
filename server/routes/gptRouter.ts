@@ -45,15 +45,54 @@ export function createGptRouter() {
     }
   });
 
+  router.get("/gpts/my", async (req, res) => {
+    try {
+      const currentUserId = getOrCreateSecureUserId(req);
+      const myGpts = await storage.getGpts({ creatorId: currentUserId });
+      res.json(Array.isArray(myGpts) ? myGpts : []);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get("/gpts/accessible", async (req, res) => {
+    try {
+      const currentUserId = getOrCreateSecureUserId(req);
+      const allGpts = await storage.getGpts();
+      
+      const accessibleGpts = allGpts.filter(gpt => {
+        if (gpt.visibility === 'public') return true;
+        if (gpt.creatorId === currentUserId) return true;
+        if (gpt.visibility === 'team') {
+          return gpt.creatorId === currentUserId;
+        }
+        return false;
+      });
+      
+      res.json(accessibleGpts);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   router.get("/gpts", async (req, res) => {
     try {
       const { visibility, categoryId, creatorId } = req.query;
+      const currentUserId = getOrCreateSecureUserId(req);
       const filters: any = {};
       if (visibility) filters.visibility = visibility as string;
       if (categoryId) filters.categoryId = categoryId as string;
       if (creatorId) filters.creatorId = creatorId as string;
       
-      const gptList = await storage.getGpts(Object.keys(filters).length > 0 ? filters : undefined);
+      let gptList = await storage.getGpts(Object.keys(filters).length > 0 ? filters : undefined);
+      
+      gptList = gptList.filter(gpt => {
+        if (gpt.visibility === 'public') return true;
+        if (gpt.creatorId === currentUserId) return true;
+        if (gpt.visibility === 'team' && gpt.creatorId === currentUserId) return true;
+        return false;
+      });
+      
       res.json(gptList);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

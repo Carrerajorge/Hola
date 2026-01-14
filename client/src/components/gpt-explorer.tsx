@@ -57,6 +57,7 @@ interface GptExplorerProps {
   onOpenChange: (open: boolean) => void;
   onSelectGpt: (gpt: Gpt) => void;
   onCreateGpt: () => void;
+  onEditGpt?: (gpt: Gpt) => void;
 }
 
 const defaultCategories = [
@@ -68,7 +69,7 @@ const defaultCategories = [
   { slug: "programacion", name: "Programación", icon: Code },
 ];
 
-export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: GptExplorerProps) {
+export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEditGpt }: GptExplorerProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("destacados");
   const [gpts, setGpts] = useState<Gpt[]>([]);
@@ -89,10 +90,12 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
       setLoading(true);
       const [publicRes, myRes] = await Promise.all([
         fetch("/api/gpts?visibility=public"),
-        fetch("/api/gpts")
+        fetch("/api/gpts/my")
       ]);
-      const publicData = await publicRes.json();
-      const myData = await myRes.json();
+      const [publicData, myData] = await Promise.all([
+        publicRes.json(),
+        myRes.json()
+      ]);
       setGpts(Array.isArray(publicData) ? publicData : []);
       setMyGpts(Array.isArray(myData) ? myData : []);
     } catch (error) {
@@ -140,6 +143,13 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
   const handleCreateNew = () => {
     onCreateGpt();
     onOpenChange(false);
+  };
+
+  const handleEditGpt = (gpt: Gpt) => {
+    if (onEditGpt) {
+      onEditGpt(gpt);
+      onOpenChange(false);
+    }
   };
 
   return (
@@ -252,6 +262,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
                               index={index + 1}
                               onClick={() => handleSelectGpt(gpt)}
                               showEdit={activeTab === "destacados"}
+                              onEdit={handleEditGpt}
                             />
                           ))
                         ) : (
@@ -320,6 +331,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt }: Gp
                           index={index + 1}
                           onClick={() => handleSelectGpt(gpt)}
                           showEdit
+                          onEdit={handleEditGpt}
                         />
                       ))}
                     </div>
@@ -356,9 +368,16 @@ interface GptCardProps {
   index?: number;
   onClick: () => void;
   showEdit?: boolean;
+  onEdit?: (gpt: Gpt) => void;
 }
 
-function GptCard({ gpt, index, onClick, showEdit }: GptCardProps) {
+function GptCard({ gpt, index, onClick, showEdit, onEdit }: GptCardProps) {
+  const visibilityLabels: Record<string, string> = {
+    'private': 'Privado',
+    'team': 'Equipo',
+    'public': 'Público'
+  };
+
   return (
     <div 
       className="flex items-start gap-4 p-4 rounded-xl hover:bg-muted/50 cursor-pointer transition-colors group"
@@ -378,10 +397,20 @@ function GptCard({ gpt, index, onClick, showEdit }: GptCardProps) {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <h3 className="font-medium truncate">{gpt.name}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="font-medium truncate">{gpt.name}</h3>
+          {gpt.visibility && gpt.visibility !== 'public' && (
+            <span className={cn(
+              "text-[10px] px-1.5 py-0.5 rounded-full",
+              gpt.visibility === 'private' ? "bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300" : "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300"
+            )}>
+              {visibilityLabels[gpt.visibility] || gpt.visibility}
+            </span>
+          )}
+        </div>
         <p className="text-sm text-muted-foreground line-clamp-2">{gpt.description || "Sin descripción"}</p>
         <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-          <span>Por {gpt.creatorId || "Usuario"}</span>
+          <span>Por ti</span>
           {gpt.usageCount && gpt.usageCount > 0 && (
             <>
               <span>·</span>
@@ -390,6 +419,20 @@ function GptCard({ gpt, index, onClick, showEdit }: GptCardProps) {
           )}
         </div>
       </div>
+      {showEdit && onEdit && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(gpt);
+          }}
+          data-testid={`button-edit-gpt-${gpt.id}`}
+        >
+          Editar
+        </Button>
+      )}
     </div>
   );
 }
