@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { 
-  Plus, 
-  Upload, 
-  Search, 
-  Image, 
-  Video, 
-  Bot, 
+import {
+  Plus,
+  Upload,
+  Search,
+  Image,
+  Video,
+  Bot,
   Plug,
   Globe,
   FileText,
@@ -56,8 +56,10 @@ interface UploadedFile {
   };
 }
 
+import { type BrowserSessionState } from "@/hooks/use-browser-session";
+
 interface BrowserSession {
-  state: "idle" | "connecting" | "running" | "error";
+  state: BrowserSessionState;
   cancel: () => void;
 }
 
@@ -83,7 +85,7 @@ export interface ComposerProps {
   setSelectedDocTool: (tool: "word" | "excel" | "ppt" | "figma" | null) => void;
   closeDocEditor: () => void;
   openBlankDocEditor: (type: "word" | "excel" | "ppt", options?: { showInstructions?: boolean }) => void;
-  aiState: "idle" | "thinking" | "responding";
+  aiState: "idle" | "thinking" | "responding" | "agent_working";
   isRecording: boolean;
   isPaused: boolean;
   recordingTime: number;
@@ -188,9 +190,9 @@ export function Composer({
 }: ComposerProps) {
   const isDocumentMode = variant === "document";
   const hasContent = input.trim().length > 0 || uploadedFiles.length > 0;
-  
+
   const [showKnowledgeBase, setShowKnowledgeBase] = useState(false);
-  
+
   const [showMentionPopover, setShowMentionPopover] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -258,7 +260,7 @@ export function Composer({
         textareaRef.current.setSelectionRange(template.length, template.length);
       }
     }, 0);
-    
+
     const newRecent = [templateId, ...recentTemplates.filter(id => id !== templateId)].slice(0, 4);
     setRecentTemplates(newRecent);
     localStorage.setItem("recentQuickTemplates", JSON.stringify(newRecent));
@@ -270,10 +272,10 @@ export function Composer({
   const mentionSources = connectedSources.map(source => ({
     ...source,
     mention: source.id === 'gmail' ? '@Gmail' : source.id === 'googleForms' ? '@GoogleForms' : `@${source.name}`,
-    action: source.id === 'googleForms' ? () => onOpenGoogleForms?.() : () => {}
+    action: source.id === 'googleForms' ? () => onOpenGoogleForms?.() : () => { }
   }));
 
-  const filteredSources = mentionSources.filter(source => 
+  const filteredSources = mentionSources.filter(source =>
     source.name.toLowerCase().includes(mentionSearch.toLowerCase()) ||
     source.mention.toLowerCase().includes(mentionSearch.toLowerCase())
   );
@@ -282,11 +284,11 @@ export function Composer({
     const value = e.target.value;
     setInput(value);
     resetNavigation();
-    
+
     const cursorPos = e.target.selectionStart || 0;
     const textBeforeCursor = value.slice(0, cursorPos);
     const atMatch = textBeforeCursor.match(/@(\w*)$/);
-    
+
     if (atMatch) {
       setShowMentionPopover(true);
       setMentionSearch(atMatch[1]);
@@ -308,7 +310,7 @@ export function Composer({
     const textarea = e.currentTarget;
     const cursorPosition = textarea.selectionStart;
     const textLength = textarea.value.length;
-    
+
     if (e.key === "ArrowUp" && cursorPosition === 0) {
       const historyItem = navigateUp(input);
       if (historyItem !== null) {
@@ -335,16 +337,16 @@ export function Composer({
     const textBeforeCursor = input.slice(0, cursorPos);
     const textAfterCursor = input.slice(cursorPos);
     const atMatch = textBeforeCursor.match(/@(\w*)$/);
-    
+
     if (atMatch) {
       const newText = textBeforeCursor.slice(0, -atMatch[0].length) + source.mention + ' ' + textAfterCursor;
       setInput(newText);
     }
-    
+
     setShowMentionPopover(false);
     setMentionSearch("");
     textareaRef.current?.focus();
-    
+
     setSourceActive(source.id, true);
     if (source.id === 'googleForms') {
       setIsGoogleFormsActive?.(true);
@@ -353,7 +355,7 @@ export function Composer({
 
   const handleMentionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (!showMentionPopover || filteredSources.length === 0) return;
-    
+
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setMentionIndex(prev => (prev + 1) % filteredSources.length);
@@ -371,7 +373,7 @@ export function Composer({
   const toggleKnowledgeSource = (sourceId: string) => {
     const currentValue = getSourceActive(sourceId);
     setSourceActive(sourceId, !currentValue);
-    
+
     if (sourceId === 'googleForms') {
       setIsGoogleFormsActive?.(!currentValue);
     }
@@ -388,8 +390,8 @@ export function Composer({
               key={file.id || index}
               className={cn(
                 "relative group rounded-lg border overflow-hidden",
-                file.status === "error" 
-                  ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800" 
+                file.status === "error"
+                  ? "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800"
                   : "bg-card border-border"
               )}
               data-testid={`inline-file-${index}`}
@@ -404,8 +406,8 @@ export function Composer({
               </button>
               {file.type.startsWith("image/") && file.dataUrl ? (
                 <div className="relative w-16 h-16">
-                  <img 
-                    src={file.dataUrl} 
+                  <img
+                    src={file.dataUrl}
                     alt={file.name}
                     className="w-full h-full object-cover rounded-lg"
                   />
@@ -425,26 +427,26 @@ export function Composer({
                   <div className={cn(
                     "flex items-center justify-center w-8 h-8 rounded flex-shrink-0",
                     (file.name.toLowerCase().endsWith(".pdf") || file.type.includes("pdf")) ? "bg-red-500" :
-                    (file.name.toLowerCase().endsWith(".docx") || file.name.toLowerCase().endsWith(".doc") || file.type.includes("word") || file.type.includes("document") || file.type.includes("wordprocessing")) ? "bg-blue-600" :
-                    (file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls") || file.name.toLowerCase().endsWith(".csv") || file.type.includes("sheet") || file.type.includes("excel") || file.type.includes("spreadsheet")) ? "bg-green-600" :
-                    (file.name.toLowerCase().endsWith(".pptx") || file.name.toLowerCase().endsWith(".ppt") || file.type.includes("presentation") || file.type.includes("powerpoint")) ? "bg-orange-500" :
-                    "bg-muted-foreground"
+                      (file.name.toLowerCase().endsWith(".docx") || file.name.toLowerCase().endsWith(".doc") || file.type.includes("word") || file.type.includes("document") || file.type.includes("wordprocessing")) ? "bg-blue-600" :
+                        (file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls") || file.name.toLowerCase().endsWith(".csv") || file.type.includes("sheet") || file.type.includes("excel") || file.type.includes("spreadsheet")) ? "bg-green-600" :
+                          (file.name.toLowerCase().endsWith(".pptx") || file.name.toLowerCase().endsWith(".ppt") || file.type.includes("presentation") || file.type.includes("powerpoint")) ? "bg-orange-500" :
+                            "bg-muted-foreground"
                   )}>
                     <span className="text-white text-[10px] font-bold">
                       {(file.name.toLowerCase().endsWith(".pdf") || file.type.includes("pdf")) ? "PDF" :
-                       (file.name.toLowerCase().endsWith(".docx") || file.name.toLowerCase().endsWith(".doc") || file.type.includes("word") || file.type.includes("document") || file.type.includes("wordprocessing")) ? "DOC" :
-                       (file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls") || file.name.toLowerCase().endsWith(".csv") || file.type.includes("sheet") || file.type.includes("excel") || file.type.includes("spreadsheet")) ? "XLS" :
-                       (file.name.toLowerCase().endsWith(".pptx") || file.name.toLowerCase().endsWith(".ppt") || file.type.includes("presentation") || file.type.includes("powerpoint")) ? "PPT" :
-                       "FILE"}
+                        (file.name.toLowerCase().endsWith(".docx") || file.name.toLowerCase().endsWith(".doc") || file.type.includes("word") || file.type.includes("document") || file.type.includes("wordprocessing")) ? "DOC" :
+                          (file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls") || file.name.toLowerCase().endsWith(".csv") || file.type.includes("sheet") || file.type.includes("excel") || file.type.includes("spreadsheet")) ? "XLS" :
+                            (file.name.toLowerCase().endsWith(".pptx") || file.name.toLowerCase().endsWith(".ppt") || file.type.includes("presentation") || file.type.includes("powerpoint")) ? "PPT" :
+                              "FILE"}
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="text-xs font-medium truncate block">{file.name}</span>
                     <span className="text-[10px] text-muted-foreground">
                       {file.status === "uploading" ? "Subiendo..." :
-                       file.status === "processing" ? "Procesando..." :
-                       file.status === "error" ? "Error" :
-                       formatFileSize(file.size)}
+                        file.status === "processing" ? "Procesando..." :
+                          file.status === "error" ? "Error" :
+                            formatFileSize(file.size)}
                     </span>
                   </div>
                   {(file.status === "uploading" || file.status === "processing") && (
@@ -466,17 +468,17 @@ export function Composer({
         {uploadedFiles.map((file, index) => {
           const theme = getFileTheme(file.name, file.mimeType);
           const isImage = file.type?.startsWith("image/") || file.mimeType?.startsWith("image/");
-          
+
           if (isImage && file.dataUrl) {
             return (
               <div key={file.id} className="relative group">
-                <div 
+                <div
                   className="relative w-14 h-14 rounded-lg overflow-hidden cursor-pointer border border-border hover:border-primary transition-colors"
                   onClick={() => setPreviewUploadedImage?.({ name: file.name, dataUrl: file.dataUrl! })}
                   data-testid={`preview-image-${index}`}
                 >
-                  <img 
-                    src={file.dataUrl} 
+                  <img
+                    src={file.dataUrl}
                     alt={file.name}
                     className="w-full h-full object-cover"
                   />
@@ -497,13 +499,13 @@ export function Composer({
               </div>
             );
           }
-          
-          
+
+
           return (
             <TooltipProvider key={file.id}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div 
+                  <div
                     className={cn(
                       "relative group flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-all duration-200 cursor-pointer",
                       file.status === "uploading" && "bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800",
@@ -550,9 +552,9 @@ export function Composer({
   const renderToolsPopover = () => (
     <Popover>
       <PopoverTrigger asChild>
-        <Button 
-          variant="ghost" 
-          size="icon" 
+        <Button
+          variant="ghost"
+          size="icon"
           aria-label="Open tools menu"
           className={cn(
             "liquid-plus-button h-10 w-10 flex-shrink-0 focus-visible:ring-2 focus-visible:ring-primary/50",
@@ -566,17 +568,19 @@ export function Composer({
         <div className={cn(isDocumentMode ? "flex flex-col" : "grid gap-1")}>
           {isDocumentMode ? (
             <>
-              <Button 
-                variant="ghost" 
-                className="justify-start gap-2 text-sm h-9 glass-menu-item"
+              <Button
+                variant="ghost"
+                className="justify-start gap-3 text-sm h-10 glass-menu-item"
                 onClick={() => fileInputRef.current?.click()}
                 data-testid="button-upload-files"
               >
-                <Upload className="h-4 w-4" />
+                <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-muted">
+                  <Upload className="h-4 w-4" />
+                </div>
                 Upload Files
               </Button>
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => setIsBrowserOpen(!isBrowserOpen)}
               >
@@ -617,8 +621,8 @@ export function Composer({
                   </span>
                 </Button>
               </label>
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => { setShowKnowledgeBase(true); onCloseSidebar?.(); }}
                 data-testid="button-knowledge-base"
@@ -626,23 +630,27 @@ export function Composer({
                 <Users className="h-4 w-4" />
                 Conocimientos de la empresa
               </Button>
-              <Button 
-                variant="ghost" 
-                className="justify-start gap-2 text-sm h-9 glass-menu-item"
+              <Button
+                variant="ghost"
+                className="justify-start gap-3 text-sm h-10 glass-menu-item"
                 onClick={() => { setSelectedTool("web"); onCloseSidebar?.(); }}
               >
-                <Globe className="h-4 w-4" />
+                <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-cyan-100 dark:bg-cyan-900/30">
+                  <Globe className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+                </div>
                 Navegar en la web
               </Button>
-              <Button 
-                variant="ghost" 
-                className="justify-start gap-2 text-sm h-9 glass-menu-item"
+              <Button
+                variant="ghost"
+                className="justify-start gap-3 text-sm h-10 glass-menu-item"
                 onClick={() => { setSelectedTool("image"); onCloseSidebar?.(); }}
               >
-                <Image className="h-4 w-4" />
+                <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-pink-100 dark:bg-pink-900/30">
+                  <Image className="h-4 w-4 text-pink-600 dark:text-pink-400" />
+                </div>
                 Generar imagen
               </Button>
-              
+
               <HoverCard openDelay={100} closeDelay={100}>
                 <HoverCardTrigger asChild>
                   <Button variant="ghost" className="justify-between gap-2 text-sm h-9 w-full glass-menu-item">
@@ -655,8 +663,8 @@ export function Composer({
                 </HoverCardTrigger>
                 <HoverCardContent side="right" align="start" className="w-48 p-2">
                   <div className="grid gap-1">
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => openBlankDocEditor("word")}
                       data-testid="button-create-word"
@@ -666,8 +674,8 @@ export function Composer({
                       </div>
                       Documento Word
                     </Button>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => openBlankDocEditor("excel")}
                       data-testid="button-create-excel"
@@ -677,8 +685,8 @@ export function Composer({
                       </div>
                       Hoja Excel
                     </Button>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => openBlankDocEditor("ppt")}
                       data-testid="button-create-ppt"
@@ -688,18 +696,18 @@ export function Composer({
                       </div>
                       Presentación PPT
                     </Button>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       className="justify-start gap-2 text-sm h-9 glass-menu-item"
                       onClick={() => { setSelectedDocTool("figma"); onCloseSidebar?.(); }}
                     >
                       <div className="flex items-center justify-center w-5 h-5 rounded bg-card border border-border">
                         <svg width="10" height="14" viewBox="0 0 38 57" fill="none">
-                          <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE"/>
-                          <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83"/>
-                          <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262"/>
-                          <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E"/>
-                          <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF"/>
+                          <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE" />
+                          <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83" />
+                          <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262" />
+                          <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E" />
+                          <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF" />
                         </svg>
                       </div>
                       Diagrama Figma
@@ -707,9 +715,9 @@ export function Composer({
                   </div>
                 </HoverCardContent>
               </HoverCard>
-              
-              <Button 
-                variant="ghost" 
+
+              <Button
+                variant="ghost"
                 className="justify-start gap-2 text-sm h-9 glass-menu-item"
                 onClick={() => { setSelectedTool("agent"); onCloseSidebar?.(); }}
               >
@@ -728,7 +736,7 @@ export function Composer({
 
     return (
       <div className="relative group shrink-0">
-        <div 
+        <div
           className={cn(
             "relative flex items-center justify-center w-10 h-10 rounded-xl cursor-pointer overflow-hidden",
             "transition-all duration-500 ease-out",
@@ -775,7 +783,7 @@ export function Composer({
 
     return (
       <div className="relative group shrink-0">
-        <div 
+        <div
           className={cn(
             "relative flex items-center justify-center w-10 h-10 rounded-xl cursor-pointer overflow-hidden",
             "transition-all duration-500 ease-out",
@@ -795,11 +803,11 @@ export function Composer({
         >
           {selectedDocTool === "figma" ? (
             <svg width="16" height="24" viewBox="0 0 38 57" fill="none" className="z-10 drop-shadow-md">
-              <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE"/>
-              <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83"/>
-              <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262"/>
-              <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E"/>
-              <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF"/>
+              <path d="M19 28.5C19 23.2533 23.2533 19 28.5 19C33.7467 19 38 23.2533 38 28.5C38 33.7467 33.7467 38 28.5 38C23.2533 38 19 33.7467 19 28.5Z" fill="#1ABCFE" />
+              <path d="M0 47.5C0 42.2533 4.25329 38 9.5 38H19V47.5C19 52.7467 14.7467 57 9.5 57C4.25329 57 0 52.7467 0 47.5Z" fill="#0ACF83" />
+              <path d="M19 0V19H28.5C33.7467 19 38 14.7467 38 9.5C38 4.25329 33.7467 0 28.5 0H19Z" fill="#FF7262" />
+              <path d="M0 9.5C0 14.7467 4.25329 19 9.5 19H19V0H9.5C4.25329 0 0 4.25329 0 9.5Z" fill="#F24E1E" />
+              <path d="M0 28.5C0 33.7467 4.25329 38 9.5 38H19V19H9.5C4.25329 19 0 23.2533 0 28.5Z" fill="#A259FF" />
             </svg>
           ) : (
             <span className="text-white text-base font-bold z-10 drop-shadow-md">
@@ -827,21 +835,39 @@ export function Composer({
 
   const containerClass = isDocumentMode
     ? cn(
-        "p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
-        isDraggingOver && "ring-2 ring-primary rounded-2xl"
-      )
+      "p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
+      isDraggingOver && "ring-2 ring-primary rounded-2xl"
+    )
     : "shrink-0 w-full px-4 pb-4 pt-2 bg-background";
 
   const inputContainerClass = isDocumentMode
-    ? "relative flex flex-col rounded-3xl bg-zinc-100/80 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-700/50 px-5 py-4 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-all duration-200"
+    ? "relative flex flex-col rounded-xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm border border-zinc-100 dark:border-zinc-800 px-4 py-3 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-colors duration-200"
     : cn(
-        "max-w-2xl mx-auto bg-zinc-100/80 dark:bg-zinc-800/50 border border-zinc-200/80 dark:border-zinc-700/50 rounded-3xl px-5 py-4 relative transition-all duration-200",
-        selectedDocText && "border-zinc-300 dark:border-zinc-600",
-        isDraggingOver && "border-primary/50 bg-primary/5"
-      );
+      // Premium gold-accented minimalist container
+      "max-w-2xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
+      // Glass morphism base
+      "bg-gradient-to-b from-white to-amber-50/30 dark:from-zinc-900 dark:to-amber-950/10 backdrop-blur-md",
+      // Visible gold border
+      "border-[1.5px] border-amber-300/50 dark:border-amber-500/30",
+      "rounded-2xl px-4 py-3",
+      // Prominent gold glow on focus
+      "focus-within:border-amber-400/70 dark:focus-within:border-amber-400/50",
+      "focus-within:shadow-[0_0_0_3px_rgba(217,165,102,0.15),0_4px_20px_-4px_rgba(217,165,102,0.25)]",
+      // Elegant decorative gold line at top - more visible
+      "before:absolute before:top-0 before:left-1/2 before:-translate-x-1/2 before:w-24 before:h-[2px] before:-translate-y-1/2",
+      "before:bg-gradient-to-r before:from-transparent before:via-amber-400 before:to-transparent before:rounded-full",
+      // Subtle inner gold shine
+      "after:absolute after:inset-0 after:rounded-2xl after:pointer-events-none",
+      "after:bg-gradient-to-br after:from-amber-100/20 after:via-transparent after:to-amber-100/10 dark:after:from-amber-500/5 dark:after:to-amber-500/5",
+      // Outer shadow
+      "shadow-[0_2px_16px_-4px_rgba(217,165,102,0.2)]",
+      "hover:shadow-[0_4px_24px_-4px_rgba(217,165,102,0.3)] hover:border-amber-400/60",
+      selectedDocText && "border-amber-400/70 dark:border-amber-400/50",
+      isDraggingOver && "border-amber-500/80 bg-amber-50/50 dark:bg-amber-900/20"
+    );
 
   return (
-    <div 
+    <div
       ref={composerRef}
       className={containerClass}
       onDragOver={handleDragOver}
@@ -873,17 +899,17 @@ export function Composer({
               <div className="flex items-center justify-between px-1 py-0.5 bg-muted/50 border-b">
                 <span className="text-[8px] font-medium text-muted-foreground">Computadora Virtual</span>
                 <div className="flex items-center">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     className="h-4 w-4 text-muted-foreground hover:text-foreground"
                     onClick={() => setIsBrowserMaximized(true)}
                   >
                     <Maximize2 className="h-2 w-2" />
                   </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     className="h-4 w-4 text-muted-foreground hover:text-foreground"
                     onClick={() => setIsBrowserOpen(false)}
                   >
@@ -892,7 +918,7 @@ export function Composer({
                 </div>
               </div>
               <div className="bg-card relative h-[100px]">
-                <iframe 
+                <iframe
                   src={browserUrl}
                   className="w-full h-full border-0"
                   sandbox="allow-scripts allow-same-origin allow-forms"
@@ -906,23 +932,23 @@ export function Composer({
               </div>
             </div>
           )}
-          
+
           {isBrowserMaximized && (
             <div className="fixed inset-4 z-50 border rounded-lg overflow-hidden shadow-lg bg-card">
               <div className="flex items-center justify-between px-2 py-1 bg-muted/50 border-b">
                 <span className="text-xs font-medium text-muted-foreground">Computadora Virtual</span>
                 <div className="flex items-center gap-1">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     className="h-6 w-6 text-muted-foreground hover:text-foreground"
                     onClick={() => setIsBrowserMaximized(false)}
                   >
                     <Minimize2 className="h-3 w-3" />
                   </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     className="h-6 w-6 text-muted-foreground hover:text-foreground"
                     onClick={() => { setIsBrowserOpen(false); setIsBrowserMaximized(false); }}
                   >
@@ -931,7 +957,7 @@ export function Composer({
                 </div>
               </div>
               <div className="bg-card relative h-[calc(100%-28px)]">
-                <iframe 
+                <iframe
                   src={browserUrl}
                   className="w-full h-full border-0"
                   sandbox="allow-scripts allow-same-origin allow-forms"
@@ -968,7 +994,7 @@ export function Composer({
               <span className="truncate flex-1" data-testid="selected-doc-text-preview">
                 {selectedDocText.length > 50 ? selectedDocText.substring(0, 50) + '...' : selectedDocText}
               </span>
-              <button 
+              <button
                 onClick={handleDocTextDeselect}
                 className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 flex-shrink-0 p-0.5 rounded hover:bg-zinc-300/50 dark:hover:bg-zinc-600/50 transition-colors"
                 aria-label="Deselect text"
@@ -1006,22 +1032,22 @@ export function Composer({
             placeholder={placeholder}
             aria-label="Message input"
             aria-describedby="composer-hint"
-            className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 leading-relaxed overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-600"
+            className="min-h-[24px] max-h-[180px] w-full resize-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 text-[15px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400/70 dark:placeholder:text-zinc-500/60 leading-relaxed overflow-y-auto scrollbar-none"
             rows={1}
           />
-          
-          <div className="flex items-center justify-between mt-3">
+
+          <div className="flex items-center justify-between mt-2 pt-1 border-t border-amber-200/30 dark:border-amber-500/15">
             <div className="flex items-center gap-2">
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}
               {renderSelectedDocToolLogo()}
-              
+
               {showKnowledgeBase && (
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-100/80 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 text-[13px] font-medium" data-testid="knowledge-base-active">
                     <Users className="h-4 w-4" />
                     <span className="max-w-[140px] truncate" data-testid="knowledge-base-label">Conocimientos de la e...</span>
-                    <button 
+                    <button
                       onClick={() => setShowKnowledgeBase(false)}
                       className="ml-0.5 hover:bg-sky-200/50 dark:hover:bg-sky-800/50 rounded p-0.5 transition-colors focus:outline-none"
                       aria-label="Close knowledge base"
@@ -1030,16 +1056,16 @@ export function Composer({
                       <X className="h-3 w-3" />
                     </button>
                   </div>
-                  
+
                   {connectedSources.filter(s => getSourceActive(s.id)).map(source => (
                     <div key={source.id} className="flex items-center justify-center w-7 h-7 rounded-lg bg-sky-100/60 dark:bg-sky-900/20 text-sky-600 dark:text-sky-400">
                       {source.icon}
                     </div>
                   ))}
-                  
+
                   <Popover>
                     <PopoverTrigger asChild>
-                      <button 
+                      <button
                         className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-sky-100/60 dark:hover:bg-sky-900/30 text-sky-600 dark:text-sky-400 transition-colors"
                         data-testid="button-fuentes-dropdown"
                       >
@@ -1051,7 +1077,7 @@ export function Composer({
                         <div className="px-2 py-1 text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
                           Fuentes conectadas
                         </div>
-                        
+
                         {connectedSources.length === 0 ? (
                           <div className="px-2 py-2 text-xs text-zinc-400 text-center">
                             No hay fuentes
@@ -1069,7 +1095,7 @@ export function Composer({
                             />
                           ))
                         )}
-                        
+
                         <div className="border-t border-zinc-100 dark:border-zinc-700 mt-0.5 pt-0.5">
                           <SourceListItem
                             icon={
@@ -1094,8 +1120,21 @@ export function Composer({
                 </div>
               )}
             </div>
-            
+
             <div className="flex items-center gap-2">
+              {/* Character counter */}
+              {input.length > 0 && (
+                <span className="text-[11px] text-muted-foreground tabular-nums" data-testid="char-counter">
+                  {input.length.toLocaleString()} / 10,000
+                </span>
+              )}
+
+              {/* Keyboard shortcut hint */}
+              <span className="hidden sm:flex items-center text-[10px] text-muted-foreground/70">
+                <kbd className="px-1 py-0.5 rounded bg-muted/50 text-[9px] font-mono">⌘K</kbd>
+                <span className="ml-1">comandos</span>
+              </span>
+
               <RecordingPanel
                 isRecording={isRecording}
                 isPaused={isPaused}
@@ -1118,9 +1157,9 @@ export function Composer({
             </div>
           </div>
         </div>
-        
+
         {showMentionPopover && filteredSources.length > 0 && (
-          <div 
+          <div
             className="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg z-50 overflow-hidden"
             data-testid="mention-popover"
           >
@@ -1150,10 +1189,10 @@ export function Composer({
             </div>
           </div>
         )}
-        
+
       </div>
 
-      <div id="composer-hint" className="text-center text-[11px] text-muted-foreground/50 mt-2 tracking-wide">
+      <div id="composer-hint" className="text-center text-[10px] text-zinc-400/50 dark:text-zinc-600/60 mt-2 font-normal tracking-wide select-none">
         <span className="sr-only">Press Enter to send, Shift+Enter for new line, or Cmd+Enter to send quickly. </span>
         MICHAT puede cometer errores. Verifica la información importante.
       </div>

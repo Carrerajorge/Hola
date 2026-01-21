@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from "express";
+import { type AuthenticatedRequest } from "./types/express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
@@ -41,13 +42,17 @@ import { createLangGraphRouter } from "./routes/langGraphRouter";
 import { createRegistryRouter } from "./routes/registryRouter";
 import wordPipelineRoutes from "./routes/wordPipelineRoutes";
 import redisSSERouter from "./routes/redisSSERouter";
+import streamingResumeRouter from "./routes/streamingResumeRouter";
 import superAgentRouter from "./routes/superAgentRoutes";
 import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
+import { contextRoutes } from "./memory";
 import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
 import { createToolExecutionRouter } from "./routes/toolExecutionRouter";
+import agentPlanRouter from "./routes/agentPlanRouter";
 import scientificSearchRouter from "./routes/scientificSearchRouter";
 import documentAnalysisRouter from "./routes/documentAnalysisRouter";
 import ragRouter from "./routes/ragRouter";
+import feedbackRouter from "./routes/feedbackRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
@@ -68,7 +73,7 @@ import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } fr
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
-import { 
+import {
   runAgent, getTools, healthCheck as pythonAgentHealthCheck, isServiceAvailable, PythonAgentClientError,
   browse as pythonAgentBrowse, search as pythonAgentSearch, createDocument as pythonAgentCreateDocument,
   executeTool as pythonAgentExecuteTool, listFiles as pythonAgentListFiles, getStatus as pythonAgentGetStatus
@@ -76,6 +81,7 @@ import {
 import express from "express";
 import path from "path";
 import fs from "fs";
+import { compression } from "./middleware/compression";
 
 const agentClients: Map<string, Set<WebSocket>> = new Map();
 const browserClients: Map<string, Set<WebSocket>> = new Map();
@@ -212,14 +218,19 @@ export async function registerRoutes(
 ): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
-  
+
+  // Global Compression Middleware (Gzip)
+  app.use(compression);
+
+  // Session identity endpoint for consistent user ID across frontend/backend
+
   // Session identity endpoint for consistent user ID across frontend/backend
   // SECURITY: Anonymous user IDs are now bound to the session to prevent impersonation
   app.get("/api/session/identity", (req: Request, res: Response) => {
-    const user = (req as any).user;
+    const user = (req as AuthenticatedRequest).user;
     const authUserId = user?.claims?.sub;
     const authEmail = user?.claims?.email;
-    
+
     if (authUserId) {
       return res.json({
         userId: authUserId,
@@ -227,14 +238,14 @@ export async function registerRoutes(
         isAnonymous: false
       });
     }
-    
+
     // For anonymous users, bind ID to session (not header) to prevent impersonation
-    const session = req.session as any;
+    const session = req.session as Partial<Express.Session> & { anonUserId?: string };
     if (!session.anonUserId) {
-      const sessionId = (req as any).sessionID;
+      const sessionId = req.sessionID;
       session.anonUserId = sessionId ? `anon_${sessionId}` : null;
     }
-    
+
     const anonUserId = session.anonUserId;
     res.json({
       userId: anonUserId,
@@ -243,7 +254,7 @@ export async function registerRoutes(
       isAnonymous: true
     });
   });
-  
+
   const artifactsDir = path.join(process.cwd(), "artifacts");
   if (!fs.existsSync(artifactsDir)) {
     fs.mkdirSync(artifactsDir, { recursive: true });
@@ -268,7 +279,7 @@ export async function registerRoutes(
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     }
   }));
-  
+
   app.use("/api/ppt", pptExportRouter);
   app.use("/api", createChatsRouter());
   app.use(createFilesRouter());
@@ -306,25 +317,29 @@ export async function registerRoutes(
   app.use("/api", createRegistryRouter());
   app.use("/api/word-pipeline", wordPipelineRoutes);
   app.use("/api/sse", redisSSERouter);
+  app.use("/api/streaming", streamingResumeRouter);
   app.use("/api/memory", conversationMemoryRoutes);
+  app.use("/api/context", contextRoutes); // Enterprise context validation API
   app.use("/api", superAgentRouter);
   app.use("/api", createPythonToolsRouter());
   app.use("/api/execution", createToolExecutionRouter());
   app.use("/api/scientific", scientificSearchRouter);
+  app.use("/api/planning", agentPlanRouter);
   app.use("/api/document-analysis", documentAnalysisRouter);
   app.use("/api/rag", ragRouter);
+  app.use("/api/feedback", feedbackRouter);
   app.use(createStripeRouter());
   app.use("/api", createRunController());
 
   // ===== Run Detail Endpoints =====
-  
+
   // GET /api/runs/:runId - Get current run state
   app.get("/api/runs/:runId", (req: Request, res: Response) => {
     try {
       const { runId } = req.params;
       const gateway = getStreamGateway();
       const traceBus = gateway.getRunBus(runId);
-      
+
       if (!traceBus) {
         return res.status(404).json({
           success: false,
@@ -332,15 +347,15 @@ export async function registerRoutes(
           run_id: runId,
         });
       }
-      
+
       const emitter = traceBus as TraceEmitter;
       const metrics = emitter.getMetrics();
       const toolCalls = emitter.getToolCallsArray();
       const artifacts = emitter.getArtifactsArray();
-      
+
       const completedSteps = toolCalls.filter(tc => tc.status === "completed").length;
       const runningSteps = toolCalls.filter(tc => tc.status === "running" || tc.status === "streaming").length;
-      
+
       let status: "pending" | "running" | "completed" | "failed" = "pending";
       if (runningSteps > 0) {
         status = "running";
@@ -351,11 +366,11 @@ export async function registerRoutes(
       } else if (metrics.totalToolCalls > 0) {
         status = "running";
       }
-      
-      const progress = metrics.totalToolCalls > 0 
+
+      const progress = metrics.totalToolCalls > 0
         ? Math.round((metrics.completedToolCalls / metrics.totalToolCalls) * 100)
         : 0;
-      
+
       res.json({
         success: true,
         run_id: runId,
@@ -389,7 +404,7 @@ export async function registerRoutes(
       const { runId } = req.params;
       const gateway = getStreamGateway();
       const traceBus = gateway.getRunBus(runId);
-      
+
       if (!traceBus) {
         return res.status(404).json({
           success: false,
@@ -397,10 +412,10 @@ export async function registerRoutes(
           run_id: runId,
         });
       }
-      
+
       const emitter = traceBus as TraceEmitter;
       const toolCalls = emitter.getToolCallsArray();
-      
+
       res.json({
         success: true,
         run_id: runId,
@@ -422,7 +437,7 @@ export async function registerRoutes(
       const { runId, callId } = req.params;
       const gateway = getStreamGateway();
       const traceBus = gateway.getRunBus(runId);
-      
+
       if (!traceBus) {
         return res.status(404).json({
           success: false,
@@ -430,10 +445,10 @@ export async function registerRoutes(
           run_id: runId,
         });
       }
-      
+
       const emitter = traceBus as TraceEmitter;
       const toolCall = emitter.getToolCall(callId);
-      
+
       if (!toolCall) {
         return res.status(404).json({
           success: false,
@@ -442,7 +457,7 @@ export async function registerRoutes(
           call_id: callId,
         });
       }
-      
+
       res.json({
         success: true,
         run_id: runId,
@@ -463,7 +478,7 @@ export async function registerRoutes(
       const { runId } = req.params;
       const gateway = getStreamGateway();
       const traceBus = gateway.getRunBus(runId);
-      
+
       if (!traceBus) {
         return res.status(404).json({
           success: false,
@@ -471,10 +486,10 @@ export async function registerRoutes(
           run_id: runId,
         });
       }
-      
+
       const emitter = traceBus as TraceEmitter;
       const artifacts = emitter.getArtifactsArray();
-      
+
       res.json({
         success: true,
         run_id: runId,
@@ -496,7 +511,7 @@ export async function registerRoutes(
       const { runId, artifactId } = req.params;
       const gateway = getStreamGateway();
       const traceBus = gateway.getRunBus(runId);
-      
+
       if (!traceBus) {
         return res.status(404).json({
           success: false,
@@ -504,10 +519,10 @@ export async function registerRoutes(
           run_id: runId,
         });
       }
-      
+
       const emitter = traceBus as TraceEmitter;
       const artifact = emitter.getArtifact(artifactId);
-      
+
       if (!artifact) {
         return res.status(404).json({
           success: false,
@@ -516,7 +531,7 @@ export async function registerRoutes(
           artifact_id: artifactId,
         });
       }
-      
+
       res.json({
         success: true,
         run_id: runId,
@@ -535,13 +550,13 @@ export async function registerRoutes(
   // GET /api/runs/:runId/stream - SSE endpoint for real-time execution events
   app.get("/api/runs/:runId/stream", (req: Request, res: Response) => {
     const { runId } = req.params;
-    const lastEventId = req.headers["last-event-id"] 
-      ? parseInt(req.headers["last-event-id"] as string, 10) 
+    const lastEventId = req.headers["last-event-id"]
+      ? parseInt(req.headers["last-event-id"] as string, 10)
       : 0;
-    
+
     const gateway = getStreamGateway();
     const traceBus = gateway.getRunBus(runId);
-    
+
     if (!traceBus) {
       return res.status(404).json({
         success: false,
@@ -549,15 +564,15 @@ export async function registerRoutes(
         run_id: runId,
       });
     }
-    
+
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
-    
+
     let seq = lastEventId;
     let closed = false;
-    
+
     const sendEvent = (eventType: string, data: any, eventSeq?: number) => {
       if (closed) return;
       try {
@@ -569,18 +584,18 @@ export async function registerRoutes(
         console.error("[RunStream] Write error:", e);
       }
     };
-    
+
     sendEvent("connected", {
       run_id: runId,
       message: "Connected to execution stream",
       ts: Date.now(),
     });
-    
+
     const executionEventHandler = (event: ExecutionEvent) => {
       if (closed) return;
       sendEvent(event.type, event, event.seq);
     };
-    
+
     const traceEventHandler = (event: any) => {
       if (closed) return;
       const execEvent: ExecutionEvent = {
@@ -593,14 +608,14 @@ export async function registerRoutes(
       };
       sendEvent(execEvent.type, execEvent, execEvent.seq);
     };
-    
+
     const emitter = traceBus as TraceEmitter;
-    
+
     if (emitter.listenerCount && emitter.listenerCount("execution_event") >= 0) {
       emitter.on("execution_event", executionEventHandler);
     }
     emitter.on("trace", traceEventHandler);
-    
+
     const heartbeatInterval = setInterval(() => {
       if (closed) return;
       sendEvent("heartbeat", {
@@ -608,7 +623,7 @@ export async function registerRoutes(
         ts: Date.now(),
       });
     }, 800);
-    
+
     const cleanup = () => {
       if (closed) return;
       closed = true;
@@ -617,7 +632,7 @@ export async function registerRoutes(
       emitter.off("trace", traceEventHandler);
       console.log(`[RunStream] Client disconnected from run ${runId}`);
     };
-    
+
     req.on("close", cleanup);
     req.on("error", cleanup);
     res.on("close", cleanup);
@@ -630,14 +645,14 @@ export async function registerRoutes(
       const { runId } = req.params;
       const after = parseInt(req.query.after as string, 10) || 0;
       const limit = Math.min(parseInt(req.query.limit as string, 10) || 100, 1000);
-      
+
       const gateway = getStreamGateway();
       const traceBus = gateway.getRunBus(runId);
-      
+
       if (!traceBus) {
         const eventStore = getEventStore();
         const storedEvents = await eventStore.getEvents(runId, after, limit);
-        
+
         if (storedEvents.length === 0) {
           return res.status(404).json({
             success: false,
@@ -645,7 +660,7 @@ export async function registerRoutes(
             run_id: runId,
           });
         }
-        
+
         const events: ExecutionEvent[] = storedEvents.map(traceEvent => ({
           schema_version: "v1",
           run_id: traceEvent.run_id,
@@ -654,7 +669,7 @@ export async function registerRoutes(
           type: mapTraceEventType(traceEvent.event_type),
           payload: buildPayloadFromTraceEvent(traceEvent),
         }));
-        
+
         return res.json({
           success: true,
           run_id: runId,
@@ -663,10 +678,10 @@ export async function registerRoutes(
           last_seq: events.length > 0 ? events[events.length - 1].seq : after,
         });
       }
-      
+
       const eventStore = getEventStore();
       const storedEvents = await eventStore.getEvents(runId, after, limit);
-      
+
       const events: ExecutionEvent[] = storedEvents.map(traceEvent => ({
         schema_version: "v1",
         run_id: traceEvent.run_id,
@@ -675,7 +690,7 @@ export async function registerRoutes(
         type: mapTraceEventType(traceEvent.event_type),
         payload: buildPayloadFromTraceEvent(traceEvent),
       }));
-      
+
       res.json({
         success: true,
         run_id: runId,
@@ -693,7 +708,7 @@ export async function registerRoutes(
   });
 
   initializeEventStore().catch(console.error);
-  
+
   initializeRedisSSE().then(() => {
     console.log("[RedisSSE] Initialized");
   }).catch(err => {
@@ -707,7 +722,7 @@ export async function registerRoutes(
   });
 
   // ===== Simple Tools & Agents Endpoints =====
-  
+
   // GET /tools - Return all 100 tools
   app.get("/tools", (_req: Request, res: Response) => {
     try {
@@ -715,7 +730,7 @@ export async function registerRoutes(
         name: tool.name,
         description: tool.description,
       }));
-      
+
       res.json({
         success: true,
         count: tools.length,
@@ -743,7 +758,7 @@ export async function registerRoutes(
         capabilities: agent.capabilities,
         tools: agent.tools,
       }));
-      
+
       res.json({
         success: true,
         count: agents.length,
@@ -782,7 +797,7 @@ export async function registerRoutes(
         "Orchestration": ["orchestrate", "workflow", "strategicPlan"],
         "Communication": ["decide", "clarify", "summarize", "explain"],
       };
-      
+
       const categoryIcons: Record<string, string> = {
         "Core": "zap",
         "System": "terminal",
@@ -804,7 +819,7 @@ export async function registerRoutes(
         "Orchestration": "layers",
         "Communication": "message-circle",
       };
-      
+
       const tools = ALL_TOOLS.map(tool => {
         let category = "Utility";
         for (const [cat, toolNames] of Object.entries(categoryMap)) {
@@ -820,7 +835,7 @@ export async function registerRoutes(
           icon: categoryIcons[category] || "wrench",
         };
       });
-      
+
       const categories = Object.entries(categoryMap)
         .filter(([_, toolNames]) => toolNames.some(name => ALL_TOOLS.find(t => t.name === name)))
         .map(([name, _]) => ({
@@ -828,7 +843,7 @@ export async function registerRoutes(
           icon: categoryIcons[name] || "folder",
           count: tools.filter(t => t.category === name).length,
         }));
-      
+
       res.json({
         success: true,
         count: tools.length,
@@ -855,24 +870,24 @@ export async function registerRoutes(
   });
 
   // ===== Python Agent v5.0 Endpoints =====
-  
+
   // POST /api/python-agent/run - Execute the Python agent
   app.post("/api/python-agent/run", async (req: Request, res: Response) => {
     try {
       const { input, verbose = false, timeout = 60 } = req.body;
-      
+
       if (!input || typeof input !== "string") {
         return res.status(400).json({
           success: false,
           error: "Missing or invalid 'input' field",
         });
       }
-      
+
       const result = await runAgent(input, { verbose, timeout });
       res.json(result);
     } catch (error: any) {
       console.error("[PythonAgent] Run error:", error);
-      
+
       if (error instanceof PythonAgentClientError) {
         const statusCode = error.statusCode || 500;
         return res.status(statusCode).json({
@@ -881,7 +896,7 @@ export async function registerRoutes(
           details: error.details,
         });
       }
-      
+
       res.status(500).json({
         success: false,
         error: error.message || "Failed to execute Python agent",
@@ -899,7 +914,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[PythonAgent] Tools error:", error);
-      
+
       if (error instanceof PythonAgentClientError) {
         const statusCode = error.statusCode || 500;
         return res.status(statusCode).json({
@@ -907,7 +922,7 @@ export async function registerRoutes(
           error: error.message,
         });
       }
-      
+
       res.status(500).json({
         success: false,
         error: error.message || "Failed to get Python agent tools",
@@ -925,7 +940,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[PythonAgent] Health check error:", error);
-      
+
       res.status(503).json({
         success: false,
         error: error.message || "Python agent service unavailable",
@@ -1055,16 +1070,16 @@ export async function registerRoutes(
   });
 
   // ===== AI Quality Stats & Content Filter Endpoints =====
-  
+
   // GET /api/ai/quality-stats - Return quality statistics
   app.get("/api/ai/quality-stats", (req: Request, res: Response) => {
     try {
       const sinceParam = req.query.since as string | undefined;
       const since = sinceParam ? new Date(sinceParam) : undefined;
-      
+
       const stats = llmGateway.getQualityStats(since);
       const filterStats = getFilterStats();
-      
+
       res.json({
         success: true,
         data: {
@@ -1074,9 +1089,9 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[QualityStats] Error getting stats:", error);
-      res.status(500).json({ 
-        success: false, 
-        error: error.message || "Failed to get quality stats" 
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get quality stats"
       });
     }
   });
@@ -1084,18 +1099,18 @@ export async function registerRoutes(
   // GET /api/ai/content-filter - Get current filter config
   app.get("/api/ai/content-filter", (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.id || "anonymous";
+      const userId = (req as AuthenticatedRequest).user?.id || "anonymous";
       const config = getUserConfig(userId);
-      
+
       res.json({
         success: true,
         data: config,
       });
     } catch (error: any) {
       console.error("[ContentFilter] Error getting config:", error);
-      res.status(500).json({ 
-        success: false, 
-        error: error.message || "Failed to get filter config" 
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get filter config"
       });
     }
   });
@@ -1103,9 +1118,9 @@ export async function registerRoutes(
   // PUT /api/ai/content-filter - Update filter config
   app.put("/api/ai/content-filter", (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user?.id || "anonymous";
+      const userId = (req as AuthenticatedRequest).user?.id || "anonymous";
       const { enabled, sensitivityLevel, customPatterns } = req.body;
-      
+
       // Validate sensitivity level
       if (sensitivityLevel && !["low", "medium", "high"].includes(sensitivityLevel)) {
         return res.status(400).json({
@@ -1113,7 +1128,7 @@ export async function registerRoutes(
           error: "Invalid sensitivity level. Must be 'low', 'medium', or 'high'",
         });
       }
-      
+
       // Validate custom patterns if provided
       if (customPatterns && Array.isArray(customPatterns)) {
         const validation = validatePatterns(customPatterns);
@@ -1124,22 +1139,22 @@ export async function registerRoutes(
           });
         }
       }
-      
+
       const newConfig = setUserConfig(userId, {
         enabled: enabled !== undefined ? Boolean(enabled) : undefined,
         sensitivityLevel,
         customPatterns,
       });
-      
+
       res.json({
         success: true,
         data: newConfig,
       });
     } catch (error: any) {
       console.error("[ContentFilter] Error updating config:", error);
-      res.status(500).json({ 
-        success: false, 
-        error: error.message || "Failed to update filter config" 
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to update filter config"
       });
     }
   });
@@ -1153,18 +1168,18 @@ export async function registerRoutes(
         data: defaultConfig,
       });
     } catch (error: any) {
-      res.status(500).json({ 
-        success: false, 
-        error: error.message || "Failed to get default config" 
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to get default config"
       });
     }
   });
 
   // ===== Observability Endpoints =====
-  
+
   // Initialize health monitoring
   initializeHealthMonitoring();
-  
+
   // Start periodic connector health checks
   startPeriodicHealthCheck(60000);
 
@@ -1172,7 +1187,7 @@ export async function registerRoutes(
   app.get("/api/observability/logs", (req: Request, res: Response) => {
     try {
       const filters: LogFilters = {};
-      
+
       if (req.query.level) {
         filters.level = req.query.level as "debug" | "info" | "warn" | "error";
       }
@@ -1191,9 +1206,9 @@ export async function registerRoutes(
       if (req.query.limit) {
         filters.limit = parseInt(req.query.limit as string, 10);
       }
-      
+
       const logs = getLogs(filters);
-      
+
       res.json({
         success: true,
         data: {
@@ -1215,7 +1230,7 @@ export async function registerRoutes(
     try {
       const services = getAllServicesHealth();
       const overallStatus = getOverallStatus();
-      
+
       res.json({
         success: true,
         data: {
@@ -1237,10 +1252,10 @@ export async function registerRoutes(
     try {
       const includeHistory = req.query.history === "true";
       const sinceParam = req.query.since as string | undefined;
-      
+
       const activeAlerts = getActiveAlerts();
       const alertStats = getAlertStats();
-      
+
       const response: any = {
         success: true,
         data: {
@@ -1248,12 +1263,12 @@ export async function registerRoutes(
           stats: alertStats,
         },
       };
-      
+
       if (includeHistory) {
         const since = sinceParam ? new Date(sinceParam) : undefined;
         response.data.history = getAlertHistory(since);
       }
-      
+
       res.json(response);
     } catch (error: any) {
       console.error("[Observability] Error getting alerts:", error);
@@ -1269,14 +1284,14 @@ export async function registerRoutes(
     try {
       const { id } = req.params;
       const alert = resolveAlert(id);
-      
+
       if (!alert) {
         return res.status(404).json({
           success: false,
           error: "Alert not found",
         });
       }
-      
+
       res.json({
         success: true,
         data: alert,
@@ -1296,7 +1311,7 @@ export async function registerRoutes(
       const logStats = getLogStats();
       const requestStats = getRequestStats();
       const activeReqs = getActiveRequests();
-      
+
       res.json({
         success: true,
         data: {
@@ -1317,13 +1332,13 @@ export async function registerRoutes(
   });
 
   // ===== Connector Stats Endpoints =====
-  
+
   // GET /api/connectors/stats - Get all connector statistics
   app.get("/api/connectors/stats", (_req: Request, res: Response) => {
     try {
       const stats = getAllConnectorStats();
       const healthSummary = getHealthSummary();
-      
+
       res.json({
         success: true,
         data: {
@@ -1344,17 +1359,17 @@ export async function registerRoutes(
   app.get("/api/connectors/:name/stats", (req: Request, res: Response) => {
     try {
       const { name } = req.params;
-      
+
       if (!isValidConnector(name)) {
         return res.status(400).json({
           success: false,
           error: `Invalid connector name: ${name}. Valid connectors: gmail, gemini, xai, database, forms`,
         });
       }
-      
+
       const stats = getConnectorStats(name as ConnectorName);
       const health = checkConnectorHealth(name as ConnectorName);
-      
+
       res.json({
         success: true,
         data: {
@@ -1375,8 +1390,8 @@ export async function registerRoutes(
   app.post("/api/connectors/:name/reset", (req: Request, res: Response) => {
     try {
       const { name } = req.params;
-      const user = (req as any).user;
-      
+      const user = (req as AuthenticatedRequest).user;
+
       // Check admin role
       if (!user?.roles?.includes("admin")) {
         return res.status(403).json({
@@ -1384,16 +1399,16 @@ export async function registerRoutes(
           error: "Admin access required",
         });
       }
-      
+
       if (!isValidConnector(name)) {
         return res.status(400).json({
           success: false,
           error: `Invalid connector name: ${name}. Valid connectors: gmail, gemini, xai, database, forms`,
         });
       }
-      
+
       resetConnectorStats(name as ConnectorName);
-      
+
       res.json({
         success: true,
         message: `Stats reset for connector: ${name}`,
@@ -1414,10 +1429,10 @@ export async function registerRoutes(
   });
 
   const wss = new WebSocketServer({ server: httpServer, path: "/ws/agent" });
-  
+
   createAuthenticatedWebSocketHandler(wss, true, (ws: AuthenticatedWebSocket) => {
     let subscribedRunId: string | null = null;
-    
+
     ws.on("message", (message) => {
       try {
         const data = JSON.parse(message.toString());
@@ -1432,7 +1447,7 @@ export async function registerRoutes(
         console.error("WS message parse error:", e);
       }
     });
-    
+
     ws.on("close", () => {
       if (subscribedRunId) {
         const clients = agentClients.get(subscribedRunId);
@@ -1452,7 +1467,7 @@ export async function registerRoutes(
 
   createAuthenticatedWebSocketHandler(fileStatusWss, true, (ws: AuthenticatedWebSocket) => {
     let subscribedFileIds: Set<string> = new Set();
-    
+
     ws.on("message", (message) => {
       try {
         const data = JSON.parse(message.toString());
@@ -1462,9 +1477,9 @@ export async function registerRoutes(
             fileStatusClients.set(data.fileId, new Set());
           }
           fileStatusClients.get(data.fileId)!.add(ws);
-          
+
           ws.send(JSON.stringify({ type: "subscribed", fileId: data.fileId }));
-          
+
           const job = fileProcessingQueue.getJob(data.fileId);
           if (job && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
@@ -1489,7 +1504,7 @@ export async function registerRoutes(
         console.error("File status WS message parse error:", e);
       }
     });
-    
+
     ws.on("close", () => {
       const fileIds = Array.from(subscribedFileIds);
       for (const fileId of fileIds) {
@@ -1547,7 +1562,7 @@ export async function registerRoutes(
 
       await storage.updateFileCompleted(job.fileId);
       await storage.updateFileJobStatus(job.fileId, "completed");
-      
+
       console.log(`[FileQueue] File ${job.fileId} processed: ${chunks.length} chunks created`);
     } catch (error: any) {
       console.error(`[FileQueue] Error processing file ${job.fileId}:`, error);
@@ -1556,10 +1571,10 @@ export async function registerRoutes(
       throw error;
     }
   });
-  
+
   createAuthenticatedWebSocketHandler(browserWss, true, (ws: AuthenticatedWebSocket) => {
     let subscribedSessionId: string | null = null;
-    
+
     ws.on("message", async (message) => {
       try {
         const data = JSON.parse(message.toString());
@@ -1569,9 +1584,9 @@ export async function registerRoutes(
             browserClients.set(data.sessionId, new Set());
           }
           browserClients.get(data.sessionId)!.add(ws);
-          
+
           ws.send(JSON.stringify({ type: "subscribed", sessionId: data.sessionId }));
-          
+
           try {
             const screenshot = await browserSessionManager.getScreenshot(data.sessionId);
             if (screenshot && ws.readyState === WebSocket.OPEN) {
@@ -1590,7 +1605,7 @@ export async function registerRoutes(
         console.error("Browser WS message parse error:", e);
       }
     });
-    
+
     ws.on("close", () => {
       if (subscribedSessionId) {
         const clients = browserClients.get(subscribedSessionId);
@@ -1610,9 +1625,9 @@ export async function registerRoutes(
 function broadcastBrowserEvent(sessionId: string, event: SessionEvent) {
   const clients = browserClients.get(sessionId);
   if (!clients) return;
-  
-  const message = JSON.stringify({ 
-    messageType: "browser_event", 
+
+  const message = JSON.stringify({
+    messageType: "browser_event",
     eventType: event.type,
     sessionId: event.sessionId,
     timestamp: event.timestamp,
@@ -1628,7 +1643,7 @@ function broadcastBrowserEvent(sessionId: string, event: SessionEvent) {
 function broadcastAgentUpdate(runId: string, update: StepUpdate) {
   const clients = agentClients.get(runId);
   if (!clients) return;
-  
+
   const message = JSON.stringify({ type: "step_update", ...update });
   clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
@@ -1640,7 +1655,7 @@ function broadcastAgentUpdate(runId: string, update: StepUpdate) {
 function broadcastFileStatus(update: FileStatusUpdate) {
   const clients = fileStatusClients.get(update.fileId);
   if (!clients) return;
-  
+
   const message = JSON.stringify(update);
   clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {

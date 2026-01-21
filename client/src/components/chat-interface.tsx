@@ -1,13 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useDraft } from "@/hooks/use-draft";
-import { 
+import {
+  Plus,
+  ArrowUp,
   Mic,
   MicOff,
-  ArrowUp, 
-  Plus, 
   ChevronDown,
   ChevronRight,
-  Globe, 
+  Globe,
   FileText,
   FileSpreadsheet,
   FileIcon,
@@ -102,6 +102,8 @@ import { RecordingPanel } from "@/components/recording-panel";
 import { Composer } from "@/components/composer";
 import { MessageList, parseDocumentBlocks, type DocumentBlock } from "@/components/message-list";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
+import { PromptSuggestions } from "@/components/prompt-suggestions";
+import { MessageFeedback } from "@/components/message-feedback";
 // AgentPanel removed - progress is shown inline in chat messages
 import { useAuth } from "@/hooks/use-auth";
 import { useConversationState } from "@/hooks/use-conversation-state";
@@ -109,22 +111,35 @@ import { useAgentMode } from "@/hooks/use-agent-mode";
 import { Database, Sparkles, AudioLines } from "lucide-react";
 import { useModelAvailability, type AvailableModel } from "@/contexts/ModelAvailabilityContext";
 import { getFileTheme, getFileCategory, FileCategory } from "@/lib/fileTypeTheme";
+import { useChats } from "@/hooks/use-chats";
+import { useChatFolders, type Folder as FolderType } from "@/hooks/use-chat-folders";
+import { useProjects } from "@/hooks/use-projects";
+import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
 import { UniversalExecutionConsole } from "./universal-execution-console";
 import { ExecutionStreamClient, FlatRunState } from "@/lib/executionStreamClient";
 import { LiveExecutionConsole } from "./live-execution-console";
 import { PricingModal } from "./pricing-modal";
 
-function AvatarWithFallback({ 
-  src, 
-  alt, 
-  fallback 
-}: { 
-  src: string; 
-  alt: string; 
+import { SyncStatusIndicator } from "./sync-status-indicator";
+import { ProductionProgress } from "@/components/production-progress";
+import { AiProcessStep } from "./chat-interface/types";
+import { GranularErrorBoundary } from "@/components/ui/granular-error-boundary";
+import { DataTableWrapper, CleanDataTableComponents, downloadTableAsExcel, copyTableToClipboard } from "./chat-interface/DataTableWrapper";
+import { StreamingIndicator } from "./chat-interface/StreamingIndicator";
+import { EditableDocumentPreview, type TextSelection } from "./chat-interface/EditableDocumentPreview";
+import { extractTextFromChildren, isNumericValue } from "./chat-interface/utils";
+
+function AvatarWithFallback({
+  src,
+  alt,
+  fallback
+}: {
+  src: string;
+  alt: string;
   fallback: React.ReactNode;
 }) {
   const [hasError, setHasError] = useState(false);
-  
+
   if (hasError) {
     return (
       <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
@@ -132,12 +147,12 @@ function AvatarWithFallback({
       </div>
     );
   }
-  
+
   return (
     <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-primary/80 to-primary/60 flex items-center justify-center shadow-2xl shadow-primary/30">
-      <img 
-        src={src} 
-        alt={alt} 
+      <img
+        src={src}
+        alt={alt}
         className="w-full h-full rounded-2xl object-cover"
         onError={() => setHasError(true)}
       />
@@ -145,645 +160,52 @@ function AvatarWithFallback({
   );
 }
 
-const extractTextFromChildren = (children: React.ReactNode): string => {
-  if (typeof children === 'string') return children;
-  if (typeof children === 'number') return String(children);
-  if (!children) return '';
-  if (Array.isArray(children)) {
-    return children.map(extractTextFromChildren).join('');
+// Heuristic function to detect uncertainty in AI responses
+function detectUncertainty(content: string): { confidence: 'high' | 'medium' | 'low'; reason?: string } {
+  const lowConfidencePatterns = [
+    /no (estoy|está) seguro/i,
+    /no (puedo|logro|he podido) confirmar/i,
+    /falta información/i,
+    /información (insuficiente|limitada)/i,
+    /no (se menciona|se especifica|aparece|encontré)/i,
+    /podría ser/i,
+    /es probable que/i,
+    /sin certeza/i,
+    /no garantiza/i,
+    /difícil determinar/i
+  ];
+
+  const mediumConfidencePatterns = [
+    /parece indicar/i,
+    /sugiere que/i,
+    /aparentemente/i,
+    /posiblemente/i,
+    /en principio/i,
+    /según el contexto/i
+  ];
+
+  for (const pattern of lowConfidencePatterns) {
+    if (pattern.test(content)) {
+      return {
+        confidence: 'low',
+        reason: 'La respuesta contiene expresiones de duda o falta de información.'
+      };
+    }
   }
-  if (React.isValidElement(children)) {
-    return extractTextFromChildren((children.props as any)?.children);
+
+  for (const pattern of mediumConfidencePatterns) {
+    if (pattern.test(content)) {
+      return {
+        confidence: 'medium',
+        reason: 'La respuesta se basa en inferencias o indicaciones no explícitas.'
+      };
+    }
   }
-  const childArray = React.Children.toArray(children);
-  return childArray.map(extractTextFromChildren).join('');
-};
 
-const isNumericValue = (text: string): boolean => {
-  if (!text || typeof text !== 'string') return false;
-  const cleaned = text.trim().replace(/[$€£¥%,\s]/g, '');
-  return !isNaN(parseFloat(cleaned)) && isFinite(Number(cleaned)) && cleaned.length > 0;
-};
-
-const extractTableData = (children: React.ReactNode): string[][] => {
-  const data: string[][] = [];
-  const childArray = React.Children.toArray(children);
-  childArray.forEach((section: any) => {
-    if (section?.props?.children) {
-      const rows = React.Children.toArray(section.props.children);
-      rows.forEach((row: any) => {
-        if (row?.props?.children) {
-          const cells = React.Children.toArray(row.props.children);
-          const rowData = cells.map((cell: any) => extractTextFromChildren(cell?.props?.children || ''));
-          data.push(rowData);
-        }
-      });
-    }
-  });
-  return data;
-};
-
-const downloadTableAsExcel = (children: React.ReactNode) => {
-  const data = extractTableData(children);
-  if (data.length === 0) return;
-  
-  let csv = data.map(row => 
-    row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')
-  ).join('\n');
-  
-  const BOM = '\uFEFF';
-  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `tabla_${Date.now()}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
-
-const copyTableToClipboard = (children: React.ReactNode) => {
-  const data = extractTableData(children);
-  if (data.length === 0) return;
-  const text = data.map(row => row.join('\t')).join('\n');
-  navigator.clipboard.writeText(text);
-};
-
-const DataTableWrapper = ({children}: {children?: React.ReactNode}) => {
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const childArray = React.Children.toArray(children);
-  let colCount = 0;
-  childArray.forEach((child: any) => {
-    if (child?.props?.children) {
-      const rows = React.Children.toArray(child.props.children);
-      rows.forEach((row: any) => {
-        if (row?.props?.children) {
-          const cells = React.Children.toArray(row.props.children);
-          colCount = Math.max(colCount, cells.length);
-        }
-      });
-    }
-  });
-  const minWidth = Math.min(Math.max(colCount * 150, 400), 1400);
-  
-  const handleCopy = () => {
-    copyTableToClipboard(children);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-  
-  const renderTable = () => (
-    <table className="data-table" style={{ minWidth: `${minWidth}px` }}>
-      {children}
-    </table>
-  );
-
-  return (
-    <>
-      <div className="table-container group relative my-4">
-        <div className="table-actions absolute top-2 right-2 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => downloadTableAsExcel(children)}
-                className="p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border hover:bg-accent transition-colors shadow-sm"
-                data-testid="button-download-excel"
-              >
-                <Download className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Descargar</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setIsFullscreen(true)}
-                className="p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border hover:bg-accent transition-colors shadow-sm"
-                data-testid="button-fullscreen-table"
-              >
-                <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Ampliar</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border hover:bg-accent transition-colors shadow-sm"
-                data-testid="button-copy-table"
-              >
-                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{copied ? "Copiado" : "Copiar"}</TooltipContent>
-          </Tooltip>
-        </div>
-        <div className="table-wrap">
-          {renderTable()}
-        </div>
-      </div>
-      
-      {isFullscreen && (
-        <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex flex-col">
-          <div className="flex items-center justify-between p-4 border-b">
-            <h3 className="font-semibold">Vista ampliada</h3>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => downloadTableAsExcel(children)}
-                data-testid="button-download-excel-fullscreen"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Descargar
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsFullscreen(false)}
-                data-testid="button-close-fullscreen"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-auto p-4">
-            <div className="table-wrap">
-              {renderTable()}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
-const CleanDataTableComponents = {
-  table: DataTableWrapper,
-  thead: ({children}: {children?: React.ReactNode}) => <thead>{children}</thead>,
-  tbody: ({children}: {children?: React.ReactNode}) => <tbody>{children}</tbody>,
-  tr: ({children}: {children?: React.ReactNode}) => <tr>{children}</tr>,
-  th: ({children}: {children?: React.ReactNode}) => {
-    const text = extractTextFromChildren(children);
-    const isNumeric = isNumericValue(text);
-    return (
-      <th scope="col" className={isNumeric ? "text-right" : ""}>
-        {children}
-      </th>
-    );
-  },
-  td: ({children}: {children?: React.ReactNode}) => {
-    const text = extractTextFromChildren(children);
-    const isNumeric = isNumericValue(text);
-    const isLong = text.length > 50;
-    return (
-      <td className={`${isNumeric ? "text-right" : ""} ${isLong ? "wrap-cell" : ""}`}>
-        {children}
-      </td>
-    );
-  }
-};
-
-interface StreamingIndicatorProps {
-  aiState: "idle" | "thinking" | "responding";
-  streamingContent: string;
-  onCancel: () => void;
-  uiPhase?: 'idle' | 'thinking' | 'console' | 'done';
+  return { confidence: 'high' };
 }
 
-function StreamingIndicator({ aiState, streamingContent, onCancel, uiPhase }: StreamingIndicatorProps) {
-  const estimatedTokens = useMemo(() => {
-    if (!streamingContent) return 0;
-    return Math.ceil(streamingContent.length / 4);
-  }, [streamingContent]);
 
-  // Hide completely when in console phase (Super Agent is showing LiveExecutionConsole)
-  if (uiPhase === 'console') return null;
-  
-  if (aiState === "idle") return null;
-
-  return (
-    <div className="streaming-indicator-container flex items-center gap-3 px-4 py-2 rounded-lg bg-muted/50 border border-border/50" data-testid="streaming-indicator">
-      {aiState === "thinking" && (
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-muted-foreground" data-testid="typing-indicator">
-            <span className="typing-dot" />
-            <span className="typing-dot" />
-            <span className="typing-dot" />
-          </div>
-          <span className="text-sm text-muted-foreground" data-testid="streaming-indicator-pensando">Pensando...</span>
-        </div>
-      )}
-      
-      {aiState === "responding" && (
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-primary" data-testid="typing-indicator">
-            <span className="typing-dot" />
-            <span className="typing-dot" />
-            <span className="typing-dot" />
-          </div>
-          <span className="text-sm text-muted-foreground">Escribiendo...</span>
-          {estimatedTokens > 0 && (
-            <span className="token-counter-pulse text-xs text-muted-foreground/70 tabular-nums" data-testid="token-counter">
-              ~{estimatedTokens} tokens
-            </span>
-          )}
-        </div>
-      )}
-      
-      <Button
-        type="button"
-        variant="destructive"
-        size="sm"
-        onClick={onCancel}
-        className="cancel-button-pulse ml-auto h-8 px-3 text-sm font-medium"
-        data-testid="button-cancel-streaming"
-      >
-        <Square className="h-3.5 w-3.5 mr-1.5 fill-current" />
-        Detener
-      </Button>
-    </div>
-  );
-}
-
-interface ContentBlock {
-  id: number;
-  type: 'heading1' | 'heading2' | 'heading3' | 'paragraph' | 'list' | 'numberedList' | 'blockquote' | 'table' | 'hr';
-  content: string;
-  raw: string;
-}
-
-function parseContentToBlocks(content: string): ContentBlock[] {
-  const lines = content.split('\n');
-  const blocks: ContentBlock[] = [];
-  let currentBlock: string[] = [];
-  let blockId = 0;
-  
-  const flushBlock = (type: ContentBlock['type'], raw: string) => {
-    if (raw.trim()) {
-      blocks.push({ id: blockId++, type, content: raw.trim(), raw: raw });
-    }
-  };
-  
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    
-    if (line.startsWith('### ')) {
-      flushBlock('heading3', line);
-    } else if (line.startsWith('## ')) {
-      flushBlock('heading2', line);
-    } else if (line.startsWith('# ')) {
-      flushBlock('heading1', line);
-    } else if (line.startsWith('> ')) {
-      let quoteLines = [line];
-      while (i + 1 < lines.length && lines[i + 1].startsWith('> ')) {
-        i++;
-        quoteLines.push(lines[i]);
-      }
-      flushBlock('blockquote', quoteLines.join('\n'));
-    } else if (line.match(/^[-*] /)) {
-      let listLines = [line];
-      while (i + 1 < lines.length && lines[i + 1].match(/^[-*] /)) {
-        i++;
-        listLines.push(lines[i]);
-      }
-      flushBlock('list', listLines.join('\n'));
-    } else if (line.match(/^\d+\. /)) {
-      let listLines = [line];
-      while (i + 1 < lines.length && lines[i + 1].match(/^\d+\. /)) {
-        i++;
-        listLines.push(lines[i]);
-      }
-      flushBlock('numberedList', listLines.join('\n'));
-    } else if (line.startsWith('|')) {
-      let tableLines = [line];
-      while (i + 1 < lines.length && lines[i + 1].startsWith('|')) {
-        i++;
-        tableLines.push(lines[i]);
-      }
-      flushBlock('table', tableLines.join('\n'));
-    } else if (line.match(/^[-*_]{3,}$/)) {
-      flushBlock('hr', line);
-    } else if (line.trim()) {
-      let paraLines = [line];
-      while (i + 1 < lines.length && lines[i + 1].trim() && 
-             !lines[i + 1].startsWith('#') && 
-             !lines[i + 1].startsWith('>') && 
-             !lines[i + 1].match(/^[-*] /) && 
-             !lines[i + 1].match(/^\d+\. /) &&
-             !lines[i + 1].startsWith('|') &&
-             !lines[i + 1].match(/^[-*_]{3,}$/)) {
-        i++;
-        paraLines.push(lines[i]);
-      }
-      flushBlock('paragraph', paraLines.join('\n'));
-    }
-    i++;
-  }
-  
-  return blocks;
-}
-
-interface TextSelection {
-  text: string;
-  startIndex: number;
-  endIndex: number;
-}
-
-function EditableDocumentPreview({ 
-  content, 
-  onChange,
-  onSelectionChange
-}: { 
-  content: string; 
-  onChange: (newContent: string) => void;
-  onSelectionChange?: (selection: TextSelection | null) => void;
-}) {
-  const [blocks, setBlocks] = useState<ContentBlock[]>(() => parseContentToBlocks(content));
-  const [editingBlockId, setEditingBlockId] = useState<number | null>(null);
-  const [editingText, setEditingText] = useState("");
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  
-  useEffect(() => {
-    setBlocks(parseContentToBlocks(content));
-  }, [content]);
-  
-  useEffect(() => {
-    if (editingBlockId !== null && textareaRef.current) {
-      textareaRef.current.focus();
-      textareaRef.current.select();
-    }
-  }, [editingBlockId]);
-
-  const handleTextSelection = () => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-      return;
-    }
-    
-    const selectedText = selection.toString();
-    if (!selectedText.trim()) {
-      return;
-    }
-    
-    const startIndex = content.indexOf(selectedText);
-    if (startIndex === -1) {
-      const normalizedContent = content.replace(/\s+/g, ' ');
-      const normalizedSelection = selectedText.replace(/\s+/g, ' ');
-      const normalizedStart = normalizedContent.indexOf(normalizedSelection);
-      
-      if (normalizedStart !== -1) {
-        let charCount = 0;
-        let realStart = 0;
-        for (let i = 0; i < content.length && charCount < normalizedStart; i++) {
-          if (!/\s/.test(content[i]) || (i > 0 && !/\s/.test(content[i-1]))) {
-            charCount++;
-          }
-          realStart = i + 1;
-        }
-        
-        onSelectionChange?.({
-          text: selectedText,
-          startIndex: realStart,
-          endIndex: realStart + selectedText.length
-        });
-      }
-      return;
-    }
-    
-    onSelectionChange?.({
-      text: selectedText,
-      startIndex,
-      endIndex: startIndex + selectedText.length
-    });
-  };
-  
-  const handleBlockClick = (block: ContentBlock) => {
-    setEditingBlockId(block.id);
-    setEditingText(block.raw);
-  };
-  
-  const handleSaveBlock = () => {
-    if (editingBlockId === null) return;
-    
-    const newBlocks = blocks.map(b => 
-      b.id === editingBlockId 
-        ? { ...b, raw: editingText, content: editingText.trim() }
-        : b
-    );
-    setBlocks(newBlocks);
-    
-    const newContent = newBlocks.map(b => b.raw).join('\n\n');
-    onChange(newContent);
-    setEditingBlockId(null);
-    setEditingText("");
-  };
-  
-  const renderInlineFormatting = (text: string) => {
-    const parts: React.ReactNode[] = [];
-    let remaining = text;
-    let key = 0;
-    
-    while (remaining.length > 0) {
-      const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
-      const italicMatch = remaining.match(/\*(.+?)\*/);
-      
-      if (boldMatch && boldMatch.index !== undefined) {
-        if (boldMatch.index > 0) {
-          parts.push(<span key={key++}>{remaining.slice(0, boldMatch.index)}</span>);
-        }
-        parts.push(<strong key={key++} className="font-bold">{boldMatch[1]}</strong>);
-        remaining = remaining.slice(boldMatch.index + boldMatch[0].length);
-      } else if (italicMatch && italicMatch.index !== undefined && !remaining.startsWith('**')) {
-        if (italicMatch.index > 0) {
-          parts.push(<span key={key++}>{remaining.slice(0, italicMatch.index)}</span>);
-        }
-        parts.push(<em key={key++} className="italic">{italicMatch[1]}</em>);
-        remaining = remaining.slice(italicMatch.index + italicMatch[0].length);
-      } else {
-        parts.push(<span key={key++}>{remaining}</span>);
-        break;
-      }
-    }
-    
-    return parts;
-  };
-  
-  const renderBlock = (block: ContentBlock) => {
-    const isEditing = editingBlockId === block.id;
-    
-    if (isEditing) {
-      return (
-        <div key={block.id} className="relative">
-          <textarea
-            ref={textareaRef}
-            value={editingText}
-            onChange={(e) => setEditingText(e.target.value)}
-            onBlur={handleSaveBlock}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setEditingBlockId(null);
-                setEditingText("");
-              }
-            }}
-            className="w-full p-3 border-2 border-blue-500 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-sm font-mono resize-none focus:outline-none"
-            style={{ minHeight: Math.max(60, editingText.split('\n').length * 24) }}
-            data-testid={`textarea-block-${block.id}`}
-          />
-          <div className="absolute -top-6 left-0 text-xs text-blue-600 bg-blue-100 dark:bg-blue-900 px-2 py-0.5 rounded">
-            Editando - Click afuera para guardar
-          </div>
-        </div>
-      );
-    }
-    
-    const baseClass = "cursor-pointer transition-all duration-200 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded px-2 py-1 -mx-2 border border-transparent hover:border-teal-200 dark:hover:border-teal-800";
-    
-    switch (block.type) {
-      case 'heading1':
-        return (
-          <h1 
-            key={block.id}
-            onClick={() => handleBlockClick(block)}
-            className={cn("text-4xl font-bold mb-6 mt-2 text-teal-700 dark:text-teal-400 italic", baseClass)}
-            style={{ fontFamily: 'Georgia, serif' }}
-          >
-            {block.content.replace(/^# /, '')}
-          </h1>
-        );
-      case 'heading2':
-        return (
-          <h2 
-            key={block.id}
-            onClick={() => handleBlockClick(block)}
-            className={cn("text-xl font-bold mb-3 mt-6 text-teal-700 dark:text-teal-400", baseClass)}
-          >
-            {block.content.replace(/^## /, '')}
-          </h2>
-        );
-      case 'heading3':
-        return (
-          <h3 
-            key={block.id}
-            onClick={() => handleBlockClick(block)}
-            className={cn("text-lg font-bold mb-2 mt-4 text-foreground", baseClass)}
-          >
-            {block.content.replace(/^### /, '')}
-          </h3>
-        );
-      case 'paragraph':
-        return (
-          <p 
-            key={block.id}
-            onClick={() => handleBlockClick(block)}
-            className={cn("mb-3 leading-relaxed text-muted-foreground text-sm", baseClass)}
-          >
-            {renderInlineFormatting(block.content)}
-          </p>
-        );
-      case 'list':
-        return (
-          <ul 
-            key={block.id}
-            onClick={() => handleBlockClick(block)}
-            className={cn("list-disc list-inside mb-4 space-y-1", baseClass)}
-          >
-            {block.content.split('\n').map((item, idx) => (
-              <li key={idx} className="text-foreground">
-                {renderInlineFormatting(item.replace(/^[-*] /, ''))}
-              </li>
-            ))}
-          </ul>
-        );
-      case 'numberedList':
-        return (
-          <ol 
-            key={block.id}
-            onClick={() => handleBlockClick(block)}
-            className={cn("list-decimal list-inside mb-4 space-y-1", baseClass)}
-          >
-            {block.content.split('\n').map((item, idx) => (
-              <li key={idx} className="text-foreground">
-                {renderInlineFormatting(item.replace(/^\d+\. /, ''))}
-              </li>
-            ))}
-          </ol>
-        );
-      case 'blockquote':
-        return (
-          <blockquote 
-            key={block.id}
-            onClick={() => handleBlockClick(block)}
-            className={cn("border-l-4 border-blue-500 pl-4 italic my-4 py-2 bg-muted", baseClass)}
-          >
-            {block.content.split('\n').map((line, idx) => (
-              <p key={idx} className="text-muted-foreground">
-                {renderInlineFormatting(line.replace(/^> /, ''))}
-              </p>
-            ))}
-          </blockquote>
-        );
-      case 'table':
-        const rows = block.content.split('\n').filter(r => !r.match(/^\|[-:| ]+\|$/));
-        return (
-          <div key={block.id} onClick={() => handleBlockClick(block)} className={baseClass}>
-            <table className="w-full border-collapse border border-border my-4">
-              <tbody>
-                {rows.map((row, idx) => (
-                  <tr key={idx} className={idx === 0 ? "bg-muted" : ""}>
-                    {row.split('|').filter(c => c.trim()).map((cell, cidx) => (
-                      idx === 0 ? (
-                        <th key={cidx} className="border border-border px-3 py-2 font-semibold text-left">
-                          {cell.trim()}
-                        </th>
-                      ) : (
-                        <td key={cidx} className="border border-border px-3 py-2">
-                          {cell.trim()}
-                        </td>
-                      )
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-      case 'hr':
-        return <hr key={block.id} className="my-6 border-t-2 border-border" />;
-      default:
-        return (
-          <p key={block.id} onClick={() => handleBlockClick(block)} className={cn("mb-4", baseClass)}>
-            {block.content}
-          </p>
-        );
-    }
-  };
-  
-  return (
-    <div 
-      ref={containerRef}
-      className="document-preview space-y-1 select-text"
-      onMouseUp={handleTextSelection}
-      onDoubleClick={handleTextSelection}
-    >
-      {blocks.length === 0 ? (
-        <p className="text-muted-foreground italic">El documento está vacío. Haz clic para agregar contenido.</p>
-      ) : (
-        blocks.map(renderBlock)
-      )}
-    </div>
-  );
-}
 
 interface ActiveGpt {
   id: string;
@@ -805,8 +227,8 @@ interface ActiveGpt {
   };
 }
 
-type AiState = "idle" | "thinking" | "responding";
-type AiProcessStep = { step: string; status: "pending" | "active" | "done" };
+type AiState = "idle" | "thinking" | "responding" | "agent_working";
+
 
 interface ChatInterfaceProps {
   messages: Message[];
@@ -850,6 +272,7 @@ interface ChatInterfaceProps {
   setUiPhase?: React.Dispatch<React.SetStateAction<'idle' | 'thinking' | 'console' | 'done'>>;
   activeRunId?: string | null;
   setActiveRunId?: React.Dispatch<React.SetStateAction<string | null>>;
+  selectedProjectId?: string | null;
 }
 
 interface UploadedFile {
@@ -876,19 +299,19 @@ function isAnalyzableFile(filename: string): boolean {
 }
 
 async function triggerDocumentAnalysis(
-  uploadId: string, 
+  uploadId: string,
   filename: string,
   onAnalysisStarted: (analysisId: string) => void
 ): Promise<void> {
   if (!isAnalyzableFile(filename)) return;
-  
+
   try {
     const response = await fetch(`/api/chat/uploads/${uploadId}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scope: 'all' })
     });
-    
+
     if (response.ok) {
       const data = await response.json();
       if (data.sessionId || data.analysisId) {
@@ -900,11 +323,11 @@ async function triggerDocumentAnalysis(
   }
 }
 
-export function ChatInterface({ 
-  messages, 
+export function ChatInterface({
+  messages,
   setMessages,
-  onSendMessage, 
-  isSidebarOpen = true, 
+  onSendMessage,
+  isSidebarOpen = true,
   onToggleSidebar,
   onCloseSidebar,
   activeGpt,
@@ -941,13 +364,25 @@ export function ChatInterface({
   uiPhase: uiPhaseProp,
   setUiPhase: setUiPhaseProp,
   activeRunId: activeRunIdProp,
-  setActiveRunId: setActiveRunIdProp
+  setActiveRunId: setActiveRunIdProp,
+  selectedProjectId
 }: ChatInterfaceProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const {
+    projects,
+    getProject
+  } = useProjects();
+
+  const selectedProject = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return getProject(selectedProjectId) || projects.find(p => p.id === selectedProjectId);
+  }, [selectedProjectId, projects, getProject]);
+
   const { user } = useAuth();
   const { toast } = useToast();
-  
-  const { 
-    state: conversationState, 
+
+  const {
+    state: conversationState,
     isLoading: isConversationStateLoading,
     error: conversationStateError,
     refreshState: refreshConversationState,
@@ -955,7 +390,7 @@ export function ChatInterface({
     addArtifact: addArtifactToState,
     getLatestImage: getLatestImageFromServer,
   } = useConversationState(chatId);
-  
+
   useEffect(() => {
     if (conversationState) {
       console.log(`[ChatInterface] Conversation state loaded for chat ${chatId}:`, {
@@ -968,10 +403,10 @@ export function ChatInterface({
       console.warn(`[ChatInterface] Failed to load conversation state for chat ${chatId}:`, conversationStateError);
     }
   }, [chatId, conversationState, conversationStateError]);
-  
+
   const { initialDraft, saveDraftDebounced, clearDraft, currentTextRef } = useDraft(chatId);
   const [input, setInputRaw] = useState(initialDraft);
-  
+
   const setInput = useCallback((value: string | ((prev: string) => string)) => {
     setInputRaw((prev) => {
       const newValue = typeof value === "function" ? value(prev) : value;
@@ -1006,6 +441,16 @@ export function ChatInterface({
   const [selectedTool, setSelectedTool] = useState<"web" | "agent" | "image" | null>(null);
   const [activeDocEditor, setActiveDocEditor] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
   const [minimizedDocument, setMinimizedDocument] = useState<{ type: "word" | "excel" | "ppt"; title: string; content: string; messageId?: string } | null>(null);
+  // DOCX Generation State - for blank page with progress overlay
+  const [docGenerationState, setDocGenerationState] = useState<{
+    status: 'idle' | 'generating' | 'ready' | 'error';
+    progress: number;
+    stage: string;
+    downloadUrl: string | null;
+    fileName: string | null;
+    fileSize: number | null;
+    error?: string;
+  }>({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null });
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -1022,17 +467,17 @@ export function ChatInterface({
   const [userPlanInfo, setUserPlanInfo] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
-  
+
   useEffect(() => {
     const fetchUserPlanInfo = async () => {
       try {
         const response = await fetch("/api/user/usage", { credentials: "include" });
         if (response.ok) {
           const data = await response.json();
-          setUserPlanInfo({ 
-            plan: data.plan, 
-            isAdmin: data.isAdmin, 
-            isPaid: data.plan !== "free" 
+          setUserPlanInfo({
+            plan: data.plan,
+            isAdmin: data.isAdmin,
+            isPaid: data.plan !== "free"
           });
         }
       } catch (error) {
@@ -1041,37 +486,37 @@ export function ChatInterface({
     };
     fetchUserPlanInfo();
   }, [user?.id]);
-  
+
   const agentMode = useAgentMode(chatId || "");
-  
+
   // Agent store for persisting agent runs across remounts
   const agentStore = useAgentStore();
   const { startRun: startAgentRun } = useStartAgentRun();
   const { cancel: cancelAgentRun } = useCancelAgentRun();
-  
+
   // Track the current agent message ID for this chat session
   const [currentAgentMessageId, setCurrentAgentMessageId] = useState<string | null>(null);
-  
+
   // Track active run ID for Live Execution Console
   // Use props from parent to survive key changes, with local state as fallback
   const [activeRunIdLocal, setActiveRunIdLocal] = useState<string | null>(null);
   const activeRunId = activeRunIdProp !== undefined ? activeRunIdProp : activeRunIdLocal;
   const setActiveRunId = setActiveRunIdProp || setActiveRunIdLocal;
-  
+
   // uiPhase: single source of truth for UI state during Super Agent runs
   // 'idle' = normal state, 'thinking' = spinner (max 2s), 'console' = LiveExecutionConsole, 'done' = completed
   const [uiPhaseLocal, setUiPhaseLocal] = useState<'idle' | 'thinking' | 'console' | 'done'>('idle');
   const uiPhase = uiPhaseProp !== undefined ? uiPhaseProp : uiPhaseLocal;
   const setUiPhase = setUiPhaseProp || setUiPhaseLocal;
-  
+
   const uiPhaseTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   // Execution stream client for UniversalExecutionConsole - DISABLED
   // This was causing re-renders that interfered with LiveExecutionConsole in MessageList.
   // LiveExecutionConsole has its own RunStreamClient that handles streaming correctly.
   const [executionClient, setExecutionClient] = useState<ExecutionStreamClient | null>(null);
   const [executionRunState, setExecutionRunState] = useState<FlatRunState | null>(null);
-  
+
   // DISABLED: ExecutionStreamClient was connecting to /stream endpoint and causing re-renders
   // that unmounted/remounted the LiveExecutionConsole in a loop.
   // The LiveExecutionConsole in MessageList now handles all SSE streaming via RunStreamClient.
@@ -1100,10 +545,10 @@ export function ChatInterface({
   //     }
   //   }
   // }, [uiPhase, activeRunId]);
-  
+
   // Optimistic messages - shown immediately before they appear in props
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
-  
+
   // Clean up optimistic messages once they appear in props.messages
   useEffect(() => {
     if (optimisticMessages.length > 0 && messages.length > 0) {
@@ -1111,10 +556,10 @@ export function ChatInterface({
       setOptimisticMessages(prev => prev.filter(m => !propsMessageIds.has(m.id)));
     }
   }, [messages, optimisticMessages.length]);
-  
+
   // Track previous chatId for optimistic message cleanup - separate from the stream reset tracking
   const prevChatIdForOptimisticRef = useRef<string | null | undefined>(undefined);
-  
+
   // Clear optimistic messages only when switching between existing chats
   // NOT when transitioning from null to a new pending chat (which happens during message send)
   useEffect(() => {
@@ -1122,15 +567,15 @@ export function ChatInterface({
     const isInitialRender = prevChatId === undefined;
     const isNewChatCreation = prevChatId === null && chatId?.startsWith('pending-');
     const isSameChatTransition = prevChatId?.startsWith('pending-') && chatId && !chatId.startsWith('pending-');
-    
-    chatLogger.debug("optimistic chatId effect:", { 
-      prevChatId, 
-      chatId, 
-      isInitialRender, 
-      isNewChatCreation, 
-      isSameChatTransition 
+
+    chatLogger.debug("optimistic chatId effect:", {
+      prevChatId,
+      chatId,
+      isInitialRender,
+      isNewChatCreation,
+      isSameChatTransition
     });
-    
+
     // Only clear optimistic messages when:
     // 1. Not initial render
     // 2. Not transitioning from null to pending (new chat creation)
@@ -1142,21 +587,21 @@ export function ChatInterface({
     } else {
       chatLogger.debug("Keeping optimistic messages");
     }
-    
+
     prevChatIdForOptimisticRef.current = chatId;
   }, [chatId]); // Only depend on chatId - don't run effect on every optimistic message change
-  
+
   // Reset GPT session ID when activeGpt or chatId changes (new chat or GPT switch)
   useEffect(() => {
     setGptSessionId(null);
   }, [activeGpt?.id, chatId]);
-  
+
   // Use the store-based polling hook for the active agent run (only when valid messageId exists)
   useAgentPolling(currentAgentMessageId);
-  
+
   // Get store runs reactively to trigger re-render when store updates
   const allAgentRuns = useAgentStore(state => state.runs);
-  
+
   // Get the active run from the store for the current chat (use reactive allAgentRuns)
   const activeAgentRun = useMemo(() => {
     if (currentAgentMessageId) {
@@ -1166,14 +611,14 @@ export function ChatInterface({
     const runs = Object.values(allAgentRuns);
     return runs.find(r => r.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(r.status)) || null;
   }, [currentAgentMessageId, allAgentRuns, chatId]);
-  
+
   // Combined messages: prop messages + optimistic messages + agent runs from store
   const displayMessages = useMemo(() => {
     // Start with optimistic messages, then merge prop messages (prop messages take priority)
     const msgMap = new Map(optimisticMessages.map(m => [m.id, m]));
     // Override with prop messages (they are the source of truth once available)
     messages.forEach(m => msgMap.set(m.id, m));
-    
+
     // Merge agent runs from the store into messages (use reactive allAgentRuns)
     Object.entries(allAgentRuns).forEach(([messageId, runState]) => {
       // Only include runs for the current chat
@@ -1213,19 +658,19 @@ export function ChatInterface({
         }
       }
     });
-    
-    return Array.from(msgMap.values()).sort((a, b) => 
+
+    return Array.from(msgMap.values()).sort((a, b) =>
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
   }, [messages, optimisticMessages, allAgentRuns, chatId]);
-  
+
   // Reset current agent message ID when chatId changes - polling auto-starts via useAgentPolling
   useEffect(() => {
     // Find if there's an active run for this chat
     const matchingRun = Object.entries(allAgentRuns).find(
       ([_, run]) => run.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(run.status)
     );
-    
+
     if (matchingRun) {
       const [msgId] = matchingRun;
       setCurrentAgentMessageId(msgId);
@@ -1234,15 +679,15 @@ export function ChatInterface({
       setCurrentAgentMessageId(null);
     }
   }, [chatId, allAgentRuns]);
-  
+
   // Toast notifications for agent mode
   const prevAgentStatusRef = useRef<string | null>(null);
-  
+
   // Watch for agent run status changes and trigger appropriate toasts
   useEffect(() => {
     const currentStatus = activeAgentRun?.status || null;
     const prevStatus = prevAgentStatusRef.current;
-    
+
     // Only trigger toasts on status changes
     if (currentStatus && currentStatus !== prevStatus) {
       switch (currentStatus) {
@@ -1276,16 +721,16 @@ export function ChatInterface({
           break;
       }
     }
-    
+
     prevAgentStatusRef.current = currentStatus;
   }, [activeAgentRun?.status, activeAgentRun?.error, toast]);
-  
+
   // Compute whether agent is actively running (for stop button)
   const isAgentRunning = useMemo(() => {
     const status = activeAgentRun?.status;
     return status === 'starting' || status === 'queued' || status === 'planning' || status === 'running' || status === 'replanning';
   }, [activeAgentRun?.status]);
-  
+
   // Handle stopping the agent
   const handleAgentStop = useCallback(async () => {
     if (activeAgentRun && currentAgentMessageId) {
@@ -1306,17 +751,17 @@ export function ChatInterface({
       }
     }
   }, [activeAgentRun, currentAgentMessageId, cancelAgentRun, toast]);
-  
+
   const { availableModels, isLoading: isModelsLoading, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
-  
+
   const selectedModelData = useMemo(() => {
     if (!selectedModelId) return availableModels[0] || null;
     return availableModels.find(m => m.id === selectedModelId || m.modelId === selectedModelId) || availableModels[0] || null;
   }, [selectedModelId, availableModels]);
-  
+
   const selectedProvider = selectedModelData?.provider || "gemini";
   const selectedModel = selectedModelData?.modelId || "gemini-3-flash-preview";
-  
+
   const modelsByProvider = useMemo(() => {
     const grouped: Record<string, AvailableModel[]> = {};
     availableModels.forEach(model => {
@@ -1337,7 +782,7 @@ export function ChatInterface({
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
   const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{messageId: string; imageData: string} | null>(null);
+  const [pendingGeneratedImage, setPendingGeneratedImage] = useState<{ messageId: string; imageData: string } | null>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [previewUploadedImage, setPreviewUploadedImage] = useState<{ name: string; dataUrl: string } | null>(null);
   const [previewFileAttachment, setPreviewFileAttachment] = useState<{
@@ -1353,7 +798,7 @@ export function ChatInterface({
   } | null>(null);
   const [copiedAttachmentContent, setCopiedAttachmentContent] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const latestGeneratedImageRef = useRef<{messageId: string; imageData: string} | null>(null);
+  const latestGeneratedImageRef = useRef<{ messageId: string; imageData: string } | null>(null);
   const dragCounterRef = useRef(0);
   const activeDocEditorRef = useRef<{ type: "word" | "excel" | "ppt"; title: string; content: string; showInstructions?: boolean } | null>(null);
   const previewDocumentRef = useRef<DocumentBlock | null>(null);
@@ -1362,28 +807,28 @@ export function ChatInterface({
   const chatIdRef = useRef<string | null>(null);
   const streamingChatIdRef = useRef<string | null>(null);
   const prevAiStateRef = useRef<AiState>("idle");
-  
+
   // Access streaming store actions
-  const { startRun, updateStatus, completeRun, failRun, abortRun } = useStreamingStore();
-  
+  const { startRun, updateStatus, completeRun, failRun, abortRun, appendContent, clearRun } = useStreamingStore();
+
   // Keep refs in sync with state for cleanup function access
   useEffect(() => {
     editedDocumentContentRef.current = editedDocumentContent;
   }, [editedDocumentContent]);
-  
+
   useEffect(() => {
     chatIdRef.current = chatId || null;
   }, [chatId]);
-  
+
   // Agent progress is now shown inline in chat messages, no panel needed
-  
+
   // Update streaming store when aiState changes
   // This allows tracking of chats processing in background after component unmounts
   useEffect(() => {
     const prevState = prevAiStateRef.current;
     prevAiStateRef.current = aiState;
     const currentChatId = chatId || null;
-    
+
     // Start run when streaming begins
     if (prevState === "idle" && (aiState === "thinking" || aiState === "responding")) {
       streamingChatIdRef.current = currentChatId;
@@ -1391,14 +836,14 @@ export function ChatInterface({
         startRun(currentChatId);
       }
     }
-    
+
     // Update to streaming status
     if (prevState === "thinking" && aiState === "responding") {
       if (streamingChatIdRef.current) {
         updateStatus(streamingChatIdRef.current, 'streaming');
       }
     }
-    
+
     // Complete run when streaming ends
     if ((prevState === "thinking" || prevState === "responding") && aiState === "idle") {
       const completedChatId = streamingChatIdRef.current;
@@ -1409,7 +854,7 @@ export function ChatInterface({
       }
     }
   }, [aiState, chatId, startRun, updateStatus, completeRun]);
-  
+
   // Reset streaming state when chatId changes (switching chats)
   // This ensures the new chat starts clean without interference from previous chat
   // NOTE: We do NOT reset aiState here - let it complete naturally for background streaming
@@ -1418,58 +863,46 @@ export function ChatInterface({
   useEffect(() => {
     if (prevChatIdRef.current !== chatId) {
       console.debug(`[ChatInterface] Chat switched from ${prevChatIdRef.current} to ${chatId}`);
-      
-      if (streamIntervalRef.current) {
-        clearInterval(streamIntervalRef.current);
-        streamIntervalRef.current = null;
-        console.debug('[ChatInterface] Cleared stream interval due to chat switch');
-      }
-      
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-        console.debug('[ChatInterface] Aborted pending request due to chat switch');
-      }
-      
-      if (analysisAbortControllerRef.current) {
-        analysisAbortControllerRef.current.abort();
-        analysisAbortControllerRef.current = null;
-        console.debug('[ChatInterface] Aborted pending analysis due to chat switch');
-      }
-      
-      // Clear streaming content - the content was for the previous chat
+
+      // NOTE: Do NOT abort streaming when switching chats!
+      // Streaming continues in background and completes in the streamingStore.
+      // Only clear local UI state for the new active chat.
+
+      // Clear LOCAL streaming content only - actual content is preserved in store per-chat
       setStreamingContent("");
       streamingContentRef.current = "";
-      
+
       prevChatIdRef.current = chatId;
     }
   }, [chatId]);
-  
+
   const validateStreamingChatId = useCallback(() => {
     return streamingChatIdRef.current === null || streamingChatIdRef.current === chatId;
   }, [chatId]);
-  
+
   // Auto-save document when component unmounts (chat switch, new chat, etc.)
   useEffect(() => {
     return () => {
       const currentDoc = activeDocEditorRef.current;
       const currentContent = editedDocumentContentRef.current;
       const currentChatId = chatIdRef.current;
-      
+
       if (!currentDoc || !currentContent || !currentChatId) return;
-      
+
       const realChatId = resolveRealChatId(currentChatId);
       if (realChatId.startsWith("pending-")) return;
-      
+
       const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
       const plainText = stripHtml(currentContent);
       const placeholderPhrases = [
         "comienza a escribir tu documento aquí",
+        "generación inteligente de documentos",
+        "escribe tu solicitud en el chat",
         "título de la presentación",
         "haz clic para agregar"
       ];
       const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
-      
+
       if (!isPlaceholder && plainText.length > 20) {
         // Use sendBeacon for reliable save on unmount
         const data = JSON.stringify({
@@ -1481,7 +914,7 @@ export function ChatInterface({
       }
     };
   }, []);
-  
+
   // PPT streaming integration
   const pptStreaming = usePptStreaming();
   const applyRewriteRef = useRef<((newText: string) => void) | null>(null);
@@ -1496,9 +929,9 @@ export function ChatInterface({
 
   const scrollToBottom = useCallback((force = false) => {
     if (userHasScrolledUp && !force) return;
-    
+
     requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ 
+      messagesEndRef.current?.scrollIntoView({
         behavior: 'smooth',
         block: 'end'
       });
@@ -1515,13 +948,13 @@ export function ChatInterface({
   const handleScroll = useCallback(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
-    
+
     const { scrollTop, scrollHeight, clientHeight } = container;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    
+
     const nearBottom = distanceFromBottom < 150;
     setShowScrollButton(!nearBottom);
-    
+
     if (distanceFromBottom > 200) {
       setUserHasScrolledUp(true);
     } else if (distanceFromBottom < 50) {
@@ -1532,11 +965,11 @@ export function ChatInterface({
   useEffect(() => {
     if (aiState === "idle" && !streamingContent) return;
     if (userHasScrolledUp) return;
-    
+
     const now = Date.now();
     if (now - lastScrollTimeRef.current < scrollThrottleMs) return;
     lastScrollTimeRef.current = now;
-    
+
     scrollToBottom();
   }, [aiState, streamingContent, userHasScrolledUp, scrollToBottom]);
 
@@ -1545,7 +978,7 @@ export function ChatInterface({
     const prevCount = prevMessageCountRef.current;
     const currentCount = displayMessages.length;
     prevMessageCountRef.current = currentCount;
-    
+
     if (currentCount > prevCount) {
       setUserHasScrolledUp(false);
       scrollToBottom(true);
@@ -1564,13 +997,13 @@ export function ChatInterface({
   // Click-outside handler for model selector dropdown
   useEffect(() => {
     if (!isModelSelectorOpen) return;
-    
+
     const handleClickOutside = (e: MouseEvent) => {
       if (modelSelectorRef.current && !modelSelectorRef.current.contains(e.target as Node)) {
         setIsModelSelectorOpen(false);
       }
     };
-    
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isModelSelectorOpen]);
@@ -1606,7 +1039,7 @@ export function ChatInterface({
         setPreviewFileAttachment(null);
       }
     };
-    
+
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
   }, [previewFileAttachment]);
@@ -1619,7 +1052,7 @@ export function ChatInterface({
         e.preventDefault();
         setIsKeyboardShortcutsOpen(true);
       }
-      
+
       // Escape to cancel streaming (only when actively streaming)
       if (e.key === "Escape" && aiState !== "idle") {
         e.preventDefault();
@@ -1627,27 +1060,27 @@ export function ChatInterface({
         setScreenReaderAnnouncement("Generación cancelada");
       }
     };
-    
+
     document.addEventListener("keydown", handleGlobalShortcuts);
     return () => document.removeEventListener("keydown", handleGlobalShortcuts);
   }, [aiState]);
-  
+
   // Keep refs in sync with state
   useEffect(() => {
     activeDocEditorRef.current = activeDocEditor;
   }, [activeDocEditor]);
-  
+
   useEffect(() => {
     previewDocumentRef.current = previewDocument;
   }, [previewDocument]);
-  
+
   const isComplexExcelPrompt = (prompt: string): boolean => {
     return /completo|análisis|análisis completo|4 hojas|gráficos?|gráfica|grafica|gr[aá]fico de barras|gr[aá]fico de lineas|gr[aá]fico de pastel|charts?|bar chart|line chart|pie chart|dashboard|resumen ejecutivo|fórmulas múltiples|ventas.*gráfico|workbook|crea.*gr[aá]fic|genera.*gr[aá]fic|insert.*chart/i.test(prompt.toLowerCase());
   };
-  
+
   // Document editor is now only opened manually by the user clicking the buttons
   // Removed auto-open behavior to prevent unwanted document creation
-  
+
   // Check Figma connection status and handle OAuth callback
   useEffect(() => {
     const checkFigmaStatus = async () => {
@@ -1659,7 +1092,7 @@ export function ChatInterface({
         console.error("Error checking Figma status:", error);
       }
     };
-    
+
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('figma_connected') === 'true') {
       setIsFigmaConnected(true);
@@ -1670,16 +1103,16 @@ export function ChatInterface({
       setIsFigmaConnecting(false);
       window.history.replaceState({}, '', window.location.pathname);
     }
-    
+
     checkFigmaStatus();
   }, []);
-  
+
   // Figma connection handler - OAuth flow
   const handleFigmaConnect = () => {
     setIsFigmaConnecting(true);
     window.location.href = "/api/auth/figma";
   };
-  
+
   const handleFigmaDisconnect = async () => {
     try {
       await fetch("/api/figma/disconnect", { method: "POST" });
@@ -1688,7 +1121,7 @@ export function ChatInterface({
       console.error("Error disconnecting from Figma:", error);
     }
   };
-  
+
   // Function to open blank document editor - preserves existing messages
   const openBlankDocEditor = (type: "word" | "excel" | "ppt", options?: { showInstructions?: boolean }) => {
     const titles = {
@@ -1697,11 +1130,11 @@ export function ChatInterface({
       ppt: "Nueva Presentación"
     };
     const templates = {
-      word: "<p>Comienza a escribir tu documento aquí...</p>",
+      word: "", // Blank canvas - content will stream in real-time
       excel: "",
       ppt: "<h1>Título de la Presentación</h1><p>Haz clic para agregar subtítulo</p>"
     };
-    
+
     // Only update document editor state - DO NOT clear messages
     setSelectedDocTool(type);
     setActiveDocEditor({
@@ -1711,40 +1144,42 @@ export function ChatInterface({
       showInstructions: options?.showInstructions
     });
     setEditedDocumentContent(templates[type]);
-    
+
     // Close sidebar when opening a document tool
     onCloseSidebar?.();
   };
-  
+
   const closeDocEditor = async () => {
     const currentDoc = activeDocEditor;
     const currentContent = editedDocumentContent;
-    
+
     console.log("[closeDocEditor] Starting save process", {
       hasChatId: !!chatId,
       chatId,
       hasDoc: !!currentDoc,
       contentLength: currentContent?.length || 0
     });
-    
+
     const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
     const plainText = stripHtml(currentContent);
     const placeholderPhrases = [
       "comienza a escribir tu documento aquí",
+      "generación inteligente de documentos",
+      "escribe tu solicitud en el chat",
       "título de la presentación",
       "haz clic para agregar"
     ];
     const isPlaceholder = placeholderPhrases.some(p => plainText.toLowerCase().includes(p)) || plainText.length < 20;
-    
+
     console.log("[closeDocEditor] Validation", {
       plainTextLength: plainText.length,
       isPlaceholder,
       willSave: !!(chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20)
     });
-    
+
     if (chatId && currentDoc && currentContent && !isPlaceholder && plainText.length > 20) {
       let realChatId = resolveRealChatId(chatId);
-      
+
       if (isPendingChat(chatId)) {
         let attempts = 0;
         const maxAttempts = 10;
@@ -1754,7 +1189,7 @@ export function ChatInterface({
           attempts++;
         }
       }
-      
+
       if (!isPendingChat(chatId) && !realChatId.startsWith("pending-")) {
         try {
           const response = await fetch(`/api/chats/${realChatId}/documents`, {
@@ -1788,13 +1223,13 @@ export function ChatInterface({
         console.log("Chat creation timed out, document not saved");
       }
     }
-    
+
     setActiveDocEditor(null);
     setSelectedDocTool(null);
     setEditedDocumentContent("");
     docInsertContentRef.current = null;
   };
-  
+
   const handleReopenDocument = (doc: { type: "word" | "excel" | "ppt"; title: string; content: string }) => {
     setSelectedDocTool(doc.type);
     setActiveDocEditor({
@@ -1806,12 +1241,12 @@ export function ChatInterface({
     setMinimizedDocument(null);
     onCloseSidebar?.();
   };
-  
+
   const minimizeDocEditor = () => {
     if (!activeDocEditor) return;
-    
+
     const lastAssistantMessage = [...messages].reverse().find(m => m.role === "assistant");
-    
+
     setMinimizedDocument({
       type: activeDocEditor.type,
       title: activeDocEditor.title,
@@ -1821,10 +1256,10 @@ export function ChatInterface({
     setActiveDocEditor(null);
     setSelectedDocTool(null);
   };
-  
+
   const restoreDocEditor = () => {
     if (!minimizedDocument) return;
-    
+
     setActiveDocEditor({
       type: minimizedDocument.type,
       title: minimizedDocument.title,
@@ -1835,7 +1270,27 @@ export function ChatInterface({
     setMinimizedDocument(null);
     onCloseSidebar?.();
   };
-  
+
+  // Handle new chat - reset all document state before calling parent handler
+  const handleNewChat = useCallback(() => {
+    // Reset document tool selection
+    setSelectedDocTool(null);
+    setActiveDocEditor(null);
+    setMinimizedDocument(null);
+    setEditedDocumentContent('');
+    // Reset document generation state
+    setDocGenerationState({
+      status: 'idle',
+      progress: 0,
+      stage: '',
+      downloadUrl: null,
+      fileName: null,
+      fileSize: null
+    });
+    // Call original onNewChat
+    onNewChat?.();
+  }, [onNewChat]);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1843,10 +1298,10 @@ export function ChatInterface({
   const analysisAbortControllerRef = useRef<AbortController | null>(null);
   const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const streamingContentRef = useRef<string>("");
-  const aiStateRef = useRef<"idle" | "thinking" | "responding">("idle");
+  const aiStateRef = useRef<AiState>("idle");
   const composerRef = useRef<HTMLDivElement>(null);
   const handleStopChatRef = useRef<(() => void) | null>(null);
-  
+
   // Measure composer height and set CSS variable for proper layout
   useEffect(() => {
     const updateComposerHeight = () => {
@@ -1855,17 +1310,17 @@ export function ChatInterface({
         document.documentElement.style.setProperty('--composer-height', `${h}px`);
       }
     };
-    
+
     updateComposerHeight();
     window.addEventListener('resize', updateComposerHeight);
     window.addEventListener('orientationchange', updateComposerHeight);
-    
+
     return () => {
       window.removeEventListener('resize', updateComposerHeight);
       window.removeEventListener('orientationchange', updateComposerHeight);
     };
   }, []);
-  
+
   // Keep aiStateRef in sync with aiState for reliable access
   useEffect(() => {
     aiStateRef.current = aiState;
@@ -1881,11 +1336,11 @@ export function ChatInterface({
       setScreenReaderAnnouncement("Respuesta completada");
     }
   }, [aiState]);
-  
+
   // Note: We intentionally do NOT abort requests on unmount
   // This allows streaming to continue in background when user switches chats
   // The streaming will complete and update the correct chat via onSendMessage
-  
+
   const agent = useAgent();
   const browserSession = useBrowserSession();
 
@@ -1901,24 +1356,24 @@ export function ChatInterface({
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
-    
+
     // Abort any ongoing document analysis request
     if (analysisAbortControllerRef.current) {
       analysisAbortControllerRef.current.abort();
       analysisAbortControllerRef.current = null;
     }
-    
+
     // Clear any streaming interval
     if (streamIntervalRef.current) {
       clearInterval(streamIntervalRef.current);
       streamIntervalRef.current = null;
     }
-    
+
     // Clean up PPT streaming if active
     if (pptStreaming.isStreaming) {
       pptStreaming.stopStreaming();
     }
-    
+
     // Save the partial content as a message if there's any (use ref for latest value)
     const currentContent = streamingContentRef.current;
     if (currentContent && currentContent.trim()) {
@@ -1939,7 +1394,7 @@ export function ChatInterface({
       };
       onSendMessage(stoppedMsg);
     }
-    
+
     // Reset states
     streamingContentRef.current = "";
     setAiState("idle");
@@ -1961,7 +1416,7 @@ export function ChatInterface({
 
   const startVoiceRecording = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
+
     if (!SpeechRecognition) {
       alert("Tu navegador no soporta reconocimiento de voz. Por favor usa Chrome, Edge o Safari.");
       return;
@@ -2124,16 +1579,16 @@ export function ChatInterface({
 
   const handleApplySelectionEdit = () => {
     if (!textSelection || !editedDocumentContent) return;
-    
+
     const before = editedDocumentContent.substring(0, textSelection.startIndex);
     const after = editedDocumentContent.substring(textSelection.endIndex);
     const newContent = before + editingSelectionText + after;
-    
+
     setEditedDocumentContent(newContent);
     setTextSelection(null);
     setEditingSelectionText("");
     setOriginalSelectionText("");
-    
+
     window.getSelection()?.removeAllRanges();
   };
 
@@ -2169,15 +1624,15 @@ export function ChatInterface({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(documentToDownload),
       });
-      
+
       if (!response.ok) {
         throw new Error("Failed to generate document");
       }
-      
+
       const blob = await response.blob();
       const ext = doc.type === "word" ? "docx" : doc.type === "excel" ? "xlsx" : "pptx";
       const filename = `${doc.title.replace(/[^a-zA-Z0-9]/g, "_")}.${ext}`;
-      
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -2212,7 +1667,7 @@ export function ChatInterface({
       setLightboxImage(att.imageUrl);
       return;
     }
-    
+
     if (att.type === "image" && att.storagePath) {
       setLightboxImage(att.storagePath);
       return;
@@ -2327,21 +1782,21 @@ export function ChatInterface({
     const prevMessages = messages.slice(0, msgIndex);
     const lastUserMsgIndex = [...prevMessages].reverse().findIndex(m => m.role === "user");
     if (lastUserMsgIndex === -1) return;
-    
+
     const contextUpToUser = prevMessages.slice(0, prevMessages.length - lastUserMsgIndex);
-    
+
     if (chatId && onTruncateMessagesAt) {
       onTruncateMessagesAt(chatId, msgIndex);
     }
-    
+
     setRegeneratingMsgIndex(null);
     setAiState("thinking");
     streamingContentRef.current = "";
     setStreamingContent("");
-    
+
     try {
       abortControllerRef.current = new AbortController();
-      
+
       let chatHistory = contextUpToUser.map(m => ({
         role: m.role,
         content: m.content
@@ -2354,50 +1809,125 @@ export function ChatInterface({
         ];
       }
 
-      const response = await fetch("/api/chat", {
+      const response = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chatHistory, provider: selectedProvider, model: selectedModel }),
+        body: JSON.stringify({
+          messages: chatHistory,
+          chatId,
+          conversationId: chatId,
+          provider: selectedProvider,
+          model: selectedModel,
+        }),
         signal: abortControllerRef.current.signal
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Error ${response.status}`);
+      }
 
       setAiState("responding");
-      const fullContent = data.content;
-      let currentIndex = 0;
-      
-      streamIntervalRef.current = setInterval(() => {
-        if (currentIndex < fullContent.length) {
-          const chunkSize = Math.floor(Math.random() * 3) + 1;
-          const newContent = fullContent.slice(0, currentIndex + chunkSize);
-          streamingContentRef.current = newContent;
-          setStreamingContent(newContent);
-          currentIndex += chunkSize;
-        } else {
-          if (streamIntervalRef.current) {
-            clearInterval(streamIntervalRef.current);
-            streamIntervalRef.current = null;
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullContent = "";
+      let currentEventType = "chunk";
+      let streamComplete = false;
+
+      while (!streamComplete) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+
+          if (trimmedLine.startsWith("event: ")) {
+            currentEventType = trimmedLine.slice(7).trim();
+          } else if (trimmedLine.startsWith("data: ")) {
+            const dataStr = trimmedLine.slice(6);
+            if (dataStr === "[DONE]") {
+              streamComplete = true;
+              continue;
+            }
+
+            try {
+              const data = JSON.parse(dataStr);
+
+              if (currentEventType === "chunk" || currentEventType === "text") {
+                const content = data.content || "";
+                if (content) {
+                  fullContent += content;
+                  streamingContentRef.current = fullContent;
+                  setStreamingContent(fullContent);
+                }
+              } else if (currentEventType === "production_start") {
+                setAiState("agent_working");
+                setAiProcessSteps([{
+                  id: "init",
+                  title: `Iniciando producción: ${data.topic || "Documento"}`,
+                  status: "pending",
+                  description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
+                }]);
+              } else if (currentEventType === "production_event") {
+                setAiProcessSteps(prev => {
+                  const newSteps = [...prev];
+                  const lastStep = newSteps[newSteps.length - 1];
+                  if (lastStep && lastStep.status === "pending" && data.message) {
+                    lastStep.title = data.message;
+                  } else {
+                    newSteps.push({
+                      id: `step-${Date.now()}`,
+                      title: data.message || "Procesando...",
+                      status: "pending",
+                      description: data.stage
+                    });
+                  }
+                  return newSteps;
+                });
+              } else if (currentEventType === "production_complete") {
+                setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" })));
+              } else if (currentEventType === "done" || currentEventType === "finish") {
+                // Determine web sources if available
+                const finalMsg: Message = {
+                  id: (Date.now() + 1).toString(),
+                  role: "assistant",
+                  content: fullContent,
+                  timestamp: new Date(),
+                  requestId: data.requestId || generateRequestId(),
+                  userMessageId: undefined, // Lost in regeneration context unless tracked
+                  webSources: data.webSources,
+                  artifact: data.artifact
+                };
+                onSendMessage(finalMsg);
+                streamComplete = true;
+              } else if (currentEventType === "error") {
+                throw new Error(data.message || "Stream error");
+              }
+            } catch (parseError) {
+              console.warn("SSE parse error:", parseError);
+            }
           }
-          const aiMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: fullContent,
-            timestamp: new Date(),
-            webSources: data.webSources,
-          };
-          onSendMessage(aiMsg);
-          streamingContentRef.current = "";
-          setStreamingContent("");
-          setAiState("idle");
-          abortControllerRef.current = null;
         }
-      }, 15);
+      }
+
+      setStreamingContent("");
+      streamingContentRef.current = "";
+      setAiState("idle");
+      abortControllerRef.current = null;
+
     } catch (error: any) {
       if (error.name === "AbortError") return;
       console.error("Regenerate error:", error);
-      
+
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
@@ -2406,11 +1936,7 @@ export function ChatInterface({
         requestId: generateRequestId(),
       };
       onSendMessage(errorMsg);
-      
-      if (streamIntervalRef.current) {
-        clearInterval(streamIntervalRef.current);
-        streamIntervalRef.current = null;
-      }
+
       streamingContentRef.current = "";
       setStreamingContent("");
       setAiState("idle");
@@ -2436,8 +1962,8 @@ export function ChatInterface({
   }, [cancelAgentRun, toast]);
 
   const handleAgentRetry = useCallback((messageId: string, userMessage: string) => {
-    window.dispatchEvent(new CustomEvent("retry-agent-run", { 
-      detail: { messageId, userMessage } 
+    window.dispatchEvent(new CustomEvent("retry-agent-run", {
+      detail: { messageId, userMessage }
     }));
   }, []);
 
@@ -2490,9 +2016,9 @@ export function ChatInterface({
       }
     };
 
-    window.addEventListener("retry-agent-run", handleRetryAgentRun as EventListener);
+    window.addEventListener("retry-agent-run", handleRetryAgentRun as unknown as EventListener);
     return () => {
-      window.removeEventListener("retry-agent-run", handleRetryAgentRun as EventListener);
+      window.removeEventListener("retry-agent-run", handleRetryAgentRun as unknown as EventListener);
     };
   }, [chatId, agentStore, startAgentRun, toast]);
 
@@ -2508,31 +2034,31 @@ export function ChatInterface({
 
   const handleSendEdit = async (msgId: string) => {
     if (!editContent.trim()) return;
-    
+
     const msgIndex = messages.findIndex(m => m.id === msgId);
     if (msgIndex === -1) return;
-    
+
     const editedContent = editContent.trim();
     setEditingMessageId(null);
     setEditContent("");
-    
+
     if (chatId && onEditMessageAndTruncate) {
       onEditMessageAndTruncate(chatId, msgId, editedContent, msgIndex);
     }
-    
+
     setAiState("thinking");
     streamingContentRef.current = "";
     setStreamingContent("");
-    
+
     abortControllerRef.current = new AbortController();
-    
+
     try {
       const historyUpToEdit = messages.slice(0, msgIndex).map(m => ({
         role: m.role as "user" | "assistant",
         content: m.content
       }));
       historyUpToEdit.push({ role: "user", content: editedContent });
-      
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2543,13 +2069,13 @@ export function ChatInterface({
         }),
         signal: abortControllerRef.current.signal
       });
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error: ${response.status}`);
       }
-      
+
       const data = await response.json();
-      
+
       if (data.content) {
         const aiMsg: Message = {
           id: (Date.now() + 1).toString(),
@@ -2561,17 +2087,17 @@ export function ChatInterface({
         };
         onSendMessage(aiMsg);
       }
-      
+
       setAiState("idle");
       abortControllerRef.current = null;
-      
+
     } catch (error: any) {
       if (error.name === "AbortError") {
         setAiState("idle");
         return;
       }
       console.error("Edit regenerate error:", error);
-      
+
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
@@ -2602,20 +2128,20 @@ export function ChatInterface({
     const checkStatus = async () => {
       try {
         const contentRes = await fetch(`/api/files/${fileId}/content`);
-        
+
         if (!contentRes.ok && contentRes.status !== 202) {
           setUploadedFiles((prev) =>
             prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
           );
           return;
         }
-        
+
         const contentData = await contentRes.json();
 
         if (contentData.status === "ready") {
           setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId 
-              ? { ...f, id: fileId, status: "ready", content: contentData.content } 
+            prev.map((f) => (f.id === fileId || f.id === trackingId
+              ? { ...f, id: fileId, status: "ready", content: contentData.content }
               : f))
           );
           return;
@@ -2652,7 +2178,7 @@ export function ChatInterface({
 
   const ALLOWED_TYPES = [
     "text/plain",
-    "text/markdown", 
+    "text/markdown",
     "text/csv",
     "text/html",
     "application/json",
@@ -2676,10 +2202,10 @@ export function ChatInterface({
 
   const processFilesForUpload = async (files: File[]) => {
     const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE_BYTES);
-    const invalidTypeFiles = files.filter(file => 
+    const invalidTypeFiles = files.filter(file =>
       !ALLOWED_TYPES.includes(file.type) && !file.type.startsWith("image/")
     );
-    
+
     if (oversizedFiles.length > 0) {
       const names = oversizedFiles.map(f => f.name).join(", ");
       const sizes = oversizedFiles.map(f => `${(f.size / (1024 * 1024)).toFixed(1)}MB`).join(", ");
@@ -2689,7 +2215,7 @@ export function ChatInterface({
         variant: "destructive",
       });
     }
-    
+
     if (invalidTypeFiles.length > 0) {
       const names = invalidTypeFiles.map(f => f.name).join(", ");
       toast({
@@ -2698,12 +2224,12 @@ export function ChatInterface({
         variant: "destructive",
       });
     }
-    
-    const validFiles = files.filter(file => 
+
+    const validFiles = files.filter(file =>
       (ALLOWED_TYPES.includes(file.type) || file.type.startsWith("image/")) &&
       file.size <= MAX_FILE_SIZE_BYTES
     );
-    
+
     if (validFiles.length === 0) return;
 
     for (const file of validFiles) {
@@ -2714,7 +2240,7 @@ export function ChatInterface({
         'application/vnd.ms-excel',
         'text/csv'
       ].includes(file.type) || !!file.name.match(/\.(xlsx|xls|csv)$/i);
-      
+
       let dataUrl: string | undefined;
       if (isImage) {
         dataUrl = await new Promise<string>((resolve) => {
@@ -2723,7 +2249,7 @@ export function ChatInterface({
           reader.readAsDataURL(file);
         });
       }
-      
+
       const tempFile: UploadedFile = {
         id: tempId,
         name: file.name,
@@ -2749,17 +2275,17 @@ export function ChatInterface({
           if (!uploadRes.ok) throw new Error("Upload failed");
 
           let spreadsheetData: UploadedFile['spreadsheetData'] | undefined;
-          
+
           if (isExcel) {
             try {
               const formData = new FormData();
               formData.append('file', file);
-              
+
               const spreadsheetRes = await fetch('/api/spreadsheet/upload', {
                 method: 'POST',
                 body: formData,
               });
-              
+
               if (spreadsheetRes.ok) {
                 const spreadsheetResult = await spreadsheetRes.json();
                 const uploadId = spreadsheetResult.id;
@@ -2769,19 +2295,19 @@ export function ChatInterface({
                   rowCount: s.rowCount,
                   columnCount: s.columnCount,
                 }));
-                
+
                 spreadsheetData = {
                   uploadId,
                   sheets,
                 };
-                
+
                 if (spreadsheetResult.firstSheetPreview) {
                   spreadsheetData.previewData = {
                     headers: spreadsheetResult.firstSheetPreview.headers || [],
                     data: spreadsheetResult.firstSheetPreview.data || [],
                   };
                 }
-                
+
                 triggerDocumentAnalysis(uploadId, file.name, (analysisId) => {
                   setUploadedFiles((prev) =>
                     prev.map((f) => f.id === tempId ? { ...f, analysisId } : f)
@@ -2801,7 +2327,7 @@ export function ChatInterface({
             });
             const registeredFile = await registerRes.json();
             if (!registerRes.ok) throw new Error(registeredFile.error);
-            
+
             setUploadedFiles((prev) =>
               prev.map((f) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
             );
@@ -2809,7 +2335,7 @@ export function ChatInterface({
             setUploadedFiles((prev) =>
               prev.map((f) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
             );
-            
+
             const registerRes = await fetch("/api/files", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -2823,7 +2349,7 @@ export function ChatInterface({
             );
 
             pollFileStatusFast(registeredFile.id, tempId);
-            
+
             if (isAnalyzableFile(file.name) && !isExcel) {
               triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
                 setUploadedFiles((prev) =>
@@ -2856,7 +2382,7 @@ export function ChatInterface({
       console.log("[waitForPendingUploads] All uploads complete");
     }
   };
-  
+
   const pollFileStatusFast = async (fileId: string, trackingId: string) => {
     const maxTime = 3000;
     const pollInterval = 200;
@@ -2865,8 +2391,8 @@ export function ChatInterface({
     const checkStatus = async (): Promise<void> => {
       if (Date.now() - startTime > maxTime) {
         setUploadedFiles((prev) =>
-          prev.map((f) => (f.id === fileId || f.id === trackingId 
-            ? { ...f, id: fileId, status: "ready", content: "" } 
+          prev.map((f) => (f.id === fileId || f.id === trackingId
+            ? { ...f, id: fileId, status: "ready", content: "" }
             : f))
         );
         return;
@@ -2874,20 +2400,20 @@ export function ChatInterface({
 
       try {
         const contentRes = await fetch(`/api/files/${fileId}/content`);
-        
+
         if (!contentRes.ok && contentRes.status !== 202) {
           setUploadedFiles((prev) =>
             prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
           );
           return;
         }
-        
+
         const contentData = await contentRes.json();
 
         if (contentData.status === "ready") {
           setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId 
-              ? { ...f, id: fileId, status: "ready", content: contentData.content } 
+            prev.map((f) => (f.id === fileId || f.id === trackingId
+              ? { ...f, id: fileId, status: "ready", content: contentData.content }
               : f))
           );
           return;
@@ -2902,8 +2428,8 @@ export function ChatInterface({
       } catch (error) {
         console.error("Polling error:", error);
         setUploadedFiles((prev) =>
-          prev.map((f) => (f.id === fileId || f.id === trackingId 
-            ? { ...f, id: fileId, status: "ready", content: "" } 
+          prev.map((f) => (f.id === fileId || f.id === trackingId
+            ? { ...f, id: fileId, status: "ready", content: "" }
             : f))
         );
       }
@@ -2924,8 +2450,8 @@ export function ChatInterface({
         if (file) {
           const mimeType = file.type || item.type || "image/png";
           const ext = mimeType.split("/")[1] || "png";
-          const fileName = file.name && file.name !== "image.png" && file.name !== "" 
-            ? file.name 
+          const fileName = file.name && file.name !== "image.png" && file.name !== ""
+            ? file.name
             : `pasted-${Date.now()}.${ext}`;
           const renamedFile = new File([file], fileName, { type: mimeType });
           filesToUpload.push(renamedFile);
@@ -2977,7 +2503,7 @@ export function ChatInterface({
   const getFileIcon = (type: string, fileName?: string) => {
     const theme = getFileTheme(fileName, type);
     const category = getFileCategory(fileName, type);
-    
+
     if (category === "excel") {
       return <FileSpreadsheet className={`h-4 w-4 ${theme.textColor}`} />;
     }
@@ -3005,27 +2531,53 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
+    // MOCK CITATION TRIGGER FOR VERIFICATION
+    if (input.trim() === "/test-citation") {
+      const mockMsg: Message = {
+        id: `mock-${Date.now()}`,
+        role: "assistant",
+        content: "Aquí hay una respuesta con una cita interna [[FUENTE:Documento de Diseño|http://example.com/doc.pdf]].",
+        timestamp: new Date(),
+        webSources: [
+          {
+            source: { name: "Documento de Diseño", domain: "example.com" },
+            url: "http://example.com/doc.pdf",
+            title: "Especificación Técnica",
+            domain: "example.com",
+            metadata: {
+              pageNumber: 42,
+              section: "3.5 Arquitectura",
+              totalPages: 100
+            } as any
+          }
+        ]
+      };
+      onSendMessage(mockMsg);
+      setInput("");
+      return;
+    }
+
     console.log("[handleSubmit] called with input:", input, "selectedTool:", selectedTool);
-    
+
     // Wait for any pending uploads to complete before proceeding
     if (pendingUploadsRef.current.size > 0) {
       console.log("[handleSubmit] Waiting for", pendingUploadsRef.current.size, "pending uploads...");
       await waitForPendingUploads();
       console.log("[handleSubmit] All pending uploads completed");
     }
-    
+
     // Don't submit if files are still uploading/processing (double-check state after waiting)
     const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) {
       console.log("[handleSubmit] files still loading after wait, returning");
       return;
     }
-    
+
     // Allow submit if: there's input text, OR there are files, OR there's selected doc text with instruction
     const hasInput = input.trim().length > 0;
     const hasFiles = uploadedFiles.length > 0;
     const hasSelectionWithInstruction = selectedDocText && input.trim();
-    
+
     console.log("[handleSubmit] hasInput:", hasInput, "hasFiles:", hasFiles);
     if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
       console.log("[handleSubmit] no content to submit, returning");
@@ -3042,11 +2594,11 @@ export function ChatInterface({
           type: f.type,
           spreadsheetData: f.spreadsheetData
         }));
-        
+
         // Generate a unique message ID for tracking in the store
         const agentMessageId = `agent-${Date.now()}`;
         setCurrentAgentMessageId(agentMessageId);
-        
+
         // Add user message to chat via the callback
         const userMessage: Message = {
           id: `user-${Date.now()}`,
@@ -3057,13 +2609,13 @@ export function ChatInterface({
         // Show message immediately (optimistic update)
         setOptimisticMessages(prev => [...prev, userMessage]);
         onSendMessage(userMessage);
-        
+
         // Clear input IMMEDIATELY after capturing the value to prevent duplicates
         setInput("");
         setUploadedFiles([]);
-        
+
         console.log("[Agent Mode] Starting run with input:", userMessageContent);
-        
+
         // Use the store-based approach for starting the run
         // This will create the run in the store and start polling automatically
         const result = await startAgentRun(
@@ -3072,13 +2624,13 @@ export function ChatInterface({
           agentMessageId,
           attachments
         );
-        
+
         console.log("[Agent Mode] Run result:", result);
-        
+
         if (result) {
           // Tool already cleared above; now clear selected tool
           setSelectedTool(null);
-          
+
           // Navigate to new chat if created
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
             console.log("[Agent Mode] Navigating to chat:", result.chatId);
@@ -3090,16 +2642,16 @@ export function ChatInterface({
           console.error("[Agent Mode] Failed to start run, result is null");
           // Remove the optimistic message since the agent failed to start
           setOptimisticMessages(prev => prev.filter(m => m.id !== userMessage.id));
-          toast({ 
-            title: "Error", 
-            description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.", 
-            variant: "destructive" 
+          toast({
+            title: "Error",
+            description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.",
+            variant: "destructive"
           });
         }
       } catch (error) {
         console.error("Failed to start agent run:", error);
         // Remove the optimistic message since the agent failed to start
-        setOptimisticMessages(prev => prev.filter(m => m.id !== userMessage.id));
+        setOptimisticMessages(prev => prev.filter(m => !m.id.startsWith('user-')));
         toast({ title: "Error", description: "Error al iniciar el agente", variant: "destructive" });
       }
       return;
@@ -3113,13 +2665,13 @@ export function ChatInterface({
         clearDraft(chatId);
       }
       setAiState("thinking");
-      
+
       try {
         abortControllerRef.current = new AbortController();
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             messages: [{
               role: "user",
               content: `Reescribe el siguiente texto según esta instrucción: "${rewritePrompt}"\n\nTexto original:\n${selectedDocText}\n\nDevuelve SOLO el texto reescrito, sin explicaciones ni comentarios adicionales.`
@@ -3134,7 +2686,7 @@ export function ChatInterface({
         if (response.ok && data.content) {
           applyRewriteRef.current(data.content.trim());
         }
-        
+
         setSelectedDocText("");
         applyRewriteRef.current = null;
         setAiState("idle");
@@ -3160,7 +2712,7 @@ export function ChatInterface({
       /\b(crea|create|genera|generate|haz|make)\b.*\b(pdf)\b/i,
       /\b(cv|curriculum|resume|currículum|carta de presentación|cover letter)\b/i,
     ];
-    
+
     const imageEditPatterns = [
       // Spanish - explicit image reference
       /\b(edita|modifica|cambia|ajusta|arregla)\s+(la\s+)?(última|anterior|esa|esta)\s*(imagen|foto)?/i,
@@ -3168,7 +2720,7 @@ export function ChatInterface({
       /\bpon(le|er)?\s+/i,
       /\bagrega(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
       /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
-      
+
       // Spanish - IMPLICIT edit commands (when there's a recent image, these imply editing it)
       /\bagrega\s+(a\s+)?[A-Z]/i,                   // "agrega a Cristiano", "agrega un árbol"
       /\bañade\s+(a\s+)?[A-Z]/i,                    // "añade a Messi"
@@ -3178,10 +2730,10 @@ export function ChatInterface({
       /\b(en\s+el\s+)?(costado|lado|fondo|frente)\b/i,
       /\bcámbia(le|r)?\s+(el|la|los|las)\s+\w+/i,   // "cámbiale el color", "cambiar el fondo"
       /\bhaz(le|lo)?\s+más\s+\w+/i,                 // "hazlo más grande", "hazle más brillante"
-      
+
       // English - explicit
       /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
-      
+
       // English - implicit edit commands
       /\badd\s+[A-Z]/i,                             // "add Ronaldo", "add a tree"
       /\bput\s+[A-Z]/i,                             // "put Messi"
@@ -3189,26 +2741,31 @@ export function ChatInterface({
       /\b(on\s+the\s+)?(side|left|right|background|front)\b/i,
       /\bmake\s+(it|the\s+\w+)\s+more\s+\w+/i,      // "make it more colorful"
     ];
-    
+
     const isGenerationRequest = generationPatterns.some(p => p.test(input));
     const hasEditPattern = imageEditPatterns.some(p => p.test(input));
-    
-    if (isGenerationRequest || hasEditPattern) {
+
+    // IMPORTANT: When a doc tool is explicitly selected (Word/Excel/PPT), we bypass the legacy
+    // generation pattern detection and use the new /api/chat/stream flow with docTool parameter,
+    // which triggers production mode directly on the backend
+    const hasDocToolSelected = selectedDocTool && ['word', 'excel', 'ppt'].includes(selectedDocTool);
+
+    if ((isGenerationRequest || hasEditPattern) && !hasDocToolSelected) {
       console.log("[handleSubmit] Generation/Edit pattern detected - checking image context...");
-      
+
       // Set thinking state
       setAiState("thinking");
       setAiProcessSteps([
         { step: "Procesando tu solicitud", status: "active" },
         { step: "Generando contenido", status: "pending" }
       ]);
-      
+
       const generationInput = input;
       setInput("");
       if (chatId) {
         clearDraft(chatId);
       }
-      
+
       // Add user message to chat
       const userMsgId = Date.now().toString();
       const userMsg: Message = {
@@ -3221,17 +2778,17 @@ export function ChatInterface({
       // Show message immediately (optimistic update)
       setOptimisticMessages(prev => [...prev, userMsg]);
       onSendMessage(userMsg);
-      
+
       try {
         // Only fetch image context if we have an edit pattern (not for generation-only requests)
         // This prevents misrouting generation requests like "agrega una conclusión" to image edit
         let lastImageBase64: string | null = null;
         let lastImageId: string | null = null;
         let isImageEditRequest = false;
-        
+
         if (hasEditPattern) {
           console.log("[handleSubmit] Edit pattern detected - checking for image context...");
-          
+
           // Strategy 1: Check local memory cache first (fastest)
           const lastImage = getLastGeneratedImage();
           if (lastImage?.base64) {
@@ -3259,7 +2816,7 @@ export function ChatInterface({
                 }
               }
             }
-            
+
             // Strategy 3: Try server memory system (last resort)
             if (!lastImageBase64) {
               console.log("[handleSubmit] No local image, checking server memory...");
@@ -3281,11 +2838,11 @@ export function ChatInterface({
               }
             }
           }
-          
+
           // Determine if this is an edit request based on whether we found an image
           const hasImageContext = !!lastImageBase64;
           isImageEditRequest = hasImageContext;
-          
+
           // If we retrieved an image from server, persist it to local cache for future use
           if (lastImageBase64 && lastImageId && !getLastGeneratedImage()) {
             console.log("[handleSubmit] Persisting server image to local cache:", lastImageId);
@@ -3295,9 +2852,9 @@ export function ChatInterface({
               artifactId: lastImageId,
             });
           }
-          
+
         }
-        
+
         if (isImageEditRequest) {
           console.log("[handleSubmit] Image edit request confirmed with image context");
           // Update UI to reflect edit mode
@@ -3306,95 +2863,184 @@ export function ChatInterface({
             { step: "Editando imagen", status: "pending" }
           ]);
         }
-        
-        // Direct call to /api/chat for generation - bypasses SSE/runs system
-        const response = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
-            provider: selectedProvider,
-            model: selectedModel,
-            lastImageBase64,
-            lastImageId,
-          })
-        });
-        
-        setAiProcessSteps(prev => prev.map((s, i) => 
+
+        // Direct call to /api/chat/stream for generation - REAL-TIME SSE
+        console.log("[handleSubmit] ⚡ Starting standard chat stream...");
+        setAiProcessSteps(prev => prev.map((s, i) =>
           i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
         ));
-        
-        if (response.status === 402) {
-          const errorData = await response.json();
-          if (errorData.code === "QUOTA_EXCEEDED" && errorData.quota) {
-            setQuotaInfo(errorData.quota);
-            setShowPricingModal(true);
-            setAiState("idle");
-            setAiProcessSteps([]);
-            return;
-          }
+
+        // Ensure abort controller is active
+        if (!abortControllerRef.current) {
+          abortControllerRef.current = new AbortController();
         }
-        
-        const data = await response.json();
-        
-        if (response.ok && data.content) {
-          setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
-          
-          const aiMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: data.content,
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-            userMessageId: userMsgId,
-            artifact: data.artifact,
-            webSources: data.webSources,
-          };
-          onSendMessage(aiMsg);
-        } else {
+
+        try {
+          const response = await fetch("/api/chat/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
+              chatId,
+              conversationId: chatId,
+              provider: selectedProvider,
+              model: selectedModel,
+              lastImageBase64,
+              lastImageId
+            }),
+            signal: abortControllerRef.current.signal
+          });
+
+          if (!response.ok) {
+            if (response.status === 402) {
+              const errorData = await response.json();
+              if (errorData.code === "QUOTA_EXCEEDED" && errorData.quota) {
+                setQuotaInfo(errorData.quota);
+                setShowPricingModal(true);
+                setAiState("idle");
+                setAiProcessSteps([]);
+                return;
+              }
+            }
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Error ${response.status}`);
+          }
+
+          setAiState("responding");
+
+          const reader = response.body?.getReader();
+          if (!reader) throw new Error("No response body");
+
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let fullContent = "";
+          let currentEventType = "chunk"; // Default start
+          let streamComplete = false;
+
+          while (!streamComplete) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+              if (!trimmedLine) continue;
+
+              if (trimmedLine.startsWith("event: ")) {
+                currentEventType = trimmedLine.slice(7).trim();
+              } else if (trimmedLine.startsWith("data: ")) {
+                const dataStr = trimmedLine.slice(6);
+                if (dataStr === "[DONE]") {
+                  streamComplete = true;
+                  continue;
+                }
+
+                try {
+                  const data = JSON.parse(dataStr);
+
+                  if (currentEventType === "chunk" || currentEventType === "text") {
+                    const content = data.content || "";
+                    if (content) {
+                      fullContent += content;
+                      streamingContentRef.current = fullContent;
+                      setStreamingContent(fullContent);
+                    }
+                  } else if (currentEventType === "production_start") {
+                    setAiState("agent_working");
+                    setAiProcessSteps([{
+                      id: "init",
+                      title: `Iniciando producción: ${data.topic || "Documento"}`,
+                      status: "pending",
+                      description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
+                    }]);
+                  } else if (currentEventType === "production_event") {
+                    setAiProcessSteps(prev => {
+                      const newSteps = [...prev];
+                      const lastStep = newSteps[newSteps.length - 1];
+                      if (lastStep && lastStep.status === "pending" && data.message) {
+                        // Update generic pending step
+                        lastStep.title = data.message;
+                      } else {
+                        // Add new step log
+                        newSteps.push({
+                          id: `step-${Date.now()}`,
+                          title: data.message || "Procesando...",
+                          status: "pending",
+                          description: data.stage
+                        });
+                      }
+                      return newSteps;
+                    });
+                  } else if (currentEventType === "production_complete") {
+                    setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" })));
+                  } else if (currentEventType === "done" || currentEventType === "finish") {
+                    streamComplete = true;
+                    setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
+
+                    const aiMsg: Message = {
+                      id: (Date.now() + 1).toString(),
+                      role: "assistant",
+                      content: fullContent,
+                      timestamp: new Date(),
+                      requestId: data.requestId || generateRequestId(),
+                      userMessageId: userMsgId,
+                      artifact: data.artifact,
+                      webSources: data.webSources,
+                    };
+                    onSendMessage(aiMsg);
+                  } else if (currentEventType === "error" || currentEventType === "production_error") {
+                    throw new Error(data.message || data.error || "Stream error");
+                  }
+                } catch (parseError) {
+                  console.warn("SSE parse error:", parseError);
+                }
+              }
+            }
+          }
+
+        } catch (error: any) {
+          if (error.name === "AbortError") return;
+          console.error("[Generation] Stream Error:", error);
           const errorMsg: Message = {
             id: (Date.now() + 1).toString(),
             role: "assistant",
-            content: data.error || "Error al procesar la solicitud. Por favor, intenta de nuevo.",
+            content: error.message || "Error de conexión. Por favor, intenta de nuevo.",
             timestamp: new Date(),
             requestId: generateRequestId(),
             userMessageId: userMsgId,
           };
           onSendMessage(errorMsg);
         }
+
+        setAiState("idle");
+        setAiProcessSteps([]);
+        setStreamingContent("");
+        streamingContentRef.current = "";
       } catch (error) {
-        console.error("[Generation] Error:", error);
-        const errorMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: "Error de conexión. Por favor, intenta de nuevo.",
-          timestamp: new Date(),
-          requestId: generateRequestId(),
-          userMessageId: userMsgId,
-        };
-        onSendMessage(errorMsg);
+        console.error("[handleSubmit] Top-level error:", error);
+        setAiState("idle");
       }
-      
-      setAiState("idle");
-      setAiProcessSteps([]);
-      return;
-    }
-    
+    } // Close if ((isGenerationRequest ...
+
+
     // Check if this is a Super Agent research request with sources
     const superAgentCheck = shouldUseSuperAgent(input);
     if (superAgentCheck.use) {
       console.log("[handleSubmit] Super Agent detected:", superAgentCheck.reason);
-      
+
       const userInput = input;
       const superAgentMessageId = `super-agent-${Date.now()}`;
-      
+
       // Clear input immediately
       setInput("");
       if (chatId) {
         clearDraft(chatId);
       }
       setUploadedFiles([]);
-      
+
       // Create user message
       const userMsgId = Date.now().toString();
       const userMessage: Message = {
@@ -3404,11 +3050,11 @@ export function ChatInterface({
         timestamp: new Date(),
         requestId: generateRequestId(),
       };
-      
+
       // Show user message immediately
       setOptimisticMessages(prev => [...prev, userMessage]);
       onSendMessage(userMessage);
-      
+
       // Create assistant message placeholder for Super Agent display
       const assistantMessage: Message = {
         id: superAgentMessageId,
@@ -3419,35 +3065,28 @@ export function ChatInterface({
         userMessageId: userMsgId,
         isThinking: true,
       };
-      
+
       // Add assistant message that will show SuperAgentDisplay
       setOptimisticMessages(prev => [...prev, assistantMessage]);
-      
+
       // Start Super Agent run in store
       const { startRun, updateState, completeRun } = useSuperAgentStore.getState();
       startRun(superAgentMessageId);
-      
+
       // Generate run ID on frontend to enable immediate LiveExecutionConsole display
       const frontendRunId = `run_${crypto.randomUUID()}`;
-      console.log('[uiPhase] runId created, uiPhase=thinking', { runId: frontendRunId });
-      
-      // Set uiPhase to 'thinking' immediately (shows spinner for max 2s)
-      setUiPhase('thinking');
-      
-      // Start grace window timer - transition to 'console' phase after 2000ms
-      if (uiPhaseTimerRef.current) {
-        clearTimeout(uiPhaseTimerRef.current);
-      }
-      uiPhaseTimerRef.current = setTimeout(() => {
-        console.log('[uiPhase] Grace window expired, uiPhase=console');
-        setUiPhase('console');
-      }, 2000);
-      
+      console.log('[uiPhase] runId created, uiPhase=console (immediate)', { runId: frontendRunId });
+
+      // Set uiPhase to 'console' IMMEDIATELY (no grace window)
+      // This ensures LiveExecutionConsole connects to SSE as soon as possible
+      // to receive all events from the backend
+      setUiPhase('console');
+
       setActiveRunId(frontendRunId);
-      
+
       // Set up SSE stream by making POST request
       setAiState("thinking");
-      
+
       try {
         const response = await fetch("/api/super/stream", {
           method: "POST",
@@ -3461,46 +3100,46 @@ export function ChatInterface({
             },
           }),
         });
-        
+
         if (!response.ok) {
           setActiveRunId(null);
           throw new Error(`Super Agent request failed: ${response.status}`);
         }
-        
+
         const reader = response.body?.getReader();
         if (!reader) {
           throw new Error("No response body reader");
         }
-        
+
         const decoder = new TextDecoder();
         let buffer = "";
         let finalResult: SuperAgentFinal | null = null;
         let currentEventType = "";
-        
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          
+
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
-          
+
           for (const line of lines) {
             if (line.startsWith("event: ")) {
               currentEventType = line.slice(7).trim();
             } else if (line.startsWith("data: ")) {
               const jsonStr = line.slice(6);
               if (jsonStr === "[DONE]") continue;
-              
+
               try {
                 const eventData = JSON.parse(jsonStr);
                 const eventType = currentEventType || eventData.type;
-                
+
                 // Update store based on event type
                 const currentState = useSuperAgentStore.getState().runs[superAgentMessageId];
                 if (currentState) {
                   let updates: Partial<SuperAgentState> = {};
-                  
+
                   switch (eventType) {
                     case "contract":
                       updates = {
@@ -3509,11 +3148,82 @@ export function ChatInterface({
                         phase: "planning",
                       };
                       break;
+                    case "production_start":
+                      updates = {
+                        phase: "planning",
+                        contract: {
+                          contract_id: eventData.runId,
+                          intent: eventData.intent,
+                          requirements: {
+                            min_sources: 0,
+                            must_create: eventData.deliverables || ["word"],
+                            language: "es"
+                          },
+                          plan: [],
+                          original_prompt: eventData.topic || ""
+                        }
+                      };
+                      // DOCX Generation: Set blank page with generating status
+                      if (selectedDocTool === "word" && eventData.deliverables?.includes("word")) {
+                        setDocGenerationState({
+                          status: 'generating',
+                          progress: 0,
+                          stage: 'Iniciando generación...',
+                          downloadUrl: null,
+                          fileName: null,
+                          fileSize: null
+                        });
+                        // Clear editor content to show blank page
+                        setEditedDocumentContent('');
+                      }
+                      break;
                     case "progress":
                       updates = {
                         phase: eventData.phase || currentState.phase,
                         progress: eventData,
                       };
+                      break;
+                    case "production_event":
+                      const stageMap: Record<string, any> = {
+                        init: "planning",
+                        blueprint: "planning",
+                        research: "signals",
+                        writing: "creating",
+                        review: "verifying",
+                        render: "creating",
+                        final: "finalizing"
+                      };
+                      const mappedPhase = stageMap[eventData.stage] || currentState.phase;
+                      updates = {
+                        phase: mappedPhase,
+                        progress: {
+                          phase: mappedPhase,
+                          status: eventData.message,
+                          collected: eventData.progress,
+                          target: 100
+                        }
+                      };
+
+                      // DOCX Generation: Update progress state (no HTML injection)
+                      if (selectedDocTool === "word") {
+                        const stageLabels: Record<string, string> = {
+                          intake: "Procesando solicitud...",
+                          blueprint: "Diseñando estructura...",
+                          research: "Investigando contenido...",
+                          analysis: "Analizando información...",
+                          writing: "Redactando documento...",
+                          qa: "Verificando calidad...",
+                          consistency: "Validando consistencia...",
+                          render: "Generando documento final..."
+                        };
+                        const progress = eventData.progress || 0;
+                        setDocGenerationState(prev => ({
+                          ...prev,
+                          status: 'generating',
+                          progress,
+                          stage: stageLabels[eventData.stage] || eventData.message || prev.stage
+                        }));
+                      }
                       break;
                     case "source_signal":
                       const existingIdx = currentState.sources.findIndex(s => s.id === eventData.id);
@@ -3534,7 +3244,29 @@ export function ChatInterface({
                       }
                       break;
                     case "artifact":
-                      updates = { artifacts: [...currentState.artifacts, eventData] };
+                      const artifactObj = {
+                        id: eventData.id || `art_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        type: eventData.type,
+                        name: eventData.name || eventData.filename || "Documento",
+                        downloadUrl: eventData.downloadUrl,
+                        size: eventData.size
+                      };
+                      updates = {
+                        artifacts: [...currentState.artifacts, artifactObj],
+                        phase: "creating"
+                      };
+
+                      // DOCX Generation: Set ready status with download info
+                      if (selectedDocTool === "word" && eventData.type === "word") {
+                        setDocGenerationState({
+                          status: 'ready',
+                          progress: 100,
+                          stage: '¡Documento listo!',
+                          downloadUrl: eventData.downloadUrl || null,
+                          fileName: eventData.filename || eventData.name || "Documento.docx",
+                          fileSize: eventData.size || null
+                        });
+                      }
                       break;
                     case "verify":
                       updates = { verify: eventData, phase: "verifying" };
@@ -3547,6 +3279,21 @@ export function ChatInterface({
                         isRunning: false,
                       };
                       break;
+                    case "production_complete":
+                      const finalObj = {
+                        response: eventData.summary,
+                        sources_count: 0,
+                        artifacts: currentState.artifacts,
+                        duration_ms: 0,
+                        iterations: 1
+                      };
+                      finalResult = finalObj;
+                      updates = {
+                        final: finalObj,
+                        phase: "completed",
+                        isRunning: false
+                      };
+                      break;
                     case "error":
                       updates = {
                         error: eventData.message || "Error en Super Agent",
@@ -3554,8 +3301,15 @@ export function ChatInterface({
                         isRunning: false,
                       };
                       break;
+                    case "production_error":
+                      updates = {
+                        error: eventData.error,
+                        phase: "error",
+                        isRunning: false
+                      };
+                      break;
                   }
-                  
+
                   if (Object.keys(updates).length > 0) {
                     updateState(superAgentMessageId, updates);
                   }
@@ -3566,7 +3320,7 @@ export function ChatInterface({
             }
           }
         }
-        
+
         // Stream completed - update assistant message with final content
         if (finalResult) {
           const finalAssistantMessage: Message = {
@@ -3577,17 +3331,17 @@ export function ChatInterface({
             requestId: generateRequestId(),
             userMessageId: userMsgId,
           };
-          
+
           // Update optimistic message
-          setOptimisticMessages(prev => 
+          setOptimisticMessages(prev =>
             prev.map(m => m.id === superAgentMessageId ? finalAssistantMessage : m)
           );
           onSendMessage(finalAssistantMessage);
-          
+
           completeRun(superAgentMessageId, finalResult);
           setActiveRunId(null);
         }
-        
+
       } catch (error) {
         console.error("[Super Agent] Stream error:", error);
         updateState(superAgentMessageId, {
@@ -3595,7 +3349,7 @@ export function ChatInterface({
           phase: "error",
           isRunning: false,
         });
-        
+
         const errorMessage: Message = {
           id: superAgentMessageId,
           role: "assistant",
@@ -3604,26 +3358,26 @@ export function ChatInterface({
           requestId: generateRequestId(),
           userMessageId: userMsgId,
         };
-        
-        setOptimisticMessages(prev => 
+
+        setOptimisticMessages(prev =>
           prev.map(m => m.id === superAgentMessageId ? errorMessage : m)
         );
         onSendMessage(errorMessage);
         setActiveRunId(null);
       }
-      
+
       setAiState("idle");
       setAiProcessSteps([]);
       return;
     }
-    
+
     // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
     const hasAttachedFiles = uploadedFiles.length > 0;
     const complexityCheck = shouldAutoActivateAgent(input, hasAttachedFiles);
-    
+
     if (!isGenerationRequest && complexityCheck.agent_required && complexityCheck.confidence === 'high') {
       console.log("[handleSubmit] Auto-activating Agent mode:", complexityCheck.agent_reason);
-      
+
       const userMessageContent = input;
       const readyFiles = uploadedFiles.filter(f => f.status === "ready");
       const agentAttachments = readyFiles.map(f => ({
@@ -3632,16 +3386,16 @@ export function ChatInterface({
         type: f.type,
         spreadsheetData: f.spreadsheetData
       }));
-      
+
       setInput("");
       if (chatId) {
         clearDraft(chatId);
       }
       setUploadedFiles([]);
-      
+
       const agentMessageId = `agent-${Date.now()}`;
       setCurrentAgentMessageId(agentMessageId);
-      
+
       try {
         const result = await startAgentRun(
           chatId || "",
@@ -3649,14 +3403,14 @@ export function ChatInterface({
           agentMessageId,
           agentAttachments
         );
-        
+
         if (result) {
           toast({
             title: "Modo Agente activado",
             description: complexityCheck.agent_reason || "Tarea compleja detectada",
             duration: 4000,
           });
-          
+
           const userMessage: Message = {
             id: `user-${Date.now()}`,
             role: "user",
@@ -3666,7 +3420,7 @@ export function ChatInterface({
           // Show message immediately (optimistic update)
           setOptimisticMessages(prev => [...prev, userMessage]);
           onSendMessage(userMessage);
-          
+
           setSelectedTool(null);
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
             window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
@@ -3687,7 +3441,7 @@ export function ChatInterface({
         setCurrentAgentMessageId(null);
         // Continue to normal chat processing below instead of returning
       }
-      
+
       // Only return if agent succeeded (result is truthy)
       if (useAgentStore.getState().runs[agentMessageId]?.runId) {
         return;
@@ -3698,10 +3452,10 @@ export function ChatInterface({
       .filter(f => f.status === "ready" || f.status === "processing")
       .map(f => ({
         type: f.type.startsWith("image/") ? "image" as const :
-              f.type.includes("word") || f.type.includes("document") ? "word" as const :
-              f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
+          f.type.includes("word") || f.type.includes("document") ? "word" as const :
+            f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
               f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
-              "word" as const,
+                "word" as const,
         name: f.name,
         mimeType: f.type,
         imageUrl: f.dataUrl,
@@ -3709,15 +3463,15 @@ export function ChatInterface({
         fileId: f.id,
         spreadsheetData: f.spreadsheetData,
       }));
-    
+
     // Set thinking state FIRST to show stop button immediately
     setAiState("thinking");
     streamingContentRef.current = "";
     setStreamingContent("");
-    
+
     const userInput = input;
     const currentFiles = [...uploadedFiles];
-    
+
     // Reset uiPhase to 'idle' for regular (non-Super Agent) messages
     if (uiPhase !== 'idle') {
       console.log('[uiPhase] Reset to idle for regular message');
@@ -3728,9 +3482,9 @@ export function ChatInterface({
       clearTimeout(uiPhaseTimerRef.current);
       uiPhaseTimerRef.current = null;
     }
-    
+
     // Initialize process steps based on context (reuse hasAttachedFiles from above)
-    const initialSteps: {step: string; status: "pending" | "active" | "done"}[] = [];
+    const initialSteps: { step: string; status: "pending" | "active" | "done" }[] = [];
     if (hasAttachedFiles) {
       initialSteps.push({ step: "Analizando archivos adjuntos", status: "active" });
     }
@@ -3745,12 +3499,13 @@ export function ChatInterface({
     setUploadedFiles([]);
 
     // Generate unique IDs for idempotency
+    // userMsgId is already defined above, reusing it
     const userMsgId = Date.now().toString();
     const userRequestId = generateRequestId(); // Unique ID for user message
     const clientRequestId = generateClientRequestId(); // For run-based idempotency
     // Note: Each assistant message generates its own unique requestId inline
     // Idempotency is handled in addMessage via markRequestProcessing
-    
+
     const userMsg: Message = {
       id: userMsgId,
       role: "user",
@@ -3763,7 +3518,7 @@ export function ChatInterface({
     };
 
     console.log("[handleSubmit] sending user message:", userMsg, "chatId:", chatId);
-    
+
     // CRITICAL: Add user message to UI IMMEDIATELY (optimistic update)
     // This ensures the user sees their message with attachments right away,
     // before any async operations like document analysis begin
@@ -3772,63 +3527,63 @@ export function ChatInterface({
       console.log("[handleSubmit] setOptimisticMessages: prev count:", prev.length, "adding:", userMsg.id);
       return [...prev, userMsg];
     });
-    
+
     // DATA_MODE: Pre-check if we have document attachments that need analysis
     // This must happen BEFORE onSendMessage to avoid race conditions with chat navigation
     const isDocumentFileLegacyPrecheck = (mimeType: string, fileName: string, type?: string): boolean => {
       const lowerMime = (mimeType || "").toLowerCase();
       const lowerName = (fileName || "").toLowerCase();
       const lowerType = (type || "").toLowerCase();
-      
+
       if (lowerType === "image" || lowerMime.startsWith("image/")) return false;
-      
+
       const docMimePatterns = ["pdf", "word", "document", "sheet", "excel", "spreadsheet", "presentation", "powerpoint", "csv", "text/plain", "text/csv", "application/json"];
       if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
-      
+
       const docExtensions = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"];
       if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
-      
+
       if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType)) return true;
-      
+
       if (!lowerMime || lowerMime === "application/octet-stream") {
         const hasImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"].some(ext => lowerName.endsWith(ext));
         return !hasImageExt;
       }
-      
+
       return false;
     };
-    
+
     const hasDocumentAttachmentsPrecheck = attachments.some(a => isDocumentFileLegacyPrecheck(a.mimeType || String(a.type), a.name, String(a.type)));
-    
+
     // Store pre-fetched analysis result to use later (prevents race condition)
-    let preFetchedAnalysisResult: { 
-      answer_text?: string; 
-      ui_components?: any[]; 
-      documentModel?: any; 
+    let preFetchedAnalysisResult: {
+      answer_text?: string;
+      ui_components?: any[];
+      documentModel?: any;
       insights?: string[];
       suggestedQuestions?: string[];
     } | null = null;
-    
+
     // If we have document attachments, execute analysis BEFORE calling onSendMessage
     // This prevents race condition where chat navigation interrupts the fetch
     // The result is stored and used later in the legacy flow
     // Use a DEDICATED controller for pre-fetch to not interfere with main abortControllerRef
     if (hasDocumentAttachmentsPrecheck) {
       console.log("[handleSubmit] DATA_MODE (Pre-send): Executing document analysis BEFORE chat navigation");
-      
+
       // Create a dedicated abort controller for the pre-fetch, stored in shared ref for cancellation
       analysisAbortControllerRef.current = new AbortController();
-      
+
       try {
         // Clean attachments for server
         const cleanedAttachments = attachments.map((att: any) => {
           const { spreadsheetData, previewData, ...rest } = att;
-          const normalizedType = ['word', 'excel', 'pdf', 'ppt', 'text', 'csv'].includes(rest.type?.toLowerCase?.()) 
-            ? 'document' 
+          const normalizedType = ['word', 'excel', 'pdf', 'ppt', 'text', 'csv'].includes(rest.type?.toLowerCase?.())
+            ? 'document'
             : (rest.type === 'image' ? 'image' : 'document');
           return { ...rest, type: normalizedType };
         });
-        
+
         const effectiveConversationId = chatId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
         const finalChatHistoryPrecheck = [
           ...messages.map(m => ({
@@ -3837,9 +3592,9 @@ export function ChatInterface({
           })),
           { role: "user", content: userInput }
         ];
-        
+
         console.log("[handleSubmit] Pre-send: Fetching /api/analyze with attachments:", cleanedAttachments.map((a: any) => ({ name: a.name, storagePath: a.storagePath })));
-        
+
         const analyzeResponse = await fetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3850,9 +3605,9 @@ export function ChatInterface({
           }),
           signal: analysisAbortControllerRef.current.signal
         });
-        
+
         console.log("[handleSubmit] Pre-send: Analyze response status:", analyzeResponse.status);
-        
+
         if (analyzeResponse.ok) {
           preFetchedAnalysisResult = await analyzeResponse.json();
           console.log("[handleSubmit] Pre-send: Analysis successful, stored for later use");
@@ -3876,17 +3631,18 @@ export function ChatInterface({
         analysisAbortControllerRef.current = null; // Clear the ref after analysis completes
       }
     }
-    
+
     // Send user message and get run info for SSE streaming
     const messageResult = await onSendMessage(userMsg);
     console.log("[handleSubmit] messageResult:", messageResult);
     const runInfo = messageResult?.run;
 
-    // Check for Google Forms intent
+    // Check for Google Forms intent - ONLY trigger on HIGH confidence to prevent false positives
     const { hasMention, cleanPrompt } = extractMentionFromPrompt(userInput);
     const formIntent = detectFormIntent(cleanPrompt, isGoogleFormsActive, hasMention);
-    
-    if (formIntent.hasFormIntent && formIntent.confidence !== 'low') {
+
+    // Only activate Google Forms on HIGH confidence (explicit mention or specific phrase match)
+    if (formIntent.hasFormIntent && formIntent.confidence === 'high') {
       // Create file context from uploaded files
       const fileContext = currentFiles
         .filter(f => f.content && f.status === "ready")
@@ -3895,7 +3651,7 @@ export function ChatInterface({
           content: f.content || "",
           type: f.type
         }));
-      
+
       // Create assistant message with inline form preview
       const formPreviewMsg: Message = {
         id: (Date.now() + 1).toString(),
@@ -3910,7 +3666,7 @@ export function ChatInterface({
           autoStart: true
         }
       };
-      
+
       onSendMessage(formPreviewMsg);
       // Note: markRequestComplete is called inside addMessage after persistence
       setAiState("idle");
@@ -3921,7 +3677,7 @@ export function ChatInterface({
     // Check for Gmail intent
     const hasGmailMention = userInput.toLowerCase().includes('@gmail');
     const gmailIntent = detectGmailIntent(cleanPrompt, isGmailActive, hasGmailMention);
-    
+
     if (gmailIntent.hasGmailIntent && gmailIntent.confidence !== 'low') {
       setAiState("thinking");
       setAiProcessSteps([
@@ -3929,11 +3685,11 @@ export function ChatInterface({
         { step: "Analizando correos encontrados", status: "pending" },
         { step: "Generando respuesta inteligente", status: "pending" }
       ]);
-      
+
       try {
         const fullMessages = messages.map(m => ({ role: m.role, content: m.content }));
         fullMessages.push({ role: "user", content: cleanPrompt });
-        
+
         const chatResponse = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3944,17 +3700,17 @@ export function ChatInterface({
             useRag: true
           })
         });
-        
-        setAiProcessSteps(prev => prev.map((s, i) => 
-          i === 0 ? { ...s, status: "done" as const } : 
-          i === 1 ? { ...s, status: "active" as const } : s
+
+        setAiProcessSteps(prev => prev.map((s, i) =>
+          i === 0 ? { ...s, status: "done" as const } :
+            i === 1 ? { ...s, status: "active" as const } : s
         ));
-        
+
         if (chatResponse.ok) {
           const data = await chatResponse.json();
-          
+
           setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
-          
+
           const gmailResponseMsg: Message = {
             id: (Date.now() + 1).toString(),
             role: "assistant",
@@ -3988,7 +3744,7 @@ export function ChatInterface({
         };
         onSendMessage(gmailErrorMsg);
       }
-      
+
       setAiState("idle");
       setAiProcessSteps([]);
       return;
@@ -4003,12 +3759,12 @@ export function ChatInterface({
         { step: "Creando hojas y datos", status: "pending" },
         { step: "Aplicando fórmulas y gráficos", status: "pending" }
       ]);
-      
+
       try {
         await orchestratorRef.current.runOrchestrator(cleanPrompt);
-        
+
         setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
-        
+
         const orchestratorMsg: Message = {
           id: (Date.now() + 1).toString(),
           role: "assistant",
@@ -4030,7 +3786,7 @@ export function ChatInterface({
         };
         onSendMessage(errorMsg);
       }
-      
+
       setAiState("idle");
       setAiProcessSteps([]);
       return;
@@ -4038,11 +3794,11 @@ export function ChatInterface({
 
     try {
       abortControllerRef.current = new AbortController();
-      
+
       // Check if this is an image generation request (manual tool selection or auto-detect)
       const isImageTool = selectedTool === "image";
       let shouldGenerateImage = isImageTool;
-      
+
       // CRITICAL FIX: When files are attached, NEVER auto-detect image generation
       // Files indicate document analysis intent, not image generation
       // Auto-detect image requests ONLY if no tool is selected AND no files attached
@@ -4059,12 +3815,12 @@ export function ChatInterface({
           console.error("Image detection error:", e);
         }
       }
-      
+
       // If files are attached, log that we're skipping image detection
       if (hasAttachedFiles && !isImageTool) {
         console.log(`[ChatInterface] Files attached (${currentFiles.length}), skipping image auto-detection - will process as document analysis`);
       }
-      
+
       // Generate image if needed
       if (shouldGenerateImage) {
         setIsGeneratingImage(true);
@@ -4073,7 +3829,7 @@ export function ChatInterface({
           { step: "Generando imagen con IA", status: "active" },
           { step: "Procesando resultado", status: "pending" }
         ]);
-        
+
         try {
           const imageRes = await fetch("/api/image/generate", {
             method: "POST",
@@ -4081,17 +3837,17 @@ export function ChatInterface({
             body: JSON.stringify({ prompt: userInput }),
             signal: abortControllerRef.current.signal
           });
-          
+
           const imageData = await imageRes.json();
-          
+
           if (imageRes.ok && imageData.success) {
             setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
-            
+
             const msgId = (Date.now() + 1).toString();
-            
+
             // Store image in separate memory store to prevent loss during localStorage sync
             storeGeneratedImage(msgId, imageData.imageData);
-            
+
             // Track last generated image for edit operations
             storeLastGeneratedImageInfo({
               messageId: msgId,
@@ -4099,7 +3855,7 @@ export function ChatInterface({
               artifactId: imageData.artifactId || null,
               previewUrl: imageData.previewUrl,
             });
-            
+
             // Save generated image to user's library (fire and forget)
             if (user) {
               fetch("/api/library", {
@@ -4117,12 +3873,12 @@ export function ChatInterface({
                 })
               }).catch(err => console.error("Failed to save image to library:", err));
             }
-            
+
             // Also store in local component state and ref for persistence across remounts
             const pendingImage = { messageId: msgId, imageData: imageData.imageData };
             setPendingGeneratedImage(pendingImage);
             latestGeneratedImageRef.current = pendingImage;
-            
+
             const aiMsg: Message = {
               id: msgId,
               role: "assistant",
@@ -4133,7 +3889,7 @@ export function ChatInterface({
               userMessageId: userMsgId,
             };
             onSendMessage(aiMsg);
-            
+
             setIsGeneratingImage(false);
             setAiState("idle");
             setAiProcessSteps([]);
@@ -4155,13 +3911,13 @@ export function ChatInterface({
           console.error("Image generation failed:", imgError);
         }
       }
-      
+
       const fileContents = currentFiles
         .filter(f => f.content && f.status === "ready")
         .map(f => `[ARCHIVO ADJUNTO: "${f.name}"]\n${f.content}\n[FIN DEL ARCHIVO]`)
         .join("\n\n");
-      
-      const messageWithFiles = fileContents 
+
+      const messageWithFiles = fileContents
         ? `${fileContents}\n\n[SOLICITUD DEL USUARIO]: ${userInput}`
         : userInput;
 
@@ -4183,9 +3939,9 @@ export function ChatInterface({
       const isPptMode = documentType === "ppt";
       const isWordMode = documentType === "word";
       const isExcelMode = documentType === "excel";
-      
+
       console.log('[ChatInterface] Document mode detection:', { isDocumentMode, documentType, isExcelMode, hasInsertFn: !!docInsertContentRef.current });
-      
+
       // Check if document has existing content (not just placeholder)
       const currentDocContent = editedDocumentContent || "";
       const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '').trim();
@@ -4195,12 +3951,12 @@ export function ChatInterface({
         "comienza a escribir",
         "escribe aquí"
       ];
-      const isPlaceholder = placeholderPhrases.some(p => 
+      const isPlaceholder = placeholderPhrases.some(p =>
         plainTextContent.toLowerCase().includes(p)
       );
       // Any non-empty, non-placeholder content should be preserved
       const hasExistingContent = isWordMode && !isPlaceholder && plainTextContent.length > 0;
-      
+
       // Build system prompt for Word document mode (cumulative - each response adds to document)
       let wordSystemPrompt = "";
       if (isWordMode) {
@@ -4220,7 +3976,7 @@ INSTRUCCIONES IMPORTANTES:
 Responde SOLO con el contenido del documento en formato Markdown, sin explicaciones adicionales.`;
         }
       }
-      
+
       // Build Excel system prompt for direct streaming to spreadsheet
       const excelSystemPrompt = `Eres un asistente de hojas de cálculo Excel. Genera datos estructurados en formato CSV.
 
@@ -4242,9 +3998,9 @@ IMPORTANTE:
 - Usa comas como separador de columnas
 - Cada fila en una línea separada
 - Los datos numéricos sin formato de moneda (solo números)`;
-      
+
       // Build chat history with appropriate system prompt
-      let finalChatHistory: Array<{role: string; content: string}> = chatHistory;
+      let finalChatHistory: Array<{ role: string; content: string }> = chatHistory;
       if (isPptMode) {
         finalChatHistory = [{ role: "system", content: PPT_STREAMING_SYSTEM_PROMPT }, ...chatHistory];
       } else if (isExcelMode) {
@@ -4252,11 +4008,11 @@ IMPORTANTE:
       } else if (isWordMode) {
         finalChatHistory = [{ role: "system", content: wordSystemPrompt }, ...chatHistory];
       }
-      
+
       // Capture document mode state NOW using ref (avoids closure issues)
       // For Excel, also check previewDocument since Excel can be opened via preview
       const shouldWriteToDoc = !!activeDocEditorRef.current || (isExcelMode && !!docInsertContentRef.current);
-      
+
       // Capture existing document HTML for cumulative mode (shared between SSE and legacy)
       // Note: currentDocContent is HTML from the editor
       const existingDocHTML = isWordMode && hasExistingContent ? currentDocContent : "";
@@ -4266,9 +4022,12 @@ IMPORTANTE:
       if (runInfo && chatId) {
         // SSE streaming mode - real-time streaming from server
         setAiState("responding");
-        
+
         // Update steps: mark processing done, searching active
         setAiProcessSteps(prev => prev.map((s, i) => {
+          // Guard against undefined step or s
+          if (!s || !s.step) return s;
+
           if (s.step.includes("Analizando")) return { ...s, status: "done" };
           if (s.step.includes("Procesando")) return { ...s, status: "done" };
           if (s.step.includes("Buscando")) return { ...s, status: "active" };
@@ -4284,28 +4043,28 @@ IMPORTANTE:
           const isDocumentFile = (mimeType: string, fileName: string): boolean => {
             const lowerMime = (mimeType || "").toLowerCase();
             const lowerName = (fileName || "").toLowerCase();
-            
+
             // Check for explicit image MIME types first
             if (lowerMime.startsWith("image/")) return false;
-            
+
             // Document MIME types
             const docMimePatterns = [
-              "pdf", "word", "document", "sheet", "excel", 
+              "pdf", "word", "document", "sheet", "excel",
               "spreadsheet", "presentation", "powerpoint", "csv",
               "text/plain", "text/csv", "application/json"
             ];
             if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
-            
+
             // Document file extensions
             const docExtensions = [
               ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
               ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"
             ];
             if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
-            
+
             // If mimeType is empty/unknown and has no extension, treat as document (safer)
             if (!lowerMime || lowerMime === "application/octet-stream") return true;
-            
+
             return false;
           };
 
@@ -4314,23 +4073,23 @@ IMPORTANTE:
             .filter(f => f.status === "ready" || f.status === "processing")
             .map(f => ({
               type: f.type.startsWith("image/") ? "image" as const :
-                    f.type.includes("pdf") ? "pdf" as const :
-                    f.type.includes("word") || f.type.includes("document") ? "word" as const :
+                f.type.includes("pdf") ? "pdf" as const :
+                  f.type.includes("word") || f.type.includes("document") ? "word" as const :
                     f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
-                    f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
-                    "document" as const,
+                      f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
+                        "document" as const,
               name: f.name,
               mimeType: f.type,
               storagePath: f.storagePath,
               fileId: f.id,
               content: f.content,
             }));
-          
+
           // Robust document detection using both mimeType AND file extension
           const hasDocumentAttachments = currentFiles
             .filter(f => f.status === "ready" || f.status === "processing")
             .some(f => isDocumentFile(f.type, f.name));
-          
+
           // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
           if (hasDocumentAttachments) {
             console.log("[handleSubmit] DATA_MODE: Using /analyze endpoint for document analysis");
@@ -4344,14 +4103,14 @@ IMPORTANTE:
               }),
               signal: abortControllerRef.current?.signal
             });
-            
+
             if (!analyzeResponse.ok) {
               const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
               throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
             }
-            
+
             const analyzeResult = await analyzeResponse.json();
-            
+
             // Create assistant message with analysis results
             const analysisMsg: Message = {
               id: (Date.now() + 1).toString(),
@@ -4368,13 +4127,16 @@ IMPORTANTE:
               } : undefined,
             };
             onSendMessage(analysisMsg);
-            
+
             setAiState("idle");
             setAiProcessSteps([]);
             abortControllerRef.current = null;
             return;
           }
-          
+
+          // DEBUG: Log selectedDocTool value before making request
+          console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
+
           const response = await fetch("/api/chat/stream", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -4383,7 +4145,9 @@ IMPORTANTE:
               conversationId: chatId,
               runId: runInfo.id,
               chatId: chatId,
-              attachments: streamAttachments.length > 0 ? streamAttachments : undefined
+              attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+              // Send selected doc tool for production mode activation
+              docTool: selectedDocTool || null
             }),
             signal: abortControllerRef.current?.signal
           });
@@ -4410,6 +4174,7 @@ IMPORTANTE:
 
           // Update steps: mark searching done, generating active
           setAiProcessSteps(prev => prev.map(s => {
+            if (!s || !s.step) return s;
             if (s.step.includes("Buscando")) return { ...s, status: "done" };
             if (s.step.includes("Generando")) return { ...s, status: "active" };
             return { ...s, status: s.status === "pending" ? "pending" : "done" };
@@ -4436,22 +4201,22 @@ IMPORTANTE:
 
           while (!streamComplete) {
             const { done, value } = await reader.read();
-            
+
             if (done) break;
-            
+
             buffer += decoder.decode(value, { stream: true });
-            
+
             // Parse SSE events from buffer
             const lines = buffer.split("\n");
             buffer = lines.pop() || ""; // Keep incomplete line in buffer
-            
+
             for (const line of lines) {
               // Track event type for the next data line
               if (line.startsWith("event: ")) {
                 currentEventType = line.slice(7).trim();
                 continue;
               }
-              
+
               if (line.startsWith("data: ")) {
                 let data: any;
                 try {
@@ -4461,7 +4226,7 @@ IMPORTANTE:
                   console.debug('[SSE] Parse error, skipping line:', line);
                   continue;
                 }
-                
+
                 // Skip out-of-order sequences for deduplication
                 if (typeof data.sequenceId === 'number') {
                   if (data.sequenceId <= lastSeq) {
@@ -4470,23 +4235,23 @@ IMPORTANTE:
                   }
                   lastSeq = data.sequenceId;
                 }
-                
+
                 // Handle completion events (done or complete)
                 if (currentEventType === 'complete' || currentEventType === 'done' || data.done === true) {
                   console.debug('[SSE] Stream complete event received');
                   streamComplete = true;
                   break;
                 }
-                
+
                 // Handle error events
                 if (currentEventType === 'error') {
                   throw new Error(data.error || 'SSE stream error');
                 }
-                
+
                 // Handle chunk events with content
                 if (currentEventType === 'chunk' && data.content) {
                   fullContent += data.content;
-                  
+
                   // Update UI based on mode
                   if (isPptMode && shouldWriteToDoc) {
                     pptStreaming.processChunk(data.content);
@@ -4510,7 +4275,7 @@ IMPORTANTE:
                     setStreamingContent(fullContent);
                   }
                 }
-                
+
                 // Reset event type after processing data
                 currentEventType = "chunk";
               }
@@ -4541,7 +4306,7 @@ IMPORTANTE:
         console.log('[ChatInterface] Finalize check:', { isPptMode, isExcelMode, isWordMode, shouldWriteToDoc, hasInsertFn: !!docInsertContentRef.current, fullContentLength: fullContent.length });
         if (isPptMode && shouldWriteToDoc) {
           pptStreaming.stopStreaming();
-          
+
           const confirmMsg: Message = {
             id: (Date.now() + 1).toString(),
             role: "assistant",
@@ -4563,7 +4328,7 @@ IMPORTANTE:
           } catch (err) {
             console.error('[ChatInterface] Error streaming to Excel:', err);
           }
-          
+
           const confirmMsg: Message = {
             id: (Date.now() + 1).toString(),
             role: "assistant",
@@ -4583,7 +4348,7 @@ IMPORTANTE:
           } catch (err) {
             console.error('[ChatInterface] Error finalizing document:', err);
           }
-          
+
           const confirmMsg: Message = {
             id: (Date.now() + 1).toString(),
             role: "assistant",
@@ -4595,6 +4360,7 @@ IMPORTANTE:
           await onSendMessage(confirmMsg);
         } else {
           // Normal chat mode - create final assistant message
+          const uncertainty = detectUncertainty(fullContent);
           const aiMsg: Message = {
             id: (Date.now() + 1).toString(),
             role: "assistant",
@@ -4602,6 +4368,8 @@ IMPORTANTE:
             timestamp: new Date(),
             requestId: generateRequestId(),
             userMessageId: userMsgId,
+            confidence: uncertainty.confidence,
+            uncertaintyReason: uncertainty.reason,
           };
           await onSendMessage(aiMsg);
         }
@@ -4619,32 +4387,32 @@ IMPORTANTE:
           const lowerMime = (mimeType || "").toLowerCase();
           const lowerName = (fileName || "").toLowerCase();
           const lowerType = (type || "").toLowerCase();
-          
+
           if (lowerType === "image" || lowerMime.startsWith("image/")) return false;
-          
+
           const docMimePatterns = ["pdf", "word", "document", "sheet", "excel", "spreadsheet", "presentation", "powerpoint", "csv", "text/plain", "text/csv", "application/json"];
           if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
-          
+
           const docExtensions = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"];
           if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
-          
+
           if (["pdf", "word", "excel", "ppt", "document"].includes(lowerType)) return true;
-          
+
           if (!lowerMime || lowerMime === "application/octet-stream") {
             const hasImageExt = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"].some(ext => lowerName.endsWith(ext));
             return !hasImageExt;
           }
-          
+
           return false;
         };
-        
+
         const hasDocumentAttachments = attachments.some(a => isDocumentFileLegacy(a.mimeType || a.type, a.name, a.type));
-        
+
         // Use pre-fetched result if available (prevents race condition)
         // Note: We send the analysis result and then continue with normal flow (no early return)
         if (hasDocumentAttachments && preFetchedAnalysisResult) {
           console.log("[handleSubmit] DATA_MODE (Legacy): Using pre-fetched analysis result");
-          
+
           // Send analysis result as assistant message
           const analysisMsg: Message = {
             id: (Date.now() + 1).toString(),
@@ -4661,7 +4429,7 @@ IMPORTANTE:
             } : undefined,
           };
           onSendMessage(analysisMsg);
-          
+
           // Complete the flow and return - document analysis is a complete response
           setAiState("idle");
           setAiProcessSteps([]);
@@ -4670,20 +4438,20 @@ IMPORTANTE:
         } else if (hasDocumentAttachments && !preFetchedAnalysisResult) {
           // Pre-fetch failed, try again (fallback - shouldn't normally happen)
           console.log("[handleSubmit] DATA_MODE (Legacy): Pre-fetch failed, falling back to /api/analyze fetch");
-          
+
           const cleanedAttachments = attachments.map((att: any) => {
             const { spreadsheetData, previewData, ...rest } = att;
-            const normalizedType = ['word', 'excel', 'pdf', 'ppt', 'text', 'csv'].includes(rest.type?.toLowerCase?.()) 
-              ? 'document' 
+            const normalizedType = ['word', 'excel', 'pdf', 'ppt', 'text', 'csv'].includes(rest.type?.toLowerCase?.())
+              ? 'document'
               : (rest.type === 'image' ? 'image' : 'document');
             return { ...rest, type: normalizedType };
           });
-          
+
           const effectiveConversationId = chatId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
-          
+
           // Create a new AbortController for the fallback fetch (stored in shared ref for cancellation)
           analysisAbortControllerRef.current = new AbortController();
-          
+
           try {
             const analyzeResponse = await fetch("/api/analyze", {
               method: "POST",
@@ -4695,10 +4463,10 @@ IMPORTANTE:
               }),
               signal: analysisAbortControllerRef.current.signal
             });
-            
+
             if (analyzeResponse.ok) {
               const analyzeResult = await analyzeResponse.json();
-              
+
               const analysisMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
@@ -4714,7 +4482,7 @@ IMPORTANTE:
                 } : undefined,
               };
               onSendMessage(analysisMsg);
-              
+
               setAiState("idle");
               setAiProcessSteps([]);
               analysisAbortControllerRef.current = null;
@@ -4737,11 +4505,11 @@ IMPORTANTE:
             analysisAbortControllerRef.current = null;
           }
         }
-        
+
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             messages: finalChatHistory,
             images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
             documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
@@ -4758,18 +4526,19 @@ IMPORTANTE:
 
         // Update steps: mark processing done, searching active
         setAiProcessSteps(prev => prev.map((s, i) => {
+          if (!s || !s.step) return s;
           if (s.step.includes("Analizando")) return { ...s, status: "done" };
           if (s.step.includes("Procesando")) return { ...s, status: "done" };
           if (s.step.includes("Buscando")) return { ...s, status: "active" };
           return s;
         }));
-        
+
         const data = await response.json();
 
         if (!response.ok) {
           throw new Error(data.error || "Failed to get response");
         }
-        
+
         // Save and log GPT session metadata from server
         if (data.session_id) {
           setGptSessionId(data.session_id);
@@ -4780,9 +4549,10 @@ IMPORTANTE:
             toolPermissions: data.tool_permissions
           });
         }
-        
+
         // Update steps: mark searching done, generating active
         setAiProcessSteps(prev => prev.map(s => {
+          if (!s || !s.step) return s;
           if (s.step.includes("Buscando")) return { ...s, status: "done" };
           if (s.step.includes("Generando")) return { ...s, status: "active" };
           return { ...s, status: s.status === "pending" ? "pending" : "done" };
@@ -4793,11 +4563,11 @@ IMPORTANTE:
         const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
         const responseArtifact = data.artifact;
         const responseWebSources = data.webSources;
-        
+
         // If Figma diagram was generated, add it to chat with simulated streaming
         if (figmaDiagram) {
           setAiState("responding");
-          
+
           let currentIndex = 0;
           streamIntervalRef.current = setInterval(() => {
             if (currentIndex < fullContent.length) {
@@ -4810,7 +4580,7 @@ IMPORTANTE:
                 clearInterval(streamIntervalRef.current);
                 streamIntervalRef.current = null;
               }
-              
+
               const aiMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
@@ -4820,31 +4590,36 @@ IMPORTANTE:
                 userMessageId: userMsgId,
                 figmaDiagram,
                 webSources: responseWebSources,
+                confidence: detectUncertainty(fullContent).confidence,
+                uncertaintyReason: detectUncertainty(fullContent).reason,
               };
               onSendMessage(aiMsg);
-              
+
               streamingContentRef.current = "";
               setStreamingContent("");
               setAiState("idle");
               setAiProcessSteps([]);
-              setSelectedDocTool(null);
+              // Only reset doc tool if there's no active document editor
+              if (!activeDocEditorRef.current) {
+                setSelectedDocTool(null);
+              }
               agent.complete();
               abortControllerRef.current = null;
             }
           }, 10);
           return;
         }
-        
+
         // Legacy simulated streaming for other cases
         setAiState("responding");
-        
+
         // Check document modes
         const isExcelModeLegacy = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
         const isWordModeLegacy = activeDocEditorRef.current?.type === "word";
         const shouldWriteToDocLegacy = !!activeDocEditorRef.current && isWordModeLegacy;
-        
+
         console.log('[ChatInterface] Legacy mode:', { isExcelModeLegacy, isWordModeLegacy, hasInsertFn: !!docInsertContentRef.current });
-        
+
         // Excel mode: send data directly to Excel at the end (no progressive streaming in chat)
         if (isExcelModeLegacy && docInsertContentRef.current) {
           console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
@@ -4879,15 +4654,15 @@ IMPORTANTE:
           abortControllerRef.current = null;
           return;
         }
-        
+
         // Word mode or normal chat: use progressive streaming
         let currentIndex = 0;
-        
+
         streamIntervalRef.current = setInterval(() => {
           if (currentIndex < fullContent.length) {
             const chunkSize = Math.floor(Math.random() * 3) + 1;
             const newContent = fullContent.slice(0, currentIndex + chunkSize);
-            
+
             // Write to document if in document mode (cumulative)
             if (shouldWriteToDocLegacy && docInsertContentRef.current) {
               try {
@@ -4900,6 +4675,11 @@ IMPORTANTE:
                 console.error('[ChatInterface] Error streaming to document (legacy):', err);
               }
             } else {
+              // Store content in streaming store for conversation affinity
+              const originalChatId = streamingChatIdRef.current;
+              if (originalChatId) {
+                appendContent(originalChatId, fullContent.slice(currentIndex, currentIndex + chunkSize), currentIndex);
+              }
               streamingContentRef.current = newContent;
               setStreamingContent(newContent);
             }
@@ -4909,7 +4689,7 @@ IMPORTANTE:
               clearInterval(streamIntervalRef.current);
               streamIntervalRef.current = null;
             }
-            
+
             // Finalize document or create message (cumulative)
             if (shouldWriteToDocLegacy && docInsertContentRef.current) {
               try {
@@ -4921,7 +4701,7 @@ IMPORTANTE:
               } catch (err) {
                 console.error('[ChatInterface] Error finalizing document (legacy):', err);
               }
-              
+
               const confirmMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
@@ -4932,6 +4712,7 @@ IMPORTANTE:
               };
               onSendMessage(confirmMsg);
             } else {
+              const uncertainty = detectUncertainty(fullContent);
               const aiMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
@@ -4942,10 +4723,12 @@ IMPORTANTE:
                 sources: responseSources.length > 0 ? responseSources : undefined,
                 artifact: responseArtifact,
                 webSources: responseWebSources,
+                confidence: uncertainty.confidence,
+                uncertaintyReason: uncertainty.reason,
               };
               onSendMessage(aiMsg);
             }
-            
+
             streamingContentRef.current = "";
             setStreamingContent("");
             setAiState("idle");
@@ -4955,21 +4738,26 @@ IMPORTANTE:
           }
         }, 15);
       }
-      
+
     } catch (error: any) {
       // Clean up PPT streaming on any error
       if (pptStreaming.isStreaming) {
         pptStreaming.stopStreaming();
       }
-      
+
       if (error.name === "AbortError") {
         return;
       }
-      
-      // Enhanced error logging for debugging
-      const errorMessage = error?.message || error?.toString?.() || JSON.stringify(error) || 'Error desconocido';
+
+      // Enhanced error logging for debugging - ensure errorMessage is always a string
+      const rawErrorMessage = error?.message || error?.toString?.() || error;
+      const errorMessage = typeof rawErrorMessage === 'string'
+        ? rawErrorMessage
+        : (typeof rawErrorMessage === 'object' && rawErrorMessage !== null
+          ? (rawErrorMessage.message || rawErrorMessage.error || JSON.stringify(rawErrorMessage))
+          : 'Error desconocido');
       console.error("Chat error:", error, "Message:", errorMessage, "Stack:", error?.stack);
-      
+
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
@@ -4995,7 +4783,7 @@ IMPORTANTE:
           {activeGpt ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <div 
+                <div
                   className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
                   data-testid="button-gpt-menu"
                 >
@@ -5035,7 +4823,7 @@ IMPORTANTE:
                   </DropdownMenuPortal>
                 </DropdownMenuSub>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={onNewChat} className="flex items-center gap-2">
+                <DropdownMenuItem onClick={handleNewChat} className="flex items-center gap-2">
                   <Pencil className="h-4 w-4" />
                   <span>Nuevo chat</span>
                 </DropdownMenuItem>
@@ -5059,24 +4847,24 @@ IMPORTANTE:
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem 
+                <DropdownMenuItem
                   onClick={() => {
                     navigator.clipboard.writeText(`${window.location.origin}/gpts/${activeGpt.id}`);
                     toast({ title: "Enlace copiado", description: "El enlace del GPT se ha copiado al portapapeles" });
-                  }} 
+                  }}
                   className="flex items-center gap-2"
                 >
                   <Link className="h-4 w-4" />
                   <span>Copiar enlace</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem 
+                <DropdownMenuItem
                   onClick={() => toast({ title: "Valorar GPT", description: "Esta función estará disponible próximamente" })}
                   className="flex items-center gap-2"
                 >
                   <Star className="h-4 w-4" />
                   <span>Valorar GPT</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem 
+                <DropdownMenuItem
                   onClick={() => toast({ title: "Denunciar GPT", description: "Puedes reportar contenido inapropiado a soporte" })}
                   className="flex items-center gap-2 text-destructive"
                 >
@@ -5088,7 +4876,7 @@ IMPORTANTE:
           ) : !isAnyModelAvailable ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <div 
+                <div
                   className="flex items-center gap-1 sm:gap-2 bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-1 rounded-md cursor-not-allowed opacity-60"
                   data-testid="button-model-selector-disabled"
                 >
@@ -5104,7 +4892,7 @@ IMPORTANTE:
             </Tooltip>
           ) : (
             <>
-              <div 
+              <div
                 className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
                 onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
                 data-testid="button-model-selector"
@@ -5114,7 +4902,7 @@ IMPORTANTE:
                 </span>
                 <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
               </div>
-              
+
               {isModelSelectorOpen && (
                 <div className="absolute top-full left-0 mt-1 w-64 bg-popover border border-border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
                   <div className="p-2">
@@ -5127,18 +4915,37 @@ IMPORTANTE:
                         {models.map((model) => (
                           <button
                             key={model.id}
-                            className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${
-                              selectedModelData?.id === model.id ? "bg-muted" : ""
-                            }`}
-                            onClick={() => { 
-                              setSelectedModelId(model.id); 
-                              setIsModelSelectorOpen(false); 
+                            className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedModelData?.id === model.id ? "bg-muted" : ""
+                              }`}
+                            onClick={() => {
+                              setSelectedModelId(model.id);
+                              setIsModelSelectorOpen(false);
                             }}
                             data-testid={`model-option-${model.modelId}`}
                           >
-                            <div className="font-medium">{model.name}</div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{model.name}</span>
+                              {/* Capability badges */}
+                              <div className="flex items-center gap-1">
+                                {(model.modelId?.includes("vision") || model.name?.toLowerCase().includes("vision")) && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                                    🖼 Vision
+                                  </span>
+                                )}
+                                {(model.modelId?.includes("fast") || model.name?.toLowerCase().includes("fast")) && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
+                                    ⚡ Fast
+                                  </span>
+                                )}
+                                {(model.modelId?.includes("pro") || model.name?.toLowerCase().includes("pro") || model.name?.toLowerCase().includes("reasoning")) && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                                    🧠 Pro
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                             {model.description && (
-                              <div className="text-xs text-muted-foreground">{model.description}</div>
+                              <div className="text-xs text-muted-foreground mt-0.5">{model.description}</div>
                             )}
                           </button>
                         ))}
@@ -5171,9 +4978,9 @@ IMPORTANTE:
               </Button>
             </ShareChatDialog>
           ) : (
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               data-testid="button-share-chat-disabled"
               disabled
               title="Envía un mensaje para poder compartir este chat"
@@ -5212,7 +5019,7 @@ IMPORTANTE:
                 Editar
               </DropdownMenuItem>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger 
+                <DropdownMenuSubTrigger
                   disabled={!chatId || chatId.startsWith("pending-")}
                   data-testid="menu-move-folder"
                 >
@@ -5229,8 +5036,8 @@ IMPORTANTE:
                             onClick={() => chatId && onMoveToFolder?.(chatId, folder.id)}
                             data-testid={`menu-folder-${folder.id}`}
                           >
-                            <span 
-                              className="h-3 w-3 rounded-full mr-2 flex-shrink-0" 
+                            <span
+                              className="h-3 w-3 rounded-full mr-2 flex-shrink-0"
                               style={{ backgroundColor: folder.color }}
                             />
                             {folder.name}
@@ -5332,224 +5139,231 @@ IMPORTANTE:
                   </div>
                 </div>
               )}
-              
-          {/* Messages Area - Compact for document mode */}
-          {hasMessages && (
-            <div 
-              className={cn(
-                "flex-1 overflow-y-auto space-y-3 overscroll-contain",
-                activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
-              )}
-              style={{ paddingBottom: 'var(--composer-height, 120px)' }}
-            >
-              <MessageList
-                messages={displayMessages}
-                variant={activeDocEditor ? "compact" : "default"}
-                editingMessageId={editingMessageId}
-                editContent={editContent}
-                setEditContent={setEditContent}
-                copiedMessageId={copiedMessageId}
-                messageFeedback={messageFeedback}
-                speakingMessageId={speakingMessageId}
-                isGeneratingImage={isGeneratingImage}
-                pendingGeneratedImage={pendingGeneratedImage}
-                latestGeneratedImageRef={latestGeneratedImageRef}
-                streamingContent={streamingContent}
-                aiState={aiState}
-                regeneratingMsgIndex={regeneratingMsgIndex}
-                handleCopyMessage={handleCopyMessage}
-                handleStartEdit={handleStartEdit}
-                handleCancelEdit={handleCancelEdit}
-                handleSendEdit={handleSendEdit}
-                handleFeedback={handleFeedback}
-                handleRegenerate={handleRegenerate}
-                handleShare={handleShare}
-                handleReadAloud={handleReadAloud}
-                handleOpenDocumentPreview={handleOpenDocumentPreview}
-                handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
-                handleDownloadImage={handleDownloadImage}
-                setLightboxImage={setLightboxImage}
-                handleReopenDocument={handleReopenDocument}
-                minimizedDocument={minimizedDocument}
-                onRestoreDocument={restoreDocEditor}
-                onSelectSuggestedReply={(text) => setInput(text)}
-                onAgentCancel={handleAgentCancel}
-                onAgentRetry={handleAgentRetry}
-                onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
-                onSuperAgentCancel={handleSuperAgentCancel}
-                onSuperAgentRetry={handleSuperAgentRetry}
-                onQuestionClick={(text) => setInput(text)}
-                activeRunId={activeRunId}
-                onRunComplete={() => {
-                  console.log('[uiPhase] Run completed, uiPhase=done');
-                  setUiPhase('done');
-                  setActiveRunId(null);
-                }}
-                uiPhase={uiPhase}
-              />
 
-              {/* Agent Observer - Show when agent is running */}
-        {agent.state.status !== "idle" && (
-          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-            <AgentObserver
-              steps={agent.state.steps}
-              objective={agent.state.objective}
-              status={agent.state.status}
-              onCancel={agent.cancel}
-            />
-          </div>
-        )}
-
-        {/* Image Generation Loading Skeleton */}
-        {isGeneratingImage && (
-          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-            <div className="flex flex-col gap-2 items-start">
-              <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Generando imagen...</span>
-                </div>
-              </div>
-              <div className="px-4">
-                <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
-                  <Image className="h-8 w-8 text-muted-foreground" />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
-        {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' && (
-          <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
-            {/* Streaming Indicator with cancel button */}
-            <StreamingIndicator
-              aiState={aiState}
-              streamingContent={streamingContent}
-              onCancel={handleStopChat}
-              uiPhase={uiPhase}
-            />
-            
-            {/* Streaming content with fade-in animation */}
-            {aiState === "responding" && streamingContent && (
-              <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
-                <MarkdownErrorBoundary fallbackContent={streamingContent}>
-                  <MarkdownRenderer
-                    content={streamingContent}
-                    customComponents={{...CleanDataTableComponents}}
+              {/* Messages Area - Compact for document mode */}
+              {hasMessages && (
+                <div
+                  className={cn(
+                    "flex-1 overflow-y-auto space-y-3 overscroll-contain",
+                    activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                  )}
+                  style={{ paddingBottom: 'var(--composer-height, 120px)' }}
+                >
+                  <MessageList
+                    messages={displayMessages}
+                    variant={activeDocEditor ? "compact" : "default"}
+                    editingMessageId={editingMessageId}
+                    editContent={editContent}
+                    setEditContent={setEditContent}
+                    copiedMessageId={copiedMessageId}
+                    messageFeedback={messageFeedback}
+                    speakingMessageId={speakingMessageId}
+                    isGeneratingImage={isGeneratingImage}
+                    pendingGeneratedImage={pendingGeneratedImage}
+                    latestGeneratedImageRef={latestGeneratedImageRef}
+                    streamingContent={streamingContent}
+                    aiState={aiState}
+                    regeneratingMsgIndex={regeneratingMsgIndex}
+                    handleCopyMessage={handleCopyMessage}
+                    handleStartEdit={handleStartEdit}
+                    handleCancelEdit={handleCancelEdit}
+                    handleSendEdit={handleSendEdit}
+                    handleFeedback={handleFeedback}
+                    handleRegenerate={handleRegenerate}
+                    handleShare={handleShare}
+                    handleReadAloud={handleReadAloud}
+                    handleOpenDocumentPreview={handleOpenDocumentPreview}
+                    handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+                    handleDownloadImage={handleDownloadImage}
+                    setLightboxImage={setLightboxImage}
+                    handleReopenDocument={handleReopenDocument}
+                    minimizedDocument={minimizedDocument}
+                    onRestoreDocument={restoreDocEditor}
+                    onSelectSuggestedReply={(text) => setInput(text)}
+                    onAgentCancel={handleAgentCancel}
+                    onAgentRetry={handleAgentRetry}
+                    onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
+                    onSuperAgentCancel={handleSuperAgentCancel}
+                    onSuperAgentRetry={handleSuperAgentRetry}
+                    onQuestionClick={(text) => setInput(text)}
+                    activeRunId={activeRunId}
+                    onRunComplete={() => {
+                      console.log('[uiPhase] Run completed, uiPhase=done');
+                      setUiPhase('done');
+                      setActiveRunId(null);
+                    }}
+                    uiPhase={uiPhase}
                   />
-                </MarkdownErrorBoundary>
-                <span className="typing-cursor">|</span>
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
-        {uiPhase === 'console' && activeRunId && (
-          <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
-            {executionRunState ? (
-              <UniversalExecutionConsole 
-                runState={executionRunState as any}
-                className="mb-4"
-              />
-            ) : (
-              <LiveExecutionConsole 
-                runId={activeRunId}
-                forceShow={true}
-              />
-            )}
-          </div>
-        )}
-        
-              <div ref={bottomRef} />
-            </div>
-          )}
+                  {/* Agent Observer - Show when agent is running */}
+                  {agent.state.status !== "idle" && (
+                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                      <AgentObserver
+                        steps={agent.state.steps}
+                        objective={agent.state.objective}
+                        status={agent.state.status}
+                        onCancel={agent.cancel}
+                      />
+                    </div>
+                  )}
 
-          {/* Centered content when no messages */}
-          {!hasMessages && (
-            <div className="flex-1 flex flex-col items-center justify-center">
-              <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
-                {activeGpt ? (
-                  <>
-                    <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
-                      {activeGpt.avatar ? (
-                        <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
-                      ) : (
-                        <Bot className="h-8 w-8 text-muted-foreground" />
+                  {/* Production Mode Progress */}
+                  {aiState === "agent_working" && aiProcessSteps.length > 0 && (
+                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
+                      <ProductionProgress steps={aiProcessSteps} />
+                    </div>
+                  )}
+
+                  {/* Image Generation Loading Skeleton */}
+                  {isGeneratingImage && (
+                    <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                      <div className="flex flex-col gap-2 items-start">
+                        <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Generando imagen...</span>
+                          </div>
+                        </div>
+                        <div className="px-4">
+                          <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                            <Image className="h-8 w-8 text-muted-foreground" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
+                  {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' && (
+                    <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                      {/* Streaming Indicator with cancel button */}
+                      <StreamingIndicator
+                        aiState={aiState}
+                        streamingContent={streamingContent}
+                        onCancel={handleStopChat}
+                        uiPhase={uiPhase}
+                      />
+
+                      {/* Streaming content with fade-in animation */}
+                      {aiState === "responding" && streamingContent && (
+                        <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
+                          <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                            <MarkdownRenderer
+                              content={streamingContent}
+                              customComponents={{ ...CleanDataTableComponents }}
+                            />
+                          </MarkdownErrorBoundary>
+                          <span className="typing-cursor">|</span>
+                        </div>
                       )}
                     </div>
-                    <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
-                    <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
-                    {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
-                        {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => setInput(starter)}
-                            className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
-                          >
-                            {starter}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-muted-foreground">¿En qué puedo ayudarte?</p>
-                )}
-              </div>
-            </div>
-          )}
+                  )}
 
-          <Composer
-            input={input}
-            setInput={setInput}
-            textareaRef={textareaRef}
-            composerRef={composerRef}
-            fileInputRef={fileInputRef}
-            uploadedFiles={uploadedFiles}
-            removeFile={removeFile}
-            handleSubmit={handleSubmit}
-            handleFileUpload={handleFileUpload}
-            handlePaste={handlePaste}
-            handleDragOver={handleDragOver}
-            handleDragEnter={handleDragEnter}
-            handleDragLeave={handleDragLeave}
-            handleDrop={handleDrop}
-            isDraggingOver={isDraggingOver}
-            selectedTool={selectedTool}
-            setSelectedTool={setSelectedTool}
-            selectedDocTool={selectedDocTool}
-            setSelectedDocTool={setSelectedDocTool}
-            closeDocEditor={closeDocEditor}
-            openBlankDocEditor={openBlankDocEditor}
-            aiState={aiState}
-            isRecording={isRecording}
-            isPaused={isPaused}
-            recordingTime={recordingTime}
-            toggleVoiceRecording={toggleVoiceRecording}
-            discardVoiceRecording={discardVoiceRecording}
-            pauseVoiceRecording={pauseVoiceRecording}
-            resumeVoiceRecording={resumeVoiceRecording}
-            sendVoiceRecording={sendVoiceRecording}
-            handleStopChat={handleStopChat}
-            isAgentRunning={isAgentRunning}
-            handleAgentStop={handleAgentStop}
-            setIsVoiceChatOpen={setIsVoiceChatOpen}
-            browserSession={browserSession}
-            isBrowserOpen={isBrowserOpen}
-            setIsBrowserOpen={setIsBrowserOpen}
-            isBrowserMaximized={isBrowserMaximized}
-            setIsBrowserMaximized={setIsBrowserMaximized}
-            browserUrl={browserUrl}
-            variant="document"
-            placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
-            selectedDocText={selectedDocText}
-            handleDocTextDeselect={handleDocTextDeselect}
-            onTextareaFocus={handleCloseModelSelector}
-            isFilesLoading={uploadedFiles.some(f => f.status === "uploading" || f.status === "processing")}
-          />
+                  {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
+                  {uiPhase === 'console' && activeRunId && (
+                    <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                      {executionRunState ? (
+                        <UniversalExecutionConsole
+                          runState={executionRunState as any}
+                          className="mb-4"
+                        />
+                      ) : (
+                        <LiveExecutionConsole
+                          runId={activeRunId}
+                          forceShow={true}
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  <div ref={bottomRef} />
+                </div>
+              )}
+
+              {/* Centered content when no messages */}
+              {!hasMessages && (
+                <div className="flex-1 flex flex-col items-center justify-center">
+                  <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
+                    {activeGpt ? (
+                      <>
+                        <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
+                          {activeGpt.avatar ? (
+                            <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
+                          ) : (
+                            <Bot className="h-8 w-8 text-muted-foreground" />
+                          )}
+                        </div>
+                        <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
+                        <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
+                        {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
+                            {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => setInput(starter)}
+                                className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                              >
+                                {starter}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground">¿En qué puedo ayudarte?</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <Composer
+                input={input}
+                setInput={setInput}
+                textareaRef={textareaRef}
+                composerRef={composerRef}
+                fileInputRef={fileInputRef}
+                uploadedFiles={uploadedFiles}
+                removeFile={removeFile}
+                handleSubmit={handleSubmit}
+                handleFileUpload={handleFileUpload}
+                handlePaste={handlePaste}
+                handleDragOver={handleDragOver}
+                handleDragEnter={handleDragEnter}
+                handleDragLeave={handleDragLeave}
+                handleDrop={handleDrop}
+                isDraggingOver={isDraggingOver}
+                selectedTool={selectedTool}
+                setSelectedTool={setSelectedTool}
+                selectedDocTool={selectedDocTool}
+                setSelectedDocTool={setSelectedDocTool}
+                closeDocEditor={closeDocEditor}
+                openBlankDocEditor={openBlankDocEditor}
+                aiState={aiState}
+                isRecording={isRecording}
+                isPaused={isPaused}
+                recordingTime={recordingTime}
+                toggleVoiceRecording={toggleVoiceRecording}
+                discardVoiceRecording={discardVoiceRecording}
+                pauseVoiceRecording={pauseVoiceRecording}
+                resumeVoiceRecording={resumeVoiceRecording}
+                sendVoiceRecording={sendVoiceRecording}
+                handleStopChat={handleStopChat}
+                isAgentRunning={isAgentRunning}
+                handleAgentStop={handleAgentStop}
+                setIsVoiceChatOpen={setIsVoiceChatOpen}
+                browserSession={browserSession}
+                isBrowserOpen={isBrowserOpen}
+                setIsBrowserOpen={setIsBrowserOpen}
+                isBrowserMaximized={isBrowserMaximized}
+                setIsBrowserMaximized={setIsBrowserMaximized}
+                browserUrl={browserUrl}
+                variant="document"
+                placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
+                selectedDocText={selectedDocText}
+                handleDocTextDeselect={handleDocTextDeselect}
+                onTextareaFocus={handleCloseModelSelector}
+                isFilesLoading={uploadedFiles.some(f => f.status === "uploading" || f.status === "processing")}
+              />
             </div>
           </Panel>
 
@@ -5590,27 +5404,136 @@ IMPORTANTE:
                   onOrchestratorReady={(orch) => { orchestratorRef.current = orch; }}
                 />
               ) : (
-                <EnhancedDocumentEditor
-                  key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
-                  title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
-                  content={editedDocumentContent}
-                  onChange={setEditedDocumentContent}
-                  onClose={activeDocEditor ? minimizeDocEditor : handleCloseDocumentPreview}
-                  onDownload={() => {
-                    if (activeDocEditor) {
-                      handleDownloadDocument({
-                        type: activeDocEditor.type,
-                        title: activeDocEditor.title,
-                        content: editedDocumentContent
-                      });
-                    } else if (previewDocument) {
-                      handleDownloadDocument(previewDocument);
-                    }
-                  }}
-                  onTextSelect={handleDocTextSelect}
-                  onTextDeselect={handleDocTextDeselect}
-                  onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
-                />
+                <div className="relative h-full">
+                  {/* Document Generation Overlay - shows on top of blank editor */}
+                  {selectedDocTool === "word" && docGenerationState.status !== 'idle' && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm">
+                      <div className="max-w-md w-full mx-8 text-center">
+                        {docGenerationState.status === 'generating' && (
+                          <div className="space-y-6">
+                            {/* Spinner */}
+                            <div className="w-16 h-16 mx-auto border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+
+                            {/* Stage */}
+                            <div>
+                              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                                🚀 Generando Documento
+                              </h3>
+                              <p className="text-gray-600 dark:text-gray-300 text-sm">
+                                {docGenerationState.stage}
+                              </p>
+                            </div>
+
+                            {/* Progress Bar */}
+                            <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                              <div
+                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all duration-300 ease-out"
+                                style={{ width: `${docGenerationState.progress}%` }}
+                              />
+                            </div>
+                            <p className="text-xs text-gray-500">{docGenerationState.progress}% completado</p>
+
+                            {/* Code Preview */}
+                            <div className="bg-slate-900 rounded-lg p-4 text-left font-mono text-xs text-slate-300">
+                              <div className="text-green-400 mb-1">// Generando código docx...</div>
+                              <span className="text-blue-300">const</span> doc = <span className="text-yellow-300">new</span> Document({"{"}<br />
+                              <span className="text-gray-500">  {"  "}sections: [{"{ children: [...] }"}]</span><br />
+                              {"}"});
+                            </div>
+                          </div>
+                        )}
+
+                        {docGenerationState.status === 'ready' && (
+                          <div className="space-y-6">
+                            {/* Success Icon */}
+                            <div className="text-6xl">✅</div>
+
+                            <div>
+                              <h3 className="text-xl font-bold text-green-600 dark:text-green-400 mb-2">
+                                ¡Documento Generado!
+                              </h3>
+                              <p className="text-gray-600 dark:text-gray-300 text-sm">
+                                Tu documento está listo para descargar
+                              </p>
+                            </div>
+
+                            {/* File Info Card */}
+                            <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 border border-green-200 dark:border-green-700 rounded-xl p-5">
+                              <div className="flex items-center gap-4">
+                                <div className="bg-white dark:bg-slate-800 rounded-lg p-3 shadow-sm">
+                                  <span className="text-3xl">📄</span>
+                                </div>
+                                <div className="flex-1 text-left">
+                                  <div className="font-semibold text-gray-900 dark:text-white">
+                                    {docGenerationState.fileName}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    {docGenerationState.fileSize ? `${(docGenerationState.fileSize / 1024).toFixed(1)} KB` : 'Listo'}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Download Button */}
+                              {docGenerationState.downloadUrl && (
+                                <a
+                                  href={docGenerationState.downloadUrl}
+                                  download={docGenerationState.fileName || 'documento.docx'}
+                                  className="mt-4 w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+                                >
+                                  <span>⬇️</span> Descargar Documento
+                                </a>
+                              )}
+                            </div>
+
+                            {/* Reset Button */}
+                            <button
+                              onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
+                              className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+                            >
+                              Generar otro documento
+                            </button>
+                          </div>
+                        )}
+
+                        {docGenerationState.status === 'error' && (
+                          <div className="space-y-4">
+                            <div className="text-5xl">❌</div>
+                            <h3 className="text-lg font-semibold text-red-600">Error en generación</h3>
+                            <p className="text-sm text-gray-600">{docGenerationState.error || 'Ocurrió un error al generar el documento'}</p>
+                            <button
+                              onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
+                              className="bg-red-100 text-red-700 px-4 py-2 rounded hover:bg-red-200"
+                            >
+                              Reintentar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <EnhancedDocumentEditor
+                    key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
+                    title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                    content={editedDocumentContent}
+                    onChange={setEditedDocumentContent}
+                    onClose={activeDocEditor ? minimizeDocEditor : handleCloseDocumentPreview}
+                    onDownload={() => {
+                      if (activeDocEditor) {
+                        handleDownloadDocument({
+                          type: activeDocEditor.type,
+                          title: activeDocEditor.title,
+                          content: editedDocumentContent
+                        });
+                      } else if (previewDocument) {
+                        handleDownloadDocument(previewDocument);
+                      }
+                    }}
+                    onTextSelect={handleDocTextSelect}
+                    onTextDeselect={handleDocTextDeselect}
+                    onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                  />
+                </div>
               )}
             </div>
           </Panel>
@@ -5621,7 +5544,7 @@ IMPORTANTE:
           {hasMessages ? (
             <>
               {/* Scrollable messages container */}
-              <div 
+              <div
                 ref={messagesContainerRef}
                 onScroll={handleScroll}
                 className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
@@ -5710,7 +5633,7 @@ IMPORTANTE:
                         <MarkdownErrorBoundary fallbackContent={streamingContent}>
                           <MarkdownRenderer
                             content={streamingContent}
-                            customComponents={{...CleanDataTableComponents}}
+                            customComponents={{ ...CleanDataTableComponents }}
                           />
                         </MarkdownErrorBoundary>
                         <span className="typing-cursor">|</span>
@@ -5721,15 +5644,15 @@ IMPORTANTE:
               ) : (
                 /* Welcome Screen */
                 <>
-                  <motion.div 
+                  <motion.div
                     initial={{ scale: 0.8, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
                     transition={{ duration: 0.5, ease: "easeOut" }}
                     className="mb-8"
                   >
                     {activeGpt?.avatar ? (
-                      <AvatarWithFallback 
-                        src={activeGpt.avatar} 
+                      <AvatarWithFallback
+                        src={activeGpt.avatar}
                         alt={activeGpt.name}
                         fallback={<Bot className="h-10 w-10 text-white" />}
                       />
@@ -5737,7 +5660,7 @@ IMPORTANTE:
                       <IliaGPTLogo size={80} />
                     )}
                   </motion.div>
-                  <motion.h1 
+                  <motion.h1
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ duration: 0.5, delay: 0.2 }}
@@ -5745,15 +5668,21 @@ IMPORTANTE:
                   >
                     {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
                   </motion.h1>
-                  <motion.p 
+                  <motion.p
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ duration: 0.5, delay: 0.3 }}
                     className="text-muted-foreground text-center max-w-md text-base"
                   >
-                    {activeGpt 
+                    {activeGpt
                       ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
-                      : "Soy MICHAT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                      : selectedProject
+                        ? (
+                          <span>
+                            <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
+                          </span>
+                        )
+                        : "Soy MICHAT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
                     }
                   </motion.p>
                   {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
@@ -5777,12 +5706,24 @@ IMPORTANTE:
                         ))}
                     </motion.div>
                   )}
+                  {/* Show PromptSuggestions when no conversation starters available */}
+                  {(!activeGpt?.conversationStarters || activeGpt.conversationStarters.length === 0) && (
+                    <PromptSuggestions
+                      onSelect={(action) => setInput(action)}
+                      hasAttachment={uploadedFiles.length > 0}
+                      className="mt-6 justify-center max-w-xl"
+                    />
+                  )}
                 </>
               )}
             </div>
           )}
-          
+
           {/* Input Bar - flex shrink-0, stays at bottom */}
+          {/* Sync Status Indicator */}
+          <div className="flex justify-end px-4 py-1">
+            <SyncStatusIndicator />
+          </div>
           <Composer
             input={input}
             setInput={setInput}
@@ -5841,8 +5782,8 @@ IMPORTANTE:
           />
         </div>
       )}
-      <ETLDialog 
-        open={isETLDialogOpen} 
+      <ETLDialog
+        open={isETLDialogOpen}
         onClose={() => setIsETLDialogOpen(false)}
         onComplete={(summary) => {
           onSendMessage({
@@ -5883,20 +5824,20 @@ IMPORTANTE:
         }}
       />
       {/* Voice Chat Mode - Fullscreen conversation with Grok */}
-      <VoiceChatMode 
-        open={isVoiceChatOpen} 
-        onClose={() => setIsVoiceChatOpen(false)} 
+      <VoiceChatMode
+        open={isVoiceChatOpen}
+        onClose={() => setIsVoiceChatOpen(false)}
       />
       {/* Image Lightbox Modal */}
       {lightboxImage && (
-        <div 
+        <div
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setLightboxImage(null)}
         >
           <div className="relative max-w-[90vw] max-h-[90vh]">
-            <img 
-              src={lightboxImage} 
-              alt="Imagen ampliada" 
+            <img
+              src={lightboxImage}
+              alt="Imagen ampliada"
               className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             />
@@ -5923,7 +5864,7 @@ IMPORTANTE:
       )}
       {/* File Attachment Preview Modal */}
       {previewFileAttachment && (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -5932,7 +5873,7 @@ IMPORTANTE:
           onClick={() => setPreviewFileAttachment(null)}
           data-testid="file-attachment-preview-overlay"
         >
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -5946,7 +5887,7 @@ IMPORTANTE:
                 {(() => {
                   const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
                   return (
-                    <motion.div 
+                    <motion.div
                       initial={{ scale: 0.8 }}
                       animate={{ scale: 1 }}
                       transition={{ delay: 0.1, duration: 0.2 }}
@@ -6017,11 +5958,11 @@ IMPORTANTE:
                 </Button>
               </div>
             </div>
-            
+
             {/* Content */}
             <div className="flex-1 overflow-auto p-6">
               {previewFileAttachment.isLoading ? (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   className="flex items-center justify-center h-64"
@@ -6033,7 +5974,7 @@ IMPORTANTE:
                     >
                       <Loader2 className="h-8 w-8 text-primary" />
                     </motion.div>
-                    <motion.p 
+                    <motion.p
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.2 }}
@@ -6044,14 +5985,14 @@ IMPORTANTE:
                   </div>
                 </motion.div>
               ) : previewFileAttachment.isProcessing ? (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   className="flex items-center justify-center h-64"
                 >
                   <div className="flex flex-col items-center gap-4 p-6 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
                     <motion.div
-                      animate={{ 
+                      animate={{
                         scale: [1, 1.1, 1],
                         rotate: [0, 5, -5, 0]
                       }}
@@ -6070,7 +6011,7 @@ IMPORTANTE:
                   </div>
                 </motion.div>
               ) : previewFileAttachment.content ? (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
@@ -6083,7 +6024,7 @@ IMPORTANTE:
                   </div>
                 </motion.div>
               ) : (
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ duration: 0.3 }}
@@ -6111,22 +6052,22 @@ IMPORTANTE:
       )}
       {/* Uploaded Image Preview Modal */}
       {previewUploadedImage && (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
           onClick={() => setPreviewUploadedImage(null)}
         >
-          <motion.div 
+          <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
             className="relative max-w-4xl max-h-[90vh] rounded-lg overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <img 
-              src={previewUploadedImage.dataUrl} 
+            <img
+              src={previewUploadedImage.dataUrl}
               alt={previewUploadedImage.name}
               className="max-w-full max-h-[90vh] object-contain"
             />
@@ -6162,9 +6103,9 @@ IMPORTANTE:
       />
 
       {/* Upgrade Plan Dialog */}
-      <UpgradePlanDialog 
-        open={isUpgradeDialogOpen} 
-        onOpenChange={setIsUpgradeDialogOpen} 
+      <UpgradePlanDialog
+        open={isUpgradeDialogOpen}
+        onOpenChange={setIsUpgradeDialogOpen}
       />
 
       {/* Document Preview Panel for agent-generated documents */}
@@ -6207,13 +6148,13 @@ IMPORTANTE:
 
 function BotIcon({ className }: { className?: string }) {
   return (
-    <svg 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round" 
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       className={className}
     >
       <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />

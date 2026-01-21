@@ -11,6 +11,10 @@ import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useChats } from "@/hooks/use-chats";
 import { SearchModal } from "@/components/search-modal";
 import { ToolCatalog } from "@/components/tool-catalog";
+import { BackgroundNotificationContainer } from "@/components/background-notification";
+import { CommandPalette } from "@/components/command-palette";
+import { OfflineIndicator } from "@/components/OfflineIndicator";
+import { SkipLink } from "@/lib/accessibility";
 import Home from "@/pages/home";
 import { Loader2 } from "lucide-react";
 
@@ -23,14 +27,14 @@ const PageLoader = () => (
 function ChatPageRedirect() {
   const params = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
-  
+
   useEffect(() => {
     if (params.id) {
       window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: params.id } }));
       setLocation("/");
     }
   }, [params.id, setLocation]);
-  
+
   return <Home />;
 }
 import LoginPage from "@/pages/login";
@@ -76,6 +80,7 @@ function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const [toolCatalogOpen, setToolCatalogOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const { chats } = useChats();
 
   const handleNewChat = useCallback(() => {
@@ -84,7 +89,7 @@ function GlobalKeyboardShortcuts() {
   }, [setLocation]);
 
   const handleOpenSearch = useCallback(() => {
-    setSearchOpen(true);
+    setCommandPaletteOpen(true); // Now opens Command Palette instead
   }, []);
 
   const handleOpenToolCatalog = useCallback(() => {
@@ -94,6 +99,7 @@ function GlobalKeyboardShortcuts() {
   const handleCloseDialogs = useCallback(() => {
     setSearchOpen(false);
     setToolCatalogOpen(false);
+    setCommandPaletteOpen(false);
     window.dispatchEvent(new CustomEvent("close-all-dialogs"));
   }, []);
 
@@ -103,6 +109,7 @@ function GlobalKeyboardShortcuts() {
 
   const handleSelectChat = useCallback((chatId: string) => {
     setSearchOpen(false);
+    setCommandPaletteOpen(false);
     window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId } }));
   }, []);
 
@@ -112,7 +119,7 @@ function GlobalKeyboardShortcuts() {
 
   useKeyboardShortcuts([
     { key: "n", ctrl: true, action: handleNewChat, description: "Nuevo chat" },
-    { key: "k", ctrl: true, action: handleOpenSearch, description: "Búsqueda rápida" },
+    { key: "k", ctrl: true, action: handleOpenSearch, description: "Command Palette" },
     { key: "k", ctrl: true, shift: true, action: handleOpenToolCatalog, description: "Tool Catalog" },
     { key: "Escape", action: handleCloseDialogs, description: "Cerrar diálogo" },
     { key: ",", ctrl: true, action: handleOpenSettings, description: "Configuración" },
@@ -131,33 +138,47 @@ function GlobalKeyboardShortcuts() {
         onOpenChange={setToolCatalogOpen}
         onSelectTool={handleSelectTool}
       />
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        onNewChat={handleNewChat}
+        onOpenSettings={() => { setCommandPaletteOpen(false); setLocation("/settings"); }}
+        chats={chats}
+        onSelectChat={handleSelectChat}
+      />
     </>
   );
 }
 
+import { ErrorBoundary } from "@/components/ui/error-boundary";
+
 function Router() {
   return (
-    <Suspense fallback={<PageLoader />}>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/chat/:id" component={ChatPageRedirect} />
-        <Route path="/welcome" component={LandingPage} />
-        <Route path="/login" component={LoginPage} />
-        <Route path="/signup" component={SignupPage} />
-        <Route path="/profile" component={ProfilePage} />
-        <Route path="/billing" component={BillingPage} />
-        <Route path="/settings" component={SettingsPage} />
-        <Route path="/privacy" component={PrivacyPage} />
-        <Route path="/admin" component={AdminPage} />
-        <Route path="/admin/health" component={SystemHealthPage} />
-        <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
-        <Route path="/workspace" component={WorkspacePage} />
-        <Route path="/skills" component={SkillsPage} />
-        <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
-        <Route path="/monitoring" component={MonitoringDashboard} />
-        <Route component={NotFound} />
-      </Switch>
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense fallback={<PageLoader />}>
+        <main id="main-content" className="flex-1 outline-none" tabIndex={-1}>
+          <Switch>
+            <Route path="/" component={Home} />
+            <Route path="/chat/:id" component={ChatPageRedirect} />
+            <Route path="/welcome" component={LandingPage} />
+            <Route path="/login" component={LoginPage} />
+            <Route path="/signup" component={SignupPage} />
+            <Route path="/profile" component={ProfilePage} />
+            <Route path="/billing" component={BillingPage} />
+            <Route path="/settings" component={SettingsPage} />
+            <Route path="/privacy" component={PrivacyPage} />
+            <Route path="/admin" component={AdminPage} />
+            <Route path="/admin/health" component={SystemHealthPage} />
+            <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
+            <Route path="/workspace" component={WorkspacePage} />
+            <Route path="/skills" component={SkillsPage} />
+            <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
+            <Route path="/monitoring" component={MonitoringDashboard} />
+            <Route component={NotFound} />
+          </Switch>
+        </main>
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 
@@ -167,12 +188,14 @@ function App() {
       <SettingsProvider>
         <ModelAvailabilityProvider>
           <TooltipProvider>
+            <SkipLink targetId="main-content" />
+            <OfflineIndicator />
             <AuthCallbackHandler />
             <GlobalKeyboardShortcuts />
             <Toaster />
-            <SonnerToaster 
-              position="bottom-right" 
-              richColors 
+            <SonnerToaster
+              position="bottom-right"
+              richColors
               closeButton
               toastOptions={{
                 classNames: {
@@ -182,6 +205,7 @@ function App() {
               }}
             />
             <Router />
+            <BackgroundNotificationContainer onNavigateToChat={() => { }} />
           </TooltipProvider>
         </ModelAvailabilityProvider>
       </SettingsProvider>

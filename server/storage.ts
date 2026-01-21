@@ -16,9 +16,10 @@
  * See: server/repositories/index.ts for all available exports.
  */
 
-import { 
-  type User, type InsertUser, 
-  type File, type InsertFile, 
+import { cache } from "./lib/cache";
+import {
+  type User, type InsertUser,
+  type File, type InsertFile,
   type FileChunk, type InsertFileChunk,
   type FileJob, type InsertFileJob,
   type AgentRun, type InsertAgentRun,
@@ -85,10 +86,11 @@ import {
   providerMetrics, costBudgets, apiLogs, kpiSnapshots, analyticsEvents, securityPolicies,
   reportTemplates, generatedReports, settingsConfig, agentGapLogs,
   libraryFolders, libraryFiles, libraryCollections, libraryFileCollections, libraryActivity, libraryStorage
-} from "@shared/schema";
-import crypto, { randomUUID } from "crypto";
+} from "../shared/schema";
+import * as crypto from "crypto";
+import { randomUUID } from "crypto";
 import { db } from "./db";
-import { eq, sql, desc, and, isNull, ilike, or } from "drizzle-orm";
+import { eq, sql, desc, and, isNull, ilike, or, type SQL } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -129,7 +131,7 @@ export interface IStorage {
   updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined>;
   deleteChat(id: string): Promise<void>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
-  getChatMessages(chatId: string): Promise<ChatMessage[]>;
+  getChatMessages(chatId: string, options?: { limit?: number; offset?: number; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]>;
   updateChatMessageContent(id: string, content: string, status: string): Promise<ChatMessage | undefined>;
   createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }>;
   // Chat Run operations (for idempotent message processing)
@@ -454,18 +456,18 @@ export class MemStorage implements IStorage {
   }
 
   async updateFileCompleted(id: string): Promise<File | undefined> {
-    const [file] = await db.update(files).set({ 
-      status: "completed", 
-      processingProgress: 100, 
-      completedAt: new Date() 
+    const [file] = await db.update(files).set({
+      status: "completed",
+      processingProgress: 100,
+      completedAt: new Date()
     }).where(eq(files.id, id)).returning();
     return file;
   }
 
   async updateFileUploadChunks(id: string, uploadedChunks: number, totalChunks: number): Promise<File | undefined> {
-    const [file] = await db.update(files).set({ 
-      uploadedChunks, 
-      totalChunks 
+    const [file] = await db.update(files).set({
+      uploadedChunks,
+      totalChunks
     }).where(eq(files.id, id)).returning();
     return file;
   }
@@ -490,7 +492,7 @@ export class MemStorage implements IStorage {
     }
     if (error) {
       updates.lastError = error;
-      updates.retries = sql`${fileJobs.retries} + 1` as any;
+      updates.retries = sql<number>`${fileJobs.retries} + 1`;
     }
     const [result] = await db.update(fileJobs).set(updates).where(eq(fileJobs.fileId, fileId)).returning();
     return result;
@@ -508,7 +510,7 @@ export class MemStorage implements IStorage {
 
   async searchSimilarChunks(embedding: number[], limit: number = 5, userId?: string): Promise<FileChunk[]> {
     const embeddingStr = `[${embedding.join(",")}]`;
-    
+
     if (userId) {
       const result = await db.execute(sql`
         SELECT fc.*, f.name as file_name,
@@ -522,7 +524,7 @@ export class MemStorage implements IStorage {
       `);
       return result.rows as FileChunk[];
     }
-    
+
     const result = await db.execute(sql`
       SELECT fc.*, f.name as file_name,
         fc.embedding <=> ${embeddingStr}::vector AS distance
@@ -636,9 +638,35 @@ export class MemStorage implements IStorage {
     return result;
   }
 
-  async getChatMessages(chatId: string): Promise<ChatMessage[]> {
-    return db.select().from(chatMessages).where(eq(chatMessages.chatId, chatId)).orderBy(chatMessages.createdAt);
+  async getChatMessages(chatId: string, options?: { limit?: number; offset?: number; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]> {
+    const { limit, offset, orderBy = 'asc' } = options || {};
+    // Cache key includes pagination params to avoid mixing pages
+    const cacheKey = `messages:${chatId}:${limit || 'all'}:${offset || 0}:${orderBy}`;
+
+    // Cache for 10 seconds (short TTL because messages are added frequently)
+    return cache.remember(cacheKey, 10, async () => {
+      let query = db.select().from(chatMessages).where(eq(chatMessages.chatId, chatId));
+
+      if (orderBy === 'desc') {
+        query.orderBy(desc(chatMessages.createdAt));
+      } else {
+        query.orderBy(chatMessages.createdAt);
+      }
+
+      if (limit) {
+        query.limit(limit);
+      }
+
+      if (offset) {
+        query.offset(offset);
+      }
+
+      return query;
+    });
   }
+
+
+
 
   async updateChatMessageContent(id: string, content: string, status: string): Promise<ChatMessage | undefined> {
     const [result] = await db.update(chatMessages)
@@ -652,7 +680,7 @@ export class MemStorage implements IStorage {
     return db.transaction(async (tx) => {
       // Create chat first
       const [createdChat] = await tx.insert(chats).values(chat).returning();
-      
+
       // Insert all messages with the chatId
       const savedMessages: ChatMessage[] = [];
       for (const msg of messages) {
@@ -666,7 +694,7 @@ export class MemStorage implements IStorage {
         }).returning();
         savedMessages.push(savedMsg);
       }
-      
+
       return { chat: createdChat, messages: savedMessages };
     });
   }
@@ -679,12 +707,12 @@ export class MemStorage implements IStorage {
         eq(chatMessages.role, "assistant")
       ))
       .orderBy(desc(chatMessages.createdAt));
-    
-    const docGenMessage = messages.find(m => 
-      m.content?.includes("Documento generado correctamente") || 
+
+    const docGenMessage = messages.find(m =>
+      m.content?.includes("Documento generado correctamente") ||
       m.content?.includes("Presentación generada correctamente")
     );
-    
+
     const attachment = {
       type: "document",
       name: document.title,
@@ -693,7 +721,7 @@ export class MemStorage implements IStorage {
       content: document.content,
       savedAt: new Date().toISOString()
     };
-    
+
     if (docGenMessage) {
       // Update existing message with the document attachment
       const existingAttachments = Array.isArray(docGenMessage.attachments) ? docGenMessage.attachments : [];
@@ -862,7 +890,7 @@ export class MemStorage implements IStorage {
       .innerJoin(chats, eq(chatShares.chatId, chats.id))
       .where(eq(chatShares.recipientUserId, userId))
       .orderBy(desc(chatShares.createdAt));
-    
+
     return results as (Chat & { shareRole: string; shareId: string })[];
   }
 
@@ -1049,14 +1077,14 @@ export class MemStorage implements IStorage {
       .from(sidebarPinnedGpts)
       .where(eq(sidebarPinnedGpts.userId, userId))
       .orderBy(sidebarPinnedGpts.displayOrder);
-    
+
     const gptDetails = await Promise.all(
       pinnedRecords.map(async (record) => {
         const gpt = await this.getGpt(record.gptId);
         return gpt ? { ...record, gpt } : null;
       })
     );
-    
+
     return gptDetails.filter(Boolean);
   }
 
@@ -1064,11 +1092,11 @@ export class MemStorage implements IStorage {
     const existing = await db.select()
       .from(sidebarPinnedGpts)
       .where(and(eq(sidebarPinnedGpts.userId, userId), eq(sidebarPinnedGpts.gptId, gptId)));
-    
+
     if (existing.length > 0) {
       return existing[0];
     }
-    
+
     const [result] = await db.insert(sidebarPinnedGpts)
       .values({ userId, gptId, displayOrder })
       .returning();
@@ -1124,7 +1152,7 @@ export class MemStorage implements IStorage {
   async getAiModelsFiltered(filters: { provider?: string; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }> {
     const { provider, type, status, search, sortBy = "name", sortOrder = "asc", page = 1, limit = 20 } = filters;
     const conditions = [];
-    
+
     if (provider) {
       conditions.push(eq(aiModels.provider, provider.toLowerCase()));
     }
@@ -1139,12 +1167,12 @@ export class MemStorage implements IStorage {
         sql`(${aiModels.name} ILIKE ${`%${search}%`} OR ${aiModels.modelId} ILIKE ${`%${search}%`} OR ${aiModels.description} ILIKE ${`%${search}%`})`
       );
     }
-    
+
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-    
+
     const allModels = await db.select().from(aiModels).where(whereClause);
     const total = allModels.length;
-    
+
     let sortedModels = [...allModels];
     sortedModels.sort((a, b) => {
       let aVal: any, bVal: any;
@@ -1159,10 +1187,10 @@ export class MemStorage implements IStorage {
       const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
       return sortOrder === "desc" ? -cmp : cmp;
     });
-    
+
     const offset = (page - 1) * limit;
     const models = sortedModels.slice(offset, offset + limit);
-    
+
     return { models, total };
   }
 
@@ -1408,10 +1436,10 @@ export class MemStorage implements IStorage {
     };
 
     const existing = await this.getUserSettings(userId);
-    
+
     if (existing) {
       const mergedSettings = {
-        responsePreferences: settings.responsePreferences 
+        responsePreferences: settings.responsePreferences
           ? { ...existing.responsePreferences, ...settings.responsePreferences }
           : existing.responsePreferences,
         userProfile: settings.userProfile
@@ -1425,7 +1453,7 @@ export class MemStorage implements IStorage {
           : existing.privacySettings,
         updatedAt: new Date()
       };
-      
+
       const [updated] = await db.update(userSettings)
         .set(mergedSettings)
         .where(eq(userSettings.userId, userId))
@@ -1435,7 +1463,7 @@ export class MemStorage implements IStorage {
 
     const newSettings: InsertUserSettings = {
       userId,
-      responsePreferences: settings.responsePreferences 
+      responsePreferences: settings.responsePreferences
         ? { ...defaultResponsePreferences, ...settings.responsePreferences }
         : defaultResponsePreferences,
       userProfile: settings.userProfile
@@ -1518,10 +1546,10 @@ export class MemStorage implements IStorage {
 
   async upsertIntegrationPolicy(userId: string, policy: Partial<InsertIntegrationPolicy>): Promise<IntegrationPolicy> {
     const existing = await this.getIntegrationPolicy(userId);
-    
+
     if (existing) {
       const mergedPolicy = {
-        enabledApps: policy.enabledApps 
+        enabledApps: policy.enabledApps
           ? Array.from(new Set([...(existing.enabledApps || []), ...policy.enabledApps]))
           : existing.enabledApps,
         enabledTools: policy.enabledTools
@@ -1536,7 +1564,7 @@ export class MemStorage implements IStorage {
         maxParallelCalls: policy.maxParallelCalls ?? existing.maxParallelCalls,
         updatedAt: new Date()
       };
-      
+
       const [updated] = await db.update(integrationPolicies)
         .set(mergedPolicy)
         .where(eq(integrationPolicies.userId, userId))
@@ -1632,7 +1660,7 @@ export class MemStorage implements IStorage {
 
   async incrementSharedLinkAccess(id: string): Promise<void> {
     await db.update(sharedLinks)
-      .set({ 
+      .set({
         accessCount: sql`${sharedLinks.accessCount} + 1`,
         lastAccessedAt: new Date()
       })
@@ -1877,7 +1905,7 @@ export class MemStorage implements IStorage {
     const updates: Partial<OfflineMessageQueue> = { status };
     if (error) {
       updates.error = error;
-      updates.retryCount = sql`${offlineMessageQueue.retryCount} + 1` as any;
+      updates.retryCount = sql<number>`${offlineMessageQueue.retryCount} + 1`;
     }
     const [result] = await db.update(offlineMessageQueue)
       .set(updates)
@@ -1899,15 +1927,15 @@ export class MemStorage implements IStorage {
     const messages = await db.select().from(chatMessages)
       .where(eq(chatMessages.chatId, chatId))
       .orderBy(desc(chatMessages.createdAt));
-    
+
     const messageCount = messages.length;
     const lastMessageAt = messages.length > 0 ? messages[0].createdAt : null;
 
     const [result] = await db.update(chats)
-      .set({ 
-        messageCount, 
+      .set({
+        messageCount,
         lastMessageAt,
-        updatedAt: new Date() 
+        updatedAt: new Date()
       })
       .where(eq(chats.id, chatId))
       .returning();
@@ -1923,7 +1951,7 @@ export class MemStorage implements IStorage {
   async getProviderMetrics(provider?: string, startDate?: Date, endDate?: Date): Promise<ProviderMetrics[]> {
     let query = db.select().from(providerMetrics);
     const conditions: any[] = [];
-    
+
     if (provider) {
       conditions.push(eq(providerMetrics.provider, provider));
     }
@@ -1933,7 +1961,7 @@ export class MemStorage implements IStorage {
     if (endDate) {
       conditions.push(sql`${providerMetrics.windowEnd} <= ${endDate}`);
     }
-    
+
     if (conditions.length > 0) {
       return db.select().from(providerMetrics)
         .where(and(...conditions))
@@ -2026,7 +2054,7 @@ export class MemStorage implements IStorage {
       WHERE status_code IS NOT NULL
       GROUP BY status_code
     `);
-    
+
     const providerStats = await db.execute(sql`
       SELECT provider, COUNT(*) as count
       FROM api_logs
@@ -2035,12 +2063,12 @@ export class MemStorage implements IStorage {
     `);
 
     const byStatusCode: Record<number, number> = {};
-    for (const row of statusCodeStats.rows as any[]) {
+    for (const row of statusCodeStats.rows as { status_code: number; count: number | string }[]) {
       byStatusCode[row.status_code] = Number(row.count);
     }
 
     const byProvider: Record<string, number> = {};
-    for (const row of providerStats.rows as any[]) {
+    for (const row of providerStats.rows as { provider: string; count: number | string }[]) {
       byProvider[row.provider] = Number(row.count);
     }
 
@@ -2075,7 +2103,7 @@ export class MemStorage implements IStorage {
   async getAnalyticsEventStats(startDate?: Date, endDate?: Date): Promise<Record<string, number>> {
     let query;
     const conditions: any[] = [];
-    
+
     if (startDate) {
       conditions.push(sql`${analyticsEvents.createdAt} >= ${startDate}`);
     }
@@ -2101,7 +2129,7 @@ export class MemStorage implements IStorage {
     }
 
     const stats: Record<string, number> = {};
-    for (const row of query.rows as any[]) {
+    for (const row of query.rows as { event_name: string; count: number | string }[]) {
       stats[row.event_name] = Number(row.count);
     }
     return stats;
@@ -2118,7 +2146,7 @@ export class MemStorage implements IStorage {
     };
 
     const config = configMap[granularity];
-    
+
     const result = await db.execute(sql`
       SELECT date_trunc(${config.trunc}, created_at) as date, COUNT(*) as count
       FROM users
@@ -2127,7 +2155,7 @@ export class MemStorage implements IStorage {
       ORDER BY date ASC
     `);
 
-    return (result.rows as any[]).map(row => ({
+    return (result.rows as { date: string | Date; count: number | string }[]).map(row => ({
       date: new Date(row.date),
       count: Number(row.count),
     }));
@@ -2302,7 +2330,7 @@ export class MemStorage implements IStorage {
 
     if (existing.length > 0) {
       const updated = await db.update(agentGapLogs)
-        .set({ 
+        .set({
           frequencyCount: sql`${agentGapLogs.frequencyCount} + 1`,
           updatedAt: new Date()
         })
@@ -2459,7 +2487,7 @@ export class MemStorage implements IStorage {
           ilike(libraryFiles.name, `%${options.search}%`),
           ilike(libraryFiles.originalName, `%${options.search}%`),
           ilike(libraryFiles.description, `%${options.search}%`)
-        ) as any
+        ) as SQL
       );
     }
     return db.select().from(libraryFiles)

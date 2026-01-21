@@ -108,27 +108,32 @@ interface PageMetadata {
   publishedDate?: string;
 }
 
-async function fetchPageContent(url: string): Promise<PageMetadata | null> {
+// Export as fetchUrl for compatibility with agentExecutor
+export async function fetchUrl(url: string, options?: { extractText?: boolean; maxLength?: number }): Promise<PageMetadata | null> {
+  return fetchPageContent(url);
+}
+
+export async function fetchPageContent(url: string): Promise<PageMetadata | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUTS.PAGE_FETCH);
-    
+
     const response = await fetch(url, {
       signal: controller.signal,
       headers: getHeaders()
     });
-    
+
     clearTimeout(timeout);
-    
+
     if (!response.ok) return null;
-    
+
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("text/html")) return null;
-    
+
     const html = await response.text();
     const dom = new JSDOM(html, { url });
     const doc = dom.window.document;
-    
+
     // Extract og:image, twitter:image, or first large image
     let imageUrl: string | undefined;
     const ogImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
@@ -138,7 +143,7 @@ async function fetchPageContent(url: string): Promise<PageMetadata | null> {
     } else if (twitterImage) {
       imageUrl = twitterImage.startsWith("http") ? twitterImage : new URL(twitterImage, url).href;
     }
-    
+
     // Extract canonical URL and normalize to absolute
     const canonicalEl = doc.querySelector('link[rel="canonical"]');
     const rawCanonical = canonicalEl?.getAttribute("href");
@@ -150,19 +155,19 @@ async function fetchPageContent(url: string): Promise<PageMetadata | null> {
         canonicalUrl = url;
       }
     }
-    
+
     // Extract site name
     const siteName = doc.querySelector('meta[property="og:site_name"]')?.getAttribute("content") ||
-                     doc.querySelector('meta[name="application-name"]')?.getAttribute("content");
-    
+      doc.querySelector('meta[name="application-name"]')?.getAttribute("content");
+
     // Extract published date
     const publishedDate = doc.querySelector('meta[property="article:published_time"]')?.getAttribute("content") ||
-                          doc.querySelector('meta[name="date"]')?.getAttribute("content") ||
-                          doc.querySelector('time[datetime]')?.getAttribute("datetime");
-    
+      doc.querySelector('meta[name="date"]')?.getAttribute("content") ||
+      doc.querySelector('time[datetime]')?.getAttribute("datetime");
+
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
-    
+
     if (article?.textContent) {
       return {
         title: article.title || "",
@@ -173,7 +178,7 @@ async function fetchPageContent(url: string): Promise<PageMetadata | null> {
         publishedDate
       };
     }
-    
+
     return {
       title: doc.querySelector("title")?.textContent || "",
       text: "",
@@ -192,7 +197,7 @@ export async function fetchPageMetadata(url: string): Promise<Omit<PageMetadata,
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000); // 2s timeout for metadata only
-    
+
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
@@ -200,15 +205,15 @@ export async function fetchPageMetadata(url: string): Promise<Omit<PageMetadata,
         "Range": "bytes=0-50000" // Only fetch first 50KB for metadata
       }
     });
-    
+
     clearTimeout(timeout);
-    
+
     if (!response.ok) return null;
-    
+
     const html = await response.text();
     const dom = new JSDOM(html, { url });
     const doc = dom.window.document;
-    
+
     // Extract og:image
     let imageUrl: string | undefined;
     const ogImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
@@ -218,7 +223,7 @@ export async function fetchPageMetadata(url: string): Promise<Omit<PageMetadata,
     } else if (twitterImage) {
       imageUrl = twitterImage.startsWith("http") ? twitterImage : new URL(twitterImage, url).href;
     }
-    
+
     // Normalize canonical URL to absolute
     const rawCanonical = doc.querySelector('link[rel="canonical"]')?.getAttribute("href");
     let canonicalUrl = url;
@@ -229,12 +234,12 @@ export async function fetchPageMetadata(url: string): Promise<Omit<PageMetadata,
         canonicalUrl = url;
       }
     }
-    
+
     const siteName = doc.querySelector('meta[property="og:site_name"]')?.getAttribute("content");
     const publishedDate = doc.querySelector('meta[property="article:published_time"]')?.getAttribute("content");
     const title = doc.querySelector('meta[property="og:title"]')?.getAttribute("content") ||
-                  doc.querySelector("title")?.textContent || "";
-    
+      doc.querySelector("title")?.textContent || "";
+
     return { title, imageUrl, canonicalUrl, siteName, publishedDate };
   } catch {
     return null;
@@ -244,7 +249,7 @@ export async function fetchPageMetadata(url: string): Promise<Omit<PageMetadata,
 export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RESULTS): Promise<WebSearchResponse> {
   const results: SearchResult[] = [];
   const seenDomains = new Set<string>();
-  
+
   // Helper to extract domain from URL
   const extractDomain = (url: string): string => {
     try {
@@ -253,43 +258,43 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
       return url.split("/")[2]?.replace(/^www\./, "") || "";
     }
   };
-  
+
   try {
     // Request more results than needed to ensure diversity after deduplication
     const requestCount = Math.min(maxResults * 2, 30);
     const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     const response = await fetch(searchUrl, { headers: getHeaders() });
-    
+
     if (!response.ok) {
       throw new Error(`Search failed: ${response.status}`);
     }
-    
+
     const html = await response.text();
     const dom = new JSDOM(html);
     const doc = dom.window.document;
-    
+
     for (const result of Array.from(doc.querySelectorAll(".result")).slice(0, requestCount)) {
       if (results.length >= maxResults) break;
-      
+
       const titleEl = result.querySelector(".result__title a");
       const snippetEl = result.querySelector(".result__snippet");
-      
+
       if (titleEl) {
         const href = titleEl.getAttribute("href") || "";
         let url = href;
-        
+
         if (href.includes("uddg=")) {
           const match = href.match(/uddg=([^&]+)/);
           if (match) url = decodeURIComponent(match[1]);
         }
-        
+
         if (url && !url.includes("duckduckgo.com")) {
           const domain = extractDomain(url);
-          
+
           // Skip duplicate domains to ensure source diversity
           if (seenDomains.has(domain)) continue;
           seenDomains.add(domain);
-          
+
           results.push({
             title: titleEl.textContent?.trim() || "",
             url,
@@ -301,15 +306,15 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
   } catch (error) {
     console.error("Search error:", error);
   }
-  
+
   const contents: { url: string; title: string; content: string; imageUrl?: string; siteName?: string; publishedDate?: string }[] = [];
-  
+
   // ULTRA-FAST: Only fetch metadata (no full page content) with 2s total timeout
   const TOTAL_FETCH_TIMEOUT = 2000;
-  
+
   // Create metadata map to enrich results (include canonicalUrl)
   const metadataMap = new Map<string, { imageUrl?: string; siteName?: string; publishedDate?: string; canonicalUrl?: string }>();
-  
+
   // Only fetch metadata (fast) not full content (slow) for top results
   const metadataPromises = results.slice(0, LIMITS.MAX_CONTENT_FETCH).map(async (result) => {
     try {
@@ -330,15 +335,15 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
           publishedDate: metadata.publishedDate
         });
       }
-    } catch {}
+    } catch { }
   });
-  
+
   // Race against aggressive timeout
   await Promise.race([
     Promise.allSettled(metadataPromises),
     new Promise<void>(resolve => setTimeout(resolve, TOTAL_FETCH_TIMEOUT))
   ]);
-  
+
   // Enrich results with metadata from fetched pages
   const enrichedResults = results.map(r => {
     const metadata = metadataMap.get(r.url);
@@ -353,42 +358,42 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
     }
     return r;
   });
-  
+
   console.log(`[WebSearch] Query: "${query}" - Found ${results.length} unique sources, fetched ${contents.length} pages, ${Array.from(metadataMap.values()).filter(m => m.imageUrl).length} with images`);
-  
+
   return { query, results: enrichedResults, contents };
 }
 
 export async function searchScholar(query: string, maxResults = LIMITS.MAX_SEARCH_RESULTS): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
-  
+
   try {
     const searchUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(query)}&hl=es`;
     const response = await fetch(searchUrl, { headers: getHeaders() });
-    
+
     if (!response.ok) {
       console.error("Scholar search failed:", response.status);
       return results;
     }
-    
+
     const html = await response.text();
     const dom = new JSDOM(html);
     const doc = dom.window.document;
-    
+
     for (const article of Array.from(doc.querySelectorAll(".gs_ri")).slice(0, maxResults)) {
       const titleEl = article.querySelector(".gs_rt a");
       const snippetEl = article.querySelector(".gs_rs");
       const infoEl = article.querySelector(".gs_a");
-      
+
       if (titleEl) {
         const title = titleEl.textContent?.trim() || "";
         const url = titleEl.getAttribute("href") || "";
         const snippet = snippetEl?.textContent?.trim() || "";
         const info = infoEl?.textContent?.trim() || "";
-        
+
         const authors = info.match(/^([^-]+)/)?.[1]?.trim() || "";
         const year = info.match(/\b(19|20)\d{2}\b/)?.[0] || "";
-        
+
         if (title && (url || snippet)) {
           results.push({
             title,
@@ -404,7 +409,7 @@ export async function searchScholar(query: string, maxResults = LIMITS.MAX_SEARC
   } catch (error) {
     console.error("Scholar search error:", error);
   }
-  
+
   return results;
 }
 

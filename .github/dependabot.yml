@@ -1,0 +1,59 @@
+name: Dependabot Configuration
+
+version: 2
+updates:
+  # npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+      - "npm"
+    reviewers:
+      - "maintainers"
+    groups:
+      # Group React dependencies
+      react:
+        patterns:
+          - "react*"
+          - "@types/react*"
+      # Group Radix UI components
+      radix:
+        patterns:
+          - "@radix-ui/*"
+      # Group testing dependencies
+      testing:
+        patterns:
+          - "vitest*"
+          - "@vitest/*"
+          - "playwright*"
+      # Group build tools
+      build:
+        patterns:
+          - "vite*"
+          - "@vitejs/*"
+          - "esbuild*"
+          - "tsx"
+          - "typescript"
+    ignore:
+      # Don't update major versions automatically
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "ci"
+      - "dependencies"

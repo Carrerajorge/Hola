@@ -20,8 +20,12 @@ export interface SecurityHeadersConfig {
 
 const DEFAULT_CSP_DIRECTIVES: Record<string, string[]> = {
   "default-src": ["'self'"],
-  "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net"],
-  "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+  // Production CSP: Use nonces for inline scripts in production
+  // For development, we need unsafe-inline for hot reload
+  "script-src": process.env.NODE_ENV === 'production'
+    ? ["'self'", "https://cdn.jsdelivr.net"]
+    : ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net"],
+  "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
   "font-src": ["'self'", "https://fonts.gstatic.com", "data:"],
   "img-src": ["'self'", "data:", "blob:", "https:"],
   "connect-src": ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "wss:", "ws:"],

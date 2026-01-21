@@ -75,13 +75,34 @@ async function signObjectURLForMultipart({
 
 async function processFileAsync(fileId: string, storagePath: string, mimeType: string, filename?: string) {
   try {
-    const objectStorageService = new ObjectStorageService();
-    const objectFile = await objectStorageService.getObjectEntityFile(storagePath);
-    const content = await objectStorageService.getFileContent(objectFile);
-    
+    let content: Buffer;
+
+    // Check if this is a local storage path (from our local fallback)
+    if (storagePath.startsWith('/objects/uploads/')) {
+      // Extract the object ID from the path and read from local uploads directory
+      const objectId = storagePath.replace('/objects/uploads/', '');
+      const fs = await import("fs");
+      const path = await import("path");
+      const localFilePath = path.default.join(process.cwd(), "uploads", objectId);
+
+      console.log(`[processFileAsync] Reading local file: ${localFilePath}`);
+
+      if (!fs.default.existsSync(localFilePath)) {
+        throw new Error(`Local file not found: ${localFilePath}`);
+      }
+
+      content = await fs.promises.readFile(localFilePath);
+      console.log(`[processFileAsync] Read ${content.length} bytes from local file`);
+    } else {
+      // Use object storage for non-local paths
+      const objectStorageService = new ObjectStorageService();
+      const objectFile = await objectStorageService.getObjectEntityFile(storagePath);
+      content = await objectStorageService.getFileContent(objectFile);
+    }
+
     const result = await processDocument(content, mimeType, filename);
     const chunks = chunkText(result.text, 1500, 150);
-    
+
     const chunksWithoutEmbeddings = chunks.map((chunk) => ({
       fileId,
       content: chunk.content,
@@ -90,12 +111,12 @@ async function processFileAsync(fileId: string, storagePath: string, mimeType: s
       pageNumber: chunk.pageNumber || null,
       metadata: null,
     }));
-    
+
     await storage.createFileChunks(chunksWithoutEmbeddings);
     await storage.updateFileStatus(fileId, "ready");
-    
+
     console.log(`File ${fileId} processed: ${chunks.length} chunks created (fast mode)`);
-    
+
     generateEmbeddingsAsync(fileId, chunks);
   } catch (error) {
     console.error(`Error processing file ${fileId}:`, error);
@@ -107,7 +128,7 @@ async function generateEmbeddingsAsync(fileId: string, chunks: { content: string
   try {
     const texts = chunks.map(c => c.content);
     const embeddings = await generateEmbeddingsBatch(texts);
-    
+
     for (let i = 0; i < chunks.length; i++) {
       await storage.updateFileChunkEmbedding(fileId, chunks[i].chunkIndex, embeddings[i]);
     }
@@ -136,8 +157,28 @@ export function createFilesRouter() {
       const { uploadURL, storagePath } = await objectStorageService.getObjectEntityUploadURLWithPath();
       res.json({ uploadURL, storagePath });
     } catch (error: any) {
-      console.error("Error getting upload URL:", error);
-      res.status(500).json({ error: "Failed to get upload URL" });
+      // Fallback to local storage for development
+      console.log("[FilesRouter] Replit object storage unavailable, using local fallback");
+      try {
+        const fs = await import("fs");
+        const path = await import("path");
+        const crypto = await import("crypto");
+
+        const UPLOADS_DIR = path.default.join(process.cwd(), "uploads");
+        if (!fs.default.existsSync(UPLOADS_DIR)) {
+          fs.default.mkdirSync(UPLOADS_DIR, { recursive: true });
+        }
+
+        const objectId = crypto.randomUUID();
+        const storagePath = `/objects/uploads/${objectId}`;
+        // Return local upload endpoint URL
+        const uploadURL = `/api/local-upload/${objectId}`;
+
+        res.json({ uploadURL, storagePath, localFallback: true });
+      } catch (localError: any) {
+        console.error("Error with local fallback:", localError);
+        res.status(500).json({ error: "Failed to get upload URL" });
+      }
     }
   });
 
@@ -203,7 +244,7 @@ export function createFilesRouter() {
 
       const partPath = `${session.basePath}_part_${partNumber}`;
       const { bucketName, objectName } = parseObjectPath(partPath);
-      
+
       const signedUrl = await signObjectURLForMultipart({
         bucketName,
         objectName,
@@ -233,7 +274,7 @@ export function createFilesRouter() {
 
       const { bucketName } = parseObjectPath(session.basePath);
       const bucket = objectStorageClient.bucket(bucketName);
-      
+
       const partPaths = parts
         .sort((a: { partNumber: number }, b: { partNumber: number }) => a.partNumber - b.partNumber)
         .map((p: { partNumber: number }) => {
@@ -250,7 +291,7 @@ export function createFilesRouter() {
           partPaths.map(p => bucket.file(p)),
           destinationFile
         );
-        
+
         await destinationFile.setMetadata({ contentType: session.mimeType });
 
         for (const objectPath of partPaths) {
@@ -258,9 +299,9 @@ export function createFilesRouter() {
             const fileRef = bucket.file(objectPath);
             await fileRef.delete();
           } catch (cleanupErr) {
-            console.warn(JSON.stringify({ 
-              event: "multipart_cleanup_failed", 
-              path: objectPath 
+            console.warn(JSON.stringify({
+              event: "multipart_cleanup_failed",
+              path: objectPath
             }));
           }
         }
@@ -441,6 +482,79 @@ export function createFilesRouter() {
       }
       console.error("Error serving object:", error);
       return res.sendStatus(500);
+    }
+  });
+
+  // Local file upload handler (development fallback)
+  router.put("/api/local-upload/:objectId", async (req, res) => {
+    try {
+      const { objectId } = req.params;
+      const fsSync = await import("fs");
+      const pathMod = await import("path");
+
+      const UPLOADS_DIR = pathMod.default.join(process.cwd(), "uploads");
+      if (!fsSync.default.existsSync(UPLOADS_DIR)) {
+        fsSync.default.mkdirSync(UPLOADS_DIR, { recursive: true });
+      }
+
+      const filePath = pathMod.default.join(UPLOADS_DIR, objectId);
+
+
+      const MAX_SIZE = 100 * 1024 * 1024; // Hard limit 100MB for local uploads
+
+      const contentLength = parseInt(req.headers['content-length'] || '0');
+      if (contentLength > MAX_SIZE) {
+        return res.status(413).json({ error: "File too large" });
+      }
+
+      const writeStream = fsSync.default.createWriteStream(filePath);
+      let receivedBytes = 0;
+
+      req.pipe(writeStream);
+
+      req.on("data", (chunk: Buffer) => {
+        receivedBytes += chunk.length;
+        if (receivedBytes > MAX_SIZE) {
+          writeStream.destroy();
+          fsSync.default.unlinkSync(filePath); // Cleanup
+          // We can't easily send a response if we're pipe-ing, but we can try destroying request
+          req.destroy(new Error("File limit exceeded"));
+        }
+      });
+
+      writeStream.on("finish", async () => {
+        console.log(`[LocalStorage] File streamed to disk: ${filePath} (${receivedBytes} bytes)`);
+        res.status(200).json({ success: true, path: filePath, size: receivedBytes });
+      });
+
+      writeStream.on("error", (error: Error) => {
+        console.error("Upload stream error:", error);
+        if (!res.headersSent) res.status(500).json({ error: "Upload failed" });
+      });
+    } catch (error: any) {
+      console.error("Error handling local upload:", error);
+      res.status(500).json({ error: "Upload failed" });
+    }
+  });
+
+  // Serve locally uploaded files
+  router.get("/api/local-files/:objectId", async (req, res) => {
+    try {
+      const { objectId } = req.params;
+      const fsSync = await import("fs");
+      const pathMod = await import("path");
+
+      const filePath = pathMod.default.join(process.cwd(), "uploads", objectId);
+
+      if (!fsSync.default.existsSync(filePath)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      const content = await fsSync.promises.readFile(filePath);
+      res.send(content);
+    } catch (error: any) {
+      console.error("Error serving file:", error);
+      res.status(500).json({ error: "Failed to serve file" });
     }
   });
 

@@ -16,7 +16,7 @@ import { useSandboxExecution } from "@/hooks/useSandboxExecution";
 const InlineSourceBadge = memo(function InlineSourceBadge({ name, url }: { name: string; url: string }) {
   const [showTooltip, setShowTooltip] = useState(false);
   const [imageError, setImageError] = useState(false);
-  
+
   let domain = "";
   try {
     const urlObj = new URL(url);
@@ -24,9 +24,9 @@ const InlineSourceBadge = memo(function InlineSourceBadge({ name, url }: { name:
   } catch {
     domain = name.toLowerCase().replace(/\s+/g, "");
   }
-  
+
   const faviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`;
-  
+
   return (
     <span className="relative inline-block align-baseline">
       <a
@@ -58,7 +58,7 @@ const InlineSourceBadge = memo(function InlineSourceBadge({ name, url }: { name:
         )}
         <span className="max-w-[100px] truncate">{name}</span>
       </a>
-      
+
       {showTooltip && (
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
           <div className="bg-popover border border-border rounded-lg shadow-lg p-2 min-w-[160px] max-w-[240px]">
@@ -80,30 +80,61 @@ const InlineSourceBadge = memo(function InlineSourceBadge({ name, url }: { name:
   );
 });
 
-function preprocessSourceBadges(content: string, webSources?: Array<{ url: string; siteName?: string; domain: string }>): string {
+function preprocessSourceBadges(content: string, webSources?: Array<{ url: string; siteName?: string; domain: string; metadata?: { pageNumber?: number; section?: string; totalPages?: number } }>): string {
   let processed = content;
-  
+
+  // Handle existing explicit source tags
   processed = processed.replace(
     /\[\[FUENTE:([^\|]+)\|([^\]]+)\]\]/g,
-    (_, name, url) => `[__SOURCE__${name.trim()}__SOURCE__](${url.trim()})`
+    (_, name, url) => `[%%SOURCE%%${name.trim()}%%SOURCE%%](${url.trim()})`
   );
-  
+
   if (webSources && webSources.length > 0) {
+    // Regex for various citation formats:
+    // [1], [Source 1], [Fuente 1], [Ref 1]
+    // (Source 1), (Fuente 1), (Ref 1) - Note: standard markdown might treat (url) as link part, so context matters, but here we replace text.
+    // We target isolated patterns to avoid breaking existing links.
     processed = processed.replace(
-      /\[(?:Fuente|Source|Ref)[:.]?\s*(\d+)\]|\((?:Fuente|Source)\s*(\d+)\)|\[(\d+)\](?=\s|$|[.,])/gi,
-      (match, num1, num2, num3) => {
-        const numStr = num1 || num2 || num3;
-        const num = parseInt(numStr, 10);
-        const source = webSources[num - 1];
+      /(\[|\()\s*(?:Fuente|Source|Ref|Cita)?[:.]?\s*(\d+)\s*(\]|\))/gi,
+      (match, open, num, close) => {
+        const index = parseInt(num, 10);
+        const source = webSources[index - 1]; // 1-based index
+
         if (source) {
           const name = source.siteName || source.domain;
-          return ` [__SOURCE__${name}__SOURCE__](${source.url})`;
+          let label = name;
+
+          // Enhanced citation label with metadata
+          if (source.metadata) {
+            const parts = [];
+
+            // Page priority
+            if (source.metadata.pageNumber) {
+              parts.push(`p. ${source.metadata.pageNumber}`);
+            }
+
+            // Section priority
+            if (source.metadata.section) {
+              const sec = source.metadata.section;
+              // Limit section length to keep badge concise
+              parts.push(sec.length > 20 ? sec.substring(0, 18) + "..." : sec);
+            }
+
+            if (parts.length > 0) {
+              label = `${name} • ${parts.join(" ")}`;
+            }
+          }
+
+          // Return markdown link with special marker
+          // We add a space only if it doesn't look like it's inside a sentence flow awkwardly, 
+          // but safely adding a leading space helps prevent merging with previous words.
+          return ` [%%SOURCE%%${label}%%SOURCE%%](${source.url})`;
         }
         return match;
       }
     );
   }
-  
+
   return processed;
 }
 
@@ -131,7 +162,7 @@ const purifyConfig: DOMPurify.Config = {
 
 export function sanitizeContent(content: string): string {
   if (!content || typeof content !== 'string') return '';
-  return DOMPurify.sanitize(content, purifyConfig);
+  return DOMPurify.sanitize(content, purifyConfig) as unknown as string;
 }
 
 interface MarkdownErrorBoundaryProps {
@@ -210,39 +241,39 @@ interface DocumentGenerationLoaderProps {
   onOpen?: () => void;
 }
 
-const DocumentGenerationLoader = memo(function DocumentGenerationLoader({ 
-  documentType, 
-  title, 
+const DocumentGenerationLoader = memo(function DocumentGenerationLoader({
+  documentType,
+  title,
   isComplete,
-  onOpen 
+  onOpen
 }: DocumentGenerationLoaderProps) {
   const [state, setState] = useState<GenerationState>('analyzing');
-  
+
   useEffect(() => {
     if (isComplete) {
       setState('done');
       return;
     }
-    
+
     const progression: GenerationState[] = ['analyzing', 'structuring', 'generating', 'completing'];
     let currentIndex = 0;
-    
+
     const interval = setInterval(() => {
       currentIndex = Math.min(currentIndex + 1, progression.length - 1);
       setState(progression[currentIndex]);
     }, 1200);
-    
+
     return () => clearInterval(interval);
   }, [isComplete]);
-  
+
   const currentState = STATE_MESSAGES[state];
-  
+
   const DocIcon = documentType === 'word' ? FileText : documentType === 'excel' ? FileSpreadsheet : Presentation;
   const iconBgColor = documentType === 'word' ? 'bg-[#2B579A]' : documentType === 'excel' ? 'bg-[#217346]' : 'bg-[#D04423]';
-  
+
   if (isComplete) {
     return (
-      <div 
+      <div
         className="flex items-center gap-3.5 p-4 bg-gradient-to-r from-sky-50 to-blue-50 dark:from-sky-950/30 dark:to-blue-950/30 border border-sky-200 dark:border-sky-800 rounded-2xl cursor-pointer transition-all duration-300 hover:shadow-lg hover:shadow-sky-200/50 dark:hover:shadow-sky-900/30 hover:-translate-y-0.5 max-w-[340px] group"
         onClick={onOpen}
         data-testid="document-ready-card"
@@ -267,7 +298,7 @@ const DocumentGenerationLoader = memo(function DocumentGenerationLoader({
       </div>
     );
   }
-  
+
   return (
     <div className="bg-gradient-to-br from-slate-50 to-gray-100 dark:from-slate-900 dark:to-gray-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 max-w-[340px] shadow-sm" data-testid="document-generation-loader">
       <div className="flex items-center gap-3.5 mb-4">
@@ -286,10 +317,10 @@ const DocumentGenerationLoader = memo(function DocumentGenerationLoader({
           </span>
         </div>
       </div>
-      
+
       <div className="flex items-center gap-2.5">
         <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-          <div 
+          <div
             className="h-full bg-gradient-to-r from-sky-500 to-blue-500 rounded-full transition-all duration-500 ease-out"
             style={{ width: `${currentState.progress}%` }}
           />
@@ -298,10 +329,10 @@ const DocumentGenerationLoader = memo(function DocumentGenerationLoader({
           {currentState.progress}%
         </span>
       </div>
-      
+
       <div className="flex justify-center gap-1.5 mt-4">
         {[0, 1, 2].map((i) => (
-          <span 
+          <span
             key={i}
             className="w-1.5 h-1.5 bg-slate-300 dark:bg-slate-600 rounded-full animate-bounce"
             style={{ animationDelay: `${i * 0.15}s`, animationDuration: '1s' }}
@@ -314,7 +345,7 @@ const DocumentGenerationLoader = memo(function DocumentGenerationLoader({
 
 function detectDocumentJSON(content: string): { isDocument: boolean; type?: 'word' | 'excel' | 'ppt'; title?: string; isComplete: boolean } {
   const trimmed = content.trim();
-  
+
   const typeMatch = trimmed.match(/"type"\s*:\s*"(word|excel|ppt)"/);
   if (!typeMatch) {
     const partialTypeMatch = trimmed.match(/\{\s*"type"\s*:\s*"?/);
@@ -326,15 +357,15 @@ function detectDocumentJSON(content: string): { isDocument: boolean; type?: 'wor
     }
     return { isDocument: false, isComplete: false };
   }
-  
+
   const docType = typeMatch[1] as 'word' | 'excel' | 'ppt';
   const titleMatch = trimmed.match(/"title"\s*:\s*"([^"]+)"/);
   const title = titleMatch?.[1];
-  
+
   const hasContent = /"content"\s*:\s*"/.test(trimmed);
   const endsWithClosingBrace = trimmed.endsWith('}');
   const isComplete = hasContent && endsWithClosingBrace;
-  
+
   return { isDocument: true, type: docType, title, isComplete };
 }
 
@@ -403,12 +434,12 @@ interface LazyImageProps {
   maxHeight?: string;
 }
 
-const LazyImage = memo(function LazyImage({ 
-  src, 
-  alt, 
-  title, 
+const LazyImage = memo(function LazyImage({
+  src,
+  alt,
+  title,
   className,
-  maxHeight = "400px" 
+  maxHeight = "400px"
 }: LazyImageProps) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
@@ -417,10 +448,10 @@ const LazyImage = memo(function LazyImage({
   const handleError = useCallback(() => setError(true), []);
 
   if (!src) return null;
-  
+
   // Check if this is a Gmail logo - render inline and small
   const isGmailLogo = src.includes('gmail-logo') || (alt?.toLowerCase() === 'gmail');
-  
+
   if (isGmailLogo) {
     return (
       <img
@@ -430,10 +461,10 @@ const LazyImage = memo(function LazyImage({
         loading="eager"
         decoding="async"
         className="inline-block align-middle"
-        style={{ 
-          width: '1.4em', 
-          height: '1.4em', 
-          marginLeft: '6px', 
+        style={{
+          width: '1.4em',
+          height: '1.4em',
+          marginLeft: '6px',
           verticalAlign: 'text-bottom',
           display: 'inline'
         }}
@@ -441,7 +472,7 @@ const LazyImage = memo(function LazyImage({
       />
     );
   }
-  
+
   if (error) {
     return (
       <div className="flex items-center justify-center bg-muted rounded-lg p-4 my-3 text-muted-foreground text-sm">
@@ -509,11 +540,11 @@ const CodeBlock = memo(function CodeBlock({ inline, className, children, onOpenD
 
   const docDetection = detectDocumentJSON(codeContent);
   const isDocumentLanguage = language === 'document' || language === 'json';
-  
+
   if (docDetection.isDocument && (isDocumentLanguage || !language)) {
     const handleOpenDocument = () => {
       if (!docDetection.isComplete || !docDetection.type) return;
-      
+
       try {
         const parsed = JSON.parse(codeContent);
         if (parsed.type && parsed.title && parsed.content) {
@@ -521,17 +552,17 @@ const CodeBlock = memo(function CodeBlock({ inline, className, children, onOpenD
           if (typeof docContent === 'string') {
             docContent = docContent.replace(/\\n/g, '\n').replace(/\\\\n/g, '\n');
           }
-          onOpenDocument?.({ 
-            type: parsed.type, 
-            title: parsed.title, 
-            content: docContent 
+          onOpenDocument?.({
+            type: parsed.type,
+            title: parsed.title,
+            content: docContent
           });
         }
       } catch (e) {
         console.error('Failed to parse document JSON:', e);
       }
     };
-    
+
     return (
       <div className="my-4">
         <DocumentGenerationLoader
@@ -583,13 +614,13 @@ const TableWrapper = memo(function TableWrapper({ children }: TableWrapperProps)
     if (!tableRef.current) return;
     const table = tableRef.current.querySelector('table');
     if (!table) return;
-    
+
     const rows = table.querySelectorAll('tr');
     const text = Array.from(rows).map(row => {
       const cells = row.querySelectorAll('th, td');
       return Array.from(cells).map(cell => cell.textContent?.trim() || '').join('\t');
     }).join('\n');
-    
+
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -603,7 +634,7 @@ const TableWrapper = memo(function TableWrapper({ children }: TableWrapperProps)
     if (!tableRef.current) return;
     const table = tableRef.current.querySelector('table');
     if (!table) return;
-    
+
     const rows = table.querySelectorAll('tr');
     const csv = Array.from(rows).map(row => {
       const cells = row.querySelectorAll('th, td');
@@ -612,7 +643,7 @@ const TableWrapper = memo(function TableWrapper({ children }: TableWrapperProps)
         return text.includes(',') ? `"${text}"` : text;
       }).join(',');
     }).join('\n');
-    
+
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -623,7 +654,7 @@ const TableWrapper = memo(function TableWrapper({ children }: TableWrapperProps)
   }, []);
 
   return (
-    <div 
+    <div
       ref={tableRef}
       className={cn(
         "relative group my-4",
@@ -815,7 +846,7 @@ function isSimpleContent(text: string): boolean {
   const hasLinks = /\[.*?\]\(.*?\)/.test(text);
   const hasBold = /\*\*[^*]+\*\*|__[^_]+__/.test(text);
   const hasItalic = /\*[^*]+\*|_[^_]+_/.test(text);
-  const hasSourceBadges = /__SOURCE__/.test(text);
+  const hasSourceBadges = /%%SOURCE%%/.test(text);
   return !hasCodeBlocks && !hasMath && !hasComplexMarkdown && !hasLinks && !hasBold && !hasItalic && !hasSourceBadges;
 }
 
@@ -828,6 +859,16 @@ function SafeSimpleRenderer({ content, className }: { content: string; className
       ))}
     </div>
   );
+}
+
+function extractText(children: React.ReactNode): string {
+  if (typeof children === 'string') return children;
+  if (typeof children === 'number') return children.toString();
+  if (Array.isArray(children)) return children.map(extractText).join('');
+  if (typeof children === 'object' && children !== null && 'props' in children) {
+    return extractText((children as any).props.children);
+  }
+  return '';
 }
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({
@@ -880,8 +921,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       plugins.push([rehypeSanitize, sanitizeSchema]);
     }
     if (enableMath) {
-      plugins.push([rehypeKatex, { 
-        throwOnError: false, 
+      plugins.push([rehypeKatex, {
+        throwOnError: false,
         errorColor: '#cc0000',
         strict: false,
         trust: false,
@@ -910,14 +951,19 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     img: (props: any) => <LazyImage {...props} maxHeight={imageMaxHeight} />,
     p: ({ children }: { children?: React.ReactNode }) => <p className="mb-3 leading-relaxed">{children}</p>,
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
-      const childText = typeof children === 'string' ? children : 
-        (Array.isArray(children) && typeof children[0] === 'string' ? children[0] : '');
-      
-      const sourceMatch = childText.match(/^__SOURCE__(.+)__SOURCE__$/);
+      // DEBUG LOGGING
+      // console.log("[MarkdownRenderer] 'a' tag children:", children, "href:", href);
+
+      const childText = extractText(children).trim();
+
+      // console.log("[MarkdownRenderer] childText:", childText);
+
+      const sourceMatch = childText.match(/^%%SOURCE%%(.+)%%SOURCE%%$/);
       if (sourceMatch && href) {
+        // console.log("[MarkdownRenderer] Match found:", sourceMatch[1]);
         return <InlineSourceBadge name={sourceMatch[1]} url={href} />;
       }
-      
+
       return (
         <a
           href={href}

@@ -13,6 +13,7 @@ import { productionWorkflowRunner, classifyIntent, isGenerationIntent } from "..
 import { agentLoopFacade, promptAnalyzer, type ComplexityLevel } from "../agent/orchestration";
 import { buildSystemPromptWithContext, isToolAllowed, getEnforcedModel, type GptSessionContract } from "./gptSessionService";
 import { intentEnginePipeline, type PipelineOptions } from "../intent-engine";
+import OpenAI from "openai";
 
 const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true';
 
@@ -123,7 +124,7 @@ function detectDiagramType(prompt: string): DiagramType {
   const lowerPrompt = prompt.toLowerCase();
   const orgChartKeywords = ["organigrama", "org chart", "estructura organizacional", "jerarqu", "organización", "equipo", "departamento", "ceo", "director", "gerente", "jefe"];
   const mindmapKeywords = ["mapa mental", "mindmap", "lluvia de ideas", "brainstorm"];
-  
+
   if (orgChartKeywords.some(kw => lowerPrompt.includes(kw))) return "orgchart";
   if (mindmapKeywords.some(kw => lowerPrompt.includes(kw))) return "mindmap";
   return "flowchart";
@@ -142,7 +143,7 @@ interface AgenticContext {
 
 function shouldUseAgenticPipeline(message: string, context: AgenticContext): boolean {
   const lowerMessage = message.toLowerCase();
-  
+
   const COMPLEX_PATTERNS = [
     /\b(investiga|research|analiza\s+a\s+fondo|deep\s+dive)\b/i,
     /\b(crea|genera|build|create)\b.*\b(y|and|then|luego|después)\b/i,
@@ -160,47 +161,47 @@ function shouldUseAgenticPipeline(message: string, context: AgenticContext): boo
     /\b(genera|crea|build|create)\b.*\b(excel|spreadsheet|documento|word|pdf)\b.*\b(con|with)\b.*\d+/i,
     /\b\d+\s*(art[ií]culos?|tesis|papers?|items?|elementos?)\b.*\b(tabla|table|lista|list|excel|spreadsheet)\b/i,
   ];
-  
+
   const SIMPLE_PATTERNS = [
     /^(hola|hello|hi|hey|buenos?\s+d[ií]as?|buenas?\s+tardes?|buenas?\s+noches?)$/i,
     /^(gracias|thanks|ok|sí|no|claro|vale|perfecto)$/i,
     /^(qué|cuál|quién|dónde|cuándo|what|who|where|when|how)\s+\w{1,20}(\?)?$/i,
   ];
-  
+
   if (SIMPLE_PATTERNS.some(p => p.test(message.trim()))) {
     return false;
   }
-  
+
   if (context.hasActiveDocuments && context.hasAttachments) {
     return false;
   }
-  
+
   if (COMPLEX_PATTERNS.some(p => p.test(lowerMessage))) {
     console.log(`[ChatService:AgenticPipeline] Complex pattern matched for: "${message.slice(0, 50)}..."`);
     return true;
   }
-  
+
   const wordCount = message.split(/\s+/).filter(w => w.length > 0).length;
   const hasMultipleClauses = (message.match(/[,;]/g) || []).length >= 2;
   const hasListMarkers = /(\d+\.|[-•])\s+/g.test(message);
-  
+
   if (wordCount > 50 && (hasMultipleClauses || hasListMarkers)) {
     console.log(`[ChatService:AgenticPipeline] Complex message structure detected: ${wordCount} words, clauses: ${hasMultipleClauses}, lists: ${hasListMarkers}`);
     return true;
   }
-  
+
   return false;
 }
 
 function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
-  
+
   const hasStartEnd = diagram.nodes.some(n => n.type === "start" || n.type === "end");
   if (hasStartEnd) errors.push("Org charts should not have start/end nodes");
-  
+
   const invalidWords = ["inicio", "fin", "start", "end", "aleta"];
   const validOrgTypes = ["role", "department", "person"];
-  
+
   diagram.nodes.forEach(node => {
     if (invalidWords.some(w => node.label.toLowerCase() === w)) {
       errors.push(`Invalid label: ${node.label}`);
@@ -209,12 +210,12 @@ function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: stri
       errors.push(`Invalid node type for org chart: ${node.type}`);
     }
   });
-  
+
   const nodeIds = new Set(diagram.nodes.map(n => n.id));
   const childIds = new Set(diagram.connections.map(c => c.to));
   const roots = diagram.nodes.filter(n => !childIds.has(n.id));
   if (roots.length !== 1) errors.push(`Expected 1 root, found ${roots.length}`);
-  
+
   const parentCount = new Map<string, number>();
   diagram.connections.forEach(conn => {
     const count = parentCount.get(conn.to) || 0;
@@ -223,7 +224,7 @@ function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: stri
   parentCount.forEach((count, nodeId) => {
     if (count > 1) errors.push(`Node ${nodeId} has multiple parents (${count})`);
   });
-  
+
   function hasCycle(): boolean {
     const visited = new Set<string>();
     const recStack = new Set<string>();
@@ -233,7 +234,7 @@ function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: stri
       children.push(conn.to);
       childrenMap.set(conn.from, children);
     });
-    
+
     function dfs(nodeId: string): boolean {
       visited.add(nodeId);
       recStack.add(nodeId);
@@ -247,84 +248,84 @@ function validateOrgChart(diagram: FigmaDiagram): { valid: boolean; errors: stri
       recStack.delete(nodeId);
       return false;
     }
-    
+
     for (const node of diagram.nodes) {
       if (!visited.has(node.id) && dfs(node.id)) return true;
     }
     return false;
   }
-  
+
   if (hasCycle()) errors.push("Org chart contains cycles");
-  
+
   return { valid: errors.length === 0, errors };
 }
 
 function applyTreeLayout(diagram: FigmaDiagram): FigmaDiagram {
   if (diagram.diagramType !== "orgchart") return diagram;
-  
+
   const nodeMap = new Map(diagram.nodes.map(n => [n.id, n]));
   const childrenMap = new Map<string, string[]>();
   const childIds = new Set(diagram.connections.map(c => c.to));
-  
+
   diagram.connections.forEach(conn => {
     const children = childrenMap.get(conn.from) || [];
     children.push(conn.to);
     childrenMap.set(conn.from, children);
   });
-  
+
   const root = diagram.nodes.find(n => !childIds.has(n.id));
   if (!root) return diagram;
-  
+
   const NODE_WIDTH = 140;
   const NODE_HEIGHT = 50;
   const HORIZONTAL_GAP = 40;
   const VERTICAL_GAP = 80;
-  
+
   const subtreeWidthCache = new Map<string, number>();
   const visited = new Set<string>();
-  
+
   function getSubtreeWidth(nodeId: string): number {
     if (subtreeWidthCache.has(nodeId)) return subtreeWidthCache.get(nodeId)!;
     if (visited.has(nodeId)) return NODE_WIDTH;
     visited.add(nodeId);
-    
+
     const children = childrenMap.get(nodeId) || [];
-    const width = children.length === 0 
-      ? NODE_WIDTH 
+    const width = children.length === 0
+      ? NODE_WIDTH
       : children.reduce((sum, childId) => sum + getSubtreeWidth(childId), 0) + (children.length - 1) * HORIZONTAL_GAP;
-    
+
     subtreeWidthCache.set(nodeId, width);
     return width;
   }
-  
+
   const positioned = new Set<string>();
-  
+
   function positionNode(nodeId: string, x: number, y: number, level: number) {
     if (positioned.has(nodeId)) return;
     positioned.add(nodeId);
-    
+
     const node = nodeMap.get(nodeId);
     if (!node) return;
-    
+
     node.x = x;
     node.y = y;
     node.level = level;
-    
+
     const children = childrenMap.get(nodeId) || [];
     if (children.length === 0) return;
-    
+
     const totalWidth = children.reduce((sum, childId) => sum + getSubtreeWidth(childId), 0) + (children.length - 1) * HORIZONTAL_GAP;
     let childX = x - totalWidth / 2 + NODE_WIDTH / 2;
-    
+
     children.forEach(childId => {
       const childWidth = getSubtreeWidth(childId);
       positionNode(childId, childX + childWidth / 2 - NODE_WIDTH / 2, y + NODE_HEIGHT + VERTICAL_GAP, level + 1);
       childX += childWidth + HORIZONTAL_GAP;
     });
   }
-  
+
   positionNode(root.id, 400, 50, 0);
-  
+
   return diagram;
 }
 
@@ -343,6 +344,10 @@ interface WebSource {
   imageUrl?: string;
   canonicalUrl?: string;
   siteName?: string;
+  source?: {
+    name: string;
+    domain: string;
+  };
 }
 
 interface ChatResponse {
@@ -365,6 +370,16 @@ interface ChatResponse {
     allowedTools: string[];
     actionsEnabled: boolean;
   };
+  // Agent Verifier Metadata (Improvement 1)
+  metadata?: {
+    verified?: boolean;
+    verificationAttempts?: number;
+    [key: string]: any;
+  };
+  artifact?: any;
+  artifacts?: any[];
+  agenticMetadata?: any;
+  documentAgenticMetadata?: any;
 }
 
 function broadcastAgentUpdate(runId: string, update: any) {
@@ -393,7 +408,7 @@ export async function handleChatRequest(
 ): Promise<ChatResponse> {
   const { useRag = true, conversationId, userId, images, onAgentProgress, gptSession, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false, hasRawAttachments = false, lastImageBase64, lastImageId } = options;
   const hasImages = images && images.length > 0;
-  
+
   // Fetch user settings for feature flags and preferences
   let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
   let companyKnowledge: Awaited<ReturnType<typeof storage.getActiveCompanyKnowledge>> = [];
@@ -405,7 +420,7 @@ export async function handleChatRequest(
       console.error("Error fetching user settings or company knowledge:", error);
     }
   }
-  
+
   // Extract feature flags with defaults
   // These flags control tool availability:
   // - memoryEnabled: controls RAG/document memory retrieval
@@ -422,7 +437,7 @@ export async function handleChatRequest(
     canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
     voiceEnabled: userSettings?.featureFlags?.voiceEnabled ?? true,
   };
-  
+
   // Tool Policy Enforcement Helper
   const enforcePolicyCheck = async (toolId: string, providerId: string): Promise<{ allowed: boolean; reason?: string }> => {
     if (!userId) return { allowed: true };
@@ -459,7 +474,7 @@ export async function handleChatRequest(
       console.error("[IntentEngine] Pipeline error:", error);
     }
   }
-  
+
   // Use intent engine results to enhance routing decisions
   const intentContext = intentEngineResult?.success ? {
     primaryIntent: intentEngineResult.context.intent?.primaryIntent,
@@ -467,14 +482,14 @@ export async function handleChatRequest(
     qualityScore: intentEngineResult.qualityScore,
     isMultiIntent: (intentEngineResult.context.intent?.subIntents?.length || 0) > 1
   } : null;
-  
+
   // Extract response preferences
   const customInstructions = userSettings?.responsePreferences?.customInstructions || "";
   const responseStyle = userSettings?.responsePreferences?.responseStyle || "default";
-  
+
   // Extract user profile for context
   const userProfile = userSettings?.userProfile || null;
-  
+
   // Load persistent conversation documents for context continuity
   let persistentDocumentContext = "";
   if (conversationId) {
@@ -506,7 +521,7 @@ export async function handleChatRequest(
     activeSessionContract = gptSession.contract;
     effectiveModel = getEnforcedModel(activeSessionContract, model);
     console.log(`[ChatService] Using GPT Session Contract: gptId=${activeSessionContract.gptId}, version=${activeSessionContract.configVersion}, model=${effectiveModel}`);
-    
+
     // Track usage for the GPT
     storage.incrementGptUsage(activeSessionContract.gptId).catch(console.error);
   } else if (gptSession?.legacyConfig) {
@@ -534,9 +549,9 @@ export async function handleChatRequest(
       validatedGptConfig = undefined;
     }
   }
-  
+
   const lastUserMessage = messages.filter(m => m.role === "user").pop();
-  
+
   if (lastUserMessage) {
     // GMAIL INTEGRATION: Detectar y manejar solicitudes de correo electrónico
     // Skip Gmail detection when user has attached a document (attachmentContext contains the file)
@@ -590,14 +605,14 @@ export async function handleChatRequest(
       // Fallback: starts with search-like verbs
       /^(busca|encuentra|investiga|dame|dime|muestrame|search|find|look)/i,
     ];
-    
+
     // Ultra-aggressive: normalize text by removing accents for matching
-    const normalizeText = (text: string) => 
+    const normalizeText = (text: string) =>
       text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    
+
     const isSimpleSearchQueryEarly = (text: string) => {
       const normalized = normalizeText(text);
-      
+
       // GUARD: If message contains artifact generation keywords, it's NOT a simple search
       // These should be routed to the agentic pipeline instead
       const ARTIFACT_KEYWORDS = /\b(excel|spreadsheet|hoja\s*de\s*c[aá]lculo|documento|word|pdf|pptx?|presentaci[oó]n|slides?|genera|crea|exporta|col[oó]ca(lo)?|pon(lo|erlo)?|guarda(lo)?)\b/i;
@@ -605,37 +620,37 @@ export async function handleChatRequest(
         console.log(`[ChatService] Artifact keyword detected in query, skipping simple search path`);
         return false;
       }
-      
+
       // Check patterns against both original and normalized
       return SIMPLE_SEARCH_PATTERNS_EARLY.some(p => p.test(text) || p.test(normalized));
     };
-    
+
     // INTENT GUARD SYSTEM: Detect intent and enforce response contracts
     // This prevents context contamination from previous sessions/templates
     // CRITICAL: Include hasRawAttachments to ensure we catch attachments even if extraction failed
     const hasActiveDocuments = persistentDocumentContext.length > 0 || (attachmentContext && attachmentContext.length > 0) || hasRawAttachments;
-    
+
     console.log(`[IntentGuard] PRE-CHECK: persistentDocLen=${persistentDocumentContext.length}, attachmentLen=${attachmentContext?.length || 0}, hasRawAttachments=${hasRawAttachments}, hasActiveDocuments=${hasActiveDocuments}`);
-    
+
     // AGGRESSIVE DOCUMENT PRIORITY: If there's any document content, handle it FIRST before any search logic
     if (hasActiveDocuments && lastUserMessage) {
       console.log(`[IntentGuard] DOCUMENT DETECTED - Entering document analysis flow`);
-      
+
       const { detectIntent, validateResponse, buildDocumentPrompt, createAuditLog } = await import("./intentGuard");
-      
+
       const intentContract = detectIntent(
         lastUserMessage.content,
         persistentDocumentContext.length > 0,
         attachmentContext.length > 0
       );
-      
+
       console.log(`[IntentGuard] Detected intent: ${intentContract.taskType}, goal: ${intentContract.userGoal}, documentPresent: ${intentContract.documentPresent}`);
-      
+
       // CHECK: Does user also want to generate an OUTPUT artifact (DOCX, XLSX, PPTX)?
       // If so, skip document-only analysis and let ProductionWorkflowRunner handle it
       const outputArtifactIntent = classifyIntent(lastUserMessage.content);
       const wantsOutputArtifact = isGenerationIntent(outputArtifactIntent);
-      
+
       if (wantsOutputArtifact) {
         console.log(`[IntentGuard] OUTPUT ARTIFACT REQUESTED: ${outputArtifactIntent} - Skipping document-only analysis, routing to ProductionWorkflowRunner`);
         // Fall through to ProductionWorkflowRunner handling below
@@ -643,19 +658,19 @@ export async function handleChatRequest(
       // DOCUMENT ANALYSIS MODE: If document is present and task is document-related (but NO output artifact requested)
       else if (intentContract.documentPresent && intentContract.taskType.startsWith("document_")) {
         console.log("[ChatService] DOCUMENT ANALYSIS MODE: Intent contract enforced");
-        
+
         const fullDocContext = persistentDocumentContext + attachmentContext;
         const documentPrompt = buildDocumentPrompt(intentContract, fullDocContext, lastUserMessage.content);
-        
+
         const llmMessages = [
           { role: "system" as const, content: documentPrompt },
           { role: "user" as const, content: lastUserMessage.content }
         ];
-        
+
         const MAX_RETRIES = 2;
         let attempt = 0;
         let validatorOutcome: "pass" | "fail" | "retry" = "pass";
-        
+
         while (attempt <= MAX_RETRIES) {
           try {
             const llmResponse = await llmGateway.chat(llmMessages, {
@@ -663,10 +678,10 @@ export async function handleChatRequest(
               maxTokens: 2500,
               model: "gemini-2.5-flash"
             });
-            
+
             // Validate response against intent contract
             const validation = validateResponse(llmResponse.content, intentContract);
-            
+
             if (validation.valid) {
               validatorOutcome = "pass";
               const auditLog = createAuditLog(
@@ -676,7 +691,7 @@ export async function handleChatRequest(
                 validatorOutcome
               );
               console.log(`[IntentGuard] Audit: ${JSON.stringify(auditLog)}`);
-              
+
               return {
                 content: llmResponse.content,
                 role: "assistant"
@@ -684,13 +699,13 @@ export async function handleChatRequest(
             } else {
               validatorOutcome = attempt < MAX_RETRIES ? "retry" : "fail";
               console.warn(`[IntentGuard] INTENT_MISMATCH_ERROR: ${validation.matchedProhibitedPattern}, attempt ${attempt + 1}/${MAX_RETRIES + 1}`);
-              
+
               if (attempt < MAX_RETRIES && validation.suggestedRetryPrompt) {
                 llmMessages[0].content = documentPrompt + "\n\nCORRECCIÓN IMPORTANTE:\n" + validation.suggestedRetryPrompt;
                 attempt++;
                 continue;
               }
-              
+
               const auditLog = createAuditLog(
                 intentContract,
                 lastUserMessage.content,
@@ -699,7 +714,7 @@ export async function handleChatRequest(
                 validation.error
               );
               console.error(`[IntentGuard] Validation failed after retries: ${JSON.stringify(auditLog)}`);
-              
+
               return {
                 content: `**Error de análisis**: El sistema detectó una inconsistencia en la respuesta. Por favor, reformula tu pregunta sobre el documento.`,
                 role: "assistant"
@@ -715,26 +730,26 @@ export async function handleChatRequest(
         }
       }
     }
-    
+
     // DETERMINISTIC PIPELINE: Search + Analyze + Create Document
     // 8-stage sequential pipeline: search → download → analyze → extract_data → generate_charts → generate_images → validate → assemble
     const SEARCH_AND_CREATE_PATTERN = /busca\s+(\d+)\s*(artículos?|fuentes?|referencias?).*(crea|genera|haz|hacer).*(ppt|powerpoint|presentaci[oó]n|word|documento|excel)/i;
     if (lastUserMessage && SEARCH_AND_CREATE_PATTERN.test(lastUserMessage.content) && !documentMode && !figmaMode) {
       console.log(`[ChatService:DeterministicPipeline] Detected search + create pattern`);
-      
+
       try {
         const match = lastUserMessage.content.match(SEARCH_AND_CREATE_PATTERN);
         const requestedCount = match ? parseInt(match[1], 10) : 10;
         const isPPT = /ppt|powerpoint|presentaci[oó]n/i.test(lastUserMessage.content);
         const hasAPA = /apa|bibliograf[ií]a|referencias?|citas?/i.test(lastUserMessage.content);
-        
+
         console.log(`[ChatService:DeterministicPipeline] Count: ${requestedCount}, PPT: ${isPPT}, APA: ${hasAPA}`);
-        
+
         if (isPPT) {
           // Use the new 8-stage deterministic pipeline
           const { DeterministicPipeline } = await import("../agent/pipelines/deterministicPipeline");
           const pipeline = new DeterministicPipeline();
-          
+
           // Subscribe to stage events for logging
           pipeline.on("stage_start", ({ stage, index }) => {
             console.log(`[DeterministicPipeline] Stage ${index + 1}/8: ${stage} started`);
@@ -742,7 +757,7 @@ export async function handleChatRequest(
           pipeline.on("stage_complete", ({ stage, index, duration, inputCount, outputCount }) => {
             console.log(`[DeterministicPipeline] Stage ${index + 1}/8: ${stage} completed in ${duration}ms (${inputCount} → ${outputCount})`);
           });
-          
+
           const result = await pipeline.execute(lastUserMessage.content, {
             maxSources: requestedCount,
             includeAcademic: hasAPA,
@@ -752,7 +767,7 @@ export async function handleChatRequest(
             apaCitation: hasAPA,
             slideTemplate: hasAPA ? "academic" : "standard",
           });
-          
+
           if (result.success && result.artifact) {
             // Save artifact to disk
             const fs = await import("fs");
@@ -761,19 +776,19 @@ export async function handleChatRequest(
             if (!fs.existsSync(artifactsDir)) {
               fs.mkdirSync(artifactsDir, { recursive: true });
             }
-            
+
             const filename = `presentation_${Date.now()}.pptx`;
             const filepath = path.join(artifactsDir, filename);
             fs.writeFileSync(filepath, result.artifact.buffer);
-            
+
             const state = result.state;
             const sources = state.sources.slice(0, requestedCount);
-            
+
             // Build traceability summary
             const stagesSummary = result.traceability.stages
               .map(s => `${s.stage}: ${s.duration}ms`)
               .join(" → ");
-            
+
             return {
               content: `He creado una presentación profesional sobre **${state.topic}** usando el pipeline determinista de 8 etapas.
 
@@ -807,12 +822,12 @@ ${sources.slice(0, 10).map((s, i) => `${i + 1}. ${s.title} (${s.year})`).join("\
             console.warn(`[ChatService:DeterministicPipeline] Pipeline failed:`, result.state.error);
           }
         }
-        
+
         // Fallback for non-PPT or pipeline failure: simple search + format
         const { searchScholar, searchWeb, needsAcademicSearch } = await import("./webSearch");
         const topicMatch = lastUserMessage.content.match(/sobre\s+(?:la\s+|el\s+|los\s+|las\s+)?(.+?)(?:\s+y\s+crea|\s+crea|\s+genera|\s+haz|$)/i);
         const topic = topicMatch ? topicMatch[1].trim() : "el tema solicitado";
-        
+
         let searchResults: any[] = [];
         if (hasAPA || needsAcademicSearch(topic)) {
           const scholarResults = await searchScholar(topic, requestedCount);
@@ -824,7 +839,7 @@ ${sources.slice(0, 10).map((s, i) => `${i + 1}. ${s.title} (${s.year})`).join("\
             year: r.year || new Date().getFullYear().toString(),
           }));
         }
-        
+
         if (searchResults.length < requestedCount) {
           const webResponse = await searchWeb(topic, requestedCount - searchResults.length);
           searchResults = [...searchResults, ...webResponse.results.map(r => ({
@@ -835,37 +850,37 @@ ${sources.slice(0, 10).map((s, i) => `${i + 1}. ${s.title} (${s.year})`).join("\
             year: r.publishedDate?.slice(0, 4) || new Date().getFullYear().toString(),
           }))];
         }
-        
-        const formattedResults = searchResults.slice(0, requestedCount).map((r, i) => 
+
+        const formattedResults = searchResults.slice(0, requestedCount).map((r, i) =>
           `**${i + 1}. ${r.title}**\n   ${r.snippet?.slice(0, 200) || "Sin descripción"}...\n   📚 ${r.authors} (${r.year})\n   🔗 ${r.url}`
         ).join("\n\n");
-        
-        const apaBibliography = hasAPA ? `\n\n---\n**Referencias (APA 7ma ed.):**\n${searchResults.slice(0, requestedCount).map(r => 
+
+        const apaBibliography = hasAPA ? `\n\n---\n**Referencias (APA 7ma ed.):**\n${searchResults.slice(0, requestedCount).map(r =>
           `${r.authors} (${r.year}). *${r.title}*. Recuperado de ${r.url}`
         ).join("\n\n")}` : "";
-        
+
         return {
           content: `Encontré ${searchResults.length} artículos sobre **${topic}**:\n\n${formattedResults}${apaBibliography}`,
           role: "assistant"
         };
-        
+
       } catch (pipelineError: any) {
         console.error(`[ChatService:DeterministicPipeline] Error:`, pipelineError);
         // Fall through to normal flow
       }
     }
-    
+
     // AGENTIC SUPER-COMPLEX PIPELINE: Planner → Executor → Critic loop with iterative refinement
     // Activated when user requests "agentic", "iterative", "optimize", "verify quality" modes
     const AGENTIC_COMPLEX_PATTERN = /(?:modo\s+)?(?:ag[eé]ntico|iterativo|optimiza|verifica|calidad|planner|critic|bucle|loop|refin)/i;
     const PPT_REQUEST_PATTERN = /(?:crea|genera|haz).*(ppt|powerpoint|presentaci[oó]n)/i;
     if (lastUserMessage && AGENTIC_COMPLEX_PATTERN.test(lastUserMessage.content) && PPT_REQUEST_PATTERN.test(lastUserMessage.content) && !documentMode && !figmaMode) {
       console.log(`[ChatService:AgenticSuperComplex] Detected agentic pipeline request`);
-      
+
       try {
         const { AgenticPipeline } = await import("../agent/pipelines/agenticPipeline");
         const agenticPipeline = new AgenticPipeline();
-        
+
         // Subscribe to phase events for real-time feedback
         agenticPipeline.on("phase_start", ({ phase, iteration }) => {
           console.log(`[AgenticPipeline] Phase: ${phase}${iteration !== undefined ? ` (iteration ${iteration})` : ""}`);
@@ -873,17 +888,17 @@ ${sources.slice(0, 10).map((s, i) => `${i + 1}. ${s.title} (${s.year})`).join("\
         agenticPipeline.on("critic_feedback", ({ feedback }) => {
           console.log(`[AgenticPipeline] Critic: ${feedback.passed ? "PASSED" : "NEEDS_REFINEMENT"} (${(feedback.metrics.overallScore * 100).toFixed(0)}%)`);
         });
-        
+
         // Detect audience and goal from message
         const isAcademic = /acad[eé]mic|universidad|tesis|paper|investigaci[oó]n|apa/i.test(lastUserMessage.content);
         const isExecutive = /ejecutivo|gerente|director|junta|board|resumen/i.test(lastUserMessage.content);
-        
+
         const result = await agenticPipeline.execute(lastUserMessage.content, {
           audience: isAcademic ? "academic" : isExecutive ? "executive" : "general",
           goal: isAcademic ? "educate" : "inform",
           maxIterations: 3,
         });
-        
+
         if (result.success && result.artifact) {
           const fs = await import("fs");
           const path = await import("path");
@@ -891,19 +906,19 @@ ${sources.slice(0, 10).map((s, i) => `${i + 1}. ${s.title} (${s.year})`).join("\
           if (!fs.existsSync(artifactsDir)) {
             fs.mkdirSync(artifactsDir, { recursive: true });
           }
-          
+
           const filename = `agentic_ppt_${Date.now()}.pptx`;
           const filepath = path.join(artifactsDir, filename);
           fs.writeFileSync(filepath, result.artifact.buffer);
-          
+
           const state = result.state;
           const plan = state.plan!;
           const lastFeedback = state.iterations.length > 0 ? state.iterations[state.iterations.length - 1].feedback : null;
-          
-          const iterationsSummary = state.iterations.map((it, i) => 
+
+          const iterationsSummary = state.iterations.map((it, i) =>
             `  ${i + 1}. Score: ${(it.feedback.metrics.overallScore * 100).toFixed(0)}% - ${it.actionsCompleted.length} acciones`
           ).join("\n");
-          
+
           return {
             content: `He creado una presentación profesional sobre **${plan.topic}** usando el pipeline agéntico con bucle Planner → Executor → Critic.
 
@@ -951,32 +966,32 @@ ${iterationsSummary || "  (Ninguna - aprobó en primera iteración)"}
         // Fall through to normal flow
       }
     }
-    
+
     // DOCUMENT AGENTIC PIPELINE: Word/Excel generation with Planner → Executor → Critic loop
     // Activated when user requests Word documents, Excel models, or reports/analysis
     const DOCUMENT_AGENTIC_PATTERN = /(?:crea|genera|haz)\s+(?:un\s+)?(?:informe|reporte|an[aá]lisis|documento|modelo.*datos|excel|word)/i;
     const HAS_AGENTIC_KEYWORDS = /(?:ag[eé]ntico|iterativo|optimiza|verifica|calidad|bucle|consistencia)/i;
     if (lastUserMessage && DOCUMENT_AGENTIC_PATTERN.test(lastUserMessage.content) && !documentMode && !figmaMode) {
       const isAgenticMode = HAS_AGENTIC_KEYWORDS.test(lastUserMessage.content);
-      
+
       if (isAgenticMode) {
         console.log(`[ChatService:DocumentAgentic] Detected document agentic pipeline request`);
-        
+
         try {
           const { DocumentAgenticPipeline } = await import("../agent/pipelines/documentAgenticPipeline");
           const docPipeline = new DocumentAgenticPipeline();
-          
+
           docPipeline.on("phase_start", ({ phase, iteration }) => {
             console.log(`[DocumentAgenticPipeline] Phase: ${phase}${iteration !== undefined ? ` (iteration ${iteration})` : ""}`);
           });
           docPipeline.on("validation_result", ({ report }) => {
             console.log(`[DocumentAgenticPipeline] Validation: ${report.passed}/${report.totalChecks} passed (${(report.overallScore * 100).toFixed(0)}%)`);
           });
-          
+
           const result = await docPipeline.execute(lastUserMessage.content, {
             maxIterations: 3,
           });
-          
+
           if (result.success && result.artifacts.length > 0) {
             const fs = await import("fs");
             const path = await import("path");
@@ -984,7 +999,7 @@ ${iterationsSummary || "  (Ninguna - aprobó en primera iteración)"}
             if (!fs.existsSync(artifactsDir)) {
               fs.mkdirSync(artifactsDir, { recursive: true });
             }
-            
+
             const savedArtifacts: any[] = [];
             for (const artifact of result.artifacts) {
               const filepath = path.join(artifactsDir, artifact.filename);
@@ -997,20 +1012,20 @@ ${iterationsSummary || "  (Ninguna - aprobó en primera iteración)"}
                 sizeBytes: artifact.sizeBytes,
               });
             }
-            
+
             const state = result.state;
             const wordPlan = state.wordPlan;
             const excelPlan = state.excelPlan;
             const validation = state.validationReport;
-            
-            const artifactsSummary = savedArtifacts.map(a => 
+
+            const artifactsSummary = savedArtifacts.map(a =>
               `  • ${a.type === "word" ? "📄 Word" : "📊 Excel"}: ${a.filename}`
             ).join("\n");
-            
-            const iterationsSummary = state.iterations.map((it, i) => 
+
+            const iterationsSummary = state.iterations.map((it, i) =>
               `  ${i + 1}. Score: ${(it.validationScore * 100).toFixed(0)}% - ${it.actions.join(", ")}`
             ).join("\n");
-            
+
             return {
               content: `He creado los documentos solicitados usando el pipeline agéntico con bucle de validación y refinamiento.
 
@@ -1059,7 +1074,7 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
         }
       }
     }
-    
+
     // AGENTIC PIPELINE: Route complex requests through AgentLoopFacade when feature flag is enabled
     // This provides multi-agent orchestration, QA verification, and SSE streaming for complex tasks
     if (AGENTIC_PIPELINE_ENABLED && lastUserMessage && !documentMode && !figmaMode && !hasImages) {
@@ -1068,10 +1083,10 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
         hasActiveDocuments: hasActiveDocuments,
         conversationLength: messages.length
       };
-      
+
       if (shouldUseAgenticPipeline(lastUserMessage.content, agenticContext)) {
         console.log(`[ChatService:AgenticPipeline] Routing to AgentLoopFacade for complex task`);
-        
+
         try {
           const pipelineResult = await agentLoopFacade.execute(
             lastUserMessage.content,
@@ -1088,17 +1103,25 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
               model: model || DEFAULT_MODEL
             }
           );
-          
+
           if (pipelineResult.success) {
             console.log(`[ChatService:AgenticPipeline] Pipeline completed successfully in ${pipelineResult.metadata.durationMs}ms`);
-            
+
             return {
               content: pipelineResult.response.content,
               role: "assistant",
               agentRunId: pipelineResult.runId,
               wasAgentTask: true,
               pipelineSteps: pipelineResult.metadata.totalSteps,
-              pipelineSuccess: true
+              pipelineSuccess: true,
+              metadata: {
+                verified: pipelineResult.metadata.qaResult?.passed,
+                verificationAttempts: pipelineResult.metadata.qaResult ? 1 : 0,
+                qaResult: pipelineResult.metadata.qaResult,
+                // Preserve other metadata
+                agentsUsed: pipelineResult.metadata.agentsUsed,
+                toolsUsed: pipelineResult.metadata.toolsUsed
+              }
             };
           } else {
             console.warn(`[ChatService:AgenticPipeline] Pipeline failed, falling back to normal flow`);
@@ -1108,12 +1131,12 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
         }
       }
     }
-    
+
     // IMMEDIATE EXECUTION: Simple searches bypass EVERYTHING and execute directly
     // Only activate if NO documents are present (documents take priority)
     if (!documentMode && !figmaMode && !hasImages && !hasActiveDocuments && lastUserMessage && isSimpleSearchQueryEarly(lastUserMessage.content)) {
       console.log("[ChatService] IMMEDIATE SEARCH EXECUTION: Bypassing all pipelines");
-      
+
       // Helper to extract domain and favicon with proper source object
       const extractWebSourceImmediate = (url: string, title: string, snippet?: string, imageUrl?: string, siteName?: string, canonicalUrl?: string): WebSource => {
         let domain = "";
@@ -1123,13 +1146,13 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
         } catch {
           domain = url.split("/")[2]?.replace(/^www\./, "") || "unknown";
         }
-        
+
         // Determine source name with fallback chain
         const sourceName = siteName || domain || "Desconocida";
         if (!siteName && !domain) {
           console.warn(`[ChatService] missing_source_count: URL ${url} has no source info`);
         }
-        
+
         return {
           url,
           title,
@@ -1145,52 +1168,52 @@ ${excelPlan ? `**📊 Estructura Excel:** ${excelPlan.sheets.length} hojas` : ""
           }
         };
       };
-      
+
       try {
         // Check cache first for ultra-fast response
         const cached = getCachedSearch(lastUserMessage.content);
         let webSources: WebSource[] = [];
-        
+
         if (cached) {
           webSources = cached;
         } else {
           // Check if academic search is needed
           const isAcademic = needsAcademicSearch(lastUserMessage.content);
-          
+
           if (isAcademic) {
             const scholarResults = await searchScholar(lastUserMessage.content, 15);
             if (scholarResults.length > 0) {
-              webSources = scholarResults.filter(r => r.url).map(r => 
+              webSources = scholarResults.filter(r => r.url).map(r =>
                 extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
               );
             }
           }
-          
+
           // Always do web search for general results
           const searchResults = await searchWeb(lastUserMessage.content, 20);
           if (searchResults.results.length > 0) {
             webSources = [
               ...webSources,
-              ...searchResults.results.slice(0, 15).map(r => 
+              ...searchResults.results.slice(0, 15).map(r =>
                 extractWebSourceImmediate(r.url, r.title, r.snippet, r.imageUrl, r.siteName, r.canonicalUrl)
               )
             ];
           }
-          
+
           // Cache results for repeated queries
           if (webSources.length > 0) {
             setCachedSearch(lastUserMessage.content, webSources);
           }
         }
-        
+
         // Build rich context for LLM with full snippets
         const topSources = webSources.slice(0, 12);
         console.log(`[ChatService] Building response with ${topSources.length} sources`);
-        
-        const richContext = topSources.map((s, i) => 
+
+        const richContext = topSources.map((s, i) =>
           `[${i + 1}] ${s.title}\nFuente: ${s.siteName || s.domain}\nURL: ${s.url}\nResumen: ${s.snippet || "Sin resumen disponible"}`
         ).join("\n\n");
-        
+
         // General-purpose system prompt for search results
         const systemPrompt = `Eres IliaGPT, un asistente de IA versátil y capaz. Responde a la consulta del usuario basándote en las fuentes proporcionadas.
 
@@ -1210,7 +1233,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           { role: "system" as const, content: systemPrompt },
           { role: "user" as const, content: lastUserMessage.content }
         ];
-        
+
         // Use faster model with enough tokens for complete response
         const llmResponse = await Promise.race([
           llmGateway.chat(llmMessages, {
@@ -1218,13 +1241,13 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
             maxTokens: 1500,
             model: "gemini-2.5-flash"
           }),
-          new Promise<never>((_, reject) => 
+          new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error("LLM timeout")), 12000)
           )
         ]);
-        
+
         console.log(`[ChatService] FAST SEARCH: Returning ${webSources.length} sources in <10s`);
-        
+
         return {
           content: llmResponse.content,
           role: "assistant",
@@ -1235,7 +1258,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
         // Fall through to normal flow on error
       }
     }
-    
+
     // PRODUCTION WORKFLOW: Route generation intents (image, slides, docs) through ProductionWorkflowRunner
     // This ensures real artifacts are generated with proper termination guarantees
     // NEW: Allow artifact generation WITH attachments if user explicitly wants OUTPUT artifact
@@ -1243,7 +1266,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
     const hasAttachments = hasRawAttachments || (attachmentContext && attachmentContext.length > 0);
     const intent = classifyIntent(lastUserMessage.content);
     const wantsOutputArtifact = isGenerationIntent(intent);
-    
+
     // Execute ProductionWorkflowRunner if:
     // 1. No attachments and generation intent detected, OR
     // 2. Has attachments but user explicitly wants to GENERATE an output artifact
@@ -1252,12 +1275,12 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
         console.log(`[ChatService] Generation intent detected: ${intent}, routing to ProductionWorkflowRunner${hasAttachments ? ' (with attachment context)' : ''}`);
         try {
           // Include attachment context in the prompt if available
-          const enrichedPrompt = hasAttachments && attachmentContext 
+          const enrichedPrompt = hasAttachments && attachmentContext
             ? `${lastUserMessage.content}\n\n[DOCUMENTO DE REFERENCIA]\n${attachmentContext.slice(0, 20000)}`
             : lastUserMessage.content;
           const imageContext = lastImageBase64 ? { image: { lastImageBase64, lastImageId } } : undefined;
           const { run, response } = await productionWorkflowRunner.executeAndWait(enrichedPrompt, imageContext);
-          
+
           // Build response with artifact information
           let artifactInfo = null;
           if (run.artifacts.length > 0) {
@@ -1274,7 +1297,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
               contentUrl: artifact.contentUrl || null,
             };
           }
-          
+
           return {
             content: response,
             role: "assistant",
@@ -1290,7 +1313,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
         }
       }
     }
-    
+
     // PRIMERO: Detectar multi-intent ANTES de routeMessage para evitar que el agent pipeline
     // capture prompts con múltiples tareas y solo procese la última
     if (!documentMode && !figmaMode && !hasImages) {
@@ -1299,9 +1322,9 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           userPreferences: {}
         });
-        
+
         if (detection.isMultiIntent && detection.confidence >= 0.7) {
-          
+
           const pipelineResponse = await multiIntentPipeline.execute(
             lastUserMessage.content,
             {
@@ -1311,7 +1334,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
               onProgress: onAgentProgress
             }
           );
-          
+
           if (pipelineResponse.aggregate.completionStatus === "complete") {
             return {
               content: pipelineResponse.aggregate.summary,
@@ -1322,14 +1345,14 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
               multiIntentResponse: pipelineResponse
             };
           }
-          
+
           // Si el pipeline multi-intent falla, continuar con routeMessage normal
         }
       } catch (error) {
         console.error("Multi-intent pipeline error, falling back to routeMessage:", error);
       }
     }
-    
+
     // SEGUNDO: Si no es multi-intent o falló, usar routeMessage normal
     // BUT: Skip agent mode if we have attachment content - answer directly from document
     if (forceDirectResponse && attachmentContext) {
@@ -1337,22 +1360,22 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
       // Fall through to direct LLM response with attachment context
     } else {
       const routeResult = await routeMessage(lastUserMessage.content);
-    
+
       if (routeResult.decision === "agent" || routeResult.decision === "hybrid") {
         const urls = routeResult.urls || [];
-        
+
         for (const url of urls) {
           try {
             const sanitizedUrl = sanitizeUrl(url);
             const securityCheck = await checkDomainPolicy(sanitizedUrl);
-            
+
             if (!securityCheck.allowed) {
               return {
                 content: `No puedo acceder a ${url}: ${securityCheck.reason}`,
                 role: "assistant"
               };
             }
-            
+
             const domain = new URL(sanitizedUrl).hostname;
             if (!checkRateLimit(domain, securityCheck.rateLimit)) {
               return {
@@ -1364,17 +1387,17 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
             console.error("URL validation error:", e);
           }
         }
-        
+
         if (!isValidObjective(routeResult.objective || lastUserMessage.content)) {
           return {
             content: "No puedo procesar solicitudes que involucren información sensible o actividades no permitidas.",
             role: "assistant"
           };
         }
-        
+
         const objective = routeResult.objective || lastUserMessage.content;
         let lastBrowserSessionId: string | null = null;
-        
+
         // Enforce policy check before running agent pipeline
         const agentPolicyCheck = await enforcePolicyCheck("agent_pipeline", "browser_agent");
         if (!agentPolicyCheck.allowed) {
@@ -1383,7 +1406,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
             role: "assistant"
           };
         }
-        
+
         const pipelineStartTime = Date.now();
         try {
           const pipelineResult = await runPipeline({
@@ -1396,11 +1419,11 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
               }
             }
           });
-          
-          await logToolCall(userId || "anonymous", "agent_pipeline", "browser_agent", 
-            { objective }, { steps: pipelineResult.steps.length, success: pipelineResult.success }, 
+
+          await logToolCall(userId || "anonymous", "agent_pipeline", "browser_agent",
+            { objective }, { steps: pipelineResult.steps.length, success: pipelineResult.success },
             pipelineResult.success ? "success" : "error", Date.now() - pipelineStartTime);
-          
+
           return {
             content: pipelineResult.summary || "Tarea completada.",
             role: "assistant",
@@ -1416,7 +1439,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
             browserSessionId: lastBrowserSessionId
           };
         } catch (pipelineError) {
-          await logToolCall(userId || "anonymous", "agent_pipeline", "browser_agent", 
+          await logToolCall(userId || "anonymous", "agent_pipeline", "browser_agent",
             { objective }, null, "error", Date.now() - pipelineStartTime, String(pipelineError));
           throw pipelineError;
         }
@@ -1428,7 +1451,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   let sources: ChatSource[] = [];
   let webSearchInfo = "";
   let webSources: WebSource[] = [];
-  
+
   // Define hasAttachments for web search blocking logic
   // Uses raw attachments from request OR presence of extracted content
   const hasAttachments = hasRawAttachments || (attachmentContext && attachmentContext.length > 0);
@@ -1476,7 +1499,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
     /investiga\s+(sobre|acerca)/i,
     /información\s+(sobre|de|del|acerca)/i,
   ];
-  
+
   // Patterns that EXPLICITLY request internet search (even with attachments)
   const EXPLICIT_WEB_PATTERNS = [
     /busca\s+(en\s+)?(internet|la\s+web|online)/i,
@@ -1486,31 +1509,31 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
     /look\s+up\s+(on\s+)?(the\s+)?(web|internet)/i,
     /find\s+(on\s+)?(the\s+)?(web|internet)/i,
   ];
-  
+
   const isSimpleSearchQuery = (text: string) => SIMPLE_SEARCH_PATTERNS.some(p => p.test(text));
   const isExplicitWebRequest = (text: string) => EXPLICIT_WEB_PATTERNS.some(p => p.test(text));
-  
+
   // CRITICAL: Block web search when attachments are present UNLESS user explicitly requests internet
   const userExplicitlyRequestsWeb = lastUserMessage && isExplicitWebRequest(lastUserMessage.content);
   const forceWebSearch = lastUserMessage && isSimpleSearchQuery(lastUserMessage.content) && !hasAttachments;
-  
+
   // Observability logging for routing decisions - include intent engine insights
   console.log(`[ChatService:Routing] hasAttachments=${hasAttachments}, forceWebSearch=${forceWebSearch}, userExplicitlyRequestsWeb=${userExplicitlyRequestsWeb}, intent=${intentContext?.primaryIntent || "unknown"}, isMultiIntent=${intentContext?.isMultiIntent || false}`);
 
   // CRITICAL: Web search is BLOCKED when attachments are present UNLESS user explicitly requests it
   // This prevents the system from ignoring uploaded documents and searching the web instead
   const allowWebSearch = !hasAttachments || userExplicitlyRequestsWeb;
-  
+
   // Intent-based search optimization: boost web search for research/information-seeking intents
-  const intentSuggestsSearch = intentContext?.primaryIntent && 
+  const intentSuggestsSearch = intentContext?.primaryIntent &&
     ['search', 'research', 'find', 'lookup', 'news', 'information'].some(
       keyword => intentContext.primaryIntent?.toLowerCase().includes(keyword)
     );
-  
+
   if (hasAttachments && !userExplicitlyRequestsWeb) {
     console.log(`[ChatService:WebSearch] BLOCKED - Document mode active. hasAttachments=${hasAttachments}, userExplicitlyRequestsWeb=${userExplicitlyRequestsWeb}`);
   }
-  
+
   // Web search: either forced by simple query OR gated by webSearchAuto feature flag
   // GATED: Only allowed when no attachments OR user explicitly requests web
   // Intent-aware: also triggers if intent engine detected a search/research intent
@@ -1524,22 +1547,22 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
       const searchStartTime = Date.now();
       try {
         const scholarResults = await searchScholar(lastUserMessage.content, 15);
-        await logToolCall(userId || "anonymous", "academic_search", "google_scholar", 
+        await logToolCall(userId || "anonymous", "academic_search", "google_scholar",
           { query: lastUserMessage.content }, { count: scholarResults.length }, "success", Date.now() - searchStartTime);
-        
+
         if (scholarResults.length > 0) {
           webSearchInfo = "\n\n**Artículos académicos encontrados en Google Scholar:**\n" +
-            scholarResults.map((r, i) => 
+            scholarResults.map((r, i) =>
               `[${i + 1}] Autores: ${r.authors || "No disponible"}\nAño: ${r.year || "No disponible"}\nTítulo: ${r.title}\nURL: ${r.url}\nResumen: ${r.snippet}\nCita sugerida: ${r.citation}`
             ).join("\n\n");
-          
+
           // Capture web sources for citations
           webSources = scholarResults
             .filter(r => r.url)
             .map(r => extractWebSource(r.url, r.title, r.snippet, r.year, r.imageUrl, r.siteName, r.canonicalUrl));
         }
       } catch (error) {
-        await logToolCall(userId || "anonymous", "academic_search", "google_scholar", 
+        await logToolCall(userId || "anonymous", "academic_search", "google_scholar",
           { query: lastUserMessage.content }, null, "error", Date.now() - searchStartTime, String(error));
         console.error("Academic search error:", error);
       }
@@ -1554,27 +1577,27 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
       try {
         // Request more sources (20) for richer citations
         const searchResults = await searchWeb(lastUserMessage.content, 20);
-        await logToolCall(userId || "anonymous", "web_search", "duckduckgo", 
+        await logToolCall(userId || "anonymous", "web_search", "duckduckgo",
           { query: lastUserMessage.content }, { count: searchResults.results.length }, "success", Date.now() - searchStartTime);
-        
+
         // Include ALL sources found for citations (not just those with extracted content)
         if (searchResults.results.length > 0) {
           webSources = searchResults.results.map(r => extractWebSource(r.url, r.title, r.snippet, undefined, r.imageUrl, r.siteName, r.canonicalUrl));
         }
-        
+
         if (searchResults.contents.length > 0) {
           webSearchInfo = "\n\n**Información de Internet (actualizada):**\n" +
-            searchResults.contents.map((content, i) => 
+            searchResults.contents.map((content, i) =>
               `[${i + 1}] ${content.title} (${content.url}):\n${content.content}`
             ).join("\n\n");
         } else if (searchResults.results.length > 0) {
           webSearchInfo = "\n\n**Resultados de búsqueda web:**\n" +
-            searchResults.results.map((r, i) => 
+            searchResults.results.map((r, i) =>
               `[${i + 1}] ${r.title}: ${r.snippet} (${r.url})`
             ).join("\n");
         }
       } catch (error) {
-        await logToolCall(userId || "anonymous", "web_search", "duckduckgo", 
+        await logToolCall(userId || "anonymous", "web_search", "duckduckgo",
           { query: lastUserMessage.content }, null, "error", Date.now() - searchStartTime, String(error));
         console.error("Web search error:", error);
       }
@@ -1584,7 +1607,7 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
   // RAG/Memory retrieval is gated by memoryEnabled AND explicit user intent
   // Only inject memory context when user explicitly mentions their documents
   const userWantsMemory = lastUserMessage ? detectMemoryIntent(lastUserMessage.content) : false;
-  
+
   if (useRag && featureFlags.memoryEnabled && lastUserMessage && userWantsMemory) {
     const ragPolicyCheck = await enforcePolicyCheck("memory_retrieval", "rag_search");
     if (!ragPolicyCheck.allowed) {
@@ -1594,29 +1617,29 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
       try {
         const queryEmbedding = await generateEmbedding(lastUserMessage.content);
         const allChunks = await storage.searchSimilarChunks(queryEmbedding, LIMITS.RAG_SIMILAR_CHUNKS, userId);
-        
+
         // Filter by similarity threshold - only include highly relevant chunks
         const similarChunks = allChunks.filter((chunk: any) => {
           const distance = parseFloat(chunk.distance || "1");
           return distance < LIMITS.RAG_SIMILARITY_THRESHOLD;
         });
-        
-        await logToolCall(userId || "anonymous", "memory_retrieval", "rag_search", 
+
+        await logToolCall(userId || "anonymous", "memory_retrieval", "rag_search",
           { query: lastUserMessage.content }, { count: similarChunks.length }, "success", Date.now() - ragStartTime);
-        
+
         if (similarChunks.length > 0) {
           sources = similarChunks.map((chunk: any) => ({
             fileName: chunk.file_name || "Documento",
             content: chunk.content.slice(0, 200) + "..."
           }));
-          
-          contextInfo = "\n\nContexto de tus documentos:\n" + 
-            similarChunks.map((chunk: any, i: number) => 
+
+          contextInfo = "\n\nContexto de tus documentos:\n" +
+            similarChunks.map((chunk: any, i: number) =>
               `[${i + 1}] ${chunk.file_name || "Documento"}: ${chunk.content}`
             ).join("\n\n");
         }
       } catch (error) {
-        await logToolCall(userId || "anonymous", "memory_retrieval", "rag_search", 
+        await logToolCall(userId || "anonymous", "memory_retrieval", "rag_search",
           { query: lastUserMessage.content }, null, "error", Date.now() - ragStartTime, String(error));
         console.error("RAG search error:", error);
       }
@@ -1711,7 +1734,7 @@ REGLAS IMPORTANTES:
 `;
 
   // Build system prompt - prioritize session contract over legacy config
-  const gptSystemPrompt = activeSessionContract 
+  const gptSystemPrompt = activeSessionContract
     ? buildSystemPromptWithContext(activeSessionContract)
     : validatedGptConfig?.systemPrompt;
 
@@ -1728,7 +1751,7 @@ ${documentModeInstructions}${documentMode.type === 'excel' ? excelChartInstructi
   // Check if user explicitly requests document creation
   const lastUserMsgText = messages.filter(m => m.role === "user").pop()?.content?.toLowerCase() || "";
   const wantsDocument = /\b(crea|crear|genera|generar|haz|hacer|escribe|escribir|redacta|redactar|elabora|elaborar)\b.*(documento|word|excel|powerpoint|ppt|archivo|docx|xlsx|pptx)/i.test(lastUserMsgText) ||
-                        /\b(documento|word|excel|powerpoint|ppt)\b.*(crea|crear|genera|generar|haz|hacer)/i.test(lastUserMsgText);
+    /\b(documento|word|excel|powerpoint|ppt)\b.*(crea|crear|genera|generar|haz|hacer)/i.test(lastUserMsgText);
 
   // Check if user wants a chart/graph/visualization
   // Code interpreter is gated by the codeInterpreterEnabled feature flag
@@ -1811,29 +1834,27 @@ NO generes documentos Word/Excel/PPT a menos que el usuario lo pida EXPLÍCITAME
 Si el usuario dice "dame un resumen" o "analiza esto", responde en texto, NO como documento.`;
 
   // Build user profile context if available
-  const userProfileContext = userProfile && (userProfile.nickname || userProfile.occupation || userProfile.bio) 
+  const userProfileContext = userProfile && (userProfile.nickname || userProfile.occupation || userProfile.bio)
     ? `\n\nInformación del usuario:${userProfile.nickname ? `\n- Nombre/Apodo: ${userProfile.nickname}` : ''}${userProfile.occupation ? `\n- Ocupación: ${userProfile.occupation}` : ''}${userProfile.bio ? `\n- Bio: ${userProfile.bio}` : ''}`
     : '';
 
   // Build custom instructions section if present
-  const customInstructionsSection = customInstructions 
+  const customInstructionsSection = customInstructions
     ? `\n\nInstrucciones personalizadas del usuario:\n${customInstructions}`
     : '';
 
   // Build response style modifier based on user preference
-  const responseStyleModifier = responseStyle !== 'default' 
-    ? `\n\nEstilo de respuesta preferido: ${
-        responseStyle === 'formal' ? 'formal y profesional' :
-        responseStyle === 'casual' ? 'casual y amigable' :
+  const responseStyleModifier = responseStyle !== 'default'
+    ? `\n\nEstilo de respuesta preferido: ${responseStyle === 'formal' ? 'formal y profesional' :
+      responseStyle === 'casual' ? 'casual y amigable' :
         responseStyle === 'concise' ? 'muy conciso y breve' : ''
-      }`
+    }`
     : '';
 
   // Build company knowledge context if available
   const companyKnowledgeSection = companyKnowledge && companyKnowledge.length > 0
-    ? `\n\n**CONOCIMIENTOS DE LA EMPRESA (usa esta información para responder):**\n${
-        companyKnowledge.map(k => `### ${k.title} [${k.category}]\n${k.content}`).join('\n\n')
-      }`
+    ? `\n\n**CONOCIMIENTOS DE LA EMPRESA (usa esta información para responder):**\n${companyKnowledge.map(k => `### ${k.title} [${k.category}]\n${k.content}`).join('\n\n')
+    }`
     : '';
 
   // Current date/time context for real-time awareness
@@ -1851,11 +1872,11 @@ ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
   // Include attachment context for document-based Q&A
   // Combine persistent conversation documents with current attachments
   const fullDocumentContext = persistentDocumentContext + attachmentContext;
-  const systemContent = documentModePrompt 
+  const systemContent = documentModePrompt
     ? documentModePrompt
-    : (gptSystemPrompt 
-        ? `${gptSystemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`
-        : `${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`);
+    : (gptSystemPrompt
+      ? `${gptSystemPrompt}\n\n${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`
+      : `${defaultSystemContent}${webSearchInfo}${contextInfo}${fullDocumentContext}`);
 
   const systemMessage: ChatMessage = {
     role: "system",
@@ -1869,7 +1890,7 @@ ${codeInterpreterPrompt}${documentCapabilitiesPrompt}`;
   // Handle Figma diagram generation mode
   if (figmaMode && lastUserMessage) {
     const diagramType = detectDiagramType(lastUserMessage.content);
-    
+
     const flowchartPrompt = `Eres un generador de diagramas de flujo. Analiza la solicitud del usuario y genera un diagrama de flujo estructurado.
 
 DEBES responder ÚNICAMENTE con un objeto JSON válido en el siguiente formato:
@@ -1969,12 +1990,12 @@ REGLAS OBLIGATORIAS:
             nodes: parsed.nodes || [],
             connections: parsed.connections || []
           };
-          
+
           // Apply tree layout for org charts
           if (figmaDiagram.diagramType === "orgchart") {
             const validOrgTypes = ["role", "department", "person"];
             const invalidLabels = ["inicio", "fin", "start", "end", "aleta"];
-            
+
             // Filter out invalid nodes
             const validNodeIds = new Set<string>();
             figmaDiagram.nodes = figmaDiagram.nodes.filter(node => {
@@ -1987,12 +2008,12 @@ REGLAS OBLIGATORIAS:
               console.warn(`Filtering out invalid org chart node: ${node.id} (type: ${node.type}, label: ${node.label})`);
               return false;
             });
-            
+
             // Filter connections to only reference valid nodes
-            figmaDiagram.connections = figmaDiagram.connections.filter(conn => 
+            figmaDiagram.connections = figmaDiagram.connections.filter(conn =>
               validNodeIds.has(conn.from) && validNodeIds.has(conn.to)
             );
-            
+
             // Validate the cleaned diagram - reject if still invalid
             const validation = validateOrgChart(figmaDiagram);
             if (!validation.valid) {
@@ -2031,7 +2052,7 @@ REGLAS OBLIGATORIAS:
   }
 
   let response;
-  
+
   if (provider === "gemini") {
     if (hasImages) {
       return {
@@ -2039,10 +2060,10 @@ REGLAS OBLIGATORIAS:
         role: "assistant"
       };
     }
-    
+
 
     const geminiMessages: GeminiChatMessage[] = [];
-    
+
     if (systemMessage.content) {
       geminiMessages.push({
         role: "user",
@@ -2053,25 +2074,25 @@ REGLAS OBLIGATORIAS:
         parts: [{ text: "Entendido. Seguiré estas instrucciones." }]
       });
     }
-    
+
     for (const msg of messages) {
       geminiMessages.push({
         role: msg.role === "assistant" ? "model" : "user",
         parts: [{ text: msg.content }]
       });
     }
-    
+
     const geminiModel = (model as typeof GEMINI_MODELS[keyof typeof GEMINI_MODELS]) || GEMINI_MODELS.FLASH;
-    
+
     const geminiResponse = await geminiChat(geminiMessages, {
       model: geminiModel,
       temperature,
       topP,
     });
-    
+
     console.log(`[ChatService] Gemini response: model=${geminiResponse.model}`);
-    
-    return { 
+
+    return {
       content: geminiResponse.content,
       role: "assistant",
       sources,
@@ -2082,7 +2103,7 @@ REGLAS OBLIGATORIAS:
       type: "image_url" as const,
       image_url: { url: img }
     }));
-    
+
     const lastUserIdx = messages.findLastIndex(m => m.role === "user");
     const messagesWithImages = messages.map((msg, idx) => {
       if (idx === lastUserIdx) {
@@ -2096,18 +2117,18 @@ REGLAS OBLIGATORIAS:
       }
       return msg;
     });
-    
+
     response = await openai.chat.completions.create({
       model: MODELS.VISION,
-      messages: [systemMessage, ...messagesWithImages] as any,
+      messages: [systemMessage, ...messagesWithImages] as OpenAI.Chat.ChatCompletionMessageParam[],
       max_tokens: 4096,
       temperature,
       top_p: topP,
     });
-    
+
     const content = response.choices[0]?.message?.content || "No response generated";
-    
-    return { 
+
+    return {
       content,
       role: "assistant",
       sources,
@@ -2124,10 +2145,10 @@ REGLAS OBLIGATORIAS:
         requestId: `chat_${Date.now()}`,
       }
     );
-    
+
     console.log(`[ChatService] LLM Gateway response: ${gatewayResponse.latencyMs}ms, tokens: ${gatewayResponse.usage?.totalTokens || 0}`);
-    
-    return { 
+
+    return {
       content: gatewayResponse.content,
       role: "assistant",
       sources,

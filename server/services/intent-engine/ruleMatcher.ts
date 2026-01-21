@@ -1,4 +1,7 @@
 import type { IntentType, OutputFormat, SupportedLocale, Slots } from "../../../shared/schemas/intent";
+import * as fs from 'fs';
+import * as path from 'path';
+import { resolveSafePath } from '../../utils/pathSecurity';
 
 const INTENT_ALIASES: Record<SupportedLocale, Record<IntentType, string[]>> = {
   es: {
@@ -10,7 +13,9 @@ const INTENT_ALIASES: Record<SupportedLocale, Record<IntentType, string[]>> = {
     CREATE_DOCUMENT: [
       "doc", "docx", "word", "documento", "informe", "reporte",
       "crear documento", "generar documento", "hacer documento", "escribir documento",
-      "elaborar informe", "redactar", "carta", "ensayo", "articulo", "manual", "guia"
+      "elaborar informe", "redactar", "carta", "ensayo", "articulo", "manual", "guia",
+      "creame", "creame un", "creame una", "solicitud", "permiso", "oficio", "memorial",
+      "hazme un documento", "genera un documento", "escribe un documento"
     ],
     CREATE_SPREADSHEET: [
       "xls", "xlsx", "excel", "hoja de calculo", "hoja de cálculo", "spreadsheet",
@@ -559,21 +564,25 @@ const FORMAT_KEYWORDS: Record<NonNullable<OutputFormat>, string[]> = {
   pptx: [
     "pptx", "ppt", "powerpoint", "power point", "presentacion", "presentación",
     "presentation", "slides", "diapositivas", "folien", "apresentacao", "diapositive",
-    "عرض تقديمي", "प्रस्तुति", "プレゼン", "프레젠테이션", "演示", "презентация", "sunum", "presentasi"
+    "عرض تقديمي", "प्रस्तुति", "プレゼン", "프레젠테이션", "演示", "презентация", "sunum", "presentasi",
+    "deck", "slide deck", "slidedeck", "diapositiva", "presentasi"
   ],
   docx: [
     "docx", "doc", "word", "documento", "document", "informe", "reporte", "report",
-    "dokument", "relatorio", "مستند", "दस्तावेज़", "ドキュメント", "문서", "文档", "документ", "belge", "dokumen"
+    "dokument", "relatorio", "مستند", "दस्तावेज़", "ドキュメント", "문서", "文档", "документ", "belge", "dokumen",
+    "ensayo", "articulo", "paper", "resumen ejecutivo", "executive summary", "briefing", "guia", "guide", "manual",
+    "carta", "letter", "propuesta", "proposal"
   ],
   xlsx: [
     "xlsx", "xls", "excel", "spreadsheet", "hoja de calculo", "tabla", "planilla",
     "tabelle", "tableur", "foglio", "جدول", "स्प्रेडशीट", "スプレッドシート", "스프레드시트",
-    "电子表格", "таблица", "tablo", "spreadsheet"
+    "电子表格", "таблица", "tablo", "spreadsheet", "csv", "data", "datos", "dataset",
+    "cuadro", "matriz", "matrix", "base de datos", "database", "listado", "list"
   ],
-  pdf: ["pdf", "portable document", "exportar pdf"],
-  txt: ["txt", "texto plano", "plain text", "text file"],
-  csv: ["csv", "comma separated", "valores separados"],
-  html: ["html", "webpage", "pagina web", "página web"]
+  pdf: ["pdf", "portable document", "exportar pdf", "guardar como pdf", "archivo pdf"],
+  txt: ["txt", "texto plano", "plain text", "text file", "archivo de texto"],
+  csv: ["csv", "comma separated", "valores separados", "archivo csv"],
+  html: ["html", "webpage", "pagina web", "página web", "sitio web", "website"]
 };
 
 const AUDIENCE_KEYWORDS: Record<string, string[]> = {
@@ -605,14 +614,14 @@ const AUDIENCE_KEYWORDS: Record<string, string[]> = {
 
 function levenshteinDistance(a: string, b: string): number {
   const matrix: number[][] = [];
-  
+
   for (let i = 0; i <= b.length; i++) {
     matrix[i] = [i];
   }
   for (let j = 0; j <= a.length; j++) {
     matrix[0][j] = j;
   }
-  
+
   for (let i = 1; i <= b.length; i++) {
     for (let j = 1; j <= a.length; j++) {
       if (b.charAt(i - 1) === a.charAt(j - 1)) {
@@ -626,22 +635,22 @@ function levenshteinDistance(a: string, b: string): number {
       }
     }
   }
-  
+
   return matrix[b.length][a.length];
 }
 
 function fuzzyMatch(text: string, target: string, threshold: number = 0.80): { match: boolean; similarity: number } {
   const normalizedText = text.toLowerCase();
   const normalizedTarget = target.toLowerCase();
-  
+
   if (normalizedText.includes(normalizedTarget)) {
     return { match: true, similarity: 1.0 };
   }
-  
+
   const distance = levenshteinDistance(normalizedText, normalizedTarget);
   const maxLength = Math.max(normalizedText.length, normalizedTarget.length);
   const similarity = 1 - (distance / maxLength);
-  
+
   return { match: similarity >= threshold, similarity };
 }
 
@@ -659,7 +668,7 @@ const NON_LATIN_LOCALES: SupportedLocale[] = ["ar", "hi", "ja", "ko", "zh", "ru"
 function hasCreationVerb(normalizedText: string, locale: SupportedLocale): boolean {
   const verbs = [...(CREATION_VERBS[locale] || []), ...CREATION_VERBS.en];
   const isNonLatin = NON_LATIN_LOCALES.includes(locale);
-  
+
   return verbs.some(verb => {
     if (isNonLatin) {
       return normalizedText.includes(verb.toLowerCase());
@@ -682,20 +691,20 @@ function detectOutputFormat(normalizedText: string): OutputFormat {
 
 export function extractSlots(normalizedText: string, originalText: string): Slots {
   const slots: Slots = {};
-  
+
   const lengthPatterns: Array<{ pattern: RegExp; value: "short" | "medium" | "long" }> = [
     { pattern: /\b(breve|corto|corta|short|brief|rapido|rápido|conciso|kurz|court|breve|قصير|संक्षिप्त|短い|짧은|短|краткий|kısa|singkat)\b/i, value: "short" },
     { pattern: /\b(medio|mediano|mediana|medium|moderate|normal|mittel|moyen|متوسط|मध्यम|中程度|중간|中等|средний|orta|sedang)\b/i, value: "medium" },
     { pattern: /\b(largo|larga|long|extenso|extensa|detallado|detallada|completo|completa|exhaustivo|lang|détaillé|lungo|طويل|विस्तृत|長い|긴|长|подробный|uzun|panjang)\b/i, value: "long" }
   ];
-  
+
   for (const { pattern, value } of lengthPatterns) {
     if (pattern.test(normalizedText)) {
       slots.length = value;
       break;
     }
   }
-  
+
   for (const [audience, keywords] of Object.entries(AUDIENCE_KEYWORDS)) {
     for (const keyword of keywords) {
       if (normalizedText.includes(keyword.toLowerCase())) {
@@ -705,25 +714,25 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
     }
     if (slots.audience) break;
   }
-  
+
   const slidesPattern = /(\d+)\s*(?:diapositivas?|slides?|paginas?|páginas?|hojas?|folien?|diapositive?|شرائح?|स्लाइड|スライド|슬라이드|张|слайд|slayt|slide)/i;
   const slidesMatch = normalizedText.match(slidesPattern);
   if (slidesMatch) {
     slots.num_slides = parseInt(slidesMatch[1], 10);
   }
-  
+
   if (/\b(con\s*)?imagenes?\b|\b(with\s*)?images?\b|\b(incluir?\s*)?fotos?\b|\billustrat|\bbilder\b|\bimmagini\b|\bصور\b|\bचित्र\b|\b画像\b|\b이미지\b|\b图片\b|\bизображения\b|\bresim\b|\bgambar\b/i.test(normalizedText)) {
     slots.include_images = true;
   }
-  
+
   if (/\b(sin\s*)?imagenes?\b|\b(no\s*)?images?\b|\btext\s*only\b|\bsolo\s*texto\b|\bkeine\s*bilder\b|\bبدون صور\b|\bबिना चित्र\b|\b画像なし\b|\b이미지 없이\b|\b无图片\b|\bбез изображений\b|\bresimsiz\b|\btanpa gambar\b/i.test(normalizedText)) {
     slots.include_images = false;
   }
-  
+
   if (/\bbullet\s*points?\b|\bviñetas?\b|\bpuntos?\b|\blista\b|\bitemized\b|\baufzaehlung\b|\bpuce\b|\bنقاط\b|\bबिंदु\b|\b箇条書き\b|\b글머리\b|\b要点\b|\bпункты\b|\bmaddeler\b|\bpoin\b/i.test(normalizedText)) {
     slots.bullet_points = true;
   }
-  
+
   const stylePatterns: Array<{ pattern: RegExp; style: string }> = [
     { pattern: /\b(profesional|professional|formal|corporativo|corporate|business|formell|formel|رسمي|औपचारिक|フォーマル|공식|正式|формальный|resmi|formal)\b/i, style: "professional" },
     { pattern: /\b(creativo|creative|moderno|modern|innovador|kreativ|créatif|إبداعي|रचनात्मक|クリエイティブ|창의적|创意|креативный|yaratıcı|kreatif)\b/i, style: "creative" },
@@ -731,19 +740,19 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
     { pattern: /\b(academico|académico|academic|científico|scientific|research|wissenschaftlich|académique|أكاديمي|शैक्षिक|学術|학술|学术|академический|akademik)\b/i, style: "academic" },
     { pattern: /\b(casual|informal|friendly|amigable|locker|غير رسمي|अनौपचारिक|カジュアル|캐주얼|休闲|неформальный|rahat|santai)\b/i, style: "casual" }
   ];
-  
+
   for (const { pattern, style } of stylePatterns) {
     if (pattern.test(normalizedText)) {
       slots.style = style;
       break;
     }
   }
-  
+
   const topicPatterns = [
     /(?:sobre|about|acerca\s+de|regarding|tema|topic|de|sur|über|su|عن|के बारे में|について|에 대해|关于|о|hakkında|tentang)\s+["']?([^"'\n,\.]{3,50})["']?/i,
     /(?:presentacion|documento|excel|informe|reporte|resumen|presentation|document|report)\s+(?:de|sobre|about|sur|über)\s+["']?([^"'\n,\.]{3,50})["']?/i
   ];
-  
+
   for (const pattern of topicPatterns) {
     const match = originalText.match(pattern);
     if (match) {
@@ -751,11 +760,11 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
       break;
     }
   }
-  
+
   const titlePatterns = [
     /(?:titulo|title|titulado|titled|llamado|called|intitulé|betitelt|عنوان|शीर्षक|タイトル|제목|标题|заголовок|başlık|judul)\s*[:\s]+["']?([^"'\n]{3,80})["']?/i
   ];
-  
+
   for (const pattern of titlePatterns) {
     const match = originalText.match(pattern);
     if (match) {
@@ -763,7 +772,123 @@ export function extractSlots(normalizedText: string, originalText: string): Slot
       break;
     }
   }
-  
+
+  // ===================================================================================
+  // AGENTIC IMPROVEMENT #4: Enhanced entity detection for pages, ranges, and sections
+  // ===================================================================================
+
+  // Detect specific page numbers (e.g., "page 3", "página 5", "página 3 y 4")
+  const pagePatterns = [
+    /(?:pagina|página|page|pag|p\.?)s?\s*(\d+(?:\s*(?:,|y|and|e|et|und|،|और|と|및|、|и|ve|dan)\s*\d+)*)/gi,
+    /(\d+)(?:ª|°)?\s*(?:pagina|página|page)/gi
+  ];
+
+  for (const pattern of pagePatterns) {
+    let match;
+    const pageNumbers: number[] = [];
+    // Reset lastIndex because we are iterating over the same regex object if reused, 
+    // but here we recreate regex or iterate list. Ideally regex should be global.
+    // The patterns above have 'g' flag.
+    while ((match = pattern.exec(normalizedText)) !== null) {
+      const nums = match[1].match(/\d+/g);
+      if (nums) {
+        pageNumbers.push(...nums.map(n => parseInt(n, 10)));
+      }
+    }
+
+    if (pageNumbers.length > 0) {
+      slots.page_numbers = Array.from(new Set(pageNumbers)).sort((a, b) => a - b);
+      break;
+    }
+  }
+
+  // Detect page ranges (e.g., "pages 1-5", "páginas 3 a 7", "from page 2 to 10")
+  const rangePatterns = [
+    /(?:paginas?|páginas?|pages?)\s*(\d+)\s*(?:-|a|to|bis|à|al|até|до|から)\s*(\d+)/gi,
+    /(?:desde|from|de|von|da|من|से|から|부터|从|от|den|dari)?\s*(?:la\s*)?(?:pagina|página|page|pag)\s*(\d+)\s*(?:hasta|to|a|bis|à|al|até|до|まで|까지|到|до|e|dan)\s*(?:la\s*)?(?:pagina|página|page|pag)?\s*(\d+)/gi
+  ];
+
+  for (const pattern of rangePatterns) {
+    const match = pattern.exec(normalizedText);
+    if (match) {
+      const start = parseInt(match[1], 10);
+      const end = parseInt(match[2], 10);
+      if (start <= end) {
+        slots.page_range = { start, end };
+        break;
+      }
+    }
+  }
+
+  // Detect section references (e.g., "section 2", "sección 3", "chapter 1")
+  const sectionPatterns = [
+    /(?:seccion|sección|section|capitulo|capítulo|chapter|parte|part|abschnitt|chapitre|sezione|قسم|अध्याय|セクション|섹션|章节|раздел|bölüm|bagian)\s*(\d+)/gi,
+    /(\d+)(?:ª|°|ª)?\s*(?:seccion|sección|section|capitulo|capítulo|chapter|parte|part)/gi
+  ];
+
+  for (const pattern of sectionPatterns) {
+    const match = pattern.exec(normalizedText);
+    if (match) {
+      slots.section_number = parseInt(match[1], 10);
+      break;
+    }
+  }
+
+  // Detect scope qualifiers (all, partial, specific)
+  const scopePatterns: Array<{ pattern: RegExp; scope: "all" | "partial" | "specific" }> = [
+    { pattern: /\b(todo|todos|todas|all|everything|completo|complete|entire|whole|full|ganz|tout|tutto|كل|सभी|全部|전체|全部|все|tüm|semua)\b/i, scope: "all" },
+    { pattern: /\b(parte|partes|partial|solo|only|just|nur|seulement|solo|جزء|भाग|一部|일부|部分|часть|sadece|sebagian)\b/i, scope: "partial" },
+    { pattern: /\b(especifico|específico|specific|particular|certain|bestimmt|spécifique|specifico|محدد|विशिष्ट|特定|특정|特定|конкретный|belirli|tertentu)\b/i, scope: "specific" }
+  ];
+
+  for (const { pattern, scope } of scopePatterns) {
+    if (pattern.test(normalizedText)) {
+      slots.scope = scope;
+      break;
+    }
+  }
+
+  // ===================================================================================
+  // AGENTIC IMPROVEMENT #24 & #31: File Entity Extraction and Feasibility Validation
+  // ===================================================================================
+
+  const filePattern = /[a-zA-Z0-9_\-\./\\]+\.(ts|js|jsx|tsx|py|html|css|json|md|txt|csv|xlsx|docx|pdf|ppt|pptx|java|c|cpp|h|go|rb|php|sql|xml|yaml|yml)\b/gi;
+  const projectRoot = process.cwd();
+
+  const foundFiles: string[] = [];
+  const validationIssues: string[] = [];
+
+  let fileMatch;
+  while ((fileMatch = filePattern.exec(originalText)) !== null) {
+    const potentialPath = fileMatch[0];
+    // Basic filter to avoid common false positives like "node.js" if used as a noun
+    if (potentialPath.includes('/') || potentialPath.includes('\\') || potentialPath.split('.').length > 1) {
+      try {
+        const absolutePath = resolveSafePath(potentialPath);
+
+        if (fs.existsSync(absolutePath)) {
+          foundFiles.push(absolutePath);
+        } else {
+          // Only report if it looks very much like a specific file path request
+          // and avoid complaining about output formats like "file.pdf" that we are about to create
+          if (!/\.(pdf|docx|xlsx|pptx)$/i.test(potentialPath)) {
+            validationIssues.push(`File not found: ${potentialPath}`);
+          }
+        }
+      } catch (e) {
+        // Ignore path parsing errors
+      }
+    }
+  }
+
+  if (foundFiles.length > 0) {
+    slots.file_paths = Array.from(new Set(foundFiles));
+  }
+
+  if (validationIssues.length > 0) {
+    slots.validation_issues = Array.from(new Set(validationIssues));
+  }
+
   return slots;
 }
 
@@ -771,12 +896,12 @@ function charBigramOverlap(text: string, pattern: string): number {
   if (pattern.length < 2) {
     return text.includes(pattern) ? 1.0 : 0.0;
   }
-  
+
   const textBigrams = new Set<string>();
   for (let i = 0; i < text.length - 1; i++) {
     textBigrams.add(text.slice(i, i + 2));
   }
-  
+
   let matches = 0;
   const patternBigramCount = Math.max(1, pattern.length - 1);
   for (let i = 0; i < pattern.length - 1; i++) {
@@ -784,7 +909,7 @@ function charBigramOverlap(text: string, pattern: string): number {
       matches++;
     }
   }
-  
+
   return matches / patternBigramCount;
 }
 
@@ -803,20 +928,20 @@ export function ruleBasedMatch(
     CHAT_GENERAL: { score: 0, patterns: [] },
     NEED_CLARIFICATION: { score: 0, patterns: [] }
   };
-  
+
   const isNonLatin = NON_LATIN_LOCALES.includes(locale);
   const words = normalizedText.split(/\s+/);
-  
+
   const localeAliases = INTENT_ALIASES[locale] || INTENT_ALIASES.es;
   const englishAliases = INTENT_ALIASES.en;
-  
+
   for (const [intent, aliases] of Object.entries(localeAliases) as [IntentType, string[]][]) {
     const allAliases = [...aliases, ...(englishAliases[intent] || [])];
-    const uniqueAliases = [...new Set(allAliases)];
-    
+    const uniqueAliases = Array.from(new Set(allAliases));
+
     for (const alias of uniqueAliases) {
       const aliasLower = alias.toLowerCase();
-      
+
       if (normalizedText.includes(aliasLower)) {
         scores[intent].score += 2;
         scores[intent].patterns.push(alias);
@@ -837,7 +962,7 @@ export function ruleBasedMatch(
       }
     }
   }
-  
+
   const hasCreation = hasCreationVerb(normalizedText, locale);
   if (hasCreation) {
     for (const createIntent of ["CREATE_PRESENTATION", "CREATE_DOCUMENT", "CREATE_SPREADSHEET"] as IntentType[]) {
@@ -847,7 +972,7 @@ export function ruleBasedMatch(
       }
     }
   }
-  
+
   const outputFormat = detectOutputFormat(normalizedText);
   if (outputFormat) {
     if (["pptx"].includes(outputFormat)) {
@@ -858,10 +983,10 @@ export function ruleBasedMatch(
       scores.CREATE_SPREADSHEET.score += 2;
     }
   }
-  
+
   let bestIntent: IntentType = "CHAT_GENERAL";
   let bestScore = 0;
-  
+
   const priorityOrder: IntentType[] = [
     "CREATE_PRESENTATION",
     "CREATE_DOCUMENT",
@@ -872,14 +997,14 @@ export function ruleBasedMatch(
     "ANALYZE_DOCUMENT",
     "CHAT_GENERAL"
   ];
-  
+
   for (const intent of priorityOrder) {
     if (scores[intent].score > bestScore) {
       bestScore = scores[intent].score;
       bestIntent = intent;
     }
   }
-  
+
   let confidence: number;
   if (bestScore === 0) {
     confidence = 0.30;
@@ -892,7 +1017,7 @@ export function ruleBasedMatch(
   } else {
     confidence = Math.min(0.95, 0.80 + (bestScore - 6) * 0.02);
   }
-  
+
   return {
     intent: bestIntent,
     confidence,
@@ -908,7 +1033,7 @@ export function getAliasCount(): Record<SupportedLocale, number> {
     es: 0, en: 0, pt: 0, fr: 0, de: 0, it: 0,
     ar: 0, hi: 0, ja: 0, ko: 0, zh: 0, ru: 0, tr: 0, id: 0
   };
-  
+
   for (const locale of Object.keys(counts) as SupportedLocale[]) {
     const localeAliases = INTENT_ALIASES[locale];
     if (localeAliases) {
@@ -918,6 +1043,6 @@ export function getAliasCount(): Record<SupportedLocale, number> {
       );
     }
   }
-  
+
   return counts;
 }

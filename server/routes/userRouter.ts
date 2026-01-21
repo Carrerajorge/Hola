@@ -7,15 +7,16 @@ import { verifyAnonToken } from "../lib/anonToken";
 import { notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema, integrationProviders, integrationTools } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { usageQuotaService } from "../services/usageQuotaService";
+import { AuthenticatedRequest, getUserId } from "../types/express";
 
 export function createUserRouter() {
   const router = Router();
 
   router.get("/api/user/usage", async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       let userId = user?.claims?.sub;
-      
+
       if (!userId) {
         const token = req.headers['x-anonymous-token'] as string;
         if (token) {
@@ -25,11 +26,11 @@ export function createUserRouter() {
           }
         }
       }
-      
+
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized" });
       }
-      
+
       const usageStatus = await usageQuotaService.getUsageStatus(userId);
       res.json(usageStatus);
     } catch (error: any) {
@@ -53,7 +54,7 @@ export function createUserRouter() {
       const { id } = req.params;
       const eventTypes = await storage.getNotificationEventTypes();
       const preferences = await storage.getNotificationPreferences(id);
-      
+
       const prefsWithEventTypes = eventTypes.map(eventType => {
         const pref = preferences.find(p => p.eventTypeId === eventType.id);
         return {
@@ -63,7 +64,7 @@ export function createUserRouter() {
           channels: pref ? pref.channels : eventType.defaultChannels
         };
       });
-      
+
       res.json(prefsWithEventTypes);
     } catch (error: any) {
       console.error("Error getting notification preferences:", error);
@@ -75,18 +76,18 @@ export function createUserRouter() {
     try {
       const { id } = req.params;
       const { eventTypeId, enabled, channels } = req.body;
-      
+
       if (!eventTypeId) {
         return res.status(400).json({ error: "eventTypeId is required" });
       }
-      
+
       const preference = await storage.upsertNotificationPreference({
         userId: id,
         eventTypeId,
         enabled: enabled !== undefined ? (enabled ? "true" : "false") : "true",
         channels: channels || "push"
       });
-      
+
       res.json(preference);
     } catch (error: any) {
       console.error("Error updating notification preference:", error);
@@ -103,20 +104,20 @@ export function createUserRouter() {
         { id: 'product_recommendation', name: 'Recomendaciones', description: 'Sugerencias personalizadas', category: 'product', severity: 'low', defaultChannels: 'email', sortOrder: 4 },
         { id: 'feature_announcement', name: 'Novedades', description: 'Nuevas funciones disponibles', category: 'product', severity: 'low', defaultChannels: 'email', sortOrder: 5 }
       ];
-      
+
       const existing = await storage.getNotificationEventTypes();
       const existingIds = new Set(existing.map(e => e.id));
-      
+
       const toInsert = eventTypesToSeed.filter(e => !existingIds.has(e.id));
-      
+
       if (toInsert.length > 0) {
         await db.insert(notificationEventTypes).values(toInsert);
       }
-      
+
       const allEventTypes = await storage.getNotificationEventTypes();
-      res.json({ 
+      res.json({
         message: `Seeded ${toInsert.length} new event types`,
-        eventTypes: allEventTypes 
+        eventTypes: allEventTypes
       });
     } catch (error: any) {
       console.error("Error seeding notification event types:", error);
@@ -127,11 +128,11 @@ export function createUserRouter() {
   router.get("/api/users/:id/settings", async (req, res) => {
     try {
       const { id } = req.params;
-      
+
       // For authenticated users, verify ownership
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       const authUserId = user?.claims?.sub;
-      
+
       if (authUserId) {
         // Authenticated user - must match
         if (authUserId !== id) {
@@ -144,9 +145,9 @@ export function createUserRouter() {
           return res.status(403).json({ error: "Access denied" });
         }
       }
-      
+
       const settings = await storage.getUserSettings(id);
-      
+
       if (!settings) {
         res.json({
           userId: id,
@@ -173,7 +174,7 @@ export function createUserRouter() {
         });
         return;
       }
-      
+
       res.json(settings);
     } catch (error: any) {
       console.error("Error getting user settings:", error);
@@ -184,11 +185,11 @@ export function createUserRouter() {
   router.put("/api/users/:id/settings", async (req, res) => {
     try {
       const { id } = req.params;
-      
+
       // For authenticated users, verify ownership
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       const authUserId = user?.claims?.sub;
-      
+
       if (authUserId) {
         // Authenticated user - must match
         if (authUserId !== id) {
@@ -201,12 +202,12 @@ export function createUserRouter() {
           return res.status(403).json({ error: "Access denied" });
         }
       }
-      
+
       const { responsePreferences, userProfile, featureFlags } = req.body;
-      
+
       const updates: any = {};
       const validationErrors: string[] = [];
-      
+
       if (responsePreferences !== undefined) {
         const parsed = responsePreferencesSchema.safeParse(responsePreferences);
         if (!parsed.success) {
@@ -215,7 +216,7 @@ export function createUserRouter() {
           updates.responsePreferences = parsed.data;
         }
       }
-      
+
       if (userProfile !== undefined) {
         const parsed = userProfileSchema.safeParse(userProfile);
         if (!parsed.success) {
@@ -224,7 +225,7 @@ export function createUserRouter() {
           updates.userProfile = parsed.data;
         }
       }
-      
+
       if (featureFlags !== undefined) {
         const parsed = featureFlagsSchema.safeParse(featureFlags);
         if (!parsed.success) {
@@ -233,14 +234,14 @@ export function createUserRouter() {
           updates.featureFlags = parsed.data;
         }
       }
-      
+
       if (validationErrors.length > 0) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
-          details: validationErrors 
+        return res.status(400).json({
+          error: "Validation failed",
+          details: validationErrors
         });
       }
-      
+
       const settings = await storage.upsertUserSettings(id, updates);
       res.json(settings);
     } catch (error: any) {
@@ -376,18 +377,18 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/integrations", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const [accounts, policy, providers] = await Promise.all([
         storage.getIntegrationAccounts(id),
         storage.getIntegrationPolicy(id),
         storage.getIntegrationProviders()
       ]);
-      
+
       res.json({ accounts, policy, providers });
     } catch (error: any) {
       console.error("Error getting user integrations:", error);
@@ -397,14 +398,14 @@ export function createUserRouter() {
 
   router.put("/api/users/:id/integrations/policy", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const { enabledApps, enabledTools, disabledTools, resourceScopes, autoConfirmPolicy, sandboxMode, maxParallelCalls } = req.body;
-      
+
       const policy = await storage.upsertIntegrationPolicy(id, {
         enabledApps,
         enabledTools,
@@ -414,7 +415,7 @@ export function createUserRouter() {
         sandboxMode,
         maxParallelCalls
       });
-      
+
       res.json(policy);
     } catch (error: any) {
       console.error("Error updating policy:", error);
@@ -424,16 +425,16 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/integrations/:provider/connect", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id, provider } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const providerInfo = await storage.getIntegrationProvider(provider);
       if (!providerInfo) return res.status(404).json({ error: "Provider not found" });
-      
-      res.json({ 
+
+      res.json({
         message: "OAuth flow not yet implemented",
         provider: providerInfo.name,
         authType: providerInfo.authType
@@ -446,15 +447,15 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/integrations/:provider/disconnect", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id, provider } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const account = await storage.getIntegrationAccountByProvider(id, provider);
       if (!account) return res.status(404).json({ error: "Account not found" });
-      
+
       await storage.deleteIntegrationAccount(account.id);
       res.json({ success: true });
     } catch (error: any) {
@@ -465,12 +466,12 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/integrations/logs", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const limit = parseInt(req.query.limit as string) || 50;
       const logs = await storage.getToolCallLogs(id, limit);
       res.json(logs);
@@ -482,15 +483,15 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/privacy", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const settings = await storage.getUserSettings(id);
       const logs = await storage.getConsentLogs(id, 10);
-      res.json({ 
+      res.json({
         privacySettings: settings?.privacySettings || { trainingOptIn: false, remoteBrowserDataAccess: false },
         consentHistory: logs
       });
@@ -502,27 +503,27 @@ export function createUserRouter() {
 
   router.put("/api/users/:id/privacy", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const { trainingOptIn, remoteBrowserDataAccess } = req.body;
       const ipAddress = req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0] || undefined;
       const userAgent = req.headers['user-agent'] || undefined;
-      
+
       if (trainingOptIn !== undefined) {
         await storage.logConsent(id, 'training_opt_in', String(trainingOptIn), ipAddress, userAgent);
       }
       if (remoteBrowserDataAccess !== undefined) {
         await storage.logConsent(id, 'remote_browser_access', String(remoteBrowserDataAccess), ipAddress, userAgent);
       }
-      
+
       const settings = await storage.upsertUserSettings(id, {
         privacySettings: { trainingOptIn: trainingOptIn ?? false, remoteBrowserDataAccess: remoteBrowserDataAccess ?? false }
       });
-      
+
       res.json(settings);
     } catch (error: any) {
       console.error("Error updating privacy settings:", error);
@@ -532,12 +533,12 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/shared-links", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const links = await storage.getSharedLinks(id);
       res.json(links);
     } catch (error: any) {
@@ -548,20 +549,20 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/shared-links", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const { resourceType, resourceId, scope, permissions, expiresAt } = req.body;
-      
+
       if (!resourceType || !resourceId) {
         return res.status(400).json({ error: "Missing required fields: resourceType, resourceId" });
       }
-      
+
       const token = crypto.randomBytes(32).toString('hex');
-      
+
       const link = await storage.createSharedLink({
         userId: id,
         resourceType,
@@ -572,7 +573,7 @@ export function createUserRouter() {
         expiresAt: expiresAt ? new Date(expiresAt) : undefined,
         isRevoked: 'false'
       });
-      
+
       res.json(link);
     } catch (error: any) {
       console.error("Error creating shared link:", error);
@@ -582,12 +583,12 @@ export function createUserRouter() {
 
   router.delete("/api/users/:id/shared-links/:linkId", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id, linkId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       await storage.revokeSharedLink(linkId);
       res.json({ success: true });
     } catch (error: any) {
@@ -598,12 +599,12 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/shared-links/:linkId/rotate", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id, linkId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const link = await storage.rotateSharedLinkToken(linkId);
       res.json(link);
     } catch (error: any) {
@@ -614,14 +615,14 @@ export function createUserRouter() {
 
   router.patch("/api/users/:id/shared-links/:linkId", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id, linkId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const { scope, permissions } = req.body;
-      
+
       const link = await storage.updateSharedLink(linkId, { scope, permissions });
       res.json(link);
     } catch (error: any) {
@@ -633,23 +634,23 @@ export function createUserRouter() {
   router.get("/api/shared/:token", async (req, res) => {
     try {
       const { token } = req.params;
-      
+
       const link = await storage.getSharedLinkByToken(token);
-      
+
       if (!link) {
         return res.status(404).json({ error: "Shared link not found" });
       }
-      
+
       if (link.isRevoked === 'true') {
         return res.status(410).json({ error: "This shared link has been revoked" });
       }
-      
+
       if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
         return res.status(410).json({ error: "This shared link has expired" });
       }
-      
+
       await storage.incrementSharedLinkAccess(link.id);
-      
+
       res.json({
         resourceType: link.resourceType,
         resourceId: link.resourceId,
@@ -665,12 +666,12 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/chats/archived", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const chats = await storage.getArchivedChats(id);
       res.json(chats);
     } catch (error: any) {
@@ -681,12 +682,12 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/chats/:chatId/unarchive", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id, chatId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       await storage.unarchiveChat(chatId);
       res.json({ success: true });
     } catch (error: any) {
@@ -697,12 +698,12 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/chats/archive-all", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const count = await storage.archiveAllChats(id);
       res.json({ count });
     } catch (error: any) {
@@ -713,12 +714,12 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/chats/deleted", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const chats = await storage.getDeletedChats(id);
       res.json(chats);
     } catch (error: any) {
@@ -729,21 +730,21 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/chats/delete-all", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const count = await storage.softDeleteAllChats(id);
-      
+
       const links = await storage.getSharedLinks(id);
       for (const link of links) {
         if (link.resourceType === 'chat') {
           await storage.revokeSharedLink(link.id);
         }
       }
-      
+
       res.json({ count });
     } catch (error: any) {
       console.error("Error deleting all chats:", error);
@@ -753,12 +754,12 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/chats/:chatId/restore", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id, chatId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       await storage.restoreDeletedChat(chatId);
       res.json({ success: true });
     } catch (error: any) {
@@ -769,12 +770,12 @@ export function createUserRouter() {
 
   router.get("/api/users/:id/company-knowledge", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const knowledge = await storage.getCompanyKnowledge(id);
       res.json(knowledge);
     } catch (error: any) {
@@ -785,17 +786,17 @@ export function createUserRouter() {
 
   router.post("/api/users/:id/company-knowledge", async (req, res) => {
     try {
-      const authUserId = (req as any).user?.claims?.sub;
+      const authUserId = (req as AuthenticatedRequest).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const { title, content, category } = req.body;
       if (!title || !content) {
         return res.status(400).json({ error: "Title and content are required" });
       }
-      
+
       const knowledge = await storage.createCompanyKnowledge({
         userId: id,
         title,
@@ -814,10 +815,10 @@ export function createUserRouter() {
     try {
       const authUserId = (req as any).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id, knowledgeId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       const { title, content, category, isActive } = req.body;
       const knowledge = await storage.updateCompanyKnowledge(knowledgeId, {
         ...(title !== undefined && { title }),
@@ -825,7 +826,7 @@ export function createUserRouter() {
         ...(category !== undefined && { category }),
         ...(isActive !== undefined && { isActive: isActive ? "true" : "false" })
       });
-      
+
       if (!knowledge) {
         return res.status(404).json({ error: "Knowledge entry not found" });
       }
@@ -840,10 +841,10 @@ export function createUserRouter() {
     try {
       const authUserId = (req as any).user?.claims?.sub;
       if (!authUserId) return res.status(401).json({ error: "Unauthorized" });
-      
+
       const { id, knowledgeId } = req.params;
       if (authUserId !== id) return res.status(403).json({ error: "Forbidden" });
-      
+
       await storage.deleteCompanyKnowledge(knowledgeId);
       res.json({ success: true });
     } catch (error: any) {

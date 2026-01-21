@@ -26,6 +26,21 @@ export const sessions = pgTable(
   (table) => [index("IDX_session_expire").on(table.expire)]
 );
 
+// Magic Links table for passwordless email authentication
+export const magicLinks = pgTable("magic_links", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull(),
+  token: varchar("token").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  used: boolean("used").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("magic_links_token_idx").on(table.token),
+  index("magic_links_user_idx").on(table.userId),
+]);
+
+export type MagicLink = typeof magicLinks.$inferSelect;
+
 // Users table (compatible with Replit Auth) - Enterprise-grade
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -2493,7 +2508,7 @@ export type SkillTrigger = z.infer<typeof skillTriggerSchema>;
 
 export const AgentEventKindSchema = z.enum([
   'action',
-  'observation', 
+  'observation',
   'result',
   'verification',
   'error',
@@ -2506,7 +2521,7 @@ export const AgentEventStatusSchema = z.enum(['ok', 'warn', 'fail']);
 
 export const AgentEventPhaseSchema = z.enum([
   'planning',
-  'executing', 
+  'executing',
   'verifying',
   'completed',
   'failed',

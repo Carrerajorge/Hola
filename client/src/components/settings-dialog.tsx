@@ -8,14 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { 
-  Settings, 
-  Bell, 
-  Palette, 
-  AppWindow, 
-  Calendar, 
-  Database, 
-  Shield, 
+import {
+  Settings,
+  Bell,
+  Palette,
+  AppWindow,
+  Calendar,
+  Database,
+  Shield,
   User,
   X,
   Play,
@@ -46,10 +46,10 @@ import { useSettingsContext } from "@/contexts/SettingsContext";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { 
-  Sparkles, 
-  CheckSquare, 
-  Users, 
+import {
+  Sparkles,
+  CheckSquare,
+  Users,
   Package,
   MessageSquare,
   Zap,
@@ -229,7 +229,7 @@ function NotificationsSection() {
                 {categoryLabels[category] || category}
               </h3>
             </div>
-            
+
             <div className="space-y-2">
               {categoryEventTypes.map((eventType) => {
                 const preference = getPreferenceForEventType(eventType.id);
@@ -237,8 +237,8 @@ function NotificationsSection() {
                 const enabled = preference?.enabled ?? true;
 
                 return (
-                  <div 
-                    key={eventType.id} 
+                  <div
+                    key={eventType.id}
                     className="flex items-center justify-between py-3 border-b border-border last:border-b-0"
                     data-testid={`row-notification-${eventType.id}`}
                   >
@@ -255,18 +255,18 @@ function NotificationsSection() {
                         </span>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-3 shrink-0">
-                      <Select 
+                      <Select
                         value={channels}
-                        onValueChange={(value) => updatePreference.mutate({ 
-                          eventTypeId: eventType.id, 
-                          channels: value 
+                        onValueChange={(value) => updatePreference.mutate({
+                          eventTypeId: eventType.id,
+                          channels: value
                         })}
                         disabled={!enabled}
                       >
-                        <SelectTrigger 
-                          className="w-36" 
+                        <SelectTrigger
+                          className="w-36"
                           data-testid={`select-channel-${eventType.id}`}
                         >
                           <SelectValue />
@@ -278,12 +278,12 @@ function NotificationsSection() {
                           <SelectItem value="push_email">Push y Email</SelectItem>
                         </SelectContent>
                       </Select>
-                      
-                      <Switch 
+
+                      <Switch
                         checked={enabled}
-                        onCheckedChange={(checked) => updatePreference.mutate({ 
-                          eventTypeId: eventType.id, 
-                          enabled: checked 
+                        onCheckedChange={(checked) => updatePreference.mutate({
+                          eventTypeId: eventType.id,
+                          enabled: checked
                         })}
                         data-testid={`switch-enabled-${eventType.id}`}
                       />
@@ -299,8 +299,8 @@ function NotificationsSection() {
       <Separator />
 
       <div className="flex items-center justify-between">
-        <a 
-          href="/settings?tab=tasks" 
+        <a
+          href="/settings?tab=tasks"
           className="text-sm text-primary hover:underline flex items-center gap-1"
           data-testid="link-manage-tasks"
         >
@@ -505,7 +505,7 @@ function AppsSection() {
 
   const toggleProviderEnabled = (providerId: string, enabled: boolean) => {
     const currentEnabled = policy?.enabledApps || [];
-    const newEnabled = enabled 
+    const newEnabled = enabled
       ? [...currentEnabled, providerId]
       : currentEnabled.filter(id => id !== providerId);
     updatePolicy.mutate({ enabledApps: newEnabled });
@@ -543,9 +543,9 @@ function AppsSection() {
             Conecta y administra las aplicaciones que MICHAT puede usar
           </p>
         </div>
-        <Button 
-          variant="ghost" 
-          size="sm" 
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => refetch()}
           disabled={isLoadingIntegrations}
           data-testid="button-refresh-integrations"
@@ -559,15 +559,15 @@ function AppsSection() {
           <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide" data-testid={`text-category-${category}`}>
             {categoryLabelsApps[category] || category}
           </h3>
-          
+
           <div className="space-y-2">
             {categoryProviders.map((provider) => {
               const connected = isProviderConnected(provider.id);
               const enabled = isProviderEnabled(provider.id);
               const account = accounts.find(a => a.providerId === provider.id);
-              
+
               return (
-                <div 
+                <div
                   key={provider.id}
                   className="flex items-center justify-between p-4 rounded-lg border bg-card"
                   data-testid={`card-provider-${provider.id}`}
@@ -601,7 +601,7 @@ function AppsSection() {
                       )}
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center gap-3">
                     {connected && (
                       <div className="flex items-center gap-2">
@@ -613,7 +613,7 @@ function AppsSection() {
                         />
                       </div>
                     )}
-                    
+
                     {connected ? (
                       <Button
                         variant="outline"
@@ -681,7 +681,7 @@ function AppsSection() {
           </div>
           <ChevronRight className={cn("h-5 w-5 text-muted-foreground transition-transform", showAdvanced && "rotate-90")} />
         </button>
-        
+
         {showAdvanced && (
           <div className="space-y-4 pl-4 border-l-2 border-muted ml-5">
             <div className="flex items-center justify-between py-2">
@@ -754,7 +754,7 @@ function AppsSection() {
         {logs.length > 0 ? (
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {logs.map((log) => (
-              <div 
+              <div
                 key={log.id}
                 className="flex items-center justify-between p-3 rounded-lg bg-muted/30 text-sm"
                 data-testid={`log-entry-${log.id}`}
@@ -763,12 +763,12 @@ function AppsSection() {
                   <div className={cn(
                     "w-6 h-6 rounded-full flex items-center justify-center",
                     log.status === 'success' ? "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400" :
-                    log.status === 'error' ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" :
-                    "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400"
+                      log.status === 'error' ? "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" :
+                        "bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400"
                   )}>
                     {log.status === 'success' ? <CheckCircle2 className="h-3 w-3" /> :
-                     log.status === 'error' ? <XCircle className="h-3 w-3" /> :
-                     <Clock className="h-3 w-3" />}
+                      log.status === 'error' ? <XCircle className="h-3 w-3" /> :
+                        <Clock className="h-3 w-3" />}
                   </div>
                   <div>
                     <span className="font-medium">{log.toolId}</span>
@@ -915,7 +915,7 @@ function DataControlsSection() {
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-semibold" data-testid="text-data-controls-title">Controles de datos</h2>
-      
+
       <div className="space-y-1">
         <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Privacidad</h3>
         <div className="space-y-3 pt-2">
@@ -926,7 +926,7 @@ function DataControlsSection() {
                 Permite que tu contenido (prompts, respuestas, adjuntos) se use para mejorar los modelos de IA.
               </span>
             </div>
-            <Switch 
+            <Switch
               checked={privacySettings.trainingOptIn}
               onCheckedChange={(checked) => updatePrivacy.mutate({ trainingOptIn: checked })}
               disabled={updatePrivacy.isPending || isLoadingPrivacy}
@@ -941,7 +941,7 @@ function DataControlsSection() {
                 Permite que MICHAT acceda a datos de sesiones de navegación remota (cookies, DOM, capturas).
               </span>
             </div>
-            <Switch 
+            <Switch
               checked={privacySettings.remoteBrowserDataAccess}
               onCheckedChange={(checked) => updatePrivacy.mutate({ remoteBrowserDataAccess: checked })}
               disabled={updatePrivacy.isPending || isLoadingPrivacy}
@@ -962,9 +962,9 @@ function DataControlsSection() {
               {sharedLinks.filter(l => l.isRevoked === 'false').length} enlaces activos
             </span>
           </div>
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setShowSharedLinksDialog(true)}
             data-testid="button-manage-links"
           >
@@ -985,9 +985,9 @@ function DataControlsSection() {
                 {archivedChats.length} chats archivados
               </span>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setShowArchivedDialog(true)}
               data-testid="button-manage-archived"
             >
@@ -997,9 +997,9 @@ function DataControlsSection() {
 
           <div className="flex items-center justify-between py-3 px-2">
             <span className="text-sm">Archivar todos los chats</span>
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setShowArchiveConfirm(true)}
               disabled={archiveAll.isPending}
               data-testid="button-archive-all"
@@ -1010,9 +1010,9 @@ function DataControlsSection() {
 
           <div className="flex items-center justify-between py-3 px-2">
             <span className="text-sm">Eliminar todos los chats</span>
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
               onClick={() => setShowDeleteConfirm(true)}
               disabled={deleteAll.isPending}
@@ -1049,8 +1049,8 @@ function DataControlsSection() {
                         {new Date(chat.createdAt).toLocaleDateString()}
                       </p>
                     </div>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="sm"
                       onClick={() => unarchiveChat.mutate(chat.id)}
                       disabled={unarchiveChat.isPending}
@@ -1093,8 +1093,8 @@ function DataControlsSection() {
                           <span className={cn(
                             "text-xs px-2 py-0.5 rounded-full",
                             link.scope === 'public' ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300" :
-                            link.scope === 'organization' ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" :
-                            "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                              link.scope === 'organization' ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" :
+                                "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
                           )}>
                             {link.scope === 'public' ? 'Público' : link.scope === 'organization' ? 'Organización' : 'Solo con enlace'}
                           </span>
@@ -1104,8 +1104,8 @@ function DataControlsSection() {
                         </p>
                       </div>
                       {link.isRevoked === 'false' && (
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="sm"
                           className="text-red-500 hover:text-red-600"
                           onClick={() => revokeLink.mutate(link.id)}
@@ -1151,7 +1151,7 @@ function DataControlsSection() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               onClick={() => deleteAll.mutate()}
               className="bg-red-500 hover:bg-red-600"
             >
@@ -1168,7 +1168,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
-  
+
   const { settings, updateSetting } = useSettingsContext();
   const { language: currentLanguage, setLanguage: setAppLanguage, supportedLanguages } = useLanguage();
   const { toast } = useToast();
@@ -1211,7 +1211,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         return (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">General</h2>
-            
+
             {/* Display Section */}
             <div className="space-y-1">
               <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Pantalla</h3>
@@ -1221,8 +1221,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Tema</span>
                     <span className="text-xs text-muted-foreground">Selecciona el aspecto visual de la aplicación</span>
                   </div>
-                  <Select 
-                    value={settings.appearance} 
+                  <Select
+                    value={settings.appearance}
                     onValueChange={(value) => updateSetting("appearance", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-appearance">
@@ -1241,8 +1241,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Color de acento</span>
                     <span className="text-xs text-muted-foreground">Color principal de la interfaz</span>
                   </div>
-                  <Select 
-                    value={settings.accentColor} 
+                  <Select
+                    value={settings.accentColor}
                     onValueChange={(value) => updateSetting("accentColor", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-accent-color">
@@ -1285,6 +1285,30 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                           Rosa
                         </div>
                       </SelectItem>
+                      <SelectItem value="red">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-red-500" />
+                          Rojo
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="teal">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-teal-500" />
+                          Teal
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="yellow">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                          Amarillo
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="indigo">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-indigo-500" />
+                          Índigo
+                        </div>
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1294,8 +1318,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Tamaño de fuente</span>
                     <span className="text-xs text-muted-foreground">Ajusta el tamaño del texto</span>
                   </div>
-                  <Select 
-                    value={settings.fontSize} 
+                  <Select
+                    value={settings.fontSize}
                     onValueChange={(value) => updateSetting("fontSize", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-font-size">
@@ -1314,8 +1338,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Densidad</span>
                     <span className="text-xs text-muted-foreground">Espaciado entre elementos</span>
                   </div>
-                  <Select 
-                    value={settings.density} 
+                  <Select
+                    value={settings.density}
                     onValueChange={(value) => updateSetting("density", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-density">
@@ -1356,8 +1380,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Idioma hablado</span>
                     <span className="text-xs text-muted-foreground">Para reconocimiento de voz</span>
                   </div>
-                  <Select 
-                    value={settings.spokenLanguage} 
+                  <Select
+                    value={settings.spokenLanguage}
                     onValueChange={(value) => updateSetting("spokenLanguage", value)}
                   >
                     <SelectTrigger className="w-40 shrink-0" data-testid="select-spoken-language">
@@ -1376,8 +1400,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
                 <div className="flex items-center justify-between py-2">
                   <span className="text-sm">Formato de fecha</span>
-                  <Select 
-                    value={settings.dateFormat} 
+                  <Select
+                    value={settings.dateFormat}
                     onValueChange={(value) => updateSetting("dateFormat", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-date-format">
@@ -1393,8 +1417,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
                 <div className="flex items-center justify-between py-2">
                   <span className="text-sm">Formato de hora</span>
-                  <Select 
-                    value={settings.timeFormat} 
+                  <Select
+                    value={settings.timeFormat}
                     onValueChange={(value) => updateSetting("timeFormat", value as any)}
                   >
                     <SelectTrigger className="w-40" data-testid="select-time-format">
@@ -1418,9 +1442,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex items-center justify-between py-2">
                   <span className="text-sm">Voz del asistente</span>
                   <div className="flex items-center gap-2">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       className="gap-1"
                       onClick={() => playVoicePreview(settings.voice)}
                       disabled={playingVoice !== null}
@@ -1432,8 +1456,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                         <Play className="h-3 w-3" />
                       )}
                     </Button>
-                    <Select 
-                      value={settings.voice} 
+                    <Select
+                      value={settings.voice}
                       onValueChange={(value) => updateSetting("voice", value)}
                     >
                       <SelectTrigger className="w-28" data-testid="select-voice">
@@ -1455,8 +1479,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Reproducir respuestas automáticamente</span>
                     <span className="text-xs text-muted-foreground">Lee las respuestas en voz alta</span>
                   </div>
-                  <Switch 
-                    checked={settings.autoPlayResponses} 
+                  <Switch
+                    checked={settings.autoPlayResponses}
                     onCheckedChange={(checked) => updateSetting("autoPlayResponses", checked)}
                     data-testid="switch-auto-play"
                   />
@@ -1467,8 +1491,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Modo de voz independiente</span>
                     <span className="text-xs text-muted-foreground">Pantalla completa sin elementos visuales</span>
                   </div>
-                  <Switch 
-                    checked={settings.independentVoiceMode} 
+                  <Switch
+                    checked={settings.independentVoiceMode}
                     onCheckedChange={(checked) => updateSetting("independentVoiceMode", checked)}
                     data-testid="switch-voice-mode"
                   />
@@ -1487,8 +1511,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Modelo predeterminado</span>
                     <span className="text-xs text-muted-foreground">Modelo para nuevas conversaciones</span>
                   </div>
-                  <Select 
-                    value={settings.defaultModel} 
+                  <Select
+                    value={settings.defaultModel}
                     onValueChange={(value) => updateSetting("defaultModel", value)}
                   >
                     <SelectTrigger className="w-48" data-testid="select-default-model">
@@ -1507,8 +1531,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Mostrar modelos adicionales</span>
                     <span className="text-xs text-muted-foreground">Ver todos los modelos disponibles</span>
                   </div>
-                  <Switch 
-                    checked={settings.showAdditionalModels} 
+                  <Switch
+                    checked={settings.showAdditionalModels}
                     onCheckedChange={(checked) => updateSetting("showAdditionalModels", checked)}
                     data-testid="switch-additional-models"
                   />
@@ -1519,8 +1543,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Transmitir respuestas</span>
                     <span className="text-xs text-muted-foreground">Ver las respuestas mientras se generan</span>
                   </div>
-                  <Switch 
-                    checked={settings.streamResponses} 
+                  <Switch
+                    checked={settings.streamResponses}
                     onCheckedChange={(checked) => updateSetting("streamResponses", checked)}
                     data-testid="switch-stream"
                   />
@@ -1539,8 +1563,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Atajos de teclado</span>
                     <span className="text-xs text-muted-foreground">Habilitar navegación con teclado</span>
                   </div>
-                  <Switch 
-                    checked={settings.keyboardShortcuts} 
+                  <Switch
+                    checked={settings.keyboardShortcuts}
                     onCheckedChange={(checked) => updateSetting("keyboardShortcuts", checked)}
                     data-testid="switch-keyboard"
                   />
@@ -1551,8 +1575,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Reducir movimiento</span>
                     <span className="text-xs text-muted-foreground">Minimizar animaciones</span>
                   </div>
-                  <Switch 
-                    checked={settings.reducedMotion} 
+                  <Switch
+                    checked={settings.reducedMotion}
                     onCheckedChange={(checked) => updateSetting("reducedMotion", checked)}
                     data-testid="switch-motion"
                   />
@@ -1563,8 +1587,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     <span className="text-sm block">Alto contraste</span>
                     <span className="text-xs text-muted-foreground">Mejorar visibilidad de elementos</span>
                   </div>
-                  <Switch 
-                    checked={settings.highContrast} 
+                  <Switch
+                    checked={settings.highContrast}
                     onCheckedChange={(checked) => updateSetting("highContrast", checked)}
                     data-testid="switch-contrast"
                   />
@@ -1581,7 +1605,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         return (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Personalización</h2>
-            
+
             <div className="space-y-2">
               <div className="flex items-start justify-between">
                 <div>
@@ -1590,8 +1614,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Configura el estilo y el tono que MICHAT utiliza al responder.
                   </p>
                 </div>
-                <Select 
-                  value={settings.styleAndTone} 
+                <Select
+                  value={settings.styleAndTone}
                   onValueChange={(value) => updateSetting("styleAndTone", value as any)}
                 >
                   <SelectTrigger className="w-40" data-testid="select-style-tone">
@@ -1609,7 +1633,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
             <div className="space-y-2">
               <span className="text-sm font-medium">Instrucciones personalizadas</span>
-              <Textarea 
+              <Textarea
                 placeholder="Preferencias adicionales de comportamiento, estilo y tono"
                 value={settings.customInstructions}
                 onChange={(e) => updateSetting("customInstructions", e.target.value)}
@@ -1624,7 +1648,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
             <div className="space-y-2">
               <span className="text-sm font-medium">Apodo</span>
-              <Input 
+              <Input
                 placeholder="¿Cómo debería llamarte MICHAT?"
                 value={settings.nickname}
                 onChange={(e) => updateSetting("nickname", e.target.value)}
@@ -1634,7 +1658,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
             <div className="space-y-2">
               <span className="text-sm font-medium">Ocupación</span>
-              <Input 
+              <Input
                 placeholder="Estudiante de ingeniería, diseñador, etc."
                 value={settings.occupation}
                 onChange={(e) => updateSetting("occupation", e.target.value)}
@@ -1644,7 +1668,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
             <div className="space-y-2">
               <span className="text-sm font-medium">Más acerca de ti</span>
-              <Textarea 
+              <Textarea
                 placeholder="Intereses, valores o preferencias para tener en cuenta"
                 value={settings.aboutYou}
                 onChange={(e) => updateSetting("aboutYou", e.target.value)}
@@ -1660,8 +1684,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Permite que MICHAT guarde y use memorias al responder.</span>
                 </div>
-                <Switch 
-                  checked={settings.allowMemories} 
+                <Switch
+                  checked={settings.allowMemories}
                   onCheckedChange={(checked) => updateSetting("allowMemories", checked)}
                   data-testid="switch-memories"
                 />
@@ -1674,8 +1698,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Permite que MICHAT consulte transcripciones y notas de grabaciones anteriores.
                   </span>
                 </div>
-                <Switch 
-                  checked={settings.allowRecordings} 
+                <Switch
+                  checked={settings.allowRecordings}
                   onCheckedChange={(checked) => updateSetting("allowRecordings", checked)}
                   data-testid="switch-recordings"
                 />
@@ -1688,8 +1712,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Dejar que MICHAT busque automáticamente las respuestas en la web.
                   </span>
                 </div>
-                <Switch 
-                  checked={settings.webSearch} 
+                <Switch
+                  checked={settings.webSearch}
                   onCheckedChange={(checked) => updateSetting("webSearch", checked)}
                   data-testid="switch-web-search"
                 />
@@ -1702,8 +1726,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Dejar que MICHAT ejecute el código con el Intérprete de código.
                   </span>
                 </div>
-                <Switch 
-                  checked={settings.codeInterpreter} 
+                <Switch
+                  checked={settings.codeInterpreter}
                   onCheckedChange={(checked) => updateSetting("codeInterpreter", checked)}
                   data-testid="switch-code"
                 />
@@ -1716,8 +1740,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Colaborar con MICHAT en texto y código.
                   </span>
                 </div>
-                <Switch 
-                  checked={settings.canvas} 
+                <Switch
+                  checked={settings.canvas}
                   onCheckedChange={(checked) => updateSetting("canvas", checked)}
                   data-testid="switch-canvas"
                 />
@@ -1730,8 +1754,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Habilitar el modo de voz en MICHAT
                   </span>
                 </div>
-                <Switch 
-                  checked={settings.voiceMode} 
+                <Switch
+                  checked={settings.voiceMode}
                   onCheckedChange={(checked) => updateSetting("voiceMode", checked)}
                   data-testid="switch-voice"
                 />
@@ -1744,8 +1768,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Ten conversaciones más naturales en el modo de voz.
                   </span>
                 </div>
-                <Switch 
-                  checked={settings.advancedVoice} 
+                <Switch
+                  checked={settings.advancedVoice}
                   onCheckedChange={(checked) => updateSetting("advancedVoice", checked)}
                   data-testid="switch-advanced-voice"
                 />
@@ -1758,8 +1782,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Dejar que MICHAT busque automáticamente las respuestas en las fuentes conectadas.
                   </span>
                 </div>
-                <Switch 
-                  checked={settings.connectorSearch} 
+                <Switch
+                  checked={settings.connectorSearch}
                   onCheckedChange={(checked) => updateSetting("connectorSearch", checked)}
                   data-testid="switch-connector-search"
                 />
@@ -1776,7 +1800,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Programaciones</h2>
             <p className="text-sm text-muted-foreground">
-              MICHAT puede programarse para ejecutarse nuevamente después de completar una tarea. 
+              MICHAT puede programarse para ejecutarse nuevamente después de completar una tarea.
               Selecciona <span className="inline-flex items-center"><Calendar className="h-3 w-3 mx-1" /></span> Programar en el menú de <span className="font-medium">⋯</span> en una conversación para configurar ejecuciones futuras.
             </p>
             <Button variant="outline" data-testid="button-manage-schedules">
@@ -1792,10 +1816,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         return (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Seguridad</h2>
-            
+
             <div className="space-y-4">
               <h3 className="text-base font-medium">Autenticación multifactor (MFA)</h3>
-              
+
               <div className="flex items-center justify-between py-2">
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Aplicación de autenticación</span>
@@ -1803,10 +1827,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Usa códigos únicos desde una aplicación de autenticación.
                   </span>
                 </div>
-                <Switch 
+                <Switch
                   checked={settings.authApp}
                   onCheckedChange={(checked) => updateSetting("authApp", checked)}
-                  data-testid="switch-auth-app" 
+                  data-testid="switch-auth-app"
                 />
               </div>
 
@@ -1817,14 +1841,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Aprueba los inicios de sesión con una notificación push enviada a tu dispositivo de confianza
                   </span>
                 </div>
-                <Switch 
+                <Switch
                   checked={settings.pushNotifications}
                   onCheckedChange={(checked) => updateSetting("pushNotifications", checked)}
-                  data-testid="switch-push-notif" 
+                  data-testid="switch-push-notif"
                 />
               </div>
 
-              <button 
+              <button
                 className="w-full flex items-center justify-between py-3 hover:bg-muted/50 transition-colors rounded-lg px-2"
                 data-testid="security-trusted-devices"
               >
@@ -1838,9 +1862,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <div className="flex items-center justify-between py-2">
                 <span className="text-sm">Cerrar la sesión en este dispositivo</span>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleLogout}
                   data-testid="button-logout"
                 >
@@ -1855,9 +1879,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     Cierra todas las sesiones activas en todos los dispositivos.
                   </span>
                 </div>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  variant="outline"
+                  size="sm"
                   className="text-red-500 border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 whitespace-nowrap"
                   onClick={() => setShowLogoutAllConfirm(true)}
                   data-testid="button-logout-all"
@@ -1885,7 +1909,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <p className="text-sm text-muted-foreground">
               Personaliza tu perfil de constructor para conectarte con usuarios de los GPT.
             </p>
-            
+
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
@@ -1908,10 +1932,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="font-medium">Nombre</span>
-                <Switch 
+                <Switch
                   checked={settings.showName}
                   onCheckedChange={(checked) => updateSetting("showName", checked)}
-                  data-testid="switch-show-name" 
+                  data-testid="switch-show-name"
                 />
               </div>
               <div className="flex items-center justify-between py-2">
@@ -1924,12 +1948,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
             <div className="space-y-4">
               <span className="font-medium">Enlaces</span>
-              
+
               <div className="flex items-center justify-between py-2">
                 <div className="flex items-center gap-3">
                   <Globe className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <Select 
+                <Select
                   value={settings.websiteDomain || "none"}
                   onValueChange={(value) => updateSetting("websiteDomain", value === "none" ? "" : value)}
                 >
@@ -1951,8 +1975,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 {settings.linkedInUrl ? (
                   <div className="flex items-center gap-2">
                     <Check className="h-4 w-4 text-green-500" />
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="sm"
                       onClick={() => updateSetting("linkedInUrl", "")}
                     >
@@ -1960,9 +1984,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     </Button>
                   </div>
                 ) : (
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => {
                       const url = prompt("Ingresa tu URL de LinkedIn:");
                       if (url) updateSetting("linkedInUrl", url);
@@ -1982,8 +2006,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 {settings.githubUrl ? (
                   <div className="flex items-center gap-2">
                     <Check className="h-4 w-4 text-green-500" />
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="sm"
                       onClick={() => updateSetting("githubUrl", "")}
                     >
@@ -1991,9 +2015,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     </Button>
                   </div>
                 ) : (
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => {
                       const url = prompt("Ingresa tu URL de GitHub:");
                       if (url) updateSetting("githubUrl", url);
@@ -2010,18 +2034,18 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
             <div className="space-y-4">
               <span className="font-medium">Correo electrónico</span>
-              
+
               <div className="flex items-center gap-3 py-2">
                 <Mail className="h-5 w-5 text-muted-foreground" />
                 <span className="text-sm">usuario@ejemplo.com</span>
               </div>
 
               <div className="flex items-center gap-3 py-2">
-                <Checkbox 
-                  id="email-comments" 
+                <Checkbox
+                  id="email-comments"
                   checked={settings.receiveEmailComments}
                   onCheckedChange={(checked) => updateSetting("receiveEmailComments", !!checked)}
-                  data-testid="checkbox-email-comments" 
+                  data-testid="checkbox-email-comments"
                 />
                 <label htmlFor="email-comments" className="text-sm">
                   Recibir correos electrónicos con comentarios
@@ -2039,13 +2063,13 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl p-0 gap-0 overflow-hidden">
+        <DialogContent className="max-w-[600px] p-0 gap-0 overflow-hidden">
           <div className="flex h-[500px]">
             <div className="w-48 border-r bg-muted/30 p-2">
               <div className="flex items-center justify-between p-2 mb-2">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-8 w-8"
                   onClick={() => onOpenChange(false)}
                   data-testid="button-close-settings"
@@ -2059,10 +2083,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     key={item.id}
                     onClick={() => setActiveSection(item.id)}
                     className={cn(
-                      "w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors",
-                      activeSection === item.id 
-                        ? "bg-background font-medium" 
-                        : "hover:bg-background/50 text-muted-foreground"
+                      "w-full flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-all duration-200",
+                      activeSection === item.id
+                        ? "bg-background font-medium border-l-3 border-l-primary shadow-sm"
+                        : "hover:bg-background/50 text-muted-foreground border-l-3 border-l-transparent"
                     )}
                     data-testid={`settings-menu-${item.id}`}
                   >
@@ -2072,7 +2096,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 ))}
               </nav>
             </div>
-            
+
             <div className="flex-1 p-6 overflow-y-auto">
               {renderSectionContent()}
             </div>
@@ -2090,7 +2114,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               onClick={handleLogoutAll}
               className="bg-red-500 hover:bg-red-600"
             >

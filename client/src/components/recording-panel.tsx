@@ -17,7 +17,7 @@ interface RecordingPanelProps {
   onOpenVoiceChat: () => void;
   onStopChat: () => void;
   onSubmit: () => void;
-  aiState: "idle" | "thinking" | "responding";
+  aiState: "idle" | "thinking" | "responding" | "agent_working";
   hasContent: boolean;
   isAgentRunning?: boolean;
   onAgentStop?: () => void;
@@ -51,7 +51,7 @@ export function RecordingPanel({
 }: RecordingPanelProps) {
   // Show stop button if either AI is processing OR agent is running
   const showStopButton = aiState !== "idle" || isAgentRunning;
-  
+
   const handleStop = () => {
     if (isAgentRunning && onAgentStop) {
       onAgentStop();
@@ -93,7 +93,7 @@ export function RecordingPanel({
               isPaused ? "bg-muted-foreground" : "bg-red-500"
             )}
           />
-          
+
           <span className="text-lg font-medium tabular-nums min-w-[48px]" data-testid="recording-timer">
             {formatRecordingTime(recordingTime)}
           </span>
@@ -102,7 +102,7 @@ export function RecordingPanel({
             {Array.from({ length: 20 }).map((_, i) => (
               <motion.div
                 key={i}
-                animate={isPaused ? { height: 4 } : { 
+                animate={isPaused ? { height: 4 } : {
                   height: [4, 8 + Math.random() * 12, 4, 12 + Math.random() * 8, 4]
                 }}
                 transition={{
@@ -160,10 +160,10 @@ export function RecordingPanel({
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button 
+          <Button
             variant="ghost"
             onClick={onToggleRecording}
-            size="icon" 
+            size="icon"
             className="h-9 w-9 rounded-full transition-all duration-300 text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary/50"
             aria-label="Start voice dictation"
             data-testid="button-voice-dictation"
@@ -175,9 +175,9 @@ export function RecordingPanel({
       </Tooltip>
 
       {showStopButton ? (
-        <Button 
+        <Button
           onClick={handleStop}
-          size="icon" 
+          size="icon"
           className="h-10 w-10 rounded-full bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/50 focus-visible:ring-2 focus-visible:ring-white/50"
           aria-label={isAgentRunning ? "Stop agent" : "Stop AI response"}
           data-testid="button-stop-chat"
@@ -192,9 +192,9 @@ export function RecordingPanel({
           transition={{ duration: 0.2, ease: "easeOut" }}
           key="send-button"
         >
-          <Button 
+          <Button
             onClick={onSubmit}
-            size="icon" 
+            size="icon"
             disabled={isFilesLoading}
             className={cn(
               "h-9 w-9 rounded-full transition-all duration-300 focus-visible:ring-2 focus-visible:ring-primary/50",
@@ -209,9 +209,9 @@ export function RecordingPanel({
       ) : (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button 
+            <Button
               onClick={onOpenVoiceChat}
-              size="icon" 
+              size="icon"
               className="h-9 w-9 rounded-full transition-all duration-300 bg-foreground text-background hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-primary/50"
               aria-label="Start voice conversation mode"
               data-testid="button-voice-chat-mode"

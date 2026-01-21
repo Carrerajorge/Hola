@@ -38,14 +38,14 @@ export class PipelineExecutor {
       }
 
       const step = plan.steps[i];
-      
+
       if (step.dependsOn) {
         const unmetDeps = step.dependsOn.filter(depId => !completedSteps.has(depId));
         if (unmetDeps.length > 0) {
-          const failedDeps = unmetDeps.filter(depId => 
+          const failedDeps = unmetDeps.filter(depId =>
             results.find(r => r.stepId === depId && r.status === "failed")
           );
-          
+
           if (failedDeps.length > 0 && !step.optional) {
             results.push({
               stepId: step.id,
@@ -97,12 +97,12 @@ export class PipelineExecutor {
 
       if (result.status === "completed") {
         completedSteps.add(step.id);
-        
+
         if (result.output?.data !== undefined) {
           variables.set(`${step.id}_output`, result.output.data);
           variables.set(`step_${i}_output`, result.output.data);
         }
-        
+
         if (result.output?.artifacts) {
           for (const artifact of result.output.artifacts) {
             artifacts.set(artifact.id, artifact);
@@ -111,7 +111,7 @@ export class PipelineExecutor {
       }
 
       if (result.status === "failed" && !step.optional) {
-        const hasRecovery = plan.steps.slice(i + 1).some(s => 
+        const hasRecovery = plan.steps.slice(i + 1).some(s =>
           s.dependsOn?.includes(step.id) === false
         );
         if (!hasRecovery) {
@@ -131,7 +131,7 @@ export class PipelineExecutor {
     const startedAt = new Date();
     let retryCount = 0;
     const maxRetries = step.retryPolicy?.maxRetries || 2;
-    
+
     onProgress?.({
       runId: context.runId,
       stepId: step.id,
@@ -156,7 +156,7 @@ export class PipelineExecutor {
     }
 
     const resolvedParams = this.resolveParams(step.params, context);
-    
+
     const validation = toolRegistry.validateToolParams(step.toolId, resolvedParams);
     if (!validation.valid) {
       return {
@@ -174,7 +174,7 @@ export class PipelineExecutor {
     }
 
     let lastError: string | undefined;
-    
+
     while (retryCount <= maxRetries) {
       if (context.isCancelled()) {
         return {
@@ -192,16 +192,16 @@ export class PipelineExecutor {
 
       try {
         const timeout = step.timeout || tool.timeout || this.config.defaultTimeout;
-        
+
         const result = await Promise.race([
           tool.execute(context, resolvedParams),
-          new Promise<ToolResult>((_, reject) => 
+          new Promise<ToolResult>((_, reject) =>
             setTimeout(() => reject(new Error("Step timeout")), timeout)
           )
         ]);
 
         const completedAt = new Date();
-        
+
         onProgress?.({
           runId: context.runId,
           stepId: step.id,
@@ -226,12 +226,12 @@ export class PipelineExecutor {
       } catch (error: any) {
         lastError = error.message;
         retryCount++;
-        
+
         if (retryCount <= maxRetries) {
-          const delay = (step.retryPolicy?.delayMs || 1000) * 
+          const delay = (step.retryPolicy?.delayMs || 1000) *
             Math.pow(step.retryPolicy?.backoffMultiplier || 2, retryCount - 1);
           await new Promise(resolve => setTimeout(resolve, delay));
-          
+
           onProgress?.({
             runId: context.runId,
             stepId: step.id,
@@ -243,7 +243,7 @@ export class PipelineExecutor {
     }
 
     const completedAt = new Date();
-    
+
     onProgress?.({
       runId: context.runId,
       stepId: step.id,
@@ -271,7 +271,7 @@ export class PipelineExecutor {
     context: ExecutionContext
   ): Record<string, any> {
     const resolved: Record<string, any> = {};
-    
+
     for (const [key, value] of Object.entries(params)) {
       if (typeof value === "string") {
         if (value.startsWith("dynamic_from_")) {
@@ -295,7 +295,7 @@ export class PipelineExecutor {
         resolved[key] = value;
       }
     }
-    
+
     return resolved;
   }
 
@@ -304,7 +304,7 @@ export class PipelineExecutor {
       const searchResult = context.previousResults
         .filter(r => r.toolId === "search_web" && r.status === "completed")
         .pop();
-      
+
       if (searchResult?.output?.data?.results?.[0]?.url) {
         return searchResult.output.data.results[0].url;
       }
@@ -312,12 +312,12 @@ export class PipelineExecutor {
         return searchResult.output.data.results[0].link;
       }
     }
-    
+
     if (placeholder === "dynamic_from_response" || placeholder === "dynamic_from_text") {
       const lastResult = context.previousResults
         .filter(r => r.status === "completed")
         .pop();
-      
+
       if (lastResult?.output?.data?.response) {
         return lastResult.output.data.response;
       }
@@ -328,27 +328,27 @@ export class PipelineExecutor {
         return lastResult.output.data.content;
       }
     }
-    
+
     if (placeholder === "dynamic_from_url" || placeholder === "dynamic_from_navigate") {
       const navResult = context.previousResults
         .filter(r => r.toolId === "web_navigate" && r.status === "completed")
         .pop();
-      
+
       if (navResult?.output?.data?.url) {
         return navResult.output.data.url;
       }
     }
-    
+
     if (placeholder === "dynamic_from_content" || placeholder === "dynamic_from_page") {
       const navResult = context.previousResults
         .filter(r => r.toolId === "web_navigate" && r.status === "completed")
         .pop();
-      
+
       if (navResult?.output?.data?.textContent) {
         return navResult.output.data.textContent;
       }
     }
-    
+
     if (placeholder.startsWith("dynamic_from_step_")) {
       const stepMatch = placeholder.match(/dynamic_from_step_(\d+)_(.+)/);
       if (stepMatch) {
@@ -363,8 +363,10 @@ export class PipelineExecutor {
         }
       }
     }
-    
-    return placeholder;
+
+    // Fallback: return empty string instead of raw placeholder to avoid showing internal placeholders to users
+    console.warn(`[PipelineExecutor] Unhandled dynamic placeholder: ${placeholder}`);
+    return "";
   }
 
   private getNestedValue(obj: any, path: string): any {
@@ -394,7 +396,7 @@ export class PipelineExecutor {
     variables.forEach((value, key) => {
       varObj[key] = value;
     });
-    
+
     try {
       const fn = new Function(...Object.keys(varObj), `return ${condition}`);
       return Boolean(fn(...Object.values(varObj)));

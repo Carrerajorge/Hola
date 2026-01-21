@@ -48,8 +48,8 @@ function writeSse(res: Response, event: string, data: object): boolean {
 
 export async function hydrateSessionState(chatId: string, userId: string): Promise<SessionState | undefined> {
   try {
-    const [recentMessages, memoryRecords, previousSpecs] = await Promise.all([
-      storage.getChatMessages(chatId, { limit: 10 }),
+    const [allMessages, memoryRecords, previousSpecs] = await Promise.all([
+      storage.getChatMessages(chatId).then(msgs => msgs.slice(-50)), // Increased from 10 to 50
       db.select().from(agentMemoryStore)
         .where(and(
           eq(agentMemoryStore.chatId, chatId),
@@ -62,37 +62,37 @@ export async function hydrateSessionState(chatId: string, userId: string): Promi
         .orderBy(desc(requestSpecHistory.createdAt))
         .limit(5)
     ]);
-    
-    if (recentMessages.length === 0 && memoryRecords.length === 0) {
+
+    if (allMessages.length === 0 && memoryRecords.length === 0) {
       return undefined;
     }
-    
+
     const previousIntents = previousSpecs.length > 0
       ? previousSpecs.map(spec => spec.intent)
-      : recentMessages
-          .filter(m => m.role === 'user')
-          .slice(0, 5)
-          .map(m => detectIntent(m.content).intent);
-    
+      : allMessages
+        .filter(m => m.role === 'user')
+        .slice(0, 5)
+        .map(m => detectIntent(m.content).intent);
+
     const previousDeliverables = previousSpecs
       .filter(spec => spec.deliverableType && spec.status === 'completed')
       .map(spec => spec.deliverableType as string);
-    
+
     const workingContext: Record<string, unknown> = {};
     const memoryKeys: string[] = [];
-    
+
     for (const record of memoryRecords) {
       memoryKeys.push(record.memoryKey);
       if (record.memoryType === 'context' || record.memoryType === 'fact') {
         workingContext[record.memoryKey] = record.memoryValue;
       }
     }
-    
+
     console.log(`[UnifiedChat] Hydrated session: ${memoryRecords.length} memory keys, ${previousSpecs.length} previous specs`);
-    
+
     return {
       conversationId: chatId,
-      turnNumber: recentMessages.length,
+      turnNumber: allMessages.length,
       previousIntents,
       previousDeliverables,
       workingContext,
@@ -146,7 +146,7 @@ export async function storeMemory(
         eq(agentMemoryStore.memoryKey, key)
       ))
       .limit(1);
-    
+
     if (existing.length > 0) {
       await db.update(agentMemoryStore)
         .set({
@@ -176,14 +176,14 @@ export async function createUnifiedRun(
   request: UnifiedChatRequest
 ): Promise<UnifiedChatContext> {
   const startTime = Date.now();
-  
-  const sessionState = request.sessionState || 
+
+  const sessionState = request.sessionState ||
     await hydrateSessionState(request.chatId, request.userId);
-  
+
   const lastUserMessage = [...request.messages]
     .reverse()
     .find(m => m.role === 'user')?.content || '';
-  
+
   const requestSpec = createRequestSpec({
     chatId: request.chatId,
     messageId: request.messageId,
@@ -192,14 +192,14 @@ export async function createUnifiedRun(
     attachments: request.attachments,
     sessionState,
   });
-  
+
   const runId = request.runId || randomUUID();
-  
-  const isAgenticMode = 
+
+  const isAgenticMode =
     requestSpec.intent !== 'chat' ||
     requestSpec.intentConfidence > 0.7 ||
     (request.attachments && request.attachments.length > 0);
-  
+
   try {
     await db.insert(agentModeRuns).values({
       id: runId,
@@ -212,9 +212,9 @@ export async function createUnifiedRun(
   } catch (error) {
     console.error('[UnifiedChat] Failed to persist run:', error);
   }
-  
+
   console.log(`[UnifiedChat] Created run ${runId} - intent: ${requestSpec.intent}, agentic: ${isAgenticMode}`);
-  
+
   return {
     requestSpec,
     runId,
@@ -246,7 +246,7 @@ export async function executeUnifiedChat(
   } = {}
 ): Promise<void> {
   const { requestSpec, runId, isAgenticMode } = context;
-  
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   res.setHeader("Connection", "keep-alive");
@@ -256,7 +256,7 @@ export async function executeUnifiedChat(
   res.setHeader("X-Intent", requestSpec.intent);
   res.setHeader("X-Agentic-Mode", String(isAgenticMode));
   res.flushHeaders();
-  
+
   await emitTraceEvent(runId, 'task_start', {
     metadata: {
       intent: requestSpec.intent,
@@ -267,7 +267,7 @@ export async function executeUnifiedChat(
       isAgenticMode
     }
   });
-  
+
   if (requestSpec.sessionState) {
     await emitTraceEvent(runId, 'memory_loaded', {
       memory: {
@@ -276,7 +276,7 @@ export async function executeUnifiedChat(
       }
     });
   }
-  
+
   writeSse(res, 'start', {
     runId,
     intent: requestSpec.intent,
@@ -284,13 +284,13 @@ export async function executeUnifiedChat(
     isAgenticMode,
     timestamp: Date.now()
   });
-  
+
   if (isAgenticMode) {
     await emitTraceEvent(runId, 'thinking', {
       content: `Analyzing request: ${requestSpec.intent}`,
       phase: 'planning'
     });
-    
+
     await emitTraceEvent(runId, 'agent_delegated', {
       agent: {
         name: requestSpec.primaryAgent,
@@ -299,10 +299,10 @@ export async function executeUnifiedChat(
       }
     });
   }
-  
+
   try {
     const systemContent = options.systemPrompt || buildSystemPrompt(requestSpec);
-    
+
     const formattedMessages = [
       { role: "system" as const, content: systemContent },
       ...request.messages.map(m => ({
@@ -310,10 +310,10 @@ export async function executeUnifiedChat(
         content: m.content
       }))
     ];
-    
+
     let fullResponse = '';
     let chunkCount = 0;
-    
+
     if (isAgenticMode) {
       await executeAgentLoop(formattedMessages, res, {
         runId,
@@ -322,13 +322,13 @@ export async function executeUnifiedChat(
         requestSpec,
         maxIterations: 10
       });
-      
+
       await emitTraceEvent(runId, 'done', {
         summary: 'Agent execution completed',
         durationMs: Date.now() - context.startTime,
         phase: 'completed'
       });
-      
+
       writeSse(res, 'done', {
         runId,
         totalChunks: 0,
@@ -343,22 +343,22 @@ export async function executeUnifiedChat(
         requestId: runId,
         disableImageGeneration: options.disableImageGeneration,
       });
-      
+
       for await (const chunk of streamGenerator) {
         if (chunk.type === 'delta' && chunk.content) {
           fullResponse += chunk.content;
           chunkCount++;
-          
+
           writeSse(res, 'chunk', {
             content: chunk.content,
             sequence: chunkCount,
             runId
           });
-          
+
           if (options.onChunk) {
             options.onChunk(chunk.content);
           }
-          
+
           if (chunkCount % 50 === 0) {
             await emitTraceEvent(runId, 'progress_update', {
               progress: {
@@ -374,13 +374,13 @@ export async function executeUnifiedChat(
           throw new Error(chunk.error || 'Stream error');
         }
       }
-      
+
       await emitTraceEvent(runId, 'done', {
         summary: fullResponse.slice(0, 200),
         durationMs: Date.now() - context.startTime,
         phase: 'completed'
       });
-      
+
       writeSse(res, 'done', {
         runId,
         totalChunks: chunkCount,
@@ -389,7 +389,7 @@ export async function executeUnifiedChat(
         timestamp: Date.now()
       });
     }
-    
+
     const memoryKeys = ['last_intent', 'last_deliverable'];
     const finalDurationMs = Date.now() - context.startTime;
     await Promise.all([
@@ -400,19 +400,19 @@ export async function executeUnifiedChat(
       persistRequestSpec(context, 'completed', finalDurationMs),
       storeMemory(request.chatId, request.userId, 'last_intent', requestSpec.intent, 'context'),
       storeMemory(request.chatId, request.userId, 'last_deliverable', requestSpec.deliverableType || 'none', 'context'),
-    ]).catch(() => {});
-    
+    ]).catch(() => { });
+
     await emitTraceEvent(runId, 'memory_saved', {
       memory: {
         keys: memoryKeys,
         saved: memoryKeys.length,
         chatId: request.chatId
       }
-    }).catch(() => {});
-    
+    }).catch(() => { });
+
   } catch (error: any) {
     console.error(`[UnifiedChat] Execution error:`, error);
-    
+
     await emitTraceEvent(runId, 'error', {
       error: {
         code: 'EXECUTION_ERROR',
@@ -420,14 +420,14 @@ export async function executeUnifiedChat(
         retryable: true
       }
     });
-    
+
     writeSse(res, 'error', {
       runId,
       message: error.message,
       code: 'EXECUTION_ERROR',
       timestamp: Date.now()
     });
-    
+
     const durationMs = Date.now() - context.startTime;
     await Promise.all([
       db.update(agentModeRuns)
@@ -435,15 +435,15 @@ export async function executeUnifiedChat(
         .where(eq(agentModeRuns.id, runId))
         .catch(err => console.error('[UnifiedChat] Failed to update run status:', err)),
       persistRequestSpec(context, 'failed', durationMs),
-    ]).catch(() => {});
+    ]).catch(() => { });
   }
-  
+
   res.end();
 }
 
 function buildSystemPrompt(requestSpec: RequestSpec): string {
   let prompt = `Eres un asistente de IA avanzado. `;
-  
+
   switch (requestSpec.intent) {
     case 'research':
       prompt += `Tu tarea es investigar y proporcionar información precisa y bien fundamentada. Incluye fuentes cuando sea posible.`;
@@ -469,15 +469,15 @@ function buildSystemPrompt(requestSpec: RequestSpec): string {
     default:
       prompt += `Responde de manera útil y profesional en el idioma del usuario.`;
   }
-  
+
   if (requestSpec.attachments.length > 0) {
     prompt += `\n\nEl usuario ha proporcionado ${requestSpec.attachments.length} archivo(s). Analiza su contenido cuidadosamente.`;
   }
-  
+
   if (requestSpec.sessionState && requestSpec.sessionState.turnNumber > 1) {
     prompt += `\n\nEsta es una conversación en curso (turno ${requestSpec.sessionState.turnNumber}). Mantén coherencia con el contexto previo.`;
   }
-  
+
   return prompt;
 }
 

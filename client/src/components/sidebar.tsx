@@ -2,13 +2,13 @@ import { useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
-import { 
-  Menu, 
-  Search, 
-  Library, 
-  Bot, 
-  Plus, 
-  MessageSquare, 
+import {
+  Menu,
+  Search,
+  Library,
+  Bot,
+  Plus,
+  MessageSquare,
   MoreHorizontal,
   Settings,
   PanelLeftClose,
@@ -39,6 +39,7 @@ import {
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -54,6 +55,13 @@ import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 import { DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { NewChatButton } from "@/components/chat/NewChatButton";
+import { useProcessingChatIds, useChatStreamContent } from "@/stores/streamingStore";
+import { CreateProjectModal, type CreateProjectData } from "@/components/create-project-modal";
+import { EditProjectModal } from "@/components/edit-project-modal";
+import { ProjectMemoriesModal } from "@/components/project-memories-modal";
+import { ShareProjectModal } from "@/components/share-project-modal";
+import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { useProjects, type Project } from "@/hooks/use-projects";
 
 interface SidebarProps {
   className?: string;
@@ -80,66 +88,123 @@ interface SidebarProps {
   folders?: FolderType[];
   onCreateFolder?: (name: string) => void;
   onMoveToFolder?: (chatId: string, folderId: string | null) => void;
+  selectedProjectId?: string | null;
+  onSelectProject?: (projectId: string) => void;
+}
+
+/**
+ * Enhanced streaming indicator with animated progress ring
+ * Shows visual progress as content streams in
+ */
+function StreamingProgressIndicator({ chatId }: { chatId: string }) {
+  const content = useChatStreamContent(chatId);
+  const contentLength = content?.length || 0;
+
+  // Estimate progress based on typical response length (~2000 chars)
+  const estimatedTotal = 2000;
+  const progress = Math.min(contentLength / estimatedTotal, 0.95);
+  const circumference = 2 * Math.PI * 6; // radius = 6
+  const strokeDashoffset = circumference * (1 - progress);
+
+  return (
+    <div className="relative h-5 w-5 flex-shrink-0" title={`${Math.round(progress * 100)}% cargado`}>
+      {/* Background circle */}
+      <svg className="h-5 w-5 -rotate-90" viewBox="0 0 16 16">
+        <circle
+          cx="8"
+          cy="8"
+          r="6"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          className="text-muted-foreground/20"
+        />
+        {/* Progress arc */}
+        <circle
+          cx="8"
+          cy="8"
+          r="6"
+          fill="none"
+          stroke="url(#progress-gradient)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          className="transition-all duration-300"
+        />
+        <defs>
+          <linearGradient id="progress-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="hsl(228, 97%, 50%)" />
+            <stop offset="100%" stopColor="hsl(260, 97%, 55%)" />
+          </linearGradient>
+        </defs>
+      </svg>
+      {/* Pulsing center dot */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+      </div>
+    </div>
+  );
 }
 
 function ChatSpinner() {
   return (
-    <svg 
-      className="h-4 w-4 flex-shrink-0" 
-      fill="hsl(228, 97%, 42%)" 
-      viewBox="0 0 24 24" 
+    <svg
+      className="h-4 w-4 flex-shrink-0"
+      fill="hsl(228, 97%, 42%)"
+      viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
     >
       <g>
         <circle cx="12" cy="3" r="1">
-          <animate id="spinner_7Z73" begin="0;spinner_tKsu.end-0.5s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_7Z73" begin="0;spinner_tKsu.end-0.5s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="16.50" cy="4.21" r="1">
-          <animate id="spinner_Wd87" begin="spinner_7Z73.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_Wd87" begin="spinner_7Z73.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="7.50" cy="4.21" r="1">
-          <animate id="spinner_tKsu" begin="spinner_tVVl.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_tKsu" begin="spinner_tVVl.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="19.79" cy="7.50" r="1">
-          <animate id="spinner_5L0R" begin="spinner_Wd87.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_5L0R" begin="spinner_Wd87.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="4.21" cy="7.50" r="1">
-          <animate id="spinner_tVVl" begin="spinner_u6j3.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_tVVl" begin="spinner_u6j3.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="21.00" cy="12.00" r="1">
-          <animate id="spinner_JSUN" begin="spinner_5L0R.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_JSUN" begin="spinner_5L0R.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="3.00" cy="12.00" r="1">
-          <animate id="spinner_u6j3" begin="spinner_YHwI.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_u6j3" begin="spinner_YHwI.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="19.79" cy="16.50" r="1">
-          <animate id="spinner_GKXF" begin="spinner_JSUN.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_GKXF" begin="spinner_JSUN.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="4.21" cy="16.50" r="1">
-          <animate id="spinner_YHwI" begin="spinner_xGMk.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_YHwI" begin="spinner_xGMk.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="16.50" cy="19.79" r="1">
-          <animate id="spinner_pMgl" begin="spinner_GKXF.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_pMgl" begin="spinner_GKXF.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="7.50" cy="19.79" r="1">
-          <animate id="spinner_xGMk" begin="spinner_pMgl.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate id="spinner_xGMk" begin="spinner_pMgl.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
         <circle cx="12" cy="21" r="1">
-          <animate begin="spinner_xGMk.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73"/>
+          <animate begin="spinner_xGMk.begin+0.1s" attributeName="r" calcMode="spline" dur="0.6s" values="1;2;1" keySplines=".27,.42,.37,.99;.53,0,.61,.73" />
         </circle>
       </g>
     </svg>
   );
 }
 
-export function Sidebar({ 
-  className, 
-  chats, 
+export function Sidebar({
+  className,
+  chats,
   hiddenChats = [],
   pinnedChats = [],
-  activeChatId, 
-  onSelectChat, 
-  onNewChat, 
+  activeChatId,
+  onSelectChat,
+  onNewChat,
   onToggle,
   onDeleteChat,
   onEditChat,
@@ -156,7 +221,9 @@ export function Sidebar({
   onClearPendingCount,
   folders = [],
   onCreateFolder,
-  onMoveToFolder
+  onMoveToFolder,
+  selectedProjectId,
+  onSelectProject
 }: SidebarProps) {
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
@@ -174,6 +241,15 @@ export function Sidebar({
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [memoriesProject, setMemoriesProject] = useState<Project | null>(null);
+  const [shareProject, setShareProject] = useState<Project | null>(null);
+  const [deletingProject, setDeletingProject] = useState<Project | null>(null);
+  const [deletingChatId, setDeletingChatId] = useState<string | null>(null);
+
+  // Projects hook for project folder management
+  const { projects, createProject, deleteProject, updateProject, addChatToProject, getProjectForChat } = useProjects();
 
   const toggleFolder = (folderId: string) => {
     setExpandedFolders(prev => {
@@ -197,13 +273,13 @@ export function Sidebar({
 
   const allFolderChatIds = new Set(folders.flatMap(f => f.chatIds));
   const unfolderedChats = chats.filter(chat => !allFolderChatIds.has(chat.id));
-  
+
   const handleStartEdit = (chat: Chat, e: React.MouseEvent) => {
     e.stopPropagation();
     setEditingChatId(chat.id);
     setEditTitle(chat.title);
   };
-  
+
   const handleSaveEdit = (chatId: string) => {
     if (onEditChat && editTitle.trim()) {
       onEditChat(chatId, editTitle.trim());
@@ -211,12 +287,12 @@ export function Sidebar({
     setEditingChatId(null);
     setEditTitle("");
   };
-  
+
   const handleCancelEdit = () => {
     setEditingChatId(null);
     setEditTitle("");
   };
-  
+
   const getChatDateLabel = (timestamp: number) => {
     const date = new Date(timestamp);
     if (isToday(date)) return "Today";
@@ -238,7 +314,7 @@ export function Sidebar({
     <div
       key={chat.id}
       className={cn(
-        "group relative flex w-full items-center px-2 pr-10 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-accent transition-all duration-300",
+        "group relative flex w-full items-center px-2 py-2.5 rounded-xl cursor-pointer liquid-hover hover:bg-accent transition-all duration-300",
         activeChatId === chat.id && "bg-accent shadow-sm",
         chat.archived && "opacity-70",
         indented && "ml-4"
@@ -280,26 +356,12 @@ export function Sidebar({
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-            {chat.archived && <Archive className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
-            <span className="truncate text-sm font-medium">{chat.title}</span>
-            {processingChatIds.includes(chat.id) && (
-              <ChatSpinner />
-            )}
-            {!processingChatIds.includes(chat.id) && pendingResponseCounts[chat.id] > 0 && (
-              <span 
-                className="flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-blue-600 text-white text-xs font-medium flex-shrink-0"
-                data-testid={`badge-pending-${chat.id}`}
-              >
-                {pendingResponseCounts[chat.id]}
-              </span>
-            )}
-          </div>
+          {/* 3-dot menu on the LEFT */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="absolute right-6 top-1/2 -translate-y-1/2 h-7 w-7 flex items-center justify-center rounded-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 hover:bg-muted transition-opacity"
+                className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md opacity-100 hover:bg-muted transition-colors mr-1"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button-chat-menu-${chat.id}`}
               >
@@ -328,42 +390,77 @@ export function Sidebar({
                 </DropdownMenuSubTrigger>
                 <DropdownMenuPortal>
                   <DropdownMenuSubContent>
-                    {folders.length > 0 ? (
+                    {/* Create new folder option */}
+                    <DropdownMenuItem
+                      onClick={() => setIsCreatingFolder(true)}
+                      data-testid={`menu-create-folder-${chat.id}`}
+                    >
+                      <FolderPlus className="h-4 w-4 mr-2" />
+                      Crear carpeta
+                    </DropdownMenuItem>
+
+                    {/* Show existing projects as folder options */}
+                    {projects.length > 0 && (
                       <>
+                        <DropdownMenuSeparator />
+                        <p className="px-2 py-1.5 text-xs text-muted-foreground font-medium">Proyectos</p>
+                        {projects.map((project) => {
+                          const isInThisProject = project.chatIds.includes(chat.id);
+                          return (
+                            <DropdownMenuItem
+                              key={project.id}
+                              onClick={() => {
+                                if (isInThisProject) {
+                                  // Remove from this project
+                                  const updatedChatIds = project.chatIds.filter(id => id !== chat.id);
+                                  updateProject(project.id, { chatIds: updatedChatIds });
+                                } else {
+                                  // Add to this project
+                                  addChatToProject(chat.id, project.id);
+                                }
+                              }}
+                              data-testid={`menu-project-${project.id}-${chat.id}`}
+                            >
+                              <span
+                                className="h-3 w-3 rounded-full mr-2 flex-shrink-0"
+                                style={{ backgroundColor: project.color }}
+                              />
+                              <span className="flex-1 truncate">{project.name}</span>
+                              {isInThisProject && <Check className="h-4 w-4 ml-2 text-green-500" />}
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </>
+                    )}
+
+                    {/* Also show chat folders if any exist */}
+                    {folders.length > 0 && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <p className="px-2 py-1.5 text-xs text-muted-foreground font-medium">Carpetas</p>
                         {folders.map((folder) => (
                           <DropdownMenuItem
                             key={folder.id}
                             onClick={() => onMoveToFolder?.(chat.id, folder.id)}
                             data-testid={`menu-folder-${folder.id}-${chat.id}`}
                           >
-                            <span 
-                              className="h-3 w-3 rounded-full mr-2 flex-shrink-0" 
+                            <span
+                              className="h-3 w-3 rounded-full mr-2 flex-shrink-0"
                               style={{ backgroundColor: folder.color }}
                             />
                             {folder.name}
                           </DropdownMenuItem>
                         ))}
                         {allFolderChatIds.has(chat.id) && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() => onMoveToFolder?.(chat.id, null)}
-                              data-testid={`menu-remove-folder-${chat.id}`}
-                            >
-                              <X className="h-4 w-4 mr-2" />
-                              Quitar de carpeta
-                            </DropdownMenuItem>
-                          </>
+                          <DropdownMenuItem
+                            onClick={() => onMoveToFolder?.(chat.id, null)}
+                            data-testid={`menu-remove-folder-${chat.id}`}
+                          >
+                            <X className="h-4 w-4 mr-2" />
+                            Quitar de carpeta
+                          </DropdownMenuItem>
                         )}
                       </>
-                    ) : (
-                      <DropdownMenuItem
-                        onClick={() => setIsCreatingFolder(true)}
-                        data-testid={`menu-create-folder-${chat.id}`}
-                      >
-                        <FolderPlus className="h-4 w-4 mr-2" />
-                        Crear carpeta
-                      </DropdownMenuItem>
                     )}
                   </DropdownMenuSubContent>
                 </DropdownMenuPortal>
@@ -387,12 +484,15 @@ export function Sidebar({
                 onClick={(e) => onHideChat?.(chat.id, e as unknown as React.MouseEvent)}
                 data-testid={`menu-hide-${chat.id}`}
               >
-                <EyeOff className="h-4 w-4 mr-2" />
-                Ocultar
+                {chat.hidden ? <Eye className="h-4 w-4 mr-2" /> : <EyeOff className="h-4 w-4 mr-2" />}
+                {chat.hidden ? "Mostrar" : "Ocultar"}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={(e) => onDeleteChat?.(chat.id, e as unknown as React.MouseEvent)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeletingChatId(chat.id);
+                }}
                 className="text-red-500 focus:text-red-500"
                 data-testid={`menu-delete-${chat.id}`}
               >
@@ -401,6 +501,31 @@ export function Sidebar({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {/* Chat title and indicators */}
+          <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+            {chat.archived && <Archive className="h-3 w-3 text-muted-foreground flex-shrink-0" />}
+            <TooltipProvider delayDuration={500}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="truncate text-sm font-medium cursor-default">{chat.title}</span>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-xs">
+                  <p className="text-xs">{chat.title}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            {processingChatIds.includes(chat.id) && (
+              <StreamingProgressIndicator chatId={chat.id} />
+            )}
+            {!processingChatIds.includes(chat.id) && pendingResponseCounts[chat.id] > 0 && (
+              <span
+                className="flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-blue-600 text-white text-xs font-medium flex-shrink-0"
+                data-testid={`badge-pending-${chat.id}`}
+              >
+                {pendingResponseCounts[chat.id]}
+              </span>
+            )}
+          </div>
         </>
       )}
     </div>
@@ -412,9 +537,9 @@ export function Sidebar({
   Object.keys(groupedChats).forEach(key => {
     if (!groupOrder.includes(key)) groupOrder.push(key);
   });
-  
+
   return (
-    <nav 
+    <nav
       className={cn("flex h-screen w-[280px] flex-col liquid-sidebar-light dark:liquid-sidebar text-sidebar-foreground", className)}
       aria-label="Navegación principal y chats"
       role="navigation"
@@ -438,9 +563,9 @@ export function Sidebar({
 
       <div className="px-2 py-2">
         <NewChatButton onNewChat={onNewChat} variant="full" showTooltip={false} />
-        <Button 
+        <Button
           ref={searchButtonRef}
-          variant="ghost" 
+          variant="ghost"
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
           onClick={() => setIsSearchModalOpen(true)}
           data-testid="button-search-chats"
@@ -448,8 +573,8 @@ export function Sidebar({
           <Search className="h-4 w-4" />
           Buscar chats
         </Button>
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
           onClick={onOpenLibrary}
           data-testid="button-library"
@@ -457,8 +582,8 @@ export function Sidebar({
           <Library className="h-4 w-4" />
           Biblioteca
         </Button>
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
           onClick={onOpenGpts}
           data-testid="button-gpts"
@@ -466,8 +591,8 @@ export function Sidebar({
           <Bot className="h-4 w-4" />
           GPTs
         </Button>
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
           onClick={onOpenSkills}
           data-testid="button-skills"
@@ -475,8 +600,8 @@ export function Sidebar({
           <Zap className="h-4 w-4" />
           Skills
         </Button>
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
           onClick={onOpenApps}
           data-testid="button-apps"
@@ -488,7 +613,7 @@ export function Sidebar({
 
       <Separator className="mx-4 my-2 w-auto" />
 
-      <ScrollArea className="flex-1 px-2 liquid-scroll">
+      <ScrollArea className="flex-1 px-2 liquid-scroll [&_[data-radix-scroll-area-viewport]]:scrollbar-thin [&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/30 [&_[data-radix-scroll-area-viewport]]:scrollbar-track-transparent hover:[&_[data-radix-scroll-area-viewport]]:scrollbar-thumb-muted-foreground/50">
         <div className="flex flex-col gap-4 pb-4">
           {folders.length > 0 && (
             <div className="flex flex-col gap-0.5">
@@ -501,7 +626,7 @@ export function Sidebar({
                 return (
                   <Collapsible key={folder.id} open={isExpanded} onOpenChange={() => toggleFolder(folder.id)}>
                     <CollapsibleTrigger asChild>
-                      <div 
+                      <div
                         className="flex items-center gap-2 px-2 py-2 rounded-xl cursor-pointer hover:bg-accent transition-all duration-300"
                         data-testid={`folder-${folder.id}`}
                       >
@@ -510,8 +635,8 @@ export function Sidebar({
                         ) : (
                           <Folder className="h-4 w-4 text-muted-foreground" />
                         )}
-                        <span 
-                          className="h-2.5 w-2.5 rounded-full flex-shrink-0" 
+                        <span
+                          className="h-2.5 w-2.5 rounded-full flex-shrink-0"
                           style={{ backgroundColor: folder.color }}
                         />
                         <span className="text-sm font-medium flex-1">{folder.name}</span>
@@ -571,7 +696,7 @@ export function Sidebar({
                   variant="ghost"
                   size="sm"
                   className="w-full justify-start gap-2 px-2 text-sm text-muted-foreground hover:text-foreground"
-                  onClick={() => setIsCreatingFolder(true)}
+                  onClick={() => setIsCreateProjectOpen(true)}
                   data-testid="button-new-folder"
                 >
                   <FolderPlus className="h-4 w-4" />
@@ -580,57 +705,169 @@ export function Sidebar({
               )}
             </div>
           )}
-          
+
           {folders.length === 0 && (
             <div className="px-2">
               <Button
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start gap-2 px-2 text-sm text-muted-foreground hover:text-foreground"
-                onClick={() => setIsCreatingFolder(true)}
+                onClick={() => setIsCreateProjectOpen(true)}
                 data-testid="button-new-folder"
               >
                 <FolderPlus className="h-4 w-4" />
                 Nueva Carpeta
               </Button>
-              {isCreatingFolder && (
-                <div className="flex items-center gap-1 mt-1">
-                  <Input
-                    value={newFolderName}
-                    onChange={(e) => setNewFolderName(e.target.value)}
-                    placeholder="Nombre de carpeta"
-                    className="h-7 text-sm flex-1"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleCreateFolder();
-                      if (e.key === "Escape") {
-                        setIsCreatingFolder(false);
-                        setNewFolderName("");
-                      }
-                    }}
-                    data-testid="input-new-folder-name"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={handleCreateFolder}
-                    data-testid="button-save-folder"
-                  >
-                    <Check className="h-3 w-3 text-green-500" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => {
-                      setIsCreatingFolder(false);
-                      setNewFolderName("");
-                    }}
-                    data-testid="button-cancel-folder"
-                  >
-                    <X className="h-3 w-3 text-red-500" />
-                  </Button>
+
+              {/* Projects List */}
+              {projects.length > 0 && (
+                <div className="flex flex-col gap-0.5 mt-2">
+                  {projects.map((project) => {
+                    const projectChats = chats.filter(chat => project.chatIds.includes(chat.id));
+                    const isExpanded = expandedFolders.has(project.id);
+                    return (
+                      <Collapsible key={project.id} open={isExpanded} onOpenChange={() => toggleFolder(project.id)}>
+                        <div className="group flex items-center gap-1 px-2 py-2 rounded-xl hover:bg-accent transition-all duration-300">
+                          <CollapsibleTrigger asChild>
+                            <button className="p-1 hover:bg-muted rounded cursor-pointer shrink-0">
+                              <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", isExpanded && "rotate-90")} />
+                            </button>
+                          </CollapsibleTrigger>
+
+                          {/* Three dots menu - ON THE LEFT */}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md opacity-100 hover:bg-muted transition-colors"
+                                onClick={(e) => e.stopPropagation()}
+                                data-testid={`project-menu-${project.id}`}
+                              >
+                                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-48" sideOffset={5}>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingProject(project);
+                                }}
+                                data-testid={`project-edit-${project.id}`}
+                              >
+                                <Pencil className="h-4 w-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setMemoriesProject(project);
+                                }}
+                                data-testid={`project-memories-${project.id}`}
+                              >
+                                <Library className="h-4 w-4 mr-2" />
+                                Memories
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShareProject(project);
+                                }}
+                                data-testid={`project-share-${project.id}`}
+                              >
+                                <MoveRight className="h-4 w-4 mr-2" />
+                                Share
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // Export project as JSON
+                                  const exportData = {
+                                    ...project,
+                                    exportedAt: new Date().toISOString(),
+                                    version: "1.0"
+                                  };
+                                  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement("a");
+                                  a.href = url;
+                                  a.download = `${project.name.replace(/[^a-z0-9]/gi, "_")}_project.json`;
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  document.body.removeChild(a);
+                                  URL.revokeObjectURL(url);
+                                }}
+                                data-testid={`project-export-${project.id}`}
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Export
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingProject(project);
+                                }}
+                                className="text-red-500 focus:text-red-500"
+                                data-testid={`project-delete-${project.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+
+                          {/* Project content */}
+                          <div
+                            className={cn(
+                              "flex items-center gap-2 flex-1 min-w-0 cursor-pointer p-1 rounded-md transition-colors",
+                              selectedProjectId === project.id ? "bg-accent/50 text-accent-foreground" : "hover:bg-muted/50"
+                            )}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onSelectProject?.(project.id);
+                            }}
+                            data-testid={`project-${project.id}`}
+                          >
+                            {project.backgroundImage ? (
+                              <div
+                                className="h-5 w-5 rounded flex-shrink-0 bg-cover bg-center"
+                                style={{ backgroundImage: `url(${project.backgroundImage})` }}
+                              />
+                            ) : isExpanded ? (
+                              <FolderOpen className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <Folder className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            <span
+                              className="h-2.5 w-2.5 rounded-full flex-shrink-0"
+                              style={{ backgroundColor: project.color }}
+                            />
+                            <span className="text-sm font-medium flex-1 truncate">{project.name}</span>
+                            {project.systemPrompt && (
+                              <span className="text-xs text-muted-foreground" title="Has system prompt">📝</span>
+                            )}
+                            {project.files.length > 0 && (
+                              <span className="text-xs text-muted-foreground" title={`${project.files.length} files`}>📎{project.files.length}</span>
+                            )}
+                            <span className="text-xs text-muted-foreground">{projectChats.length}</span>
+                          </div>
+                        </div>
+                        <CollapsibleContent>
+                          <div className="flex flex-col gap-0.5 mt-0.5">
+                            {projectChats.length > 0 ? (
+                              projectChats.map((chat) => renderChatItem(chat, true))
+                            ) : (
+                              <p className="text-xs text-muted-foreground px-6 py-2 italic">
+                                No hay chats. Mueve chats aquí.
+                              </p>
+                            )}
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -664,10 +901,10 @@ export function Sidebar({
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     {pinned.gpt.avatar ? (
-                      <img 
-                        src={pinned.gpt.avatar} 
-                        alt={pinned.gpt.name} 
-                        className="h-6 w-6 rounded-md object-cover flex-shrink-0" 
+                      <img
+                        src={pinned.gpt.avatar}
+                        alt={pinned.gpt.name}
+                        className="h-6 w-6 rounded-md object-cover flex-shrink-0"
                       />
                     ) : (
                       <div className="h-6 w-6 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
@@ -723,59 +960,65 @@ export function Sidebar({
       </ScrollArea>
 
       {/* Hidden Chats Section */}
-      {hiddenChats.length > 0 && (
-        <div className="px-2 border-t">
-          <Button
-            variant="ghost"
-            className="w-full justify-between px-2 py-2 text-sm font-medium text-muted-foreground liquid-button"
-            onClick={() => setShowHidden(!showHidden)}
-            data-testid="button-toggle-hidden"
-          >
-            <div className="flex items-center gap-2">
-              <EyeOff className="h-4 w-4" />
-              <span>Ocultos ({hiddenChats.length})</span>
-            </div>
-            <ChevronDown className={cn("h-4 w-4 transition-transform", showHidden && "rotate-180")} />
-          </Button>
-          {showHidden && (
-            <div className="flex flex-col gap-0.5 pb-2">
-              {hiddenChats.map((chat) => (
-                <div
-                  key={chat.id}
-                  className="group flex w-full items-center justify-between px-2 py-2 rounded-md cursor-pointer hover:bg-accent transition-colors opacity-70"
-                  onClick={() => onSelectChat(chat.id)}
-                  data-testid={`hidden-chat-item-${chat.id}`}
-                >
-                  <span className="truncate text-sm">{chat.title}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-80"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onHideChat?.(chat.id, e);
-                    }}
-                    data-testid={`button-unhide-${chat.id}`}
+      {
+        hiddenChats.length > 0 && (
+          <div className="px-2 border-t">
+            <Button
+              variant="ghost"
+              className="w-full justify-between px-2 py-2 text-sm font-medium text-muted-foreground liquid-button"
+              onClick={() => setShowHidden(!showHidden)}
+              data-testid="button-toggle-hidden"
+            >
+              <div className="flex items-center gap-2">
+                <EyeOff className="h-4 w-4" />
+                <span>Ocultos ({hiddenChats.length})</span>
+              </div>
+              <ChevronDown className={cn("h-4 w-4 transition-transform", showHidden && "rotate-180")} />
+            </Button>
+            {showHidden && (
+              <div className="flex flex-col gap-0.5 pb-2">
+                {hiddenChats.map((chat) => (
+                  <div
+                    key={chat.id}
+                    className="group flex w-full items-center justify-between px-2 py-2 rounded-md cursor-pointer hover:bg-accent transition-colors opacity-70"
+                    onClick={() => onSelectChat(chat.id)}
+                    data-testid={`hidden-chat-item-${chat.id}`}
                   >
-                    <Eye className="h-3 w-3" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                    <span className="truncate text-sm">{chat.title}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 opacity-0 group-hover:opacity-80"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onHideChat?.(chat.id, e);
+                      }}
+                      data-testid={`button-unhide-${chat.id}`}
+                    >
+                      <Eye className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      }
 
       <div className="mt-auto border-t p-4">
         <div className="flex w-full items-center gap-3 rounded-lg p-2">
           <Popover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
             <PopoverTrigger asChild>
               <button className="flex flex-1 items-center gap-3 liquid-button cursor-pointer" data-testid="button-user-menu">
-                <Avatar className="h-10 w-10">
-                  <AvatarFallback className="bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
-                    {user?.role === "admin" ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
+                <div className="relative">
+                  <Avatar className="h-10 w-10">
+                    <AvatarFallback className="bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300">
+                      {user?.role === "admin" ? "A" : (user?.firstName?.[0] || user?.email?.[0] || "U").toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  {/* Online status indicator */}
+                  <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full bg-green-500 ring-2 ring-background" title="En línea" />
+                </div>
                 <div className="flex flex-1 flex-col overflow-hidden text-left">
                   <span className="truncate text-sm font-medium">
                     {user?.role === "admin" ? "Admin" : (user?.firstName || user?.email?.split("@")[0] || "Usuario")}
@@ -786,43 +1029,53 @@ export function Sidebar({
                 </div>
               </button>
             </PopoverTrigger>
-          <PopoverContent className="w-auto min-w-56 p-2" align="start" side="top">
-            <div className="flex flex-col">
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/profile"); }} data-testid="button-profile">
-                <User className="h-4 w-4" />
-                Perfil
-              </Button>
-              {user?.role === "admin" && (
-                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/billing"); }} data-testid="button-billing">
-                  <CreditCard className="h-4 w-4" />
-                  Facturación
+            <PopoverContent className="w-auto min-w-56 p-2" align="start" side="top">
+              <div className="flex flex-col">
+                {/* Profile section */}
+                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/profile"); }} data-testid="button-profile">
+                  <User className="h-4 w-4" />
+                  Perfil
                 </Button>
-              )}
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/workspace-settings"); }} data-testid="button-workspace-settings">
-                <Monitor className="h-4 w-4" />
-                Configuración del espacio de trabajo
-              </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setIsSettingsOpen(true); }} data-testid="button-settings">
-                <Settings className="h-4 w-4" />
-                Configuración
-              </Button>
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/privacy"); }} data-testid="button-privacy">
-                <Shield className="h-4 w-4" />
-                Privacidad
-              </Button>
-              {user?.role === "admin" && (
-                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/admin"); }} data-testid="button-admin-panel">
+                {user?.role === "admin" && (
+                  <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/billing"); }} data-testid="button-billing">
+                    <CreditCard className="h-4 w-4" />
+                    Facturación
+                  </Button>
+                )}
+
+                <Separator className="my-1.5" />
+
+                {/* Settings section */}
+                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/workspace-settings"); }} data-testid="button-workspace-settings">
+                  <Monitor className="h-4 w-4" />
+                  Configuración del espacio de trabajo
+                </Button>
+                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setIsSettingsOpen(true); }} data-testid="button-settings">
                   <Settings className="h-4 w-4" />
-                  Admin Panel
+                  Configuración
                 </Button>
-              )}
-              <Separator className="my-1" />
-              <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} data-testid="button-logout">
-                <LogOut className="h-4 w-4" />
-                Cerrar sesión
-              </Button>
-            </div>
-          </PopoverContent>
+                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/privacy"); }} data-testid="button-privacy">
+                  <Shield className="h-4 w-4" />
+                  Privacidad
+                </Button>
+
+                {user?.role === "admin" && (
+                  <>
+                    <Separator className="my-1.5" />
+                    <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/admin"); }} data-testid="button-admin-panel">
+                      <Settings className="h-4 w-4" />
+                      Admin Panel
+                    </Button>
+                  </>
+                )}
+
+                <Separator className="my-1.5" />
+                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal text-red-500 hover:text-red-600 hover:bg-red-50 liquid-button" onClick={() => { setIsUserMenuOpen(false); handleLogout(); }} data-testid="button-logout">
+                  <LogOut className="h-4 w-4" />
+                  Cerrar sesión
+                </Button>
+              </div>
+            </PopoverContent>
           </Popover>
         </div>
       </div>
@@ -840,6 +1093,69 @@ export function Sidebar({
         onOpenChange={setIsSettingsOpen}
       />
 
-    </nav>
+      <CreateProjectModal
+        open={isCreateProjectOpen}
+        onOpenChange={setIsCreateProjectOpen}
+        onCreateProject={async (data) => {
+          await createProject(data);
+        }}
+        knowledgeFiles={[]}
+      />
+
+      <EditProjectModal
+        open={editingProject !== null}
+        onOpenChange={(open) => !open && setEditingProject(null)}
+        project={editingProject}
+        onSave={(projectId, updates) => {
+          updateProject(projectId, updates);
+          setEditingProject(null);
+        }}
+      />
+
+      <ProjectMemoriesModal
+        open={memoriesProject !== null}
+        onOpenChange={(open) => !open && setMemoriesProject(null)}
+        project={memoriesProject}
+        onUpdateProject={updateProject}
+      />
+
+      <ShareProjectModal
+        open={shareProject !== null}
+        onOpenChange={(open) => !open && setShareProject(null)}
+        project={shareProject}
+      />
+
+      <DeleteConfirmDialog
+        open={deletingProject !== null}
+        onOpenChange={(open) => !open && setDeletingProject(null)}
+        title={`¿Eliminar "${deletingProject?.name}"?`}
+        description="Esta acción no se puede deshacer. Se eliminarán todos los datos del proyecto incluyendo el prompt y los archivos adjuntos."
+        onConfirm={() => {
+          if (deletingProject) {
+            deleteProject(deletingProject.id);
+            console.log("[Sidebar] Project deleted:", deletingProject.id);
+            setDeletingProject(null);
+          }
+        }}
+      />
+
+      {/* Chat Delete Confirmation Dialog */}
+      <DeleteConfirmDialog
+        open={deletingChatId !== null}
+        onOpenChange={(open) => !open && setDeletingChatId(null)}
+        title="¿Eliminar esta conversación?"
+        description="Esta acción no se puede deshacer. Se eliminará permanentemente la conversación y todos sus mensajes."
+        onConfirm={() => {
+          if (deletingChatId && onDeleteChat) {
+            // Create a synthetic event for the handler
+            const syntheticEvent = { stopPropagation: () => { } } as React.MouseEvent;
+            onDeleteChat(deletingChatId, syntheticEvent);
+            console.log("[Sidebar] Chat deleted:", deletingChatId);
+            setDeletingChatId(null);
+          }
+        }}
+      />
+
+    </nav >
   );
 }

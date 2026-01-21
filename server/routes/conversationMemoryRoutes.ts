@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
+import { AuthenticatedRequest } from "../types/express";
 import { conversationStateService } from "../services/conversationStateService";
 import { z } from "zod";
 import { ContextRetriever, RetrievedContext, RetrievalConfig } from "../lib/contextRetriever";
@@ -61,7 +62,7 @@ router.get("/chats/:chatId/state", async (req: Request, res: Response, next: Nex
   try {
     const { chatId } = req.params;
     const forceRefresh = req.query.refresh === "true";
-    const userId = (req as any).user?.id;
+    const userId = (req as AuthenticatedRequest).user?.id;
 
     const state = await conversationStateService.hydrateState(chatId, userId, { forceRefresh });
 
@@ -79,7 +80,7 @@ router.get("/chats/:chatId/state", async (req: Request, res: Response, next: Nex
 router.post("/chats/:chatId/state", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { chatId } = req.params;
-    const userId = (req as any).user?.id;
+    const userId = (req as AuthenticatedRequest).user?.id;
 
     const state = await conversationStateService.getOrCreateState(chatId, userId);
     res.status(201).json(state);
@@ -176,7 +177,7 @@ router.post("/chats/:chatId/state/snapshot", async (req: Request, res: Response,
   try {
     const { chatId } = req.params;
     const { description } = req.body;
-    const authorId = (req as any).user?.id;
+    const authorId = (req as AuthenticatedRequest).user?.id;
 
     const version = await conversationStateService.createSnapshot(chatId, description, authorId);
     res.status(201).json({ version, chatId });
@@ -391,6 +392,7 @@ const buildPromptSchema = z.object({
     includeSystemContext: z.boolean().optional(),
     language: z.enum(["es", "en"]).optional(),
     citationFormat: z.enum(["numbered", "bracketed"]).optional(),
+    maxContextTokens: z.number().optional(),
   }).optional(),
 });
 
@@ -417,12 +419,12 @@ router.post("/chats/:chatId/process-turn", async (req: Request, res: Response, n
     }
 
     const { message, requestId, options } = validation.data;
-    const userId = (req as any).user?.id;
+    const userId = (req as AuthenticatedRequest).user?.id;
 
     let wasIdempotent = false;
     if (requestId) {
       const existing = await conversationStateService.hydrateState(chatId, userId);
-      if (existing?.messages?.some(m => (m as any).requestId === requestId)) {
+      if (existing?.messages?.some(m => (m as Record<string, any>).requestId === requestId)) {
         wasIdempotent = true;
       }
     }
@@ -483,7 +485,7 @@ router.post("/chats/:chatId/retrieve-context", async (req: Request, res: Respons
     }
 
     const { query, intent: partialIntent, config } = validation.data;
-    const userId = (req as any).user?.id;
+    const userId = (req as AuthenticatedRequest).user?.id;
 
     const state = await conversationStateService.getOrCreateState(chatId, userId);
 
@@ -521,7 +523,7 @@ router.post("/chats/:chatId/build-prompt", async (req: Request, res: Response, n
     }
 
     const { message, context: providedContext, intent: providedIntent, options } = validation.data;
-    const userId = (req as any).user?.id;
+    const userId = (req as AuthenticatedRequest).user?.id;
 
     let context: RetrievedContext;
     let intent: DetectedIntent;
@@ -630,7 +632,7 @@ router.post("/chats/:chatId/summarize", async (req: Request, res: Response, next
     }
 
     const { force, language } = validation.data;
-    const userId = (req as any).user?.id;
+    const userId = (req as AuthenticatedRequest).user?.id;
 
     const state = await conversationStateService.getOrCreateState(chatId, userId);
     const messages = state.messages || [];
@@ -646,7 +648,7 @@ router.post("/chats/:chatId/summarize", async (req: Request, res: Response, next
 
     const currentTurn = messages.length;
     const existingSummary = state.context?.summary || undefined;
-    const lastSummarizedTurn = (state.context as any)?.lastSummarizedTurn || 0;
+    const lastSummarizedTurn = (state.context as Record<string, any>)?.lastSummarizedTurn || 0;
 
     const shouldTrigger = force || summarizer.shouldSummarize(currentTurn, lastSummarizedTurn);
 

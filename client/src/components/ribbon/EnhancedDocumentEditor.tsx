@@ -123,7 +123,7 @@ export function EnhancedDocumentEditor({
 
   useEffect(() => {
     if (!editor || !onInsertContent) return;
-    
+
     // insertFn modes:
     // - replaceMode = true: Replace with markdown content (converted to TipTap)
     // - replaceMode = false: Append markdown to end of document
@@ -139,7 +139,7 @@ export function EnhancedDocumentEditor({
         editor.chain().focus().insertContent(markdownToTipTap(text)).run();
       }
     };
-    
+
     onInsertContent(insertFn);
   }, [editor, onInsertContent]);
 
@@ -155,7 +155,7 @@ export function EnhancedDocumentEditor({
     try {
       const { from, to } = editor.state.selection;
       const selectedText = editor.state.doc.textBetween(from, to, ' ');
-      
+
       const plan = await aiOrchestrator.planFromPrompt(action, {
         selectedText,
         documentContent: editor.getHTML(),
@@ -199,7 +199,7 @@ export function EnhancedDocumentEditor({
 
   const handleExportWord = useCallback(async () => {
     if (!editor) return;
-    
+
     try {
       const doc = editor.getJSON();
       const blob = await exportToWord(doc as any, title);
@@ -237,6 +237,7 @@ export function EnhancedDocumentEditor({
             variant="ghost"
             size="icon"
             onClick={onClose}
+            className="bg-red-500 hover:bg-red-600 text-white rounded-md"
             data-testid="btn-close-editor"
           >
             <X className="h-5 w-5" />

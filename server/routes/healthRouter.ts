@@ -12,6 +12,7 @@ router.get("/ready", async (req, res) => {
   const checks: Record<string, string> = {};
   let allHealthy = true;
 
+  // Database check
   try {
     await db.execute(sql`SELECT 1`);
     checks.database = "healthy";
@@ -20,6 +21,24 @@ router.get("/ready", async (req, res) => {
     allHealthy = false;
   }
 
+  // Redis check (if configured)
+  const redisUrl = process.env.REDIS_URL;
+  if (redisUrl) {
+    try {
+      const Redis = await import("ioredis");
+      const redis = new Redis.default(redisUrl);
+      await redis.ping();
+      await redis.quit();
+      checks.redis = "healthy";
+    } catch (error) {
+      checks.redis = "unhealthy";
+      allHealthy = false;
+    }
+  } else {
+    checks.redis = "not_configured";
+  }
+
+  // Memory check
   checks.memory = process.memoryUsage().heapUsed < 500 * 1024 * 1024 ? "healthy" : "warning";
   checks.uptime = process.uptime() > 10 ? "healthy" : "starting";
 
@@ -45,6 +64,39 @@ router.get("/", async (req, res) => {
     uptime: Math.floor(process.uptime()) + "s",
     timestamp: new Date().toISOString()
   });
+});
+
+// Prometheus-compatible metrics endpoint
+router.get("/metrics", async (req, res) => {
+  const memUsage = process.memoryUsage();
+  const uptimeSeconds = Math.floor(process.uptime());
+
+  // Prometheus text format
+  const metrics = `
+# HELP nodejs_heap_size_bytes Heap size in bytes
+# TYPE nodejs_heap_size_bytes gauge
+nodejs_heap_size_bytes{type="used"} ${memUsage.heapUsed}
+nodejs_heap_size_bytes{type="total"} ${memUsage.heapTotal}
+
+# HELP nodejs_rss_bytes Resident set size in bytes
+# TYPE nodejs_rss_bytes gauge
+nodejs_rss_bytes ${memUsage.rss}
+
+# HELP nodejs_external_memory_bytes External memory in bytes
+# TYPE nodejs_external_memory_bytes gauge
+nodejs_external_memory_bytes ${memUsage.external}
+
+# HELP process_uptime_seconds Process uptime in seconds
+# TYPE process_uptime_seconds counter
+process_uptime_seconds ${uptimeSeconds}
+
+# HELP process_start_time_seconds Unix timestamp when process started
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds ${Math.floor((Date.now() - uptimeSeconds * 1000) / 1000)}
+`.trim();
+
+  res.set("Content-Type", "text/plain; charset=utf-8");
+  res.status(200).send(metrics);
 });
 
 export default router;

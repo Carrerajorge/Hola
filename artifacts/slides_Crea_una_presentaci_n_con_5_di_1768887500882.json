@@ -1,0 +1,371 @@
+{
+  "title": "la IA en la medicina",
+  "slides": [
+    {
+      "id": "4067cd94-7065-4aee-8265-c1eb9d621826",
+      "size": {
+        "w": 1280,
+        "h": 720
+      },
+      "background": {
+        "color": "#1A1A2E"
+      },
+      "elements": [
+        {
+          "id": "d57a45b8-e15f-458f-a754-f2f712874fa2",
+          "type": "text",
+          "x": 80,
+          "y": 200,
+          "w": 1120,
+          "h": 150,
+          "zIndex": 1,
+          "delta": {
+            "ops": [
+              {
+                "insert": "la IA en la medicina\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 44,
+            "color": "#E5E7EB",
+            "bold": true
+          }
+        },
+        {
+          "id": "d1736419-20c4-4ff6-8fee-bd871c5856a4",
+          "type": "text",
+          "x": 80,
+          "y": 380,
+          "w": 1120,
+          "h": 60,
+          "zIndex": 2,
+          "delta": {
+            "ops": [
+              {
+                "insert": "Generado con AI por IliaGPT\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 18,
+            "color": "#8B5CF6",
+            "bold": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "3a3b4fb9-9e80-4e69-948d-1ba2110ce389",
+      "size": {
+        "w": 1280,
+        "h": 720
+      },
+      "background": {
+        "color": "#1A1A2E"
+      },
+      "elements": [
+        {
+          "id": "febf994c-2ba8-4099-8271-cb21c3b94dfd",
+          "type": "text",
+          "x": 60,
+          "y": 40,
+          "w": 1120,
+          "h": 80,
+          "zIndex": 1,
+          "delta": {
+            "ops": [
+              {
+                "insert": "La Revolución de la IA en la Medicina\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 32,
+            "color": "#E5E7EB",
+            "bold": true
+          }
+        },
+        {
+          "id": "38baade4-d058-4598-bab0-af2eb18a3a8b",
+          "type": "text",
+          "x": 60,
+          "y": 140,
+          "w": 1120,
+          "h": 500,
+          "zIndex": 2,
+          "delta": {
+            "ops": [
+              {
+                "insert": "• La IA está transformando el diagnóstico y tratamiento médico.\n"
+              },
+              {
+                "insert": "• Mejora la precisión y rapidez en análisis clínicos.\n"
+              },
+              {
+                "insert": "• Reduce errores humanos en procedimientos críticos.\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 20,
+            "color": "#E5E7EB",
+            "bold": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "0debd6d4-d4a7-4beb-a683-4794f21bd9c6",
+      "size": {
+        "w": 1280,
+        "h": 720
+      },
+      "background": {
+        "color": "#1A1A2E"
+      },
+      "elements": [
+        {
+          "id": "27f9f8bf-d2f2-4387-a43f-b57d3279db50",
+          "type": "text",
+          "x": 60,
+          "y": 40,
+          "w": 1120,
+          "h": 80,
+          "zIndex": 1,
+          "delta": {
+            "ops": [
+              {
+                "insert": "Diagnósticos Más Rápidos y Precisos\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 32,
+            "color": "#E5E7EB",
+            "bold": true
+          }
+        },
+        {
+          "id": "415e04cf-ed75-4918-848f-0456a5498e23",
+          "type": "text",
+          "x": 60,
+          "y": 140,
+          "w": 1120,
+          "h": 500,
+          "zIndex": 2,
+          "delta": {
+            "ops": [
+              {
+                "insert": "• Algoritmos detectan enfermedades en imágenes médicas.\n"
+              },
+              {
+                "insert": "• Identifican patrones invisibles al ojo humano.\n"
+              },
+              {
+                "insert": "• Aceleran diagnósticos de cáncer y enfermedades raras.\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 20,
+            "color": "#E5E7EB",
+            "bold": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "a7199a62-e050-4a87-9451-354ae4bcc953",
+      "size": {
+        "w": 1280,
+        "h": 720
+      },
+      "background": {
+        "color": "#1A1A2E"
+      },
+      "elements": [
+        {
+          "id": "3887153b-9421-4e7a-aaf8-0a5f9805c3dc",
+          "type": "text",
+          "x": 60,
+          "y": 40,
+          "w": 1120,
+          "h": 80,
+          "zIndex": 1,
+          "delta": {
+            "ops": [
+              {
+                "insert": "Personalización de Tratamientos\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 32,
+            "color": "#E5E7EB",
+            "bold": true
+          }
+        },
+        {
+          "id": "9f4a9833-8f7b-4139-9c2b-863f38cae2e3",
+          "type": "text",
+          "x": 60,
+          "y": 140,
+          "w": 1120,
+          "h": 500,
+          "zIndex": 2,
+          "delta": {
+            "ops": [
+              {
+                "insert": "• La IA adapta terapias según datos del paciente.\n"
+              },
+              {
+                "insert": "• Predice respuestas a medicamentos específicos.\n"
+              },
+              {
+                "insert": "• Optimiza planes de tratamiento a largo plazo.\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 20,
+            "color": "#E5E7EB",
+            "bold": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "bfb9c4c1-6c23-4bdf-a5b4-be83d8c6aadd",
+      "size": {
+        "w": 1280,
+        "h": 720
+      },
+      "background": {
+        "color": "#1A1A2E"
+      },
+      "elements": [
+        {
+          "id": "58e6a9ae-6e22-40c8-afc9-2ca486440f2b",
+          "type": "text",
+          "x": 60,
+          "y": 40,
+          "w": 1120,
+          "h": 80,
+          "zIndex": 1,
+          "delta": {
+            "ops": [
+              {
+                "insert": "Cirugías Asistidas por IA\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 32,
+            "color": "#E5E7EB",
+            "bold": true
+          }
+        },
+        {
+          "id": "a9eae177-f4fb-41c4-bf88-4ee06ad2b664",
+          "type": "text",
+          "x": 60,
+          "y": 140,
+          "w": 1120,
+          "h": 500,
+          "zIndex": 2,
+          "delta": {
+            "ops": [
+              {
+                "insert": "• Robots guiados por IA aumentan precisión quirúrgica.\n"
+              },
+              {
+                "insert": "• Reducen riesgos y tiempo de recuperación.\n"
+              },
+              {
+                "insert": "• Asisten en procedimientos complejos y delicados.\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 20,
+            "color": "#E5E7EB",
+            "bold": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "79850ac4-653f-4146-861c-29cac39c3472",
+      "size": {
+        "w": 1280,
+        "h": 720
+      },
+      "background": {
+        "color": "#1A1A2E"
+      },
+      "elements": [
+        {
+          "id": "1bab59c9-8a45-424b-874e-55081a40d168",
+          "type": "text",
+          "x": 60,
+          "y": 40,
+          "w": 1120,
+          "h": 80,
+          "zIndex": 1,
+          "delta": {
+            "ops": [
+              {
+                "insert": "Desafíos Éticos y Futuro\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 32,
+            "color": "#E5E7EB",
+            "bold": true
+          }
+        },
+        {
+          "id": "d1146785-d1cd-435a-b004-4e78af3e9737",
+          "type": "text",
+          "x": 60,
+          "y": 140,
+          "w": 1120,
+          "h": 500,
+          "zIndex": 2,
+          "delta": {
+            "ops": [
+              {
+                "insert": "• Preocupaciones sobre privacidad de datos médicos.\n"
+              },
+              {
+                "insert": "• Necesidad de regulaciones claras para IA médica.\n"
+              },
+              {
+                "insert": "• Potencial para democratizar la salud globalmente.\n"
+              }
+            ]
+          },
+          "defaultTextStyle": {
+            "fontFamily": "Inter",
+            "fontSize": 20,
+            "color": "#E5E7EB",
+            "bold": false
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,8 @@
 import { Router, Request, Response, NextFunction } from "express";
+import { AuthenticatedRequest } from "../types/express";
 import { db } from "../db";
 import { agentModeRuns, agentModeSteps, agentModeEvents } from "@shared/schema";
-import { agentManager } from "../agent/agentOrchestrator";
+import { agentManager, AgentPlan } from "../agent/agentOrchestrator";
 import { agentEventBus } from "../agent/eventBus";
 import { activityStreamPublisher, agentLoopFacade } from "../agent/orchestration";
 import { eq, desc, asc } from "drizzle-orm";
@@ -11,10 +12,11 @@ import { validateOrThrow, ValidationError } from "../agent/validation";
 import { checkIdempotency } from "../agent/idempotency";
 import { updateRunWithLock } from "../agent/dbTransactions";
 import { toolRegistry, TOOL_CATEGORIES } from "../agent/registry/toolRegistry";
+import { ToolArtifact } from "../agent/toolRegistry";
 import { agentRegistry } from "../agent/registry/agentRegistry";
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const user = (req as any).user;
+  const user = (req as AuthenticatedRequest).user;
   if (!user) {
     return res.status(401).json({ error: "Authentication required" });
   }
@@ -28,9 +30,9 @@ export function createAgentModeRouter() {
     try {
       const validatedBody = validateOrThrow(CreateRunRequestSchema, req.body, "POST /runs request body");
       const { chatId, messageId, message, attachments, idempotencyKey } = validatedBody;
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       const userId = user?.claims?.sub || user?.id;
-      const userPlan = (user?.plan === "pro" || user?.plan === "admin") ? user.plan : "free" as "free" | "pro" | "admin";
+      const userPlan = ((user as any)?.plan === "pro" || (user as any)?.plan === "admin") ? (user as any).plan : "free" as "free" | "pro" | "admin";
 
       if (idempotencyKey) {
         const idempotencyResult = await checkIdempotency(idempotencyKey, chatId);
@@ -67,9 +69,9 @@ export function createAgentModeRouter() {
       (async () => {
         let currentStatus = "queued";
         try {
-          const lockResult = await updateRunWithLock(runId, "queued", { 
-            status: "planning", 
-            startedAt: new Date() 
+          const lockResult = await updateRunWithLock(runId, "queued", {
+            status: "planning",
+            startedAt: new Date()
           });
           if (!lockResult.success) {
             console.warn(`[AgentRoutes] Failed to transition run ${runId} to planning: ${lockResult.error}`);
@@ -89,7 +91,7 @@ export function createAgentModeRouter() {
           orchestrator.on("progress", async (progress) => {
             try {
               const newStatus = progress.status === "executing" ? "running" : progress.status;
-              const updateData: any = {
+              const updateData: Record<string, any> = {
                 status: newStatus,
                 currentStepIndex: progress.currentStepIndex,
                 totalSteps: progress.totalSteps,
@@ -107,7 +109,7 @@ export function createAgentModeRouter() {
               if (progress.status === "completed") {
                 updateData.status = "completed";
                 updateData.completedAt = new Date();
-                
+
                 const summary = await orchestrator.generateSummary();
                 updateData.summary = summary;
               }
@@ -164,17 +166,17 @@ export function createAgentModeRouter() {
 
         } catch (err: any) {
           console.error(`[AgentRoutes] Error starting run ${runId}:`, err);
-          await updateRunWithLock(runId, currentStatus, { 
-            status: "failed", 
+          await updateRunWithLock(runId, currentStatus, {
+            status: "failed",
             error: err.message || "Failed to start agent run",
             completedAt: new Date(),
           });
         }
       })();
 
-      res.status(201).json({ 
+      res.status(201).json({
         id: newRun.id,
-        runId: newRun.id, 
+        runId: newRun.id,
         status: "queued",
         steps: [],
         artifacts: [],
@@ -184,9 +186,9 @@ export function createAgentModeRouter() {
       });
     } catch (error: any) {
       if (error instanceof ValidationError) {
-        return res.status(400).json({ 
-          error: "Validation failed", 
-          details: error.zodError.errors 
+        return res.status(400).json({
+          error: "Validation failed",
+          details: error.zodError.errors
         });
       }
       console.error("[AgentRoutes] Error creating run:", error);
@@ -211,8 +213,8 @@ export function createAgentModeRouter() {
         .where(eq(agentModeSteps.runId, id))
         .orderBy(agentModeSteps.stepIndex);
 
-      const planSteps = (run.plan as any)?.steps || [];
-      
+      const planSteps = (run.plan as AgentPlan)?.steps || [];
+
       const mergedSteps = planSteps.map((planStep: any, index: number) => {
         const dbStep = steps.find(s => s.stepIndex === index);
         if (dbStep) {
@@ -231,8 +233,8 @@ export function createAgentModeRouter() {
           stepIndex: index,
           toolName: planStep.toolName,
           description: planStep.description,
-          status: index < (run.currentStepIndex || 0) ? "pending" : 
-                  index === (run.currentStepIndex || 0) && run.status === "running" ? "running" : "pending",
+          status: index < (run.currentStepIndex || 0) ? "pending" :
+            index === (run.currentStepIndex || 0) && run.status === "running" ? "running" : "pending",
           output: null,
           error: null,
           startedAt: null,
@@ -258,7 +260,7 @@ export function createAgentModeRouter() {
           startedAt: s.startedAt,
           completedAt: s.completedAt,
         })),
-        artifacts: (run.artifacts as any[]) || [],
+        artifacts: (run.artifacts as ToolArtifact[]) || [],
         summary: run.summary,
         error: run.error,
         startedAt: run.startedAt?.toISOString(),
@@ -450,7 +452,7 @@ export function createAgentModeRouter() {
 
       const memoryEvents = activityStreamPublisher.getHistory(id);
 
-      res.json({ 
+      res.json({
         runId: id,
         events: memoryEvents,
         count: memoryEvents.length,
@@ -475,7 +477,7 @@ export function createAgentModeRouter() {
       }
 
       if (["completed", "failed", "cancelled"].includes(run.status)) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Cannot cancel a run that has already finished",
           currentStatus: run.status,
         });
@@ -484,8 +486,8 @@ export function createAgentModeRouter() {
       const agentManagerCancelled = await agentManager.cancelRun(id);
       const pipelineCancelled = await agentLoopFacade.cancelRun(id);
 
-      const lockResult = await updateRunWithLock(id, run.status, { 
-        status: "cancelled", 
+      const lockResult = await updateRunWithLock(id, run.status, {
+        status: "cancelled",
         completedAt: new Date(),
       });
 
@@ -496,8 +498,8 @@ export function createAgentModeRouter() {
         });
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         cancelled: agentManagerCancelled || pipelineCancelled,
       });
     } catch (error: any) {
@@ -519,14 +521,14 @@ export function createAgentModeRouter() {
       }
 
       if (run.status !== "running") {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Can only pause running runs",
           currentStatus: run.status,
         });
       }
 
-      if (typeof (agentManager as any).pauseRun === 'function') {
-        await (agentManager as any).pauseRun(id);
+      if (typeof (agentManager as unknown as Record<string, any>).pauseRun === 'function') {
+        await (agentManager as unknown as Record<string, any>).pauseRun(id);
       }
 
       const lockResult = await updateRunWithLock(id, "running", { status: "paused" });
@@ -558,14 +560,14 @@ export function createAgentModeRouter() {
       }
 
       if (run.status !== "paused") {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Can only resume paused runs",
           currentStatus: run.status,
         });
       }
 
-      if (typeof (agentManager as any).resumeRun === 'function') {
-        await (agentManager as any).resumeRun(id);
+      if (typeof (agentManager as unknown as Record<string, any>).resumeRun === 'function') {
+        await (agentManager as unknown as Record<string, any>).resumeRun(id);
       }
 
       const lockResult = await updateRunWithLock(id, "paused", { status: "running" });
@@ -587,9 +589,9 @@ export function createAgentModeRouter() {
   router.post("/runs/:id/retry", requireAuth, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const user = (req as any).user;
+      const user = (req as AuthenticatedRequest).user;
       const userId = user?.claims?.sub || user?.id;
-      const userPlan = (user?.plan === "pro" || user?.plan === "admin") ? user.plan : "free" as "free" | "pro" | "admin";
+      const userPlan = ((user as any)?.plan === "pro" || (user as any)?.plan === "admin") ? (user as any).plan : "free" as "free" | "pro" | "admin";
 
       const [run] = await db.select()
         .from(agentModeRuns)
@@ -600,7 +602,7 @@ export function createAgentModeRouter() {
       }
 
       if (run.status !== "failed") {
-        return res.status(400).json({ 
+        return res.status(400).json({
           error: "Can only retry failed runs",
           currentStatus: run.status,
         });
@@ -615,7 +617,7 @@ export function createAgentModeRouter() {
 
       const retryFromStep = failedStep?.stepIndex || 0;
 
-      const retryLockResult = await updateRunWithLock(id, "failed", { 
+      const retryLockResult = await updateRunWithLock(id, "failed", {
         status: "running",
         error: null,
         completedAt: null,
@@ -629,7 +631,7 @@ export function createAgentModeRouter() {
         });
       }
 
-      const plan = run.plan as any;
+      const plan = run.plan as AgentPlan;
       if (plan && plan.objective) {
         (async () => {
           let currentStatus = "running";
@@ -680,8 +682,8 @@ export function createAgentModeRouter() {
             });
           } catch (err: any) {
             console.error(`[AgentRoutes] Error retrying run ${id}:`, err);
-            await updateRunWithLock(id, currentStatus, { 
-              status: "failed", 
+            await updateRunWithLock(id, currentStatus, {
+              status: "failed",
               error: err.message || "Failed to retry agent run",
               completedAt: new Date(),
             });
@@ -689,8 +691,8 @@ export function createAgentModeRouter() {
         })();
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         status: "running",
         retryFromStep,
       });
@@ -703,7 +705,7 @@ export function createAgentModeRouter() {
   router.get("/skills", async (req: Request, res: Response) => {
     try {
       const allTools = toolRegistry.getAll();
-      
+
       const categoryMap: Record<string, string> = {
         "Web": "research",
         "Generation": "media",
@@ -725,13 +727,13 @@ export function createAgentModeRouter() {
         "Communication": "communication",
         "AdvancedSystem": "automation",
       };
-      
+
       const popularTools = new Set([
         "search_web", "generate_image", "doc_create", "spreadsheet_create",
         "code_generate", "data_analyze", "pdf_manipulate", "slides_create",
         "browser_navigate", "fetch_url"
       ]);
-      
+
       const skills = allTools
         .filter(tool => tool.metadata.implementationStatus === "implemented")
         .map((tool) => {
@@ -766,7 +768,7 @@ export function createAgentModeRouter() {
       const toolStats = toolRegistry.getStats();
       const agentStats = agentRegistry.getStats();
       const allTools = toolRegistry.getAll();
-      
+
       const categoryNameMap: Record<string, string> = {
         "Web": "Investigación",
         "Generation": "Multimedia",
@@ -788,13 +790,13 @@ export function createAgentModeRouter() {
         "Communication": "Comunicación",
         "AdvancedSystem": "Sistema Avanzado",
       };
-      
+
       const categories = Object.entries(toolStats.byCategory).map(([id, count]) => ({
         id: id.toLowerCase(),
         name: categoryNameMap[id] || id,
         count,
       }));
-      
+
       const implementedCount = allTools.filter(
         t => t.metadata.implementationStatus === "implemented"
       ).length;
@@ -811,7 +813,7 @@ export function createAgentModeRouter() {
       res.json(stats);
     } catch (error: any) {
       console.error("[AgentRoutes] Error getting capabilities:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Failed to get capabilities",
         totalTools: 0,
         totalAgents: 0,

@@ -10,6 +10,7 @@ import { getStreamGateway } from "../agent/superAgent/tracing/StreamGateway";
 import { getEventStore } from "../agent/superAgent/tracing/EventStore";
 import { createClient } from "redis";
 import { promises as fs } from "fs";
+import { conversationMemoryManager } from "../services/conversationMemory";
 
 const router = Router();
 
@@ -26,7 +27,7 @@ interface ClassifiedIntent {
 
 function classifyPromptIntent(prompt: string): ClassifiedIntent {
   const lowerPrompt = prompt.toLowerCase();
-  
+
   const academicPatterns = [
     /\b(artículos?|articulos?)\s*(científicos?|cientificos?|académicos?|academicos?)\b/i,
     /\b(papers?|publications?|research\s+articles?)\b/i,
@@ -35,29 +36,29 @@ function classifyPromptIntent(prompt: string): ClassifiedIntent {
     /\b(literatura\s+científica|scientific\s+literature)\b/i,
     /\b(busca|encuentra|dame|genera?|consigue)\s+\d+\s*(artículos?|articulos?|fuentes?|papers?)/i,
   ];
-  
+
   const documentPatterns = [
     /\b(crea|genera|escribe|redacta)\s+(un|una|el|la)?\s*(documento|word|docx|informe|reporte)\b/i,
     /\b(crear?|generar?)\s+(documento|word|docx)\b/i,
   ];
-  
+
   const spreadsheetPatterns = [
     /\b(excel|xlsx|spreadsheet|hoja\s+de\s+cálculo)\b/i,
     /\b(tabla|cuadro)\s+con\s+datos\b/i,
   ];
-  
+
   const isAcademic = academicPatterns.some(p => p.test(prompt));
   const isDocument = documentPatterns.some(p => p.test(prompt));
   const isSpreadsheet = spreadsheetPatterns.some(p => p.test(prompt));
-  
+
   let topic = extractSearchTopic(prompt);
   const yearRange = extractYearRange(prompt);
   const targetCount = extractTargetCount(prompt);
-  
+
   let category: IntentCategory = "general_chat";
   let outputFormat: "xlsx" | "docx" | "pptx" | null = null;
   let confidence = 0.5;
-  
+
   if (isAcademic) {
     category = "academic_search";
     outputFormat = isSpreadsheet ? "xlsx" : "xlsx";
@@ -71,7 +72,7 @@ function classifyPromptIntent(prompt: string): ClassifiedIntent {
     outputFormat = "xlsx";
     confidence = 0.85;
   }
-  
+
   return {
     category,
     topic: topic || prompt.substring(0, 200),
@@ -93,7 +94,7 @@ function extractSearchTopic(prompt: string): string {
       return topic.substring(0, 150);
     }
   }
-  
+
   const cleanedPrompt = prompt
     .replace(/\b(dame|busca|genera|encuentra|crea|quiero|necesito)\b/gi, "")
     .replace(/\b\d+\s*(artículos?|articulos?|fuentes?|papers?|sources?)\b/gi, "")
@@ -101,7 +102,7 @@ function extractSearchTopic(prompt: string): string {
     .replace(/\b(en\s+excel|xlsx|del\s+\d{4}\s+al\s+\d{4})\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
-  
+
   return cleanedPrompt.substring(0, 150) || prompt.substring(0, 100);
 }
 
@@ -131,8 +132,13 @@ const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 
 const ChatRequestSchema = z.object({
   prompt: z.string().min(1).max(10000),
+  messages: z.array(z.object({
+    role: z.string(),
+    content: z.string()
+  })).optional(), // CONTEXT FIX: Accept full conversation history
   session_id: z.string().optional(),
   run_id: z.string().optional(),
+  chat_id: z.string().optional(), // For context augmentation
   options: z.object({
     enforce_min_sources: z.boolean().optional(),
     max_iterations: z.number().int().min(1).max(5).optional(),
@@ -142,14 +148,14 @@ const ChatRequestSchema = z.object({
 router.post("/super/analyze", async (req: Request, res: Response) => {
   try {
     const { prompt, options } = ChatRequestSchema.parse(req.body);
-    
+
     const contract = parsePromptToContract(prompt, {
       enforceMinSources: options?.enforce_min_sources ?? true,
     });
-    
+
     const validation = validateContract(contract);
     const researchDecision = shouldResearch(prompt);
-    
+
     res.json({
       contract,
       validation,
@@ -164,28 +170,36 @@ const activeAbortControllers = new Map<string, AbortController>();
 
 router.post("/super/stream", async (req: Request, res: Response) => {
   try {
-    const { prompt, session_id, run_id, options } = ChatRequestSchema.parse(req.body);
+    const { prompt, messages: clientMessages, chat_id, session_id, run_id, options } = ChatRequestSchema.parse(req.body);
     const sessionId = session_id || randomUUID();
     const runId = run_id || `run_${randomUUID()}`;
-    
+
+    // CONTEXT FIX: Augment client messages with server-side history
+    const fullHistory = await conversationMemoryManager.augmentWithHistory(
+      chat_id,
+      clientMessages || [],
+      6000
+    );
+    console.log(`[SuperAgent] Context augmented: ${clientMessages?.length || 0} client msgs -> ${fullHistory.length} total`);
+
     const classifiedIntent = classifyPromptIntent(prompt);
     console.log(`[SuperAgent] Intent classified: ${classifiedIntent.category}, topic: "${classifiedIntent.topic.substring(0, 50)}..."`);
     console.log(`[SuperAgent] Starting run with runId=${runId}, category=${classifiedIntent.category}`);
-    
+
     const abortController = new AbortController();
     activeAbortControllers.set(runId, abortController);
-    
+
     const traceBus = new TraceBus(runId);
     const gateway = getStreamGateway();
-    
+
     // Register the TraceBus with the gateway - this enables:
     // 1. SSE clients to receive live TraceEvents with full metrics
     // 2. Automatic EventStore persistence via gateway's trace listener
     // 3. Proper heartbeat management and cleanup
     gateway.registerRun(runId, traceBus);
-    
+
     console.log(`[SuperAgent] Registered run ${runId} with StreamGateway`);
-    
+
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -193,41 +207,41 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     res.setHeader("X-Run-ID", runId);
     res.setHeader("Access-Control-Expose-Headers", "X-Run-ID, X-Session-ID");
     res.flushHeaders();
-    
+
     const sendSSE = (event: SSEEvent) => {
       res.write(`id: ${event.event_id}\n`);
       res.write(`event: ${event.event_type}\n`);
       res.write(`data: ${JSON.stringify(event.data)}\n\n`);
     };
-    
+
     let redisClient: ReturnType<typeof createClient> | null = null;
-    
+
     try {
       redisClient = createClient({ url: REDIS_URL });
       await redisClient.connect();
     } catch (redisError) {
       console.warn("[SuperAgent] Redis not available, SSE-only mode");
     }
-    
+
     const agent = createSuperAgent(sessionId, {
       maxIterations: options?.max_iterations ?? 3,
       emitHeartbeat: true,
       heartbeatIntervalMs: 5000,
       enforceContract: options?.enforce_min_sources ?? true,
     });
-    
+
     let redisAvailable = redisClient?.isReady ?? false;
     let articlesCollected = 0;
     let articlesVerified = 0;
     let currentPhase: "planning" | "signals" | "verification" | "export" | "completed" = "planning";
     let runCompleted = false;
-    
+
     traceBus.runStarted("SuperAgent", `Starting research: ${prompt.substring(0, 100)}...`);
     traceBus.phaseStarted("SuperAgent", "planning", "Analyzing research request");
-    
+
     agent.on("sse", async (event: SSEEvent) => {
       sendSSE(event);
-      
+
       switch (event.event_type) {
         case "contract":
           if (currentPhase === "planning") {
@@ -250,11 +264,12 @@ router.post("/super/stream", async (req: Request, res: Response) => {
               sourceData.relevance || sourceData.score || 0.8
             );
           }
-          traceBus.toolProgress("SuperAgent", `Collected ${articlesCollected} sources`, 
+          traceBus.toolProgress("SuperAgent", `Collected ${articlesCollected} sources`,
             Math.min(40, (articlesCollected / 50) * 40),
-            { 
+            {
               articles_collected: articlesCollected,
-              candidates_found: articlesCollected 
+              articles_accepted: articlesCollected, // Add this for frontend display
+              candidates_found: articlesCollected
             }
           );
           break;
@@ -272,7 +287,10 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           }
           traceBus.toolProgress("SuperAgent", `Verified ${articlesVerified} sources`,
             40 + Math.min(40, (articlesVerified / 50) * 40),
-            { articles_verified: articlesVerified, articles_accepted: articlesVerified }
+            {
+              articles_verified: articlesVerified,
+              articles_accepted: articlesVerified  // Frontend shows this
+            }
           );
           break;
         case "artifact":
@@ -282,9 +300,9 @@ router.post("/super/stream", async (req: Request, res: Response) => {
             currentPhase = "export";
           }
           traceBus.artifactCreated(
-            "SuperAgent", 
+            "SuperAgent",
             event.data?.type || "xlsx",
-            event.data?.name || "output.xlsx", 
+            event.data?.name || "output.xlsx",
             event.data?.url || `/api/super/artifacts/${event.data?.id}/download`
           );
           break;
@@ -365,7 +383,7 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           });
           break;
       }
-      
+
       if (redisAvailable && redisClient) {
         try {
           const streamKey = `super:stream:${sessionId}`;
@@ -375,22 +393,22 @@ router.post("/super/stream", async (req: Request, res: Response) => {
             data: JSON.stringify(event.data),
             timestamp: event.timestamp.toString(),
           });
-          
+
           await redisClient.expire(streamKey, 3600);
         } catch (e) {
           redisAvailable = false;
         }
       }
     });
-    
+
     req.on("close", () => {
       console.log(`[SuperAgent] Client disconnected: ${sessionId}`);
       gateway.unregisterRun(runId);
       if (redisClient?.isReady) {
-        redisClient.quit().catch(() => {});
+        redisClient.quit().catch(() => { });
       }
     });
-    
+
     try {
       const signal = activeAbortControllers.get(runId)?.signal;
       await agent.execute(prompt, signal);
@@ -407,17 +425,17 @@ router.post("/super/stream", async (req: Request, res: Response) => {
         fail_reason: error.message,
       });
     }
-    
+
     // Cleanup: unregister run from gateway (handles traceBus.destroy() internally)
     gateway.unregisterRun(runId);
     activeAbortControllers.delete(runId);
-    
+
     if (redisClient?.isReady) {
       await redisClient.quit();
     }
-    
+
     res.end();
-    
+
   } catch (error: any) {
     if (!res.headersSent) {
       res.status(400).json({ error: error.message });
@@ -428,25 +446,25 @@ router.post("/super/stream", async (req: Request, res: Response) => {
 router.post("/super/stream/:runId/cancel", async (req: Request, res: Response) => {
   const { runId } = req.params;
   const abortController = activeAbortControllers.get(runId);
-  
+
   if (!abortController) {
     return res.status(404).json({ error: "Run not found or already completed" });
   }
-  
+
   try {
     abortController.abort();
     activeAbortControllers.delete(runId);
-    
+
     const gateway = getStreamGateway();
     gateway.unregisterRun(runId);
-    
+
     console.log(`[SuperAgent] Run ${runId} cancelled by user`);
-    
-    res.json({ 
-      success: true, 
-      run_id: runId, 
+
+    res.json({
+      success: true,
+      run_id: runId,
       status: "cancelled",
-      message: "Run cancelled successfully" 
+      message: "Run cancelled successfully"
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -457,39 +475,39 @@ router.get("/super/stream/:sessionId/replay", async (req: Request, res: Response
   try {
     const { sessionId } = req.params;
     const lastEventId = req.headers["last-event-id"] as string | undefined;
-    
+
     let redisClient: ReturnType<typeof createClient> | null = null;
-    
+
     try {
       redisClient = createClient({ url: REDIS_URL });
       await redisClient.connect();
     } catch {
       return res.status(503).json({ error: "Redis not available for replay" });
     }
-    
+
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders();
-    
+
     const streamKey = `super:stream:${sessionId}`;
     const startId = lastEventId || "0";
-    
+
     const events = await redisClient.xRange(streamKey, startId, "+");
-    
+
     for (const entry of events) {
       const data = entry.message;
       res.write(`id: ${data.event_id}\n`);
       res.write(`event: ${data.event_type}\n`);
       res.write(`data: ${data.data}\n\n`);
     }
-    
+
     res.write(`event: replay_complete\n`);
     res.write(`data: ${JSON.stringify({ events_replayed: events.length })}\n\n`);
-    
+
     await redisClient.quit();
     res.end();
-    
+
   } catch (error: any) {
     if (!res.headersSent) {
       res.status(500).json({ error: error.message });
@@ -524,19 +542,19 @@ router.get("/super/artifacts/:id/download", async (req: Request, res: Response) 
     if (!artifact) {
       return res.status(404).json({ error: "Artifact not found" });
     }
-    
+
     const mimeTypes: Record<string, string> = {
       xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     };
-    
+
     res.setHeader("Content-Type", mimeTypes[artifact.type] || "application/octet-stream");
     res.setHeader("Content-Disposition", `attachment; filename="${artifact.name}"`);
-    
+
     const fileBuffer = await fs.readFile(artifact.path);
     res.send(fileBuffer);
-    
+
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -555,19 +573,19 @@ const runStatusCache = new Map<string, {
 router.get("/runs/:runId/events", async (req: Request, res: Response) => {
   const { runId } = req.params;
   const fromSeq = parseInt(req.query.from as string) || 0;
-  
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.setHeader("Access-Control-Allow-Origin", "*");
-  
+
   res.flushHeaders();
-  
+
   const gateway = getStreamGateway();
   let seq = fromSeq;
   let heartbeatInterval: NodeJS.Timeout | null = null;
-  
+
   const writeSSE = (eventType: string, data: any) => {
     seq++;
     const payload = JSON.stringify({ ...data, seq, run_id: runId, ts: Date.now() });
@@ -578,20 +596,20 @@ router.get("/runs/:runId/events", async (req: Request, res: Response) => {
       (res as any).flush();
     }
   };
-  
+
   writeSSE("connected", { connected: true, event_type: "connected" });
-  
-  writeSSE("run_started", { 
+
+  writeSSE("run_started", {
     event_type: "run_started",
-    phase: "planning", 
+    phase: "planning",
     message: "Research agent initialized",
     agent: "SuperAgent",
     status: "running"
   });
-  
+
   const unsubscribe = gateway.subscribe(runId, (event) => {
     writeSSE(event.event_type, event);
-    
+
     const cached = runStatusCache.get(runId) || {
       status: "running",
       phase: "planning",
@@ -600,7 +618,7 @@ router.get("/runs/:runId/events", async (req: Request, res: Response) => {
       artifacts: [],
       lastUpdate: Date.now(),
     };
-    
+
     if (event.phase) cached.phase = event.phase;
     if (event.status) cached.status = event.status;
     if (event.progress !== undefined) cached.progress = event.progress;
@@ -613,11 +631,11 @@ router.get("/runs/:runId/events", async (req: Request, res: Response) => {
     cached.lastUpdate = Date.now();
     runStatusCache.set(runId, cached);
   });
-  
+
   heartbeatInterval = setInterval(() => {
     writeSSE("heartbeat", { event_type: "heartbeat", agent: "System" });
   }, 800);
-  
+
   req.on("close", () => {
     unsubscribe();
     if (heartbeatInterval) {
@@ -628,12 +646,12 @@ router.get("/runs/:runId/events", async (req: Request, res: Response) => {
 
 router.get("/runs/:runId/status", async (req: Request, res: Response) => {
   const { runId } = req.params;
-  
+
   const cached = runStatusCache.get(runId);
   if (cached) {
     return res.json(cached);
   }
-  
+
   res.json({
     status: "pending",
     phase: "idle",
@@ -646,7 +664,7 @@ router.get("/runs/:runId/status", async (req: Request, res: Response) => {
 
 router.get("/super/health", async (req: Request, res: Response) => {
   let redisOk = false;
-  
+
   try {
     const client = createClient({ url: REDIS_URL });
     await client.connect();
@@ -656,7 +674,7 @@ router.get("/super/health", async (req: Request, res: Response) => {
   } catch {
     redisOk = false;
   }
-  
+
   res.json({
     status: redisOk ? "healthy" : "degraded",
     redis: redisOk,

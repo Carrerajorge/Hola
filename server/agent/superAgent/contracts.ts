@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const IntentTypeSchema = z.enum([
   "answer",
-  "research", 
+  "research",
   "create_docx",
   "create_xlsx",
   "mixed"
@@ -77,6 +77,8 @@ export const SourceSignalSchema = z.object({
   fetched: z.boolean().default(false),
   content: z.string().optional(),
   claims: z.array(z.string()).optional(),
+  verified: z.boolean().optional(),
+  scopusData: z.record(z.unknown()).optional(),
 });
 
 export type SourceSignal = z.infer<typeof SourceSignalSchema>;
@@ -92,6 +94,9 @@ export const ExecutionStateSchema = z.object({
     type: z.enum(["docx", "xlsx", "pptx"]),
     name: z.string(),
     download_url: z.string().optional(),
+    path: z.string().optional(),
+    size: z.number().optional(),
+    created_at: z.number().optional(),
   })).default([]),
   tool_results: z.array(z.object({
     tool_call_id: z.string(),
@@ -110,6 +115,7 @@ export const ExecutionStateSchema = z.object({
 
 export type ExecutionState = z.infer<typeof ExecutionStateSchema>;
 
+// ... (previous lines)
 export const SSEEventTypeSchema = z.enum([
   "contract",
   "plan",
@@ -125,8 +131,14 @@ export const SSEEventTypeSchema = z.enum([
   "heartbeat",
   "progress",
   "search_progress",
-  "artifact_generating"
+  "artifact_generating",
+  "phase_started",
+  "filter_progress",
+  "export_progress",
+  "accepted_progress",
+  "verify_progress"
 ]);
+// ...
 
 export type SSEEventType = z.infer<typeof SSEEventTypeSchema>;
 

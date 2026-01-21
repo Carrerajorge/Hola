@@ -1,45 +1,34 @@
 import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
-import * as schema from "@shared/schema";
+import * as pkg from "pg";
+import * as schema from "../shared/schema";
 import { Registry, Histogram, Counter, Gauge } from 'prom-client';
+import { env } from "./config/env";
+import { Logger } from "./lib/logger";
 
-const { Pool } = pg;
-
-// CRITICAL: Validate DATABASE_URL in production
-const isProduction = process.env.NODE_ENV === "production";
-const databaseUrl = process.env.DATABASE_URL;
-
-if (isProduction && !databaseUrl) {
-  console.error("[FATAL] DATABASE_URL is not set in production environment!");
-  console.error("[FATAL] The server cannot start without a PostgreSQL database.");
-  console.error("[FATAL] Please configure DATABASE_URL in your deployment secrets.");
-  console.error("[FATAL] In Replit Deployments: Go to Secrets tab and add DATABASE_URL");
-  process.exit(1);
-}
-
-if (!databaseUrl) {
-  console.warn("[WARNING] DATABASE_URL is not set. Database operations will fail.");
-}
+const { Pool } = pkg;
 
 const pool = new Pool({
-  connectionString: databaseUrl,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
+  connectionString: env.DATABASE_URL,
+  max: env.DB_POOL_MAX || (env.NODE_ENV === 'production' ? 20 : 5), // Higher in prod
+  min: env.DB_POOL_MIN || 2, // Always keep a few hot
+  idleTimeoutMillis: 10000, // Close idle connections faster (10s) to free up resources
+  connectionTimeoutMillis: 5000, // Fail fast
+  allowExitOnIdle: false,
+  application_name: 'michat_server', // Tag connections for PG logs
 });
 
 pool.on('error', (err: any) => {
   if (err.code === '57P01') {
-    console.warn('[DB] Connection terminated by administrator, pool will reconnect automatically');
+    Logger.warn('[DB] Connection terminated by administrator, pool will reconnect automatically');
   } else {
-    console.error('[DB] Unexpected error on idle client:', err.message || err);
+    Logger.error('[DB] Unexpected error on idle client:', err.message || err);
   }
   healthState.consecutiveFailures++;
   updateHealthStatus();
 });
 
 pool.on('connect', () => {
-  console.log('[DB] New client connected to pool');
+  Logger.info('[DB] New client connected to pool');
 });
 
 export { pool };
@@ -108,7 +97,7 @@ const dbConnectionFailuresCounter = new Counter({
 
 function updateHealthStatus(): void {
   let newStatus: HealthStatus;
-  
+
   if (healthState.consecutiveFailures >= 3) {
     newStatus = 'UNHEALTHY';
   } else if (healthState.consecutiveFailures >= 1) {
@@ -185,7 +174,7 @@ async function performHealthCheck(): Promise<boolean> {
   } finally {
     if (client) {
       try {
-        client.release();
+        (client as any).release();
       } catch (e) {
       }
     }
@@ -206,7 +195,7 @@ async function attemptReconnect(): Promise<void> {
 
   healthState.reconnectAttempts++;
   const delay = calculateBackoffDelay();
-  
+
   console.log(`[DB Health] Attempting reconnection (attempt ${healthState.reconnectAttempts}, delay: ${delay}ms)`);
 
   try {
@@ -240,7 +229,7 @@ function scheduleReconnect(): void {
   const delay = calculateBackoffDelay();
 
   console.log(`[DB Health] Scheduling reconnection in ${delay}ms`);
-  
+
   reconnectTimeoutId = setTimeout(() => {
     reconnectTimeoutId = null;
     attemptReconnect();
@@ -294,7 +283,7 @@ export function startHealthChecks(): void {
   }
 
   console.log(`[DB Health] Starting periodic health checks (interval: ${HEALTH_CHECK_INTERVAL_MS}ms)`);
-  
+
   performHealthCheck();
 
   healthCheckIntervalId = setInterval(() => {
@@ -321,7 +310,7 @@ export function stopHealthChecks(): void {
 
 export async function drainConnections(): Promise<void> {
   console.log('[DB Health] Draining database connections');
-  
+
   try {
     await pool.end();
     console.log('[DB Health] All database connections drained');
@@ -344,18 +333,18 @@ export async function verifyDatabaseConnection(): Promise<boolean> {
     const result = await client.query('SELECT current_database(), NOW() as server_time');
     client.release();
     console.log(`[DB] Connected to database: ${result.rows[0].current_database}`);
-    
+
     healthState.consecutiveSuccesses = HEALTHY_THRESHOLD;
     healthState.status = 'HEALTHY';
     updateHealthStatus();
-    
+
     return true;
   } catch (error: any) {
     console.error('[DB] Failed to connect to database:', error.message);
     healthState.consecutiveFailures++;
     updateHealthStatus();
-    
-    if (isProduction) {
+
+    if (env.NODE_ENV === "production") {
       console.error('[FATAL] Cannot start production server without database connection');
       process.exit(1);
     }

@@ -1,9 +1,10 @@
 import { toolRegistry, type ToolResult, type ToolArtifact } from "./toolRegistry";
 import { geminiChat, type GeminiChatMessage } from "../lib/gemini";
-import type { User } from "@shared/schema";
+import type { User, TraceEventType, TraceEvent } from "@shared/schema";
 import { EventEmitter } from "events";
 import { agentEventBus } from "./eventBus";
 import { defaultToolRegistry as sandboxToolRegistry } from "./sandbox/tools";
+import { getHTNPlanner, type Task } from "./htnPlanner";
 
 export interface PlanStep {
   index: number;
@@ -19,7 +20,7 @@ export interface AgentPlan {
   estimatedTime: string;
 }
 
-export type AgentStatus = 
+export type AgentStatus =
   | "queued"
   | "planning"
   | "running"
@@ -37,7 +38,7 @@ export interface StepResult {
   success: boolean;
   output: any;
   artifacts: ToolArtifact[];
-  error?: string;
+  error?: string | { code: string; message: string; retryable: boolean; details?: any; };
   startedAt: number;
   completedAt: number;
 }
@@ -66,7 +67,7 @@ export interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
   stepIndex?: number;
   attempts: number;
-  lastError?: string;
+  lastError?: string | { code: string; message: string; retryable: boolean; details?: any; };
   createdAt: number;
   updatedAt: number;
 }
@@ -88,7 +89,7 @@ export interface AgentProgress {
   plan: AgentPlan | null;
   stepResults: StepResult[];
   artifacts: ToolArtifact[];
-  error?: string;
+  error?: string | { code: string; message: string; retryable: boolean; details?: any; };
   todoList?: TodoItem[];
   eventStream?: AgentEvent[];
 }
@@ -98,7 +99,7 @@ let _cachedTools: Array<{ name: string; description: string; inputSchema: string
 
 function getAvailableToolDescriptions() {
   if (_cachedTools) return _cachedTools;
-  
+
   const legacyTools = [
     { name: "analyze_spreadsheet", description: "Analyze Excel or CSV spreadsheet files.", inputSchema: "{ uploadId, scope, analysisMode, userPrompt? }" },
     { name: "web_search", description: "Search the web for information.", inputSchema: "{ query, maxResults?, academic? }" },
@@ -110,7 +111,7 @@ function getAvailableToolDescriptions() {
     { name: "shell_command", description: "Execute a shell command.", inputSchema: "{ command, timeout? }" },
     { name: "list_files", description: "List files and directories.", inputSchema: "{ directory? }" },
   ];
-  
+
   // Add sandbox tools (lazy access to avoid circular deps)
   try {
     const sandboxTools = sandboxToolRegistry.listToolsWithInfo().map(t => ({
@@ -118,17 +119,17 @@ function getAvailableToolDescriptions() {
       description: t.description,
       inputSchema: `{ params specific to ${t.name} }`,
     }));
-    
+
     // Merge, preferring sandbox tools for same-name entries
     const toolMap = new Map<string, { name: string; description: string; inputSchema: string }>();
     for (const tool of legacyTools) toolMap.set(tool.name, tool);
     for (const tool of sandboxTools) toolMap.set(tool.name, tool);
-    
+
     _cachedTools = Array.from(toolMap.values());
   } catch {
     _cachedTools = legacyTools;
   }
-  
+
   return _cachedTools;
 }
 
@@ -147,17 +148,18 @@ export class AgentOrchestrator extends EventEmitter {
   public artifacts: ToolArtifact[];
   public stepResults: StepResult[];
   public summary: string | null;
-  
+
   private isCancelled: boolean;
   private abortController: AbortController;
   private userMessage: string;
   private attachments: any[];
-  
+
   private eventStream: AgentEvent[] = [];
   private todoList: TodoItem[] = [];
   private workspaceFiles: Map<string, string> = new Map();
   private replanAttempts: number = 0;
   private stepRetryCount: Map<number, number> = new Map();
+  private htnPlanId?: string; // ID of the underlying HTN plan if used
 
   constructor(runId: string, chatId: string, userId: string, userPlan: "free" | "pro" | "admin" = "free") {
     super();
@@ -178,9 +180,9 @@ export class AgentOrchestrator extends EventEmitter {
   }
 
   private logEvent(
-    type: EventType, 
-    content: any, 
-    stepIndex?: number, 
+    type: EventType,
+    content: any,
+    stepIndex?: number,
     options?: {
       title?: string;
       summary?: string;
@@ -193,7 +195,7 @@ export class AgentOrchestrator extends EventEmitter {
   ): void {
     const inferredStatus = this.inferEventStatus(type, content, options?.status);
     const inferredTitle = options?.title || this.inferEventTitle(type, content);
-    
+
     const event: AgentEvent = {
       type,
       kind: type,
@@ -210,14 +212,12 @@ export class AgentOrchestrator extends EventEmitter {
     };
     this.eventStream.push(event);
     this.emit("event", { runId: this.runId, event, eventStream: this.eventStream });
-    console.log(`[AgentOrchestrator][${this.runId}] Event: ${type} [${inferredStatus}]`, 
+    console.log(`[AgentOrchestrator][${this.runId}] Event: ${type} [${inferredStatus}]`,
       inferredTitle || (typeof content === 'string' ? content.substring(0, 100) : JSON.stringify(content).substring(0, 100)));
   }
 
   private async emitTraceEvent(
-    eventType: 'task_start' | 'plan_created' | 'step_started' | 'tool_call' | 'tool_output' | 'tool_chunk' | 
-               'step_completed' | 'step_failed' | 'step_retried' | 'artifact_created' | 'verification' | 
-               'shell_output' | 'observation' | 'thinking' | 'replan' | 'error' | 'done' | 'cancelled',
+    eventType: TraceEventType,
     options?: {
       stepIndex?: number;
       stepId?: string;
@@ -245,13 +245,13 @@ export class AgentOrchestrator extends EventEmitter {
 
   private inferEventStatus(type: EventType, content: any, explicitStatus?: EventStatus): EventStatus {
     if (explicitStatus) return explicitStatus;
-    
+
     if (type === 'error') return 'fail';
-    
+
     if (content?.success === true || content?.passed === true) return 'ok';
     if (content?.success === false || content?.passed === false) return 'fail';
     if (content?.shouldRetry || content?.shouldReplan) return 'warn';
-    
+
     return 'ok';
   }
 
@@ -280,7 +280,7 @@ export class AgentOrchestrator extends EventEmitter {
     if (type === 'replan') return 'Replanificación';
     if (type === 'thinking') return 'Analizando';
     if (type === 'progress') return 'Progreso';
-    
+
     return type.charAt(0).toUpperCase() + type.slice(1);
   }
 
@@ -313,10 +313,10 @@ export class AgentOrchestrator extends EventEmitter {
     }));
 
     this.updateWorkspaceFile('todo.md', this.generateTodoMarkdown());
-    this.logEvent('plan', { 
-      objective: this.plan.objective, 
+    this.logEvent('plan', {
+      objective: this.plan.objective,
       totalSteps: this.plan.steps.length,
-      todoList: this.todoList 
+      todoList: this.todoList
     });
     this.emitProgress();
   }
@@ -362,14 +362,14 @@ export class AgentOrchestrator extends EventEmitter {
     this.workspaceFiles.set(filename, content);
   }
 
-  updateTodoList(stepIndex: number, status: TodoItem['status'], error?: string): void {
+  updateTodoList(stepIndex: number, status: TodoItem['status'], error?: string | { code: string; message: string; retryable: boolean; details?: any; }): void {
     const todoItem = this.todoList.find(t => t.stepIndex === stepIndex);
     if (!todoItem) return;
 
     todoItem.status = status;
     todoItem.updatedAt = Date.now();
     todoItem.attempts++;
-    
+
     if (error) {
       todoItem.lastError = error;
     }
@@ -395,12 +395,12 @@ export class AgentOrchestrator extends EventEmitter {
 
   async verifyStepResult(stepIndex: number, result: ToolResult): Promise<VerificationResult> {
     if (!this.plan) {
-      return { 
-        success: false, 
-        shouldRetry: false, 
+      return {
+        success: false,
+        shouldRetry: false,
         shouldReplan: false,
-        feedback: "No plan available", 
-        confidence: 0 
+        feedback: "No plan available",
+        confidence: 0
       };
     }
 
@@ -419,8 +419,8 @@ export class AgentOrchestrator extends EventEmitter {
         shouldRetry,
         shouldReplan,
         feedback: `Step failed: ${result.error || 'Unknown error'}`,
-        suggestedAction: shouldRetry ? 'Retry with modified parameters' : 
-                         shouldReplan ? 'Replan remaining steps' : 'Mark as failed and continue',
+        suggestedAction: shouldRetry ? 'Retry with modified parameters' :
+          shouldReplan ? 'Replan remaining steps' : 'Mark as failed and continue',
         confidence: 0.9,
       };
 
@@ -508,8 +508,8 @@ Respond with ONLY valid JSON:
       success: hasOutput || hasArtifacts,
       shouldRetry: false,
       shouldReplan: false,
-      feedback: hasOutput || hasArtifacts 
-        ? "Step produced output/artifacts" 
+      feedback: hasOutput || hasArtifacts
+        ? "Step produced output/artifacts"
         : "Step completed but produced no visible output",
       confidence: 0.7,
     };
@@ -651,9 +651,9 @@ Respond with ONLY valid JSON:
       }));
 
       this.updateWorkspaceFile('todo.md', this.generateTodoMarkdown());
-      this.logEvent('plan', { 
+      this.logEvent('plan', {
         type: 'replan',
-        objective: newPlan.objective, 
+        objective: newPlan.objective,
         totalSteps: newPlan.steps.length,
         todoList: this.todoList,
         previousAttempts: this.replanAttempts,
@@ -679,7 +679,7 @@ Respond with ONLY valid JSON:
       /^(quién\s*eres|qué\s*eres|cómo\s*te\s*llamas|cuál\s*es\s*tu\s*nombre)/i,
       /^(ayuda|help|qué\s*puedes\s*hacer|para\s*qué\s*sirves)/i,
     ];
-    
+
     const trimmedMessage = message.trim();
     if (trimmedMessage.length < 50) {
       for (const pattern of conversationalPatterns) {
@@ -737,6 +737,54 @@ Respond with ONLY valid JSON:
       this.logEvent('observation', { type: 'conversational_response', response: response.substring(0, 200) });
       this.emitProgress();
       return this.plan;
+    }
+
+    // Try HTN Planner first (Batch 4 Upgrade)
+    try {
+      const planner = getHTNPlanner();
+      // Simple context for now
+      const context = { attachments: this.attachments };
+      const planningResult = await planner.plan(userMessage, context);
+
+      if (planningResult.success && planningResult.plan) {
+        this.htnPlanId = planningResult.plan.id;
+
+        // Convert HTN Plan to linear AgentPlan for UI
+        const steps: PlanStep[] = planningResult.plan.executionOrder.map((taskId, index) => {
+          const task = planningResult.plan!.allTasks.get(taskId)!;
+          // Clean up tool name if it has internal prefixes or logic
+          const toolName = task.toolName || 'unknown';
+
+          return {
+            index,
+            toolName: toolName,
+            description: task.description,
+            input: task.toolParams || {},
+            expectedOutput: "Task completion"
+          };
+        });
+
+        this.plan = {
+          objective: userMessage,
+          steps,
+          estimatedTime: `${Math.ceil((planningResult.plan.metadata.estimatedDuration || 60000) / 60000)} minutes`
+        };
+
+        this.logEvent('plan', {
+          type: 'htn_plan_generated',
+          objective: this.plan.objective,
+          steps: this.plan.steps.length,
+          estimatedTime: this.plan.estimatedTime
+        });
+
+        console.log(`[AgentOrchestrator] Generated HTN plan with ${steps.length} steps (ID: ${this.htnPlanId})`);
+
+        this.emitProgress();
+        return this.plan;
+      }
+    } catch (err: any) {
+      console.warn("[AgentOrchestrator] HTN Planning failed, falling back to LLM:", err.message);
+      // Fallthrough to existing LLM logic
     }
 
     const toolDescriptions = getAvailableToolDescriptions().map(
@@ -813,7 +861,7 @@ Respond with ONLY valid JSON in this exact format:
       return plan;
     } catch (error: any) {
       console.error(`[AgentOrchestrator] Failed to generate plan:`, error.message);
-      
+
       this.logEvent('error', { type: 'plan_generation_failed', error: error.message });
 
       this.plan = {
@@ -829,7 +877,7 @@ Respond with ONLY valid JSON in this exact format:
         ],
         estimatedTime: "1 minute",
       };
-      
+
       this.emitProgress();
       return this.plan;
     }
@@ -841,7 +889,7 @@ Respond with ONLY valid JSON in this exact format:
       return {
         success: false,
         output: null,
-        error: 'Run was cancelled',
+        error: { code: 'CANCELLED', message: 'Run was cancelled', retryable: false },
       };
     }
 
@@ -924,8 +972,8 @@ Respond with ONLY valid JSON in this exact format:
         error: result.error,
       }, stepIndex);
 
-      const outputSnippet = typeof result.output === 'string' 
-        ? result.output.substring(0, 500) 
+      const outputSnippet = typeof result.output === 'string'
+        ? result.output.substring(0, 500)
         : JSON.stringify(result.output).substring(0, 500);
 
       await this.emitTraceEvent('tool_output', {
@@ -959,7 +1007,10 @@ Respond with ONLY valid JSON in this exact format:
           stepId: `step-${stepIndex}`,
           status: 'failed',
           tool_name: step.toolName,
-          error: { message: result.error || 'Unknown error', retryable: true },
+          error: {
+            message: result.error ? (typeof result.error === 'string' ? result.error : result.error.message) : 'Unknown error',
+            retryable: true
+          },
         });
       }
 
@@ -1051,13 +1102,18 @@ Respond with ONLY valid JSON in this exact format:
         objective: this.plan.objective,
       });
 
+      if (this.htnPlanId) {
+        await this.executeHTNPlan();
+        return;
+      }
+
       let i = 0;
       while (i < this.plan.steps.length) {
         if (this.isCancelled) {
           this.status = "cancelled";
           this.updateTodoList(i, 'skipped');
           this.logEvent('observation', { type: 'run_cancelled', atStep: i });
-          
+
           await this.emitTraceEvent('cancelled', {
             phase: 'cancelled',
             status: 'cancelled',
@@ -1104,7 +1160,7 @@ Respond with ONLY valid JSON in this exact format:
           if (verification.shouldReplan) {
             console.log(`[AgentOrchestrator] Attempting replan after step ${i} failure`);
             const replanSuccess = await this.replanRemainingSteps(i, verification.feedback);
-            
+
             if (replanSuccess) {
               this.status = "running";
               i = 0;
@@ -1173,7 +1229,7 @@ Respond with ONLY valid JSON in this exact format:
     this.status = "cancelled";
     this.abortController.abort();
     this.logEvent('action', { type: 'cancel_requested' });
-    
+
     // Emit cancelled trace event immediately via SSE so client is notified right away
     await this.emitTraceEvent('cancelled', {
       phase: 'cancelled',
@@ -1181,7 +1237,7 @@ Respond with ONLY valid JSON in this exact format:
       stepIndex: this.currentStepIndex,
       summary: `Run cancelled by user at step ${this.currentStepIndex + 1}`,
     });
-    
+
     this.emitProgress();
     console.log(`[AgentOrchestrator] Run ${this.runId} cancellation requested and abort signal sent`);
   }
@@ -1201,9 +1257,8 @@ Respond with ONLY valid JSON in this exact format:
         const status = result.success ? "✓" : "✗";
         const artifactCount = result.artifacts?.length || 0;
         const description = step?.description || `Step ${result.stepIndex + 1}`;
-        return `${status} Step ${result.stepIndex + 1}: ${description}${
-          artifactCount > 0 ? ` (${artifactCount} artifacts)` : ""
-        }${result.error ? ` - Error: ${result.error}` : ""}`;
+        return `${status} Step ${result.stepIndex + 1}: ${description}${artifactCount > 0 ? ` (${artifactCount} artifacts)` : ""
+          }${result.error ? ` - Error: ${result.error}` : ""}`;
       }).join("\n");
 
     const artifactSummary = this.artifacts.length > 0
@@ -1250,10 +1305,9 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
       return response.content;
     } catch (error: any) {
       console.error(`[AgentOrchestrator] Failed to generate summary:`, error.message);
-      
-      return `Completed ${completedSteps.length} of ${this.plan.steps.length} steps for: ${this.plan.objective}. ${
-        this.artifacts.length > 0 ? `Generated ${this.artifacts.length} artifact(s).` : ""
-      }${failedSteps.length > 0 ? ` ${failedSteps.length} step(s) failed.` : ""}`;
+
+      return `Completed ${completedSteps.length} of ${this.plan.steps.length} steps for: ${this.plan.objective}. ${this.artifacts.length > 0 ? `Generated ${this.artifacts.length} artifact(s).` : ""
+        }${failedSteps.length > 0 ? ` ${failedSteps.length} step(s) failed.` : ""}`;
     }
   }
 
@@ -1286,9 +1340,119 @@ Provide a brief, user-friendly summary (2-4 sentences) of what was accomplished.
   getWorkspaceFiles(): Map<string, string> {
     return new Map(this.workspaceFiles);
   }
+  async executeHTNPlan(): Promise<void> {
+    this.status = "running";
+    this.initializeTodoList();
+    this.emitProgress();
+
+    this.logEvent('action', {
+      type: 'run_started',
+      totalSteps: this.plan!.steps.length,
+      objective: this.plan!.objective,
+      mode: 'hierarchical_parallel'
+    });
+
+    try {
+      const planner = getHTNPlanner();
+
+      const result = await planner.execute(this.htnPlanId!, async (task: Task) => {
+        return this.executeHTNTask(task);
+      });
+
+      if (result.success) {
+        this.status = "completed";
+        this.logEvent('observation', { type: 'run_completed', duration: result.executionTime });
+        await this.emitTraceEvent('done', { status: 'completed', summary: 'Run completed successfully' });
+      } else {
+        this.status = "failed";
+        const errors = result.failedTasks.map(t => t.error || 'Unknown error').join('; ');
+        this.logEvent('error', { type: 'run_failed', error: errors });
+        await this.emitTraceEvent('error', { error: { message: errors, retryable: false } });
+      }
+
+      this.emitProgress();
+
+    } catch (error: any) {
+      console.error("[AgentOrchestrator] HTN Execution Error:", error);
+      this.status = "failed";
+      this.logEvent('error', { type: 'run_crashed', error: error.message });
+      await this.emitTraceEvent('error', { error: { message: error.message, retryable: false } });
+      this.emitProgress();
+    }
+  }
+
+  async executeHTNTask(task: Task): Promise<any> {
+    // Find corresponding step index for UI updates (if strictly mapped)
+    const stepIndex = this.plan!.steps.findIndex(s => s.description === task.description && s.toolName === (task.toolName || 'unknown'));
+
+    if (this.isCancelled) {
+      throw new Error("Run cancelled");
+    }
+
+    if (stepIndex >= 0) {
+      this.updateTodoList(stepIndex, 'in_progress');
+      // We do not set this.currentStepIndex in parallel mode to avoid flickering?
+      // But UI might need it. Let's set it.
+      this.currentStepIndex = stepIndex;
+      this.emitProgress();
+    }
+
+    await this.emitTraceEvent('step_started', {
+      stepIndex: stepIndex >= 0 ? stepIndex : undefined,
+      status: 'running',
+      tool_name: task.toolName || 'unknown',
+      summary: task.description
+    });
+
+    try {
+      const result = await toolRegistry.execute(task.toolName || 'unknown', task.toolParams, {
+        userId: this.userId,
+        chatId: this.chatId,
+        runId: this.runId,
+        userPlan: this.userPlan,
+        signal: this.abortController.signal,
+      });
+
+      if (stepIndex >= 0) {
+        const stepResult: StepResult = {
+          stepIndex,
+          toolName: task.toolName || 'unknown',
+          success: result.success,
+          output: result.output,
+          artifacts: result.artifacts || [],
+          error: result.error,
+          startedAt: Date.now(),
+          completedAt: Date.now()
+        };
+        this.stepResults.push(stepResult);
+        if (result.artifacts) this.artifacts.push(...result.artifacts);
+
+        this.updateTodoList(stepIndex, result.success ? 'completed' : 'failed',
+          result.success ? undefined : (result.error ? (typeof result.error === 'string' ? result.error : result.error.message) : 'Task failed'));
+      }
+
+      await this.emitTraceEvent(result.success ? 'step_completed' : 'step_failed', {
+        stepIndex: stepIndex >= 0 ? stepIndex : undefined,
+        status: result.success ? 'completed' : 'failed',
+        tool_name: task.toolName || 'unknown',
+        error: result.success ? undefined : { message: result.error ? (typeof result.error === 'string' ? result.error : result.error.message) : 'Task failed', retryable: true }
+      });
+
+      if (!result.success) {
+        throw new Error(result.error ? (typeof result.error === 'string' ? result.error : result.error.message) : 'Task failed');
+      }
+
+      return result.output;
+    } catch (err: any) {
+      if (stepIndex >= 0) {
+        this.updateTodoList(stepIndex, 'failed', err.message);
+      }
+      throw err;
+    }
+  }
 }
 
-export class AgentManager {
+class AgentManager {
   private activeRuns: Map<string, AgentOrchestrator> = new Map();
   private cleanupIntervalMs = 30 * 60 * 1000; // 30 minutes
   private maxRunAgeMs = 2 * 60 * 60 * 1000; // 2 hours
@@ -1351,7 +1515,7 @@ export class AgentManager {
       if (!orchestrator) continue;
 
       const isCompleted = ["completed", "failed", "cancelled"].includes(orchestrator.status);
-      
+
       const lastResult = orchestrator.stepResults[orchestrator.stepResults.length - 1];
       const lastActivity = lastResult?.completedAt || 0;
       const age = now - lastActivity;

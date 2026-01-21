@@ -1,0 +1,511 @@
+openapi: 3.0.3
+info:
+  title: MICHAT API
+  description: |
+    API pública de MICHAT - Asistente de IA avanzado para productividad y documentos.
+    
+    ## Autenticación
+    La API utiliza tokens Bearer JWT. Incluye el token en el header `Authorization`:
+    ```
+    Authorization: Bearer <tu-token>
+    ```
+    
+    ## Límites de Tasa
+    - Chat: 60 req/min
+    - Documentos: 20 req/min
+    - AI: 30 req/min
+    
+    ## Errores Comunes
+    - `401`: Token inválido o expirado
+    - `429`: Límite de tasa excedido
+    - `500`: Error interno del servidor
+  version: 1.0.0
+  contact:
+    name: MICHAT Support
+    email: api@michat.ai
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:5000/api
+    description: Development
+  - url: https://api.michat.ai/v1
+    description: Production
+
+tags:
+  - name: Auth
+    description: Autenticación y usuarios
+  - name: Chats
+    description: Gestión de conversaciones
+  - name: Messages
+    description: Mensajes en chats
+  - name: Documents
+    description: Generación de documentos
+  - name: Files
+    description: Subida y gestión de archivos
+
+paths:
+  # ============================================
+  # AUTH
+  # ============================================
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Iniciar sesión
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Login exitoso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+                  mfaRequired:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Registrar nuevo usuario
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Usuario creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/mfa/verify:
+    post:
+      tags: [Auth]
+      summary: Verificar código MFA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, code]
+              properties:
+                userId:
+                  type: integer
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+      responses:
+        '200':
+          description: MFA verificado
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  # ============================================
+  # CHATS
+  # ============================================
+  /chats:
+    get:
+      tags: [Chats]
+      summary: Listar chats del usuario
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: projectId
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Lista de chats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chats:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Chat'
+                  total:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Chats]
+      summary: Crear nuevo chat
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                projectId:
+                  type: string
+                systemPrompt:
+                  type: string
+      responses:
+        '201':
+          description: Chat creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Chat'
+
+  /chats/{chatId}:
+    get:
+      tags: [Chats]
+      summary: Obtener chat por ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Chat encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatWithMessages'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [Chats]
+      summary: Eliminar chat
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Chat eliminado
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================
+  # MESSAGES
+  # ============================================
+  /chat/ai:
+    post:
+      tags: [Messages]
+      summary: Enviar mensaje y recibir respuesta AI
+      description: |
+        Envía un mensaje al AI y recibe respuesta streamed via SSE.
+        El response es un stream de eventos Server-Sent Events.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                chatId:
+                  type: string
+                message:
+                  type: string
+                model:
+                  type: string
+                  enum: [grok-3, grok-3-fast, grok-3-mini-fast, gemini-2.5-pro]
+                  default: grok-3-fast
+                temperature:
+                  type: number
+                  minimum: 0
+                  maximum: 2
+                  default: 0.7
+                attachments:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Attachment'
+      responses:
+        '200':
+          description: Stream de respuesta AI
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE stream con chunks de respuesta
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================
+  # DOCUMENTS
+  # ============================================
+  /documents/generate:
+    post:
+      tags: [Documents]
+      summary: Generar documento
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, description]
+              properties:
+                type:
+                  type: string
+                  enum: [word, excel, powerpoint, pdf]
+                description:
+                  type: string
+                template:
+                  type: string
+      responses:
+        '200':
+          description: Documento generado
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /documents/execute-code:
+    post:
+      tags: [Documents]
+      summary: Ejecutar código DOCX
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  description: Código JavaScript usando librería docx
+      responses:
+        '200':
+          description: DOCX generado
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+
+  # ============================================
+  # FILES
+  # ============================================
+  /files/upload:
+    post:
+      tags: [Files]
+      summary: Subir archivo
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                chatId:
+                  type: string
+      responses:
+        '200':
+          description: Archivo subido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  url:
+                    type: string
+                  size:
+                    type: integer
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        name:
+          type: string
+        avatar:
+          type: string
+        mfaEnabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    Chat:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        projectId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messageCount:
+          type: integer
+
+    ChatWithMessages:
+      allOf:
+        - $ref: '#/components/schemas/Chat'
+        - type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: '#/components/schemas/Message'
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        size:
+          type: integer
+        url:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Solicitud inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: No autorizado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: Límite de tasa excedido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

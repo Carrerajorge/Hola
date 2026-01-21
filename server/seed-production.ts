@@ -5,7 +5,7 @@ import { eq, and, inArray } from "drizzle-orm";
 const ADMIN_EMAIL = "carrerajorge874@gmail.com";
 const GEMINI_MODELS_TO_ENABLE = [
   "gemini-2.5-flash",
-  "gemini-2.5-pro", 
+  "gemini-2.5-pro",
   "gemini-3-flash-preview",
   "gemini-2.0-flash",
 ];
@@ -61,8 +61,24 @@ export async function seedProductionData(): Promise<SeedResult> {
         console.log(`[seed] User ${ADMIN_EMAIL} already admin (no change)`);
       }
     } else {
-      result.userMissing = true;
-      console.log(`[seed] WARNING: User ${ADMIN_EMAIL} not found - user must login at least once before seed can set admin role`);
+      // CREATE the admin user if they don't exist
+      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin123!@#";
+      const bcrypt = await import("bcrypt");
+      const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
+
+      await db.insert(users).values({
+        email: ADMIN_EMAIL,
+        password: hashedPassword,
+        role: "admin",
+        username: "admin",
+        firstName: "Admin",
+        lastName: "User",
+        status: "active",
+        emailVerified: "true",
+        authProvider: "email"
+      });
+      result.userUpdated = true;
+      console.log(`[seed] Created admin user ${ADMIN_EMAIL}`);
     }
   } catch (error) {
     const errMsg = `User update failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -72,11 +88,11 @@ export async function seedProductionData(): Promise<SeedResult> {
 
   try {
     const geminiModels = await db
-      .select({ 
-        id: aiModels.id, 
-        modelId: aiModels.modelId, 
+      .select({
+        id: aiModels.id,
+        modelId: aiModels.modelId,
         isEnabled: aiModels.isEnabled,
-        name: aiModels.name 
+        name: aiModels.name
       })
       .from(aiModels)
       .where(
@@ -101,9 +117,9 @@ export async function seedProductionData(): Promise<SeedResult> {
         try {
           await db
             .update(aiModels)
-            .set({ 
-              isEnabled: "true", 
-              enabledAt: new Date() 
+            .set({
+              isEnabled: "true",
+              enabledAt: new Date()
             })
             .where(eq(aiModels.id, model.id));
           result.modelsEnabled++;
@@ -126,12 +142,12 @@ export async function seedProductionData(): Promise<SeedResult> {
   }
 
   console.log(`[seed] Completed: userUpdated=${result.userUpdated}, userMissing=${result.userMissing}, modelsEnabled=${result.modelsEnabled}, modelsAlreadyEnabled=${result.modelsAlreadyEnabled}, modelsMissing=${result.modelsMissing}, errors=${result.errors.length}`);
-  
+
   return result;
 }
 
 export async function getSeedStatus(): Promise<{
-  adminUser: { email: string; role: string } | null;
+  adminUser: { email: string | null; role: string | null } | null;
   enabledModels: { name: string; provider: string; modelId: string }[];
   geminiModelsStatus: { modelId: string; isEnabled: boolean; exists: boolean }[];
   summary: {
@@ -149,18 +165,18 @@ export async function getSeedStatus(): Promise<{
     .limit(1);
 
   const enabledModels = await db
-    .select({ 
-      name: aiModels.name, 
-      provider: aiModels.provider, 
-      modelId: aiModels.modelId 
+    .select({
+      name: aiModels.name,
+      provider: aiModels.provider,
+      modelId: aiModels.modelId
     })
     .from(aiModels)
     .where(eq(aiModels.isEnabled, "true"));
 
   const geminiModels = await db
-    .select({ 
-      modelId: aiModels.modelId, 
-      isEnabled: aiModels.isEnabled 
+    .select({
+      modelId: aiModels.modelId,
+      isEnabled: aiModels.isEnabled
     })
     .from(aiModels)
     .where(

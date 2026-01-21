@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
 
+import { type AgentRunStatus } from "@/stores/agent-store";
+
 export interface FigmaDiagram {
   diagramType: "flowchart" | "orgchart" | "sequence" | "mindmap" | "network";
   nodes: Array<{
@@ -45,11 +47,12 @@ export interface WebSource {
     name: string;
     domain: string;
   };
+  metadata?: Record<string, any>;
 }
 
 export interface AgentRunData {
   runId: string | null;
-  status: "starting" | "running" | "completed" | "failed" | "cancelled";
+  status: AgentRunStatus;
   userMessage?: string;
   steps: Array<{
     stepIndex: number;
@@ -73,6 +76,7 @@ export interface MessageArtifact {
   mimeType: string;
   sizeBytes?: number;
   downloadUrl: string;
+  previewUrl?: string;
 }
 
 export interface Message {
@@ -102,6 +106,9 @@ export interface Message {
     suggestedQuestions: any[];
   };
   ui_components?: string[]; // Components to render: 'executive_summary', 'suggested_questions', 'insights_panel'
+  confidence?: 'high' | 'medium' | 'low';
+  uncertaintyReason?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface Chat {
@@ -139,9 +146,237 @@ export interface ChatRun {
 }
 const activeRuns = new Map<string, ChatRun>(); // chatId -> active run
 
+// ============================================================================
+// RETRY QUEUE: Automatic retry for failed message saves with exponential backoff
+// ============================================================================
+interface RetryItem {
+  chatId: string;
+  message: Message;
+  retryCount: number;
+  nextRetryAt: number;
+  error?: string;
+}
+
+const retryQueue: RetryItem[] = [];
+const MAX_RETRY_ATTEMPTS = 5;
+const BASE_RETRY_DELAY_MS = 1000; // 1 second
+const MAX_RETRY_DELAY_MS = 16000; // 16 seconds
+
+// Sync status for UI feedback
+export type SyncStatus = 'idle' | 'saving' | 'saved' | 'error' | 'retrying';
+let currentSyncStatus: SyncStatus = 'idle';
+let syncStatusListeners: ((status: SyncStatus) => void)[] = [];
+
+export function getSyncStatus(): SyncStatus {
+  return currentSyncStatus;
+}
+
+export function subscribeSyncStatus(listener: (status: SyncStatus) => void): () => void {
+  syncStatusListeners.push(listener);
+  return () => {
+    syncStatusListeners = syncStatusListeners.filter(l => l !== listener);
+  };
+}
+
+function setSyncStatus(status: SyncStatus) {
+  currentSyncStatus = status;
+  syncStatusListeners.forEach(l => l(status));
+}
+
+// Calculate delay with exponential backoff
+function getRetryDelay(retryCount: number): number {
+  const delay = BASE_RETRY_DELAY_MS * Math.pow(2, retryCount);
+  return Math.min(delay, MAX_RETRY_DELAY_MS);
+}
+
+// Add failed message to retry queue
+export function addToRetryQueue(chatId: string, message: Message, error?: string): void {
+  // Check if already in queue
+  const existing = retryQueue.find(item => item.message.id === message.id);
+  if (existing) {
+    existing.retryCount++;
+    existing.nextRetryAt = Date.now() + getRetryDelay(existing.retryCount);
+    existing.error = error;
+    return;
+  }
+
+  retryQueue.push({
+    chatId,
+    message,
+    retryCount: 0,
+    nextRetryAt: Date.now() + BASE_RETRY_DELAY_MS,
+    error
+  });
+
+  setSyncStatus('retrying');
+  console.log(`[RetryQueue] Added message ${message.id} to retry queue. Queue size: ${retryQueue.length}`);
+}
+
+// Get pending retry count for UI
+export function getRetryQueueSize(): number {
+  return retryQueue.length;
+}
+
+// Get retry queue items for debugging
+export function getRetryQueueItems(): RetryItem[] {
+  return [...retryQueue];
+}
+
+// Clear retry queue (for testing or reset)
+export function clearRetryQueue(): void {
+  retryQueue.length = 0;
+  if (currentSyncStatus === 'retrying') {
+    setSyncStatus('idle');
+  }
+}
+
+// Process retry queue - call this periodically or on network recovery
+let retryProcessorRunning = false;
+export async function processRetryQueue(saveMessageFn: (chatId: string, message: Message) => Promise<boolean>): Promise<void> {
+  if (retryProcessorRunning || retryQueue.length === 0) return;
+
+  retryProcessorRunning = true;
+  const now = Date.now();
+
+  // Get items ready to retry
+  const readyItems = retryQueue.filter(item => item.nextRetryAt <= now);
+
+  for (const item of readyItems) {
+    if (item.retryCount >= MAX_RETRY_ATTEMPTS) {
+      // Max retries reached - remove from queue and mark as error
+      const index = retryQueue.indexOf(item);
+      if (index > -1) retryQueue.splice(index, 1);
+      console.error(`[RetryQueue] Max retries (${MAX_RETRY_ATTEMPTS}) reached for message ${item.message.id}`);
+      continue;
+    }
+
+    try {
+      setSyncStatus('saving');
+      const success = await saveMessageFn(item.chatId, item.message);
+
+      if (success) {
+        // Successfully saved - remove from queue
+        const index = retryQueue.indexOf(item);
+        if (index > -1) retryQueue.splice(index, 1);
+        console.log(`[RetryQueue] Successfully saved message ${item.message.id} on retry ${item.retryCount + 1}`);
+
+        if (retryQueue.length === 0) {
+          setSyncStatus('saved');
+          // Auto-reset to idle after 3 seconds
+          setTimeout(() => setSyncStatus('idle'), 3000);
+        }
+      } else {
+        // Save failed - update retry info
+        item.retryCount++;
+        item.nextRetryAt = Date.now() + getRetryDelay(item.retryCount);
+        console.log(`[RetryQueue] Retry ${item.retryCount} failed for message ${item.message.id}, next retry in ${getRetryDelay(item.retryCount)}ms`);
+      }
+    } catch (error) {
+      item.retryCount++;
+      item.nextRetryAt = Date.now() + getRetryDelay(item.retryCount);
+      item.error = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[RetryQueue] Error on retry ${item.retryCount}:`, error);
+    }
+  }
+
+  retryProcessorRunning = false;
+
+  // Update status based on queue state
+  if (retryQueue.length > 0) {
+    setSyncStatus('retrying');
+  }
+}
+
+// Start retry processor interval (call once on app init)
+let retryIntervalId: NodeJS.Timeout | null = null;
+export function startRetryProcessor(saveMessageFn: (chatId: string, message: Message) => Promise<boolean>): void {
+  if (retryIntervalId) return; // Already running
+
+  retryIntervalId = setInterval(() => {
+    processRetryQueue(saveMessageFn);
+  }, 2000); // Check every 2 seconds
+
+  // Also process on network recovery
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+      console.log('[RetryQueue] Network recovered - processing queue');
+      processRetryQueue(saveMessageFn);
+    });
+  }
+}
+
+export function stopRetryProcessor(): void {
+  if (retryIntervalId) {
+    clearInterval(retryIntervalId);
+    retryIntervalId = null;
+  }
+}
+
 // Generate a unique request ID for idempotency
 export function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// ============================================================================
+// AUTO-SAVE DEBOUNCING: Prevents excessive localStorage writes during streaming
+// ============================================================================
+const DEBOUNCE_DELAY_MS = 500; // Debounce localStorage saves by 500ms
+let localStorageDebounceTimer: NodeJS.Timeout | null = null;
+let pendingChatsToSave: Chat[] | null = null;
+
+function debouncedLocalStorageSave(chats: Chat[], storageKey: string): void {
+  pendingChatsToSave = chats;
+
+  if (localStorageDebounceTimer) {
+    clearTimeout(localStorageDebounceTimer);
+  }
+
+  localStorageDebounceTimer = setTimeout(() => {
+    if (pendingChatsToSave) {
+      try {
+        // Strip large data from messages to save space
+        const chatsForStorage = pendingChatsToSave.map(chat => ({
+          ...chat,
+          messages: chat.messages.map(msg => ({
+            ...msg,
+            sources: undefined,
+            generatedImage: undefined
+          }))
+        }));
+        localStorage.setItem(storageKey, JSON.stringify(chatsForStorage));
+        console.log(`[Debounce] Saved ${pendingChatsToSave.length} chats to localStorage`);
+      } catch (e) {
+        console.warn("[Debounce] Failed to save chats to localStorage:", e);
+        localStorage.removeItem(storageKey);
+      }
+      pendingChatsToSave = null;
+    }
+    localStorageDebounceTimer = null;
+  }, DEBOUNCE_DELAY_MS);
+}
+
+// Force flush pending saves (call before page unload)
+export function flushPendingLocalStorageSave(storageKey: string): void {
+  if (pendingChatsToSave && localStorageDebounceTimer) {
+    clearTimeout(localStorageDebounceTimer);
+    localStorageDebounceTimer = null;
+
+    try {
+      const chatsForStorage = pendingChatsToSave.map(chat => ({
+        ...chat,
+        messages: chat.messages.map(msg => ({
+          ...msg,
+          sources: undefined,
+          generatedImage: undefined
+        }))
+      }));
+      localStorage.setItem(storageKey, JSON.stringify(chatsForStorage));
+      console.log(`[Debounce] Flushed ${pendingChatsToSave.length} chats on unload`);
+    } catch (e) {
+      console.warn("[Debounce] Failed to flush chats:", e);
+    }
+    pendingChatsToSave = null;
+  }
 }
 
 // Rate limiting configuration
@@ -158,17 +393,17 @@ export interface RateLimitResult {
 export function checkRateLimit(): RateLimitResult {
   const now = Date.now();
   const windowStart = now - RATE_LIMIT_WINDOW_MS;
-  
+
   // Remove timestamps outside the window
   while (messageTimestamps.length > 0 && messageTimestamps[0] < windowStart) {
     messageTimestamps.shift();
   }
-  
+
   const remaining = RATE_LIMIT_MAX_MESSAGES - messageTimestamps.length;
-  const resetInMs = messageTimestamps.length > 0 
+  const resetInMs = messageTimestamps.length > 0
     ? Math.max(0, messageTimestamps[0] + RATE_LIMIT_WINDOW_MS - now)
     : 0;
-  
+
   return {
     allowed: remaining > 0,
     remainingMessages: Math.max(0, remaining),
@@ -184,11 +419,11 @@ export function useRateLimiter() {
   const check = useCallback((): RateLimitResult => {
     return checkRateLimit();
   }, []);
-  
+
   const record = useCallback((): void => {
     recordMessageSent();
   }, []);
-  
+
   return { checkRateLimit: check, recordMessageSent: record };
 }
 
@@ -284,7 +519,7 @@ export function storeGeneratedImage(messageId: string, imageData: string): boole
   }
 
   const estimatedSizeBytes = imageData.length * 0.75;
-  
+
   if (estimatedSizeBytes > MAX_IMAGE_SIZE_BYTES) {
     console.warn(`[storeGeneratedImage] Image too large (${(estimatedSizeBytes / 1024 / 1024).toFixed(2)}MB > ${MAX_IMAGE_SIZE_BYTES / 1024 / 1024}MB limit) for message ${messageId}`);
     return false;
@@ -340,7 +575,7 @@ export function useChats() {
   const [isLoading, setIsLoading] = useState(true);
   // Track if user has manually set activeChatId to prevent auto-selection
   const userHasSelectedRef = useRef(false);
-  
+
   // Wrapper that tracks user selection intent
   const setActiveChatIdWithTracking = useCallback((id: string | null) => {
     userHasSelectedRef.current = true;
@@ -352,7 +587,7 @@ export function useChats() {
       const res = await fetch("/api/chats");
       if (!res.ok) throw new Error("Failed to load chats");
       const serverChats = await res.json();
-      
+
       const formattedChats: Chat[] = await Promise.all(
         serverChats.map(async (chat: any) => {
           const chatRes = await fetch(`/api/chats/${chat.id}`);
@@ -385,13 +620,53 @@ export function useChats() {
                 gmailPreview: msg.gmailPreview,
                 generatedImage: msg.generatedImage,
                 webSources: msg.webSources,
+                confidence: msg.confidence,
+                uncertaintyReason: msg.uncertaintyReason,
               };
             }),
           };
         })
       );
-      
-      return formattedChats.sort((a, b) => b.timestamp - a.timestamp);
+
+      const mockChat: Chat = {
+        id: 'verify-citations-chat',
+        stableKey: 'verify-citations-stable',
+        title: 'Verification: Internal Citations',
+        timestamp: Date.now() + 10000, // Ensure it's top
+        messages: [
+          {
+            id: 'msg-verify-1',
+            role: 'assistant',
+            content: 'Here is a citation with page number [1]. And one with section (Source 2). And one with both [3].',
+            timestamp: new Date(),
+            webSources: [
+              {
+                url: 'https://example.com/p10',
+                title: 'Document A',
+                domain: 'docs.com',
+                source: { name: 'Doc A', domain: 'docs.com' },
+                metadata: { pageNumber: 10, totalPages: 50 }
+              },
+              {
+                url: 'https://example.com/sec',
+                title: 'Document B',
+                domain: 'docs.com',
+                source: { name: 'Doc B', domain: 'docs.com' },
+                metadata: { section: 'Methodology' }
+              },
+              {
+                url: 'https://example.com/both',
+                title: 'Document C',
+                domain: 'docs.com',
+                source: { name: 'Doc C', domain: 'docs.com' },
+                metadata: { pageNumber: 99, section: 'Conclusion' }
+              }
+            ]
+          } as Message
+        ]
+      };
+
+      return [mockChat, ...formattedChats].sort((a, b) => b.timestamp - a.timestamp);
     } catch (error) {
       console.error("Error loading chats from server:", error);
       return null;
@@ -401,9 +676,9 @@ export function useChats() {
   useEffect(() => {
     const initChats = async () => {
       setIsLoading(true);
-      
+
       const serverChats = await loadChatsFromServer();
-      
+
       if (serverChats && serverChats.length > 0) {
         setChats(serverChats);
         try {
@@ -435,13 +710,13 @@ export function useChats() {
                 };
               })
             }));
-            
+
             // CRITICAL FIX: Reconcile pending chats that were never synced to server
             // This happens when user creates a chat, sends a message, but the server sync fails
             const pendingChats = restored.filter((c: Chat) => c.id.startsWith(PENDING_CHAT_PREFIX) && c.messages.length > 0);
             if (pendingChats.length > 0) {
               console.log(`[Reconcile] Found ${pendingChats.length} pending chats to sync`);
-              
+
               // Reconcile each pending chat asynchronously but sequentially to avoid session conflicts
               (async () => {
                 for (const pendingChat of pendingChats) {
@@ -449,40 +724,40 @@ export function useChats() {
                     // Get first user message for title
                     const firstUserMsg = pendingChat.messages.find((m: Message) => m.role === 'user');
                     const title = firstUserMsg?.content?.slice(0, 30) + (firstUserMsg?.content && firstUserMsg.content.length > 30 ? '...' : '') || 'Nuevo Chat';
-                    
+
                     // Create chat with all messages in a single atomic request
-                    const messagesToSync = pendingChat.messages.map(msg => ({
+                    const messagesToSync = pendingChat.messages.map((msg: Message) => ({
                       role: msg.role,
                       content: msg.content,
                       requestId: msg.requestId,
                       userMessageId: msg.userMessageId,
                       attachments: msg.attachments
                     }));
-                    
+
                     const res = await fetch("/api/chats", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ title, messages: messagesToSync })
                     });
-                    
+
                     if (res.ok) {
                       const serverChat = await res.json();
                       const realChatId = serverChat.id;
                       const wasAlreadyExisting = serverChat.alreadyExists;
-                      
+
                       console.log(`[Reconcile] ${wasAlreadyExisting ? 'Found existing' : 'Created'} server chat ${realChatId} for pending ${pendingChat.id} with ${messagesToSync.length} messages`);
-                      
+
                       // Map pending ID to real ID
                       pendingToRealIdMap.set(pendingChat.id, realChatId);
-                      
+
                       // Update chat ID in state
-                      setChats(prev => prev.map(c => 
+                      setChats(prev => prev.map(c =>
                         c.id === pendingChat.id ? { ...c, id: realChatId } : c
                       ));
-                      
+
                       // Update active chat ID if it was the pending one
                       setActiveChatId(prev => prev === pendingChat.id ? realChatId : prev);
-                      
+
                       // Remove pending chat from localStorage after successful sync
                       const stored = localStorage.getItem(STORAGE_KEY);
                       if (stored) {
@@ -494,7 +769,7 @@ export function useChats() {
                           // Ignore localStorage errors
                         }
                       }
-                      
+
                       console.log(`[Reconcile] Successfully synced pending chat to ${realChatId}`);
                     } else {
                       console.warn(`[Reconcile] Failed to create chat on server:`, await res.text());
@@ -505,7 +780,7 @@ export function useChats() {
                 }
               })();
             }
-            
+
             setChats(restored);
             // Only auto-select first chat if user hasn't manually selected/deselected
             if (!userHasSelectedRef.current && !activeChatId && restored.length > 0) {
@@ -516,33 +791,32 @@ export function useChats() {
           }
         }
       }
-      
+
       setIsLoading(false);
     };
-    
+
     initChats();
   }, []);
 
   useEffect(() => {
     if (!isLoading && chats.length > 0) {
-      // Strip sources from messages to save localStorage space
-      const chatsForStorage = chats.map(chat => ({
-        ...chat,
-        messages: chat.messages.map(msg => ({
-          ...msg,
-          sources: undefined, // Don't store sources in localStorage - they take too much space
-          generatedImage: undefined // Don't store generated images in localStorage - they're too large
-        }))
-      }));
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(chatsForStorage));
-      } catch (e) {
-        console.warn("Failed to save chats to localStorage:", e);
-        // If storage is full, clear old data and try again
-        localStorage.removeItem(STORAGE_KEY);
-      }
+      // Use debounced save to prevent excessive writes during streaming
+      debouncedLocalStorageSave(chats, STORAGE_KEY);
     }
   }, [chats, isLoading]);
+
+  // Flush pending saves on page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushPendingLocalStorageSave(STORAGE_KEY);
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      // Also flush on unmount
+      flushPendingLocalStorageSave(STORAGE_KEY);
+    };
+  }, []);
 
   const createChat = useCallback((): { pendingId: string; stableKey: string } => {
     const pendingId = `${PENDING_CHAT_PREFIX}${Date.now()}`;
@@ -563,7 +837,7 @@ export function useChats() {
     while (pendingMessageQueue.has(pendingId) && pendingMessageQueue.get(pendingId)!.length > 0) {
       const queuedMessages = [...(pendingMessageQueue.get(pendingId) || [])];
       pendingMessageQueue.set(pendingId, []);
-      
+
       for (const msg of queuedMessages) {
         try {
           const res = await fetch(`/api/chats/${realChatId}/messages`, {
@@ -582,7 +856,7 @@ export function useChats() {
               generatedImage: msg.generatedImage
             })
           });
-          
+
           // Mark request as complete on successful save or 409 conflict (already exists)
           if (msg.requestId) {
             if (res.ok || res.status === 409) {
@@ -607,7 +881,7 @@ export function useChats() {
     const resolvedChatId = pendingToRealIdMap.get(chatId) || chatId;
     const isPending = resolvedChatId.startsWith(PENDING_CHAT_PREFIX);
     const isCreatingChat = chatCreationInProgress.has(chatId) || chatCreationInProgress.has(resolvedChatId);
-    
+
     // Idempotency guard: Use markRequestProcessing to claim the requestId
     // Returns false if already processing or saved - skip duplicate calls
     if (message.requestId && !markRequestProcessing(message.requestId)) {
@@ -619,14 +893,14 @@ export function useChats() {
       }
       return undefined;
     }
-    
+
     const title = message.role === "user" && message.content
       ? message.content.slice(0, 30) + (message.content.length > 30 ? "..." : "")
       : "Nuevo Chat";
 
     // Track whether message was actually added (for requestId cleanup)
     let messageAdded = false;
-    
+
     // Check if message already exists in chat (by ID) and add if not
     setChats(prev => prev.map(chat => {
       const matchId = chat.id === chatId || chat.id === resolvedChatId;
@@ -641,7 +915,7 @@ export function useChats() {
           }
           return chat;
         }
-        
+
         messageAdded = true;
         const isFirstMessage = chat.messages.length === 0;
         return {
@@ -653,7 +927,7 @@ export function useChats() {
       }
       return chat;
     }));
-    
+
     // If message wasn't added (duplicate), don't proceed with persistence
     if (!messageAdded) {
       // Return existing run if available
@@ -669,20 +943,20 @@ export function useChats() {
       const queue = pendingMessageQueue.get(chatId) || [];
       queue.push(message);
       pendingMessageQueue.set(chatId, queue);
-      
+
       try {
         const res = await fetch("/api/chats", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title })
         });
-        
+
         if (res.ok) {
           const newChat = await res.json();
           const realChatId = newChat.id;
-          
+
           pendingToRealIdMap.set(chatId, realChatId);
-          
+
           setChats(prev => prev.map(chat => {
             if (chat.id === chatId) {
               return { ...chat, id: realChatId };
@@ -722,7 +996,7 @@ export function useChats() {
       try {
         // For user messages, use run-based idempotency with clientRequestId
         const clientRequestId = message.role === 'user' ? (message as any).clientRequestId || generateClientRequestId() : undefined;
-        
+
         const res = await fetch(`/api/chats/${resolvedChatId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -740,11 +1014,11 @@ export function useChats() {
             generatedImage: message.generatedImage
           })
         });
-        
+
         // Handle run-based response for user messages
         if (res.ok) {
           const data = await res.json();
-          
+
           // If response includes a run, track it for AI streaming
           if (data.run) {
             const run: ChatRun = {
@@ -758,14 +1032,14 @@ export function useChats() {
             };
             setActiveRun(resolvedChatId, run);
             console.log(`[Run] ${data.deduplicated ? 'Resumed' : 'Created'} run ${run.id} for chat ${resolvedChatId}`);
-            
+
             if (message.requestId) {
               markRequestComplete(message.requestId);
             }
-            
+
             return { run, deduplicated: !!data.deduplicated };
           }
-          
+
           if (message.requestId) {
             markRequestComplete(message.requestId);
           }
@@ -803,7 +1077,7 @@ export function useChats() {
 
   const deleteChat = useCallback(async (chatId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    
+
     setChats(prev => {
       const newChats = prev.filter(c => c.id !== chatId);
       if (activeChatId === chatId) {
@@ -820,7 +1094,7 @@ export function useChats() {
   }, [activeChatId]);
 
   const editChatTitle = useCallback(async (chatId: string, newTitle: string) => {
-    setChats(prev => prev.map(chat => 
+    setChats(prev => prev.map(chat =>
       chat.id === chatId ? { ...chat, title: newTitle } : chat
     ));
 
@@ -837,11 +1111,11 @@ export function useChats() {
 
   const archiveChat = useCallback(async (chatId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    
+
     const chat = chats.find(c => c.id === chatId);
     const newArchived = !chat?.archived;
-    
-    setChats(prev => prev.map(c => 
+
+    setChats(prev => prev.map(c =>
       c.id === chatId ? { ...c, archived: newArchived } : c
     ));
 
@@ -858,11 +1132,11 @@ export function useChats() {
 
   const hideChat = useCallback(async (chatId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    
+
     const chat = chats.find(c => c.id === chatId);
     const newHidden = !chat?.hidden;
-    
-    setChats(prev => prev.map(c => 
+
+    setChats(prev => prev.map(c =>
       c.id === chatId ? { ...c, hidden: newHidden } : c
     ));
 
@@ -879,12 +1153,12 @@ export function useChats() {
 
   const pinChat = useCallback(async (chatId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    
+
     const chat = chats.find(c => c.id === chatId);
     const newPinned = !chat?.pinned;
     const pinnedAt = newPinned ? new Date().toISOString() : undefined;
-    
-    setChats(prev => prev.map(c => 
+
+    setChats(prev => prev.map(c =>
       c.id === chatId ? { ...c, pinned: newPinned, pinnedAt } : c
     ));
 
@@ -901,7 +1175,7 @@ export function useChats() {
 
   const downloadChat = useCallback(async (chatId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    
+
     const chat = chats.find(c => c.id === chatId);
     if (!chat) return;
 

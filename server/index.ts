@@ -1,3 +1,5 @@
+import "dotenv/config";
+import { env } from "./config/env"; // Validates env vars immediately on import
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -11,7 +13,13 @@ import { verifyDatabaseConnection, startHealthChecks, stopHealthChecks, drainCon
 import { securityHeaders, apiSecurityHeaders } from "./middleware/securityHeaders";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
 import { pythonServiceManager } from "./lib/pythonServiceManager";
+import { idempotency } from "./middleware/idempotency";
+import { rateLimiter } from "./middleware/rateLimiter";
+import { Logger } from "./lib/logger";
 import { initTracing, shutdownTracing, getTracingMetrics } from "./lib/tracing";
+import { apiErrorHandler } from "./middleware/apiErrorHandler";
+import { corsMiddleware } from "./middleware/cors";
+import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
 
 initTracing();
 
@@ -27,11 +35,26 @@ declare module "http" {
 // Request logger middleware with correlation context - must go first
 app.use(requestLoggerMiddleware);
 
+// CORS configuration - must be before other middleware
+app.use(corsMiddleware);
+
 // Security headers middleware - CSP, HSTS, X-Frame-Options, etc.
 app.use(securityHeaders());
 
+// CSRF Token Generation (sets cookie)
+app.use(csrfTokenMiddleware);
+
 // API-specific security headers for /api routes
 app.use("/api", apiSecurityHeaders());
+
+// CSRF Protection for API (validates header)
+app.use("/api", csrfProtection);
+
+// Rate Limiting (User-based)
+app.use("/api", rateLimiter);
+
+// Idempotency for mutations
+app.use("/api", idempotency);
 
 // Legacy request tracer middleware for stats
 app.use(requestTracerMiddleware);
@@ -48,14 +71,7 @@ app.use(
 app.use(express.urlencoded({ extended: false, limit: '100mb' }));
 
 export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
+  Logger.info(`[${source}] ${message}`);
 }
 
 app.use((req, res, next) => {
@@ -87,7 +103,7 @@ app.use((req, res, next) => {
 (async () => {
   const isProduction = process.env.NODE_ENV === "production";
   const startPythonService = process.env.START_PYTHON_SERVICE === "true";
-  
+
   // Start Python Agent Tools service if enabled
   if (startPythonService) {
     log("Starting Python Agent Tools service...");
@@ -98,16 +114,16 @@ app.use((req, res, next) => {
       log("[WARNING] Python service failed to start - some features may not work");
     }
   }
-  
+
   // Verify database connection before starting (critical in production)
   log("Verifying database connection...");
   const dbConnected = await verifyDatabaseConnection();
-  
+
   if (!dbConnected && isProduction) {
     log("[FATAL] Cannot start production server without database connection");
     process.exit(1);
   }
-  
+
   if (dbConnected) {
     log("Database connection verified successfully");
     startHealthChecks();
@@ -116,7 +132,12 @@ app.use((req, res, next) => {
     log("[WARNING] Database connection failed - some features may not work");
   }
 
+
   await registerRoutes(httpServer, app);
+
+  // API Error Handler (Centralized)
+  app.use("/api", apiErrorHandler);
+
 
   app.use(errorHandler);
 
@@ -134,7 +155,7 @@ app.use((req, res, next) => {
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
+  const port = env.PORT;
   httpServer.listen(
     {
       port,

@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
+import { AuthenticatedRequest } from "../types/express";
 import { storage } from "../storage";
 import { db } from "../db";
 import { users, chats, chatMessages, aiModels, excelDocuments } from "@shared/schema";
@@ -23,22 +24,23 @@ import { isAuthenticated } from "../replit_integrations/auth/replitAuth";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { getSeedStatus } from "../seed-production";
 import { usageQuotaService } from "../services/usageQuotaService";
+import { adminRateLimiter } from "../middleware/rateLimiter";
 
 const ADMIN_EMAIL = "carrerajorge874@gmail.com";
 
 async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
-    const userReq = req as any;
+    const userReq = req as AuthenticatedRequest;
     const userEmail = userReq.user?.claims?.email;
     const userId = userReq.user?.claims?.sub;
-    
+
     let isAdmin = userEmail === ADMIN_EMAIL;
-    
+
     if (!isAdmin && userId) {
       const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
       isAdmin = user?.role === "admin";
     }
-    
+
     if (!isAdmin) {
       await storage.createAuditLog({
         action: "admin_access_denied",
@@ -87,21 +89,23 @@ async function seedDefaultExcelDocuments() {
       {
         uuid: nanoid(),
         name: 'Factura',
-        sheets: [{ name: 'Factura', data: [
-          ['FACTURA', '', '', '', ''],
-          ['', '', '', '', ''],
-          ['Cliente:', '', '', 'Fecha:', ''],
-          ['Dirección:', '', '', 'No. Factura:', ''],
-          ['', '', '', '', ''],
-          ['Descripción', 'Cantidad', 'Precio Unit.', 'Total', ''],
-          ['', '', '', '', ''],
-          ['', '', '', '', ''],
-          ['', '', '', '', ''],
-          ['', '', '', '', ''],
-          ['', '', 'Subtotal:', '', ''],
-          ['', '', 'IVA (16%):', '', ''],
-          ['', '', 'TOTAL:', '', '']
-        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 18 }, '5-0': { bold: true }, '5-1': { bold: true }, '5-2': { bold: true }, '5-3': { bold: true }, '12-2': { bold: true }, '12-3': { bold: true } } } }],
+        sheets: [{
+          name: 'Factura', data: [
+            ['FACTURA', '', '', '', ''],
+            ['', '', '', '', ''],
+            ['Cliente:', '', '', 'Fecha:', ''],
+            ['Dirección:', '', '', 'No. Factura:', ''],
+            ['', '', '', '', ''],
+            ['Descripción', 'Cantidad', 'Precio Unit.', 'Total', ''],
+            ['', '', '', '', ''],
+            ['', '', '', '', ''],
+            ['', '', '', '', ''],
+            ['', '', '', '', ''],
+            ['', '', 'Subtotal:', '', ''],
+            ['', '', 'IVA (16%):', '', ''],
+            ['', '', 'TOTAL:', '', '']
+          ], metadata: { formatting: { '0-0': { bold: true, fontSize: 18 }, '5-0': { bold: true }, '5-1': { bold: true }, '5-2': { bold: true }, '5-3': { bold: true }, '12-2': { bold: true }, '12-3': { bold: true } } }
+        }],
         size: 5000,
         isTemplate: true,
         templateCategory: 'Finanzas',
@@ -110,24 +114,26 @@ async function seedDefaultExcelDocuments() {
       {
         uuid: nanoid(),
         name: 'Presupuesto Mensual',
-        sheets: [{ name: 'Presupuesto', data: [
-          ['PRESUPUESTO MENSUAL', '', '', ''],
-          ['', '', '', ''],
-          ['Categoría', 'Presupuestado', 'Real', 'Diferencia'],
-          ['Ingresos', '', '', ''],
-          ['Salario', '', '', ''],
-          ['Otros', '', '', ''],
-          ['', '', '', ''],
-          ['Gastos', '', '', ''],
-          ['Vivienda', '', '', ''],
-          ['Alimentación', '', '', ''],
-          ['Transporte', '', '', ''],
-          ['Servicios', '', '', ''],
-          ['Entretenimiento', '', '', ''],
-          ['Ahorros', '', '', ''],
-          ['', '', '', ''],
-          ['TOTAL', '', '', '']
-        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '15-0': { bold: true } } } }],
+        sheets: [{
+          name: 'Presupuesto', data: [
+            ['PRESUPUESTO MENSUAL', '', '', ''],
+            ['', '', '', ''],
+            ['Categoría', 'Presupuestado', 'Real', 'Diferencia'],
+            ['Ingresos', '', '', ''],
+            ['Salario', '', '', ''],
+            ['Otros', '', '', ''],
+            ['', '', '', ''],
+            ['Gastos', '', '', ''],
+            ['Vivienda', '', '', ''],
+            ['Alimentación', '', '', ''],
+            ['Transporte', '', '', ''],
+            ['Servicios', '', '', ''],
+            ['Entretenimiento', '', '', ''],
+            ['Ahorros', '', '', ''],
+            ['', '', '', ''],
+            ['TOTAL', '', '', '']
+          ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '15-0': { bold: true } } }
+        }],
         size: 4000,
         isTemplate: true,
         templateCategory: 'Finanzas',
@@ -136,16 +142,18 @@ async function seedDefaultExcelDocuments() {
       {
         uuid: nanoid(),
         name: 'Lista de Tareas',
-        sheets: [{ name: 'Tareas', data: [
-          ['LISTA DE TAREAS', '', '', '', ''],
-          ['', '', '', '', ''],
-          ['#', 'Tarea', 'Prioridad', 'Estado', 'Fecha Límite'],
-          ['1', '', '', 'Pendiente', ''],
-          ['2', '', '', 'Pendiente', ''],
-          ['3', '', '', 'Pendiente', ''],
-          ['4', '', '', 'Pendiente', ''],
-          ['5', '', '', 'Pendiente', '']
-        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '2-4': { bold: true } } } }],
+        sheets: [{
+          name: 'Tareas', data: [
+            ['LISTA DE TAREAS', '', '', '', ''],
+            ['', '', '', '', ''],
+            ['#', 'Tarea', 'Prioridad', 'Estado', 'Fecha Límite'],
+            ['1', '', '', 'Pendiente', ''],
+            ['2', '', '', 'Pendiente', ''],
+            ['3', '', '', 'Pendiente', ''],
+            ['4', '', '', 'Pendiente', ''],
+            ['5', '', '', 'Pendiente', '']
+          ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '2-4': { bold: true } } }
+        }],
         size: 2500,
         isTemplate: true,
         templateCategory: 'Productividad',
@@ -154,17 +162,19 @@ async function seedDefaultExcelDocuments() {
       {
         uuid: nanoid(),
         name: 'Inventario de Productos',
-        sheets: [{ name: 'Inventario', data: [
-          ['INVENTARIO DE PRODUCTOS', '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          ['Código', 'Producto', 'Categoría', 'Stock', 'Precio', 'Valor Total'],
-          ['', '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          ['', '', '', 'TOTAL:', '', '']
-        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '2-4': { bold: true }, '2-5': { bold: true } } } }],
+        sheets: [{
+          name: 'Inventario', data: [
+            ['INVENTARIO DE PRODUCTOS', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['Código', 'Producto', 'Categoría', 'Stock', 'Precio', 'Valor Total'],
+            ['', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['', '', '', 'TOTAL:', '', '']
+          ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '2-4': { bold: true }, '2-5': { bold: true } } }
+        }],
         size: 3500,
         isTemplate: true,
         templateCategory: 'Negocio',
@@ -173,16 +183,18 @@ async function seedDefaultExcelDocuments() {
       {
         uuid: nanoid(),
         name: 'Registro de Ventas',
-        sheets: [{ name: 'Ventas', data: [
-          ['REGISTRO DE VENTAS', '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          ['Fecha', 'Cliente', 'Producto', 'Cantidad', 'Precio', 'Total'],
-          ['', '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          ['', '', '', '', '', ''],
-          ['', '', '', '', 'TOTAL:', '']
-        ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '2-4': { bold: true }, '2-5': { bold: true } } } }],
+        sheets: [{
+          name: 'Ventas', data: [
+            ['REGISTRO DE VENTAS', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['Fecha', 'Cliente', 'Producto', 'Cantidad', 'Precio', 'Total'],
+            ['', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['', '', '', '', '', ''],
+            ['', '', '', '', 'TOTAL:', '']
+          ], metadata: { formatting: { '0-0': { bold: true, fontSize: 16 }, '2-0': { bold: true }, '2-1': { bold: true }, '2-2': { bold: true }, '2-3': { bold: true }, '2-4': { bold: true }, '2-5': { bold: true } } }
+        }],
         size: 3000,
         isTemplate: true,
         templateCategory: 'Negocio',
@@ -195,11 +207,11 @@ async function seedDefaultExcelDocuments() {
 export function createAdminRouter() {
   const router = Router();
 
-  router.get("/seed-status", isAuthenticated, async (req: any, res) => {
+  router.get("/seed-status", isAuthenticated, async (req: Request, res) => {
     try {
       const status = await getSeedStatus();
-      
-      if (!req.user?.claims?.sub) {
+
+      if (!(req as AuthenticatedRequest).user?.claims?.sub) {
         console.log(`[seed-status] Access denied: not authenticated`);
         return res.status(401).json({
           success: false,
@@ -208,9 +220,9 @@ export function createAdminRouter() {
         });
       }
 
-      const user = await authStorage.getUser(req.user.claims.sub);
+      const user = await authStorage.getUser((req as AuthenticatedRequest).user!.claims.sub);
       if (!user) {
-        console.log(`[seed-status] Access denied: user not found in database (userId=${req.user.claims.sub})`);
+        console.log(`[seed-status] Access denied: user not found in database (userId=${(req as AuthenticatedRequest).user!.claims.sub})`);
         return res.status(403).json({
           success: false,
           error: "User not found in database",
@@ -238,15 +250,15 @@ export function createAdminRouter() {
       });
     } catch (error) {
       console.error(`[seed-status] Error: ${error instanceof Error ? error.message : String(error)}`);
-      res.status(500).json({ 
-        success: false, 
-        error: error instanceof Error ? error.message : "Unknown error" 
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error"
       });
     }
   });
 
-  // Apply authentication and admin role check to ALL other admin routes
-  router.use(isAuthenticated, requireAdmin);
+  // Apply authentication, admin role check, AND rate limiting to ALL other admin routes
+  router.use(isAuthenticated, requireAdmin, adminRateLimiter);
 
   router.get("/dashboard", async (req, res) => {
     try {
@@ -276,7 +288,7 @@ export function createAdminRouter() {
       const pendingInvoices = invoices.filter(i => i.status === "pending").length;
       const paidInvoices = invoices.filter(i => i.status === "paid").length;
       const activeModels = aiModels.filter(m => m.status === "active").length;
-      const securityAlerts = auditLogs.filter(l => 
+      const securityAlerts = auditLogs.filter(l =>
         l.action?.includes("login_failed") || l.action?.includes("blocked")
       ).length;
 
@@ -472,12 +484,12 @@ export function createAdminRouter() {
   router.patch("/models/:id/toggle", async (req, res) => {
     try {
       const { isEnabled } = req.body;
-      const userId = (req as any).user?.id || null;
-      
+      const userId = (req as AuthenticatedRequest).user?.id || null;
+
       const updateData: any = {
         isEnabled: isEnabled ? "true" : "false",
       };
-      
+
       if (isEnabled) {
         updateData.enabledAt = new Date();
         updateData.enabledByAdminId = userId;
@@ -485,12 +497,12 @@ export function createAdminRouter() {
         updateData.enabledAt = null;
         updateData.enabledByAdminId = null;
       }
-      
+
       const model = await storage.updateAiModel(req.params.id, updateData);
       if (!model) {
         return res.status(404).json({ error: "Model not found" });
       }
-      
+
       await storage.createAuditLog({
         userId,
         action: isEnabled ? "model_enable" : "model_disable",
@@ -498,7 +510,7 @@ export function createAdminRouter() {
         resourceId: req.params.id,
         details: { isEnabled, modelName: model.name }
       });
-      
+
       res.json(model);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -601,7 +613,7 @@ export function createAdminRouter() {
     try {
       const { type, appliedTo, isEnabled } = req.query;
       let policies = await storage.getSecurityPolicies();
-      
+
       if (type) {
         policies = policies.filter(p => p.policyType === type);
       }
@@ -611,7 +623,7 @@ export function createAdminRouter() {
       if (isEnabled !== undefined) {
         policies = policies.filter(p => p.isEnabled === isEnabled);
       }
-      
+
       res.json(policies);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -624,7 +636,7 @@ export function createAdminRouter() {
       if (!policyName || !policyType || !rules) {
         return res.status(400).json({ error: "policyName, policyType, and rules are required" });
       }
-      
+
       const policy = await storage.createSecurityPolicy({
         policyName,
         policyType,
@@ -633,14 +645,14 @@ export function createAdminRouter() {
         appliedTo: appliedTo || "global",
         createdBy
       });
-      
+
       await storage.createAuditLog({
         action: "security_policy_create",
         resource: "security_policies",
         resourceId: policy.id,
         details: { policyName, policyType }
       });
-      
+
       res.json(policy);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -653,14 +665,14 @@ export function createAdminRouter() {
       if (!policy) {
         return res.status(404).json({ error: "Policy not found" });
       }
-      
+
       await storage.createAuditLog({
         action: "security_policy_update",
         resource: "security_policies",
         resourceId: req.params.id,
         details: req.body
       });
-      
+
       res.json(policy);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -673,16 +685,16 @@ export function createAdminRouter() {
       if (!existing) {
         return res.status(404).json({ error: "Policy not found" });
       }
-      
+
       await storage.deleteSecurityPolicy(req.params.id);
-      
+
       await storage.createAuditLog({
         action: "security_policy_delete",
         resource: "security_policies",
         resourceId: req.params.id,
         details: { policyName: existing.policyName }
       });
-      
+
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -696,14 +708,14 @@ export function createAdminRouter() {
       if (!policy) {
         return res.status(404).json({ error: "Policy not found" });
       }
-      
+
       await storage.createAuditLog({
         action: isEnabled ? "security_policy_enable" : "security_policy_disable",
         resource: "security_policies",
         resourceId: req.params.id,
         details: { policyName: policy.policyName }
       });
-      
+
       res.json(policy);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -715,9 +727,9 @@ export function createAdminRouter() {
       const { action, resource, date_from, date_to, severity, status, page = "1", limit = "50" } = req.query;
       const pageNum = parseInt(page as string);
       const limitNum = Math.min(parseInt(limit as string), 100);
-      
+
       let logs = await storage.getAuditLogs(500);
-      
+
       if (action) {
         logs = logs.filter(l => l.action?.includes(action as string));
       }
@@ -732,10 +744,10 @@ export function createAdminRouter() {
         const toDate = new Date(date_to as string);
         logs = logs.filter(l => l.createdAt && new Date(l.createdAt) <= toDate);
       }
-      
+
       const total = logs.length;
       const paginatedLogs = logs.slice((pageNum - 1) * limitNum, pageNum * limitNum);
-      
+
       res.json({
         data: paginatedLogs,
         pagination: {
@@ -756,27 +768,27 @@ export function createAdminRouter() {
         storage.getSecurityPolicies(),
         storage.getAuditLogs(1000)
       ]);
-      
+
       const now = new Date();
       const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      
+
       const activePolicies = policies.filter(p => p.isEnabled === "true").length;
       const logsToday = auditLogs.filter(l => l.createdAt && new Date(l.createdAt) >= startOfToday).length;
-      
+
       const criticalActions = ["login_failed", "blocked", "unauthorized", "security_alert", "permission_denied"];
-      const criticalAlerts = auditLogs.filter(l => 
-        l.createdAt && 
+      const criticalAlerts = auditLogs.filter(l =>
+        l.createdAt &&
         new Date(l.createdAt) >= twentyFourHoursAgo &&
         criticalActions.some(a => l.action?.includes(a))
       ).length;
-      
+
       const severityCounts = {
         info: auditLogs.filter(l => !criticalActions.some(a => l.action?.includes(a)) && !l.action?.includes("warning")).length,
         warning: auditLogs.filter(l => l.action?.includes("warning")).length,
         critical: auditLogs.filter(l => criticalActions.some(a => l.action?.includes(a))).length
       };
-      
+
       res.json({
         totalPolicies: policies.length,
         activePolicies,
@@ -976,7 +988,7 @@ export function createAdminRouter() {
       const models = await storage.getAiModels();
       const payments = await storage.getPayments();
       const invoices = await storage.getInvoices();
-      
+
       res.json({
         tables: {
           users: { count: userStats.total },
@@ -1001,7 +1013,7 @@ export function createAdminRouter() {
       const startTime = Date.now();
       const result = await db.execute(sql`SELECT 1 as ping, current_timestamp as server_time, pg_database_size(current_database()) as db_size`);
       const latency = Date.now() - startTime;
-      
+
       const poolStats = await db.execute(sql`
         SELECT 
           numbackends as active_connections,
@@ -1043,8 +1055,8 @@ export function createAdminRouter() {
         version: await db.execute(sql`SELECT version()`).then(r => r.rows[0]?.version)
       });
     } catch (error: any) {
-      res.status(500).json({ 
-        status: "unhealthy", 
+      res.status(500).json({
+        status: "unhealthy",
         error: error.message,
         latencyMs: null
       });
@@ -1093,8 +1105,8 @@ export function createAdminRouter() {
       });
     } catch (error: any) {
       console.error("[AdminRouter] db-status error:", error.message);
-      res.status(500).json({ 
-        status: "error", 
+      res.status(500).json({
+        status: "error",
         error: error.message,
         database: null,
         host: null
@@ -1208,7 +1220,7 @@ export function createAdminRouter() {
       const isSelect = trimmedQuery.startsWith('SELECT');
       const isCteSelect = trimmedQuery.startsWith('WITH') && /\bSELECT\b/.test(trimmedQuery) && !/\b(INSERT|UPDATE|DELETE)\b/.test(trimmedQuery);
       if (!isSelect && !isCteSelect) {
-        return res.status(403).json({ 
+        return res.status(403).json({
           error: "Only SELECT queries are allowed for security reasons",
           hint: "Use the Replit Database panel for write operations"
         });
@@ -1241,7 +1253,7 @@ export function createAdminRouter() {
       await storage.createAuditLog({
         action: "database_query",
         resource: "database",
-        details: { 
+        details: {
           query: query.substring(0, 500),
           rowsReturned: result.rows.length,
           executionTimeMs: executionTime
@@ -1256,7 +1268,7 @@ export function createAdminRouter() {
         columns: result.rows.length > 0 ? Object.keys(result.rows[0]) : []
       });
     } catch (error: any) {
-      res.status(500).json({ 
+      res.status(500).json({
         success: false,
         error: error.message,
         hint: "Check your SQL syntax"
@@ -1282,7 +1294,7 @@ export function createAdminRouter() {
       res.json({ queries: slowQueries.rows });
     } catch (error: any) {
       // pg_stat_statements might not be enabled
-      res.json({ 
+      res.json({
         queries: [],
         note: "pg_stat_statements extension may not be enabled"
       });
@@ -1314,12 +1326,12 @@ export function createAdminRouter() {
 
   router.get("/conversations", async (req, res) => {
     try {
-      const { 
-        page = "1", 
-        limit = "20", 
-        userId, 
-        status, 
-        flagStatus, 
+      const {
+        page = "1",
+        limit = "20",
+        userId,
+        status,
+        flagStatus,
         aiModel,
         dateFrom,
         dateTo,
@@ -1334,7 +1346,7 @@ export function createAdminRouter() {
       const offset = (pageNum - 1) * limitNum;
 
       const conditions: any[] = [];
-      
+
       if (userId) conditions.push(eq(chats.userId, userId as string));
       if (status) conditions.push(eq(chats.conversationStatus, status as string));
       if (flagStatus) conditions.push(eq(chats.flagStatus, flagStatus as string));
@@ -1450,10 +1462,10 @@ export function createAdminRouter() {
       }
 
       const [updated] = await db.update(chats)
-        .set({ 
-          flagStatus, 
+        .set({
+          flagStatus,
           conversationStatus: flagStatus ? "flagged" : "active",
-          updatedAt: new Date() 
+          updatedAt: new Date()
         })
         .where(eq(chats.id, req.params.id))
         .returning();
@@ -1481,7 +1493,7 @@ export function createAdminRouter() {
       if (!query || query.length < 2) {
         return res.json({ results: [] });
       }
-      
+
       const matchingMessages = await db.select({
         chatId: chatMessages.chatId,
         content: chatMessages.content,
@@ -1491,14 +1503,14 @@ export function createAdminRouter() {
         .from(chatMessages)
         .where(ilike(chatMessages.content, `%${query}%`))
         .limit(parseInt(limit as string));
-      
+
       const chatIds = [...new Set(matchingMessages.map(m => m.chatId))];
       if (chatIds.length === 0) {
         return res.json({ results: [] });
       }
-      
+
       const conversations = await db.select().from(chats).where(inArray(chats.id, chatIds));
-      
+
       res.json({
         results: conversations.map(c => ({
           ...c,
@@ -1517,23 +1529,23 @@ export function createAdminRouter() {
       if (!conversation) {
         return res.status(404).json({ error: "Conversation not found" });
       }
-      
-      const existingNotes = (conversation as any).internalNotes || [];
+
+      const existingNotes = (conversation as Record<string, any>).internalNotes || [];
       const newNote = {
         id: `note-${Date.now()}`,
         content: note,
         createdAt: new Date().toISOString(),
         author: "admin"
       };
-      
+
       const [updated] = await db.update(chats)
-        .set({ 
+        .set({
           internalNotes: [...existingNotes, newNote],
-          updatedAt: new Date() 
+          updatedAt: new Date()
         })
         .where(eq(chats.id, req.params.id))
         .returning();
-      
+
       res.json(updated);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1563,8 +1575,8 @@ export function createAdminRouter() {
         db.select({ sum: sql<number>`coalesce(sum(tokens_used), 0)` })
           .from(chats)
           .where(gte(chats.createdAt, todayStart)),
-        db.select({ 
-          messageCount: chats.messageCount 
+        db.select({
+          messageCount: chats.messageCount
         }).from(chats)
       ]);
 
@@ -1629,7 +1641,7 @@ export function createAdminRouter() {
   router.get("/conversations/export", async (req, res) => {
     try {
       const { format = "json", includeMessages = "false" } = req.query;
-      
+
       const allConversations = await db.select().from(chats).orderBy(desc(chats.createdAt)).limit(1000);
 
       let result: any[] = allConversations;
@@ -1683,15 +1695,15 @@ export function createAdminRouter() {
   // AI Models Management - Enhanced endpoints
   router.get("/models/filtered", async (req, res) => {
     try {
-      const { 
-        page = "1", 
-        limit = "20", 
-        provider, 
-        type, 
-        status, 
-        search, 
-        sortBy = "name", 
-        sortOrder = "asc" 
+      const {
+        page = "1",
+        limit = "20",
+        provider,
+        type,
+        status,
+        search,
+        sortBy = "name",
+        sortOrder = "asc"
       } = req.query;
 
       const result = await storage.getAiModelsFiltered({
@@ -1721,7 +1733,7 @@ export function createAdminRouter() {
     try {
       const allModels = await storage.getAiModels();
       const knownStats = getModelStats();
-      
+
       const byProvider: Record<string, number> = {};
       const byType: Record<string, number> = {};
       let active = 0;
@@ -1754,7 +1766,7 @@ export function createAdminRouter() {
     try {
       const providers = getAvailableProviders();
       const allModels = await storage.getAiModels();
-      
+
       const providerStats = providers.map(provider => {
         const models = allModels.filter(m => m.provider.toLowerCase() === provider.toLowerCase());
         const activeCount = models.filter(m => m.status === "active").length;
@@ -1777,7 +1789,7 @@ export function createAdminRouter() {
     try {
       const { provider } = req.params;
       const result = await syncModelsForProvider(provider);
-      
+
       await storage.createAuditLog({
         action: "models_sync",
         resource: "ai_models",
@@ -1797,7 +1809,7 @@ export function createAdminRouter() {
   router.post("/models/sync", async (req, res) => {
     try {
       const results = await syncAllProviders();
-      
+
       let totalAdded = 0;
       let totalUpdated = 0;
       for (const r of Object.values(results)) {
@@ -1845,7 +1857,7 @@ export function createAdminRouter() {
         storage.getUserStats(),
         storage.getPaymentStats()
       ]);
-      
+
       // Map to frontend expected structure
       res.json({
         activeUsers: latestSnapshot?.activeUsersNow ?? userStats.active ?? 0,
@@ -1870,13 +1882,13 @@ export function createAdminRouter() {
   router.get("/analytics/kpis", async (req, res) => {
     try {
       const latestSnapshot = await storage.getLatestKpiSnapshot();
-      
+
       if (!latestSnapshot) {
         const [userStats, paymentStats] = await Promise.all([
           storage.getUserStats(),
           storage.getPaymentStats()
         ]);
-        
+
         return res.json({
           activeUsersNow: userStats.active,
           queriesPerMinute: 0,
@@ -1887,7 +1899,7 @@ export function createAdminRouter() {
           createdAt: new Date()
         });
       }
-      
+
       res.json(latestSnapshot);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1911,7 +1923,7 @@ export function createAdminRouter() {
         "90d": 90 * 24 * 60 * 60 * 1000,
         "1y": 365 * 24 * 60 * 60 * 1000,
       };
-      
+
       const startDate = new Date(Date.now() - intervalMap[granularity]);
       const endDate = new Date();
 
@@ -1990,12 +2002,12 @@ export function createAdminRouter() {
     try {
       const { chartType } = req.params;
       const granularity = (req.query.granularity as string) || "24h";
-      
+
       const validChartTypes = ["userGrowth", "revenue", "modelUsage", "latency", "errors", "tokens"];
       if (!validChartTypes.includes(chartType)) {
         return res.status(400).json({ error: `Invalid chartType. Valid types: ${validChartTypes.join(", ")}` });
       }
-      
+
       const validGranularities = ["1h", "24h", "7d", "30d", "90d", "1y"];
       if (!validGranularities.includes(granularity)) {
         return res.status(400).json({ error: `Invalid granularity. Valid values: ${validGranularities.join(", ")}` });
@@ -2009,7 +2021,7 @@ export function createAdminRouter() {
         "90d": 90 * 24 * 60 * 60 * 1000,
         "1y": 365 * 24 * 60 * 60 * 1000,
       };
-      
+
       const startDate = new Date(Date.now() - intervalMap[granularity]);
       const endDate = new Date();
 
@@ -2019,7 +2031,7 @@ export function createAdminRouter() {
         case "userGrowth":
           data = await storage.getUserGrowthData(granularity as '1h' | '24h' | '7d' | '30d' | '90d' | '1y');
           break;
-        
+
         case "revenue":
           const payments = await storage.getPayments();
           const revenueByDate = payments
@@ -2031,7 +2043,7 @@ export function createAdminRouter() {
             }, {});
           data = Object.entries(revenueByDate).map(([date, amount]) => ({ date, amount }));
           break;
-        
+
         case "modelUsage":
           const providerMetrics = await storage.getProviderMetrics(undefined, startDate, endDate);
           data = providerMetrics.map(m => ({
@@ -2042,7 +2054,7 @@ export function createAdminRouter() {
             tokensOut: m.tokensOut
           }));
           break;
-        
+
         case "latency":
           const latencyMetrics = await storage.getProviderMetrics(undefined, startDate, endDate);
           data = latencyMetrics.map(m => ({
@@ -2054,7 +2066,7 @@ export function createAdminRouter() {
             p99Latency: m.p99Latency
           }));
           break;
-        
+
         case "errors":
           const errorMetrics = await storage.getProviderMetrics(undefined, startDate, endDate);
           data = errorMetrics.map(m => ({
@@ -2065,7 +2077,7 @@ export function createAdminRouter() {
             errorRate: m.totalRequests ? ((m.errorCount || 0) / m.totalRequests * 100).toFixed(2) : "0.00"
           }));
           break;
-        
+
         case "tokens":
           const tokenMetrics = await storage.getProviderMetrics(undefined, startDate, endDate);
           data = tokenMetrics.map(m => ({
@@ -2093,7 +2105,7 @@ export function createAdminRouter() {
   router.get("/analytics/performance", async (req, res) => {
     try {
       const latestMetrics = await storage.getLatestProviderMetrics();
-      
+
       const performanceData = latestMetrics.map(m => ({
         provider: m.provider,
         avgLatency: m.avgLatency || 0,
@@ -2103,8 +2115,8 @@ export function createAdminRouter() {
         successRate: parseFloat(m.successRate || "100"),
         totalRequests: m.totalRequests || 0,
         errorCount: m.errorCount || 0,
-        status: parseFloat(m.successRate || "100") >= 99 ? "healthy" : 
-                parseFloat(m.successRate || "100") >= 95 ? "degraded" : "critical",
+        status: parseFloat(m.successRate || "100") >= 99 ? "healthy" :
+          parseFloat(m.successRate || "100") >= 95 ? "degraded" : "critical",
         windowStart: m.windowStart,
         windowEnd: m.windowEnd
       }));
@@ -2118,13 +2130,13 @@ export function createAdminRouter() {
   router.get("/analytics/costs", async (req, res) => {
     try {
       const budgets = await storage.getCostBudgets();
-      
+
       const costsWithAlerts = budgets.map(b => {
         const currentSpend = parseFloat(b.currentSpend || "0");
         const budgetLimit = parseFloat(b.budgetLimit || "100");
         const alertThreshold = b.alertThreshold || 80;
         const usagePercent = budgetLimit > 0 ? (currentSpend / budgetLimit) * 100 : 0;
-        
+
         return {
           provider: b.provider,
           budgetLimit: b.budgetLimit,
@@ -2134,8 +2146,8 @@ export function createAdminRouter() {
           alertThreshold: b.alertThreshold,
           isOverBudget: currentSpend >= budgetLimit,
           isNearThreshold: usagePercent >= alertThreshold,
-          alertFlag: currentSpend >= budgetLimit ? "critical" : 
-                     usagePercent >= alertThreshold ? "warning" : "ok",
+          alertFlag: currentSpend >= budgetLimit ? "critical" :
+            usagePercent >= alertThreshold ? "warning" : "ok",
           periodStart: b.periodStart,
           periodEnd: b.periodEnd
         };
@@ -2150,9 +2162,9 @@ export function createAdminRouter() {
   router.get("/analytics/funnel", async (req, res) => {
     try {
       const allUsers = await storage.getAllUsers();
-      
+
       const eventStats = await storage.getAnalyticsEventStats();
-      
+
       const visitors = eventStats["page_view"] || allUsers.length * 3;
       const signups = allUsers.length;
       const activeUsers = allUsers.filter(u => u.status === "active").length;
@@ -2184,14 +2196,14 @@ export function createAdminRouter() {
 
   router.get("/analytics/logs", async (req, res) => {
     try {
-      const { 
-        page = "1", 
-        limit = "50", 
-        provider, 
+      const {
+        page = "1",
+        limit = "50",
+        provider,
         status,
         model,
         dateFrom,
-        dateTo 
+        dateTo
       } = req.query;
 
       const pageNum = parseInt(page as string);
@@ -2230,7 +2242,7 @@ export function createAdminRouter() {
 
   router.get("/analytics/heatmap", async (req, res) => {
     try {
-      const { logs } = await storage.getApiLogs({ 
+      const { logs } = await storage.getApiLogs({
         limit: 10000,
         startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
       });
@@ -2247,7 +2259,7 @@ export function createAdminRouter() {
       }
 
       const maxValue = Math.max(...heatmapData.flat());
-      const normalizedData = heatmapData.map(row => 
+      const normalizedData = heatmapData.map(row =>
         row.map(val => maxValue > 0 ? parseFloat((val / maxValue).toFixed(3)) : 0)
       );
 
@@ -2275,7 +2287,7 @@ export function createAdminRouter() {
   router.get("/reports/templates", async (req, res) => {
     try {
       let templates = await storage.getReportTemplates();
-      
+
       // Seed system templates if none exist
       if (templates.length === 0) {
         const systemTemplates = [
@@ -2350,11 +2362,11 @@ export function createAdminRouter() {
         ];
 
         for (const template of systemTemplates) {
-          await storage.createReportTemplate(template as any);
+          await storage.createReportTemplate(template as Record<string, any>);
         }
         templates = await storage.getReportTemplates();
       }
-      
+
       res.json(templates);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -2396,10 +2408,10 @@ export function createAdminRouter() {
       const { page = "1", limit = "20" } = req.query;
       const pageNum = parseInt(page as string);
       const limitNum = Math.min(parseInt(limit as string), 100);
-      
+
       const reports = await storage.getGeneratedReports(limitNum * pageNum);
       const paginatedReports = reports.slice((pageNum - 1) * limitNum, pageNum * limitNum);
-      
+
       res.json({
         data: paginatedReports,
         pagination: {
@@ -2418,13 +2430,13 @@ export function createAdminRouter() {
   router.post("/reports/generate", async (req, res) => {
     try {
       const { templateId, name, parameters, format = "json" } = req.body;
-      const userId = (req as any).user?.id || null;
-      
+      const userId = (req as AuthenticatedRequest).user?.id || null;
+
       // Get template if provided
       let template;
       let reportType = "custom";
       let reportName = name || "Custom Report";
-      
+
       if (templateId) {
         template = await storage.getReportTemplate(templateId);
         if (!template) {
@@ -2433,7 +2445,7 @@ export function createAdminRouter() {
         reportType = template.type;
         reportName = name || template.name;
       }
-      
+
       // Create report record
       const report = await storage.createGeneratedReport({
         templateId,
@@ -2444,13 +2456,13 @@ export function createAdminRouter() {
         format,
         generatedBy: userId
       });
-      
+
       // Generate report data asynchronously
       (async () => {
         try {
           let data: any[] = [];
           let rowCount = 0;
-          
+
           switch (reportType) {
             case "user_report":
               const users = await storage.getAllUsers();
@@ -2463,7 +2475,7 @@ export function createAdminRouter() {
                 createdAt: u.createdAt
               }));
               break;
-              
+
             case "ai_models_report":
               const models = await storage.getAiModels();
               data = models.map(m => ({
@@ -2474,7 +2486,7 @@ export function createAdminRouter() {
                 modelType: m.modelType || "text"
               }));
               break;
-              
+
             case "security_report":
               const logs = await storage.getAuditLogs(1000);
               data = logs.map(l => ({
@@ -2485,7 +2497,7 @@ export function createAdminRouter() {
                 details: l.details
               }));
               break;
-              
+
             case "financial_report":
               const payments = await storage.getPayments();
               data = payments.map(p => ({
@@ -2495,23 +2507,23 @@ export function createAdminRouter() {
                 method: p.method || "N/A"
               }));
               break;
-              
+
             default:
               data = [];
           }
-          
+
           rowCount = data.length;
-          
+
           // Save to file
           const fs = await import("fs/promises");
           const path = await import("path");
           const reportsDir = path.join(process.cwd(), "generated_reports");
           await fs.mkdir(reportsDir, { recursive: true });
-          
+
           const timestamp = Date.now();
           const fileName = `${reportType}_${timestamp}.${format}`;
           const filePath = path.join(reportsDir, fileName);
-          
+
           if (format === "json") {
             await fs.writeFile(filePath, JSON.stringify(data, null, 2));
           } else if (format === "csv") {
@@ -2532,7 +2544,7 @@ export function createAdminRouter() {
               await fs.writeFile(filePath, "");
             }
           }
-          
+
           // Update report status
           await storage.updateGeneratedReport(report.id, {
             status: "completed",
@@ -2540,7 +2552,7 @@ export function createAdminRouter() {
             resultSummary: { rowCount },
             completedAt: new Date()
           });
-          
+
         } catch (err: any) {
           await storage.updateGeneratedReport(report.id, {
             status: "failed",
@@ -2548,7 +2560,7 @@ export function createAdminRouter() {
           });
         }
       })();
-      
+
       res.json(report);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -2565,21 +2577,21 @@ export function createAdminRouter() {
       if (report.status !== "completed") {
         return res.status(400).json({ error: "Report is not ready for download" });
       }
-      
+
       const fs = await import("fs/promises");
       const path = await import("path");
-      
+
       const reportsDir = path.join(process.cwd(), "generated_reports");
       const files = await fs.readdir(reportsDir);
       const reportFile = files.find(f => f.includes(report.type) && f.endsWith(`.${report.format}`));
-      
+
       if (!reportFile) {
         return res.status(404).json({ error: "Report file not found" });
       }
-      
+
       const filePath = path.join(reportsDir, reportFile);
       const content = await fs.readFile(filePath, "utf-8");
-      
+
       const contentType = report.format === "json" ? "application/json" : "text/csv";
       res.setHeader("Content-Type", contentType);
       res.setHeader("Content-Disposition", `attachment; filename="${report.name.replace(/\s+/g, "_")}.${report.format}"`);
@@ -2667,8 +2679,8 @@ export function createAdminRouter() {
         matches: result.matches.slice(0, 5),
         hasGap: result.hasGap,
         gapReason: result.gapReason,
-        suggestedAction: result.matches.length > 0 
-          ? `Use ${result.matches[0].toolId} tool` 
+        suggestedAction: result.matches.length > 0
+          ? `Use ${result.matches[0].toolId} tool`
           : "No suitable tool found"
       });
     } catch (error: any) {
@@ -2806,8 +2818,8 @@ export function createAdminRouter() {
     setFeatureFlag('AGENTIC_AUTONOMOUS_MODE', false);
     setFeatureFlag('AGENTIC_SUGGESTIONS_ENABLED', false);
     console.warn('[Agentic] EMERGENCY DISABLE activated');
-    res.json({ 
-      status: 'disabled', 
+    res.json({
+      status: 'disabled',
       timestamp: Date.now(),
       message: 'All agentic features have been disabled'
     });
@@ -2835,8 +2847,8 @@ export function createAdminRouter() {
       suggestionsEnabled: FEATURES.AGENTIC_SUGGESTIONS_ENABLED,
       autonomousModeEnabled: FEATURES.AGENTIC_AUTONOMOUS_MODE,
       circuit: circuitStatus,
-      status: !FEATURES.AGENTIC_CHAT_ENABLED ? 'disabled' : 
-              circuitStatus.isOpen ? 'circuit_open' : 'healthy'
+      status: !FEATURES.AGENTIC_CHAT_ENABLED ? 'disabled' :
+        circuitStatus.isOpen ? 'circuit_open' : 'healthy'
     });
   });
 
@@ -2870,7 +2882,7 @@ export function createAdminRouter() {
     try {
       await seedDefaultExcelDocuments();
       const { search, template } = req.query;
-      
+
       let query = db.select({
         id: excelDocuments.uuid,
         name: excelDocuments.name,
@@ -2882,8 +2894,8 @@ export function createAdminRouter() {
         isTemplate: excelDocuments.isTemplate,
         templateCategory: excelDocuments.templateCategory
       })
-      .from(excelDocuments);
-      
+        .from(excelDocuments);
+
       const conditions = [];
       if (search && typeof search === 'string') {
         conditions.push(ilike(excelDocuments.name, `%${search}%`));
@@ -2893,17 +2905,17 @@ export function createAdminRouter() {
       } else if (template === 'false') {
         conditions.push(eq(excelDocuments.isTemplate, false));
       }
-      
+
       const documents = conditions.length > 0
         ? await query.where(and(...conditions)).orderBy(desc(excelDocuments.createdAt))
         : await query.orderBy(desc(excelDocuments.createdAt));
-      
+
       const formattedDocuments = documents.map(doc => ({
         ...doc,
-        sheets: Array.isArray(doc.sheets) ? (doc.sheets as any[]).length : 1,
+        sheets: Array.isArray(doc.sheets) ? (doc.sheets as Record<string, any>[]).length : 1,
         createdBy: doc.createdBy ? String(doc.createdBy) : 'Admin'
       }));
-      
+
       res.json(formattedDocuments);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -2920,20 +2932,20 @@ export function createAdminRouter() {
         templateCategory: excelDocuments.templateCategory,
         createdAt: excelDocuments.createdAt
       })
-      .from(excelDocuments)
-      .where(eq(excelDocuments.isTemplate, true))
-      .orderBy(excelDocuments.templateCategory);
-      
+        .from(excelDocuments)
+        .where(eq(excelDocuments.isTemplate, true))
+        .orderBy(excelDocuments.templateCategory);
+
       const byCategory: Record<string, any[]> = {};
       templates.forEach(t => {
         const cat = t.templateCategory || 'General';
         if (!byCategory[cat]) byCategory[cat] = [];
         byCategory[cat].push({
           ...t,
-          sheets: Array.isArray(t.sheets) ? (t.sheets as any[]).length : 1
+          sheets: Array.isArray(t.sheets) ? (t.sheets as Record<string, any>[]).length : 1
         });
       });
-      
+
       res.json({ templates: byCategory });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -2943,16 +2955,16 @@ export function createAdminRouter() {
   router.post("/excel/template/create-from", async (req, res) => {
     try {
       const { templateId, newName } = req.body;
-      
+
       const [template] = await db.select()
         .from(excelDocuments)
         .where(and(eq(excelDocuments.uuid, templateId), eq(excelDocuments.isTemplate, true)))
         .limit(1);
-      
+
       if (!template) {
         return res.status(404).json({ error: "Template not found" });
       }
-      
+
       const newDoc = await db.insert(excelDocuments)
         .values({
           uuid: nanoid(),
@@ -2965,13 +2977,13 @@ export function createAdminRouter() {
           version: 1
         })
         .returning();
-      
-      res.json({ 
-        success: true, 
+
+      res.json({
+        success: true,
         document: {
           id: newDoc[0].uuid,
           name: newDoc[0].name,
-          sheets: Array.isArray(newDoc[0].sheets) ? (newDoc[0].sheets as any[]).length : 1
+          sheets: Array.isArray(newDoc[0].sheets) ? (newDoc[0].sheets as Record<string, any>[]).length : 1
         }
       });
     } catch (error: any) {
@@ -2985,11 +2997,11 @@ export function createAdminRouter() {
         .from(excelDocuments)
         .where(eq(excelDocuments.uuid, req.params.id))
         .limit(1);
-      
+
       if (!doc) {
         return res.status(404).json({ error: "Document not found" });
       }
-      
+
       res.json({
         id: doc.uuid,
         name: doc.name,
@@ -3012,7 +3024,7 @@ export function createAdminRouter() {
   router.post("/excel/save", async (req, res) => {
     try {
       const { id, name, data, sheets, metadata, isTemplate, templateCategory } = req.body;
-      
+
       if (!name) {
         return res.status(400).json({ error: "name is required" });
       }
@@ -3043,12 +3055,12 @@ export function createAdminRouter() {
             .where(eq(excelDocuments.uuid, id))
             .returning();
 
-          return res.json({ 
-            success: true, 
+          return res.json({
+            success: true,
             document: {
               id: updated.uuid,
               name: updated.name,
-              sheets: Array.isArray(updated.sheets) ? (updated.sheets as any[]).length : 1,
+              sheets: Array.isArray(updated.sheets) ? (updated.sheets as Record<string, any>[]).length : 1,
               size: updated.size,
               createdAt: updated.createdAt,
               updatedAt: updated.updatedAt,
@@ -3074,12 +3086,12 @@ export function createAdminRouter() {
         })
         .returning();
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         document: {
           id: inserted.uuid,
           name: inserted.name,
-          sheets: Array.isArray(inserted.sheets) ? (inserted.sheets as any[]).length : 1,
+          sheets: Array.isArray(inserted.sheets) ? (inserted.sheets as Record<string, any>[]).length : 1,
           size: inserted.size,
           createdAt: inserted.createdAt,
           updatedAt: inserted.updatedAt,
@@ -3098,14 +3110,14 @@ export function createAdminRouter() {
         .from(excelDocuments)
         .where(eq(excelDocuments.uuid, req.params.id))
         .limit(1);
-      
+
       if (!doc) {
         return res.status(404).json({ error: "Document not found" });
       }
-      
+
       await db.delete(excelDocuments)
         .where(eq(excelDocuments.uuid, req.params.id));
-      
+
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -3130,9 +3142,9 @@ export function createAdminRouter() {
           current_user as db_user,
           version() as pg_version
       `);
-      
+
       if (dbInfoResult.rows && dbInfoResult.rows.length > 0) {
-        const dbInfo = dbInfoResult.rows[0] as any;
+        const dbInfo = dbInfoResult.rows[0] as Record<string, any>;
         diagnostics.database = {
           name: dbInfo.database_name,
           host: dbInfo.host || "localhost",
@@ -3149,9 +3161,9 @@ export function createAdminRouter() {
           MAX(created_at) as latest_user_created_at
         FROM users
       `);
-      
+
       if (userStatsResult.rows && userStatsResult.rows.length > 0) {
-        const stats = userStatsResult.rows[0] as any;
+        const stats = userStatsResult.rows[0] as Record<string, any>;
         diagnostics.users = {
           total: parseInt(stats.user_count) || 0,
           latestCreatedAt: stats.latest_user_created_at,
@@ -3164,9 +3176,9 @@ export function createAdminRouter() {
         FROM ai_models
         WHERE is_enabled = 'true'
       `);
-      
+
       if (modelStatsResult.rows && modelStatsResult.rows.length > 0) {
-        const modelStats = modelStatsResult.rows[0] as any;
+        const modelStats = modelStatsResult.rows[0] as Record<string, any>;
         diagnostics.aiModels = {
           enabledCount: parseInt(modelStats.enabled_count) || 0,
         };
@@ -3178,9 +3190,9 @@ export function createAdminRouter() {
         FROM sessions
         WHERE expire > NOW()
       `);
-      
+
       if (sessionStatsResult.rows && sessionStatsResult.rows.length > 0) {
-        const sessionStats = sessionStatsResult.rows[0] as any;
+        const sessionStats = sessionStatsResult.rows[0] as Record<string, any>;
         diagnostics.sessions = {
           activeCount: parseInt(sessionStats.session_count) || 0,
         };
@@ -3193,19 +3205,19 @@ export function createAdminRouter() {
         WHERE table_schema = 'public' 
         AND table_name IN ('users', 'ai_models', 'sessions', 'chats', 'chat_messages')
       `);
-      
+
       diagnostics.tables = {
-        existing: (tablesResult.rows as any[]).map(r => r.table_name),
+        existing: (tablesResult.rows as Record<string, any>[]).map(r => r.table_name),
         required: ['users', 'ai_models', 'sessions', 'chats', 'chat_messages'],
       };
 
       console.log(`[Admin] DB status check by admin:`, JSON.stringify(diagnostics));
-      
+
       res.json(diagnostics);
     } catch (error: any) {
       console.error("[Admin] DB status check failed:", error);
-      res.status(500).json({ 
-        error: "Database diagnostics failed", 
+      res.status(500).json({
+        error: "Database diagnostics failed",
         message: error.message,
         databaseConfigured: !!process.env.DATABASE_URL,
       });
@@ -3228,7 +3240,7 @@ export function createAdminRouter() {
         stripeSubscriptionId: users.stripeSubscriptionId,
         createdAt: users.createdAt
       }).from(users).orderBy(desc(users.createdAt)).limit(100);
-      
+
       res.json({ users: allUsers });
     } catch (error: any) {
       console.error("[Admin] Failed to fetch users:", error);
@@ -3240,30 +3252,30 @@ export function createAdminRouter() {
     try {
       const { id } = req.params;
       const { plan } = req.body;
-      
+
       if (!plan || !['free', 'go', 'plus', 'pro'].includes(plan)) {
         return res.status(400).json({ error: "Invalid plan. Must be one of: free, go, plus, pro" });
       }
-      
+
       await usageQuotaService.updateUserPlan(id, plan);
-      
+
       const [updatedUser] = await db.select({
         id: users.id,
         email: users.email,
         plan: users.plan,
         dailyRequestsLimit: users.dailyRequestsLimit
       }).from(users).where(eq(users.id, id));
-      
+
       if (!updatedUser) {
         return res.status(404).json({ error: "User not found" });
       }
-      
+
       await storage.createAuditLog({
         action: "admin_update_user_plan",
         resource: "user",
         details: { userId: id, newPlan: plan }
       });
-      
+
       console.log(`[Admin] Updated user ${id} plan to ${plan}`);
       res.json({ success: true, user: updatedUser });
     } catch (error: any) {

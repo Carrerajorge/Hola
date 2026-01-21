@@ -3,7 +3,9 @@ import { authStorage } from "./storage";
 import { isAuthenticated, getAuthMetrics, getSessionStats } from "./replitAuth";
 import { storage } from "../../storage";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
-import { authRateLimiter, getRateLimitStats } from "../../middleware/rateLimiter";
+import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/rateLimiter";
+import microsoftAuthRouter from "../../auth/microsoftAuth";
+
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -15,14 +17,18 @@ function isAdminConfigured(): boolean {
 
 // Register auth-specific routes
 export function registerAuthRoutes(app: Express): void {
+  // Microsoft OAuth routes
+  app.use("/api/auth", microsoftAuthRouter);
+
   // Auth metrics endpoint (admin only)
+
   app.get("/api/auth/metrics", isAuthenticated, async (req: any, res) => {
     try {
       const user = await authStorage.getUser(req.user?.claims?.sub);
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       res.json({
         auth: getSessionStats(),
         rateLimit: getRateLimitStats(),
@@ -38,11 +44,11 @@ export function registerAuthRoutes(app: Express): void {
   app.post("/api/auth/login", authRateLimiter, async (req: any, res) => {
     try {
       const { email, password } = req.body;
-      
+
       if (!email || !password) {
         return res.status(400).json({ message: "Email y contraseña son requeridos" });
       }
-      
+
       // Check if it's the admin (case-insensitive email comparison)
       if (isAdminConfigured() && email.toLowerCase() === ADMIN_EMAIL!.toLowerCase() && password === ADMIN_PASSWORD) {
         const adminId = "admin-user-id";
@@ -54,7 +60,7 @@ export function registerAuthRoutes(app: Express): void {
           profileImageUrl: null,
           role: "admin",
         });
-        
+
         const adminUser = {
           claims: {
             sub: adminId,
@@ -64,7 +70,7 @@ export function registerAuthRoutes(app: Express): void {
           },
           expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
         };
-        
+
         return req.login(adminUser, async (err: any) => {
           if (err) {
             return res.status(500).json({ message: "Error al iniciar sesión" });
@@ -80,19 +86,19 @@ export function registerAuthRoutes(app: Express): void {
           });
         });
       }
-      
+
       // Find user in database by email
       const allUsers = await storage.getAllUsers();
       const dbUser = allUsers.find(u => u.email?.toLowerCase() === email.toLowerCase());
-      
+
       if (!dbUser) {
         return res.status(401).json({ message: "Usuario no encontrado" });
       }
-      
+
       // Verify password - handle both hashed and legacy plain text passwords
       let passwordValid = false;
       let needsPasswordMigration = false;
-      
+
       if (dbUser.password) {
         if (isHashed(dbUser.password)) {
           passwordValid = await verifyPassword(password, dbUser.password);
@@ -101,11 +107,11 @@ export function registerAuthRoutes(app: Express): void {
           needsPasswordMigration = passwordValid;
         }
       }
-      
+
       if (!passwordValid) {
         return res.status(401).json({ message: "Contraseña incorrecta" });
       }
-      
+
       // Migrate legacy plain text password to hashed version
       if (needsPasswordMigration) {
         try {
@@ -116,12 +122,12 @@ export function registerAuthRoutes(app: Express): void {
           console.error("Failed to migrate password to hash:", migrationError);
         }
       }
-      
+
       // Check if user is active
       if (dbUser.status !== "active") {
         return res.status(401).json({ message: "Usuario inactivo" });
       }
-      
+
       // Set up session
       const sessionUser = {
         claims: {
@@ -132,19 +138,19 @@ export function registerAuthRoutes(app: Express): void {
         },
         expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
       };
-      
+
       req.login(sessionUser, async (err: any) => {
         if (err) {
           return res.status(500).json({ message: "Error al iniciar sesión" });
         }
-        
+
         // Track login and update last login
         try {
           await authStorage.updateUserLogin(dbUser.id, {
             ipAddress: req.ip || req.socket.remoteAddress || null,
             userAgent: req.headers["user-agent"] || null
           });
-          
+
           await storage.createAuditLog({
             userId: dbUser.id,
             action: "user_login",
@@ -156,7 +162,7 @@ export function registerAuthRoutes(app: Express): void {
         } catch (auditError) {
           console.error("Failed to create audit log:", auditError);
         }
-        
+
         // Force session save before responding
         req.session.save((saveErr: any) => {
           if (saveErr) {
@@ -168,6 +174,10 @@ export function registerAuthRoutes(app: Express): void {
       });
     } catch (error) {
       console.error("Login error:", error);
+      const fs = require('fs');
+      try {
+        fs.appendFileSync('login_debug.log', `[${new Date().toISOString()}] Login Error: ${error}\nStack: ${(error as any).stack}\n`);
+      } catch (e) { /* ignore */ }
       res.status(500).json({ message: "Error al iniciar sesión" });
     }
   });
@@ -176,16 +186,16 @@ export function registerAuthRoutes(app: Express): void {
   app.post("/api/auth/admin-login", authRateLimiter, async (req: any, res) => {
     try {
       const { email, password } = req.body;
-      
+
       if (!email || !password) {
         return res.status(400).json({ message: "Email and password required" });
       }
-      
+
       // Verify admin is configured and credentials match
       if (!isAdminConfigured() || email.toLowerCase() !== ADMIN_EMAIL!.toLowerCase() || password !== ADMIN_PASSWORD) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
-      
+
       // Create or get admin user
       const adminId = "admin-user-id";
       await authStorage.upsertUser({
@@ -196,7 +206,7 @@ export function registerAuthRoutes(app: Express): void {
         profileImageUrl: null,
         role: "admin",
       });
-      
+
       // Set up session for admin
       const adminUser = {
         claims: {
@@ -207,20 +217,20 @@ export function registerAuthRoutes(app: Express): void {
         },
         expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60), // 1 week
       };
-      
+
       req.login(adminUser, async (err: any) => {
         if (err) {
           console.error("Admin login error:", err);
           return res.status(500).json({ message: "Login failed" });
         }
-        
+
         // Track admin login and update last login
         try {
           await authStorage.updateUserLogin(adminId, {
             ipAddress: req.ip || req.socket.remoteAddress || null,
             userAgent: req.headers["user-agent"] || null
           });
-          
+
           await storage.createAuditLog({
             userId: adminId,
             action: "admin_login",
@@ -232,7 +242,7 @@ export function registerAuthRoutes(app: Express): void {
         } catch (auditError) {
           console.error("Failed to create audit log:", auditError);
         }
-        
+
         // Force session save before responding
         req.session.save((saveErr: any) => {
           if (saveErr) {
@@ -281,21 +291,112 @@ export function registerAuthRoutes(app: Express): void {
       if (!req.isAuthenticated() || !req.user) {
         return res.status(401).json({ message: "Unauthorized" });
       }
-      
+
       const userId = req.user.claims?.sub;
       if (!userId) {
         return res.status(401).json({ message: "Unauthorized" });
       }
-      
+
       const user = await authStorage.getUser(userId);
       if (!user) {
         return res.status(401).json({ message: "User not found" });
       }
-      
+
       res.json(user);
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // Magic Link - Request a magic link (passwordless login)
+  app.post("/api/auth/magic-link/send", authRateLimiter, async (req: any, res) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ message: "Email es requerido" });
+      }
+
+      // Dynamic import to avoid circular dependencies
+      const { createMagicLink, getMagicLinkUrl } = await import("../../services/magicLink");
+
+      const result = await createMagicLink(email);
+
+      if (!result.success) {
+        return res.status(500).json({ message: result.error });
+      }
+
+      // In production, send email. For development, return the URL directly
+      const magicLinkUrl = getMagicLinkUrl(result.token!);
+
+      if (process.env.NODE_ENV === "production") {
+        // TODO: Send email with magicLinkUrl
+        console.log(`[MagicLink] Would send email to ${email} with link: ${magicLinkUrl}`);
+        res.json({
+          success: true,
+          message: "Hemos enviado un enlace mágico a tu correo electrónico."
+        });
+      } else {
+        // Development mode - return the URL for testing
+        console.log(`[MagicLink] Development mode - returning link directly`);
+        res.json({
+          success: true,
+          message: "Enlace mágico generado (modo desarrollo)",
+          magicLinkUrl // Only in development!
+        });
+      }
+    } catch (error) {
+      console.error("[MagicLink] Send error:", error);
+      res.status(500).json({ message: "Error al enviar el enlace mágico" });
+    }
+  });
+
+  // Magic Link - Verify token and login
+  app.get("/api/auth/magic-link/verify", async (req: any, res) => {
+    try {
+      const { token } = req.query;
+
+      if (!token || typeof token !== "string") {
+        return res.redirect("/login?error=invalid_token");
+      }
+
+      const { verifyMagicLink } = await import("../../services/magicLink");
+      const result = await verifyMagicLink(token);
+
+      if (!result.success) {
+        return res.redirect(`/login?error=magic_link_expired`);
+      }
+
+      // Create session for the user
+      const userClaims = {
+        claims: {
+          sub: result.user.id,
+          email: result.user.email,
+          first_name: result.user.firstName,
+          last_name: result.user.lastName,
+        },
+        expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
+      };
+
+      req.login(userClaims, (err: any) => {
+        if (err) {
+          console.error("[MagicLink] Login error:", err);
+          return res.redirect("/login?error=login_failed");
+        }
+
+        req.session.save((saveErr: any) => {
+          if (saveErr) {
+            console.error("[MagicLink] Session save error:", saveErr);
+            return res.redirect("/login?error=session_error");
+          }
+          // Redirect to home on success
+          res.redirect("/");
+        });
+      });
+    } catch (error) {
+      console.error("[MagicLink] Verify error:", error);
+      res.redirect("/login?error=verification_failed");
     }
   });
 }

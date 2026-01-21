@@ -5,7 +5,7 @@ import { toolRegistry, type ToolContext, type ToolResult } from "./toolRegistry"
 import { emitTraceEvent } from "./unifiedChatHandler";
 import type { RequestSpec } from "./requestSpec";
 import { renderPresentation, renderDocument, renderSpreadsheet } from "./artifactRenderer";
-import { SlideSpecSchema, DocSpecSchema, SheetSpecSchema } from "./builderSpec";
+import { PresentationSpecSchema, DocSpecSchema, SheetSpecSchema } from "./builderSpec";
 import { randomUUID } from "crypto";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
@@ -153,30 +153,7 @@ const AGENT_TOOLS: FunctionDeclaration[] = [
   }
 ];
 
-function zodToJsonSchema(schema: z.ZodType): any {
-  if (schema instanceof z.ZodObject) {
-    const shape = schema.shape;
-    const properties: Record<string, any> = {};
-    const required: string[] = [];
-    
-    for (const [key, value] of Object.entries(shape)) {
-      const zodValue = value as z.ZodType;
-      properties[key] = zodToJsonSchema(zodValue);
-      if (!(zodValue instanceof z.ZodOptional)) {
-        required.push(key);
-      }
-    }
-    
-    return { type: "object", properties, required: required.length > 0 ? required : undefined };
-  }
-  if (schema instanceof z.ZodString) return { type: "string" };
-  if (schema instanceof z.ZodNumber) return { type: "number" };
-  if (schema instanceof z.ZodBoolean) return { type: "boolean" };
-  if (schema instanceof z.ZodArray) return { type: "array", items: zodToJsonSchema(schema.element) };
-  if (schema instanceof z.ZodOptional) return zodToJsonSchema(schema.unwrap());
-  if (schema instanceof z.ZodEnum) return { type: "string", enum: schema.options };
-  return { type: "string" };
-}
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 function getToolsForIntent(intent: string): FunctionDeclaration[] {
   switch (intent) {
@@ -202,7 +179,7 @@ async function executeToolCall(
   runId: string
 ): Promise<{ result: any; artifact?: { type: string; url: string; name: string } }> {
   console.log(`[AgentExecutor] Executing tool: ${toolName}`, args);
-  
+
   await emitTraceEvent(runId, "tool_call_started", {
     toolCall: {
       id: randomUUID(),
@@ -211,11 +188,11 @@ async function executeToolCall(
       status: "running"
     }
   });
-  
+
   const startTime = Date.now();
   let result: any;
   let artifact: { type: string; url: string; name: string } | undefined;
-  
+
   try {
     switch (toolName) {
       case "web_search": {
@@ -226,7 +203,7 @@ async function executeToolCall(
         result = searchResult.success ? searchResult.output : { error: searchResult.error?.message };
         break;
       }
-      
+
       case "fetch_url": {
         try {
           const { fetchUrl } = await import("../services/webSearch");
@@ -240,7 +217,7 @@ async function executeToolCall(
         }
         break;
       }
-      
+
       case "create_presentation": {
         const slideSpec = {
           title: args.title,
@@ -272,9 +249,9 @@ async function executeToolCall(
           })),
           metadata: { author: context.userId, createdAt: new Date() }
         };
-        
-        const validatedSpec = SlideSpecSchema.parse(slideSpec);
-        const buffer = await renderPresentation(validatedSpec);
+
+        const validatedSpec = PresentationSpecSchema.parse(slideSpec);
+        const { buffer } = await renderPresentation(validatedSpec);
         const filename = `${args.title.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}.pptx`;
         const fs = await import("fs/promises");
         const path = await import("path");
@@ -282,10 +259,10 @@ async function executeToolCall(
         await fs.mkdir(outputDir, { recursive: true });
         const outputPath = path.join(outputDir, filename);
         await fs.writeFile(outputPath, buffer);
-        
+
         result = { success: true, filename, slidesCount: args.slides.length };
         artifact = { type: "presentation", url: `/api/artifacts/${filename}`, name: filename };
-        
+
         await emitTraceEvent(runId, "artifact_created", {
           artifact: {
             id: randomUUID(),
@@ -298,7 +275,7 @@ async function executeToolCall(
         });
         break;
       }
-      
+
       case "create_document": {
         const docSpec = {
           title: args.title,
@@ -311,9 +288,9 @@ async function executeToolCall(
           })),
           metadata: { author: context.userId, createdAt: new Date() }
         };
-        
+
         const validatedSpec = DocSpecSchema.parse(docSpec);
-        const buffer = await renderDocument(validatedSpec);
+        const { buffer } = await renderDocument(validatedSpec);
         const filename = `${args.title.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}.docx`;
         const fs = await import("fs/promises");
         const path = await import("path");
@@ -321,10 +298,10 @@ async function executeToolCall(
         await fs.mkdir(outputDir, { recursive: true });
         const outputPath = path.join(outputDir, filename);
         await fs.writeFile(outputPath, buffer);
-        
+
         result = { success: true, filename, sectionsCount: args.sections.length };
         artifact = { type: "document", url: `/api/artifacts/${filename}`, name: filename };
-        
+
         await emitTraceEvent(runId, "artifact_created", {
           artifact: {
             id: randomUUID(),
@@ -337,7 +314,7 @@ async function executeToolCall(
         });
         break;
       }
-      
+
       case "create_spreadsheet": {
         const sheetSpec = {
           title: args.title,
@@ -360,9 +337,9 @@ async function executeToolCall(
           })),
           metadata: { author: context.userId, createdAt: new Date() }
         };
-        
+
         const validatedSpec = SheetSpecSchema.parse(sheetSpec);
-        const buffer = await renderSpreadsheet(validatedSpec);
+        const { buffer } = await renderSpreadsheet(validatedSpec);
         const filename = `${args.title.replace(/[^a-zA-Z0-9]/g, "_")}_${Date.now()}.xlsx`;
         const fs = await import("fs/promises");
         const path = await import("path");
@@ -370,10 +347,10 @@ async function executeToolCall(
         await fs.mkdir(outputDir, { recursive: true });
         const outputPath = path.join(outputDir, filename);
         await fs.writeFile(outputPath, buffer);
-        
+
         result = { success: true, filename, sheetsCount: args.sheets.length };
         artifact = { type: "spreadsheet", url: `/api/artifacts/${filename}`, name: filename };
-        
+
         await emitTraceEvent(runId, "artifact_created", {
           artifact: {
             id: randomUUID(),
@@ -386,35 +363,95 @@ async function executeToolCall(
         });
         break;
       }
-      
+
       case "analyze_data": {
-        result = {
-          summary: `Analysis of provided data`,
-          type: args.analysisType || "summary",
-          insights: [
-            "Data analysis placeholder - integrate with actual analysis service"
-          ]
-        };
+        try {
+          // Dynamic import to keep startup fast
+          const ss = await import("simple-statistics");
+
+          let parsedData: any[] = [];
+          if (typeof args.data === "string") {
+            try {
+              parsedData = JSON.parse(args.data);
+            } catch {
+              // Try CSV parsing if JSON fails? For now rely on description or basic numbers
+              result = { error: "Could not parse data as JSON" };
+            }
+          } else if (Array.isArray(args.data)) {
+            parsedData = args.data;
+          }
+
+          if (parsedData.length > 0) {
+            // Extract numeric values if it's an array of objects
+            const valueKeys = Object.keys(parsedData[0]).filter(k => typeof parsedData[0][k] === 'number');
+            const insights: string[] = [];
+
+            valueKeys.forEach(key => {
+              const values = parsedData.map((d: any) => d[key]);
+              const mean = ss.mean(values);
+              const median = ss.median(values);
+              const max = ss.max(values);
+              const min = ss.min(values);
+              const stdDev = ss.standardDeviation(values);
+
+              insights.push(`Field '${key}': Mean=${mean.toFixed(2)}, Median=${median}, Range=[${min}, ${max}], StdDev=${stdDev.toFixed(2)}`);
+            });
+
+            result = {
+              summary: `Analysis performed on ${parsedData.length} records.`,
+              type: args.analysisType || "statistical",
+              insights,
+              stats: {
+                recordCount: parsedData.length,
+                fieldsAnalyzed: valueKeys
+              }
+            };
+          } else {
+            result = { error: "No valid data provided for analysis" };
+          }
+        } catch (e: any) {
+          result = { error: `Analysis failed: ${e.message}` };
+        }
         break;
       }
-      
+
       case "generate_chart": {
+        // Return a structured Chart.js/Recharts compatible config
+        const chartConfig = {
+          type: args.chartType,
+          data: args.data, // Expects { labels: [], datasets: [{ label: '', data: [] }] }
+          options: {
+            responsive: true,
+            plugins: {
+              title: {
+                display: true,
+                text: args.title
+              },
+              legend: {
+                position: 'top'
+              }
+            }
+          }
+        };
+
         result = {
+          success: true,
           chartType: args.chartType,
           title: args.title,
-          message: "Chart data prepared for visualization"
+          config: chartConfig,
+          message: "Chart configuration generated successfully"
         };
         break;
       }
-      
+
       default: {
         const toolResult = await toolRegistry.execute(toolName, args, context);
         result = toolResult.success ? toolResult.output : { error: toolResult.error?.message };
       }
     }
-    
+
     const durationMs = Date.now() - startTime;
-    
+
     await emitTraceEvent(runId, "tool_call_succeeded", {
       toolCall: {
         id: randomUUID(),
@@ -425,12 +462,12 @@ async function executeToolCall(
         durationMs
       }
     });
-    
+
     return { result, artifact };
-    
+
   } catch (error: any) {
     const durationMs = Date.now() - startTime;
-    
+
     await emitTraceEvent(runId, "tool_call_failed", {
       toolCall: {
         id: randomUUID(),
@@ -441,7 +478,7 @@ async function executeToolCall(
         durationMs
       }
     });
-    
+
     return { result: { error: error.message } };
   }
 }
@@ -459,15 +496,15 @@ export async function executeAgentLoop(
   options: AgentExecutorOptions
 ): Promise<void> {
   const { runId, userId, chatId, requestSpec, maxIterations = 10 } = options;
-  
+
   const tools = getToolsForIntent(requestSpec.intent);
   const toolContext: ToolContext = { userId, chatId, runId };
-  
+
   const artifacts: Array<{ type: string; url: string; name: string }> = [];
   let iteration = 0;
   let conversationHistory = [...messages];
   let fullResponse = "";
-  
+
   await emitTraceEvent(runId, "progress_update", {
     progress: {
       current: 0,
@@ -475,21 +512,21 @@ export async function executeAgentLoop(
       message: `Starting agent loop with ${tools.length} available tools`
     }
   });
-  
+
   while (iteration < maxIterations) {
     iteration++;
-    
+
     await emitTraceEvent(runId, "thinking", {
       content: `Iteration ${iteration}: Analyzing and planning next action...`,
       phase: "execution"
     });
-    
+
     try {
       const geminiMessages = conversationHistory.map(m => ({
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content }]
       }));
-      
+
       const response = await ai.models.generateContent({
         model: "gemini-2.0-flash",
         contents: geminiMessages as any,
@@ -500,40 +537,40 @@ export async function executeAgentLoop(
         tools: tools.length > 0 ? [{
           functionDeclarations: tools
         }] : undefined
-      });
-      
+      } as any);
+
       const candidate = response.candidates?.[0];
       if (!candidate) {
         throw new Error("No response from model");
       }
-      
+
       const parts = candidate.content?.parts || [];
       let hasToolCall = false;
       let textContent = "";
-      
+
       for (const part of parts) {
         if (part.functionCall) {
           hasToolCall = true;
           const { name, args } = part.functionCall;
-          
+
           writeSse(res, "tool_start", {
             runId,
-            toolName: name,
+            toolName: name!,
             args,
             iteration
           });
-          
+
           const { result, artifact } = await executeToolCall(
-            name,
+            name!,
             args as Record<string, any>,
             toolContext,
             runId
           );
-          
+
           if (artifact) {
             artifacts.push(artifact);
           }
-          
+
           writeSse(res, "tool_result", {
             runId,
             toolName: name,
@@ -541,7 +578,7 @@ export async function executeAgentLoop(
             artifact,
             iteration
           });
-          
+
           conversationHistory.push({
             role: "assistant",
             content: `[Called tool: ${name}]`
@@ -554,11 +591,59 @@ export async function executeAgentLoop(
           textContent += part.text;
         }
       }
-      
+
       if (textContent) {
         fullResponse += textContent;
-        
+
         if (!hasToolCall) {
+          // A1: Agent Verifier - Quality Gate
+          try {
+            // Dynamic import to avoid circular dependencies if any, though explicit import is better. 
+            // Since I can't add top-level imports easily with replace_file_content if I don't target the top, I'll use dynamic import or just hope for the best? 
+            // Actually, I should use multi_replace to add the import.
+            // But wait, I can use dynamic import here to be safe and localized.
+            const { validateResponse } = await import("../services/responseValidator");
+            const validation = validateResponse(textContent);
+
+            if (!validation.isValid && iteration < maxIterations) {
+              console.warn(`[AgentVerifier] Response rejected: ${validation.issues.map(i => i.message).join(", ")}`);
+
+              await emitTraceEvent(runId, "verification_failed", {
+                issues: validation.issues,
+                rejectedContent: textContent.substring(0, 100) + "..."
+              });
+
+              conversationHistory.push({
+                role: "assistant",
+                content: textContent
+              });
+              conversationHistory.push({
+                role: "user",
+                content: `SYSTEM_ALERT: Your response was rejected by the Quality Verifier. 
+Issues detected:
+${validation.issues.map(i => `- ${i.message}`).join("\n")}
+
+Please rewrite your response addressing these issues.`
+              });
+
+              // Skip streaming and continue to next iteration for retry
+              continue;
+            }
+          } catch (err: any) {
+            console.error("[AgentVerifier] Error during validation:", err);
+            // Fail open: if verifier crashes, let the response through but log it
+            await emitTraceEvent(runId, "verification_failed", {
+              error: {
+                message: `Verifier crashed: ${err.message}`,
+                details: { stack: err.stack }
+              },
+              metadata: {
+                checkName: "System Integrity",
+                contentSnippet: textContent.substring(0, 50)
+              }
+            });
+          }
+
           const chunks = textContent.match(/.{1,100}/g) || [textContent];
           for (let i = 0; i < chunks.length; i++) {
             writeSse(res, "chunk", {
@@ -568,11 +653,11 @@ export async function executeAgentLoop(
             });
             await new Promise(r => setTimeout(r, 10));
           }
-          
+
           break;
         }
       }
-      
+
       await emitTraceEvent(runId, "progress_update", {
         progress: {
           current: iteration,
@@ -580,10 +665,10 @@ export async function executeAgentLoop(
           message: `Completed iteration ${iteration}`
         }
       });
-      
+
     } catch (error: any) {
       console.error(`[AgentExecutor] Error in iteration ${iteration}:`, error);
-      
+
       await emitTraceEvent(runId, "error", {
         error: {
           code: "AGENT_EXECUTION_ERROR",
@@ -591,15 +676,15 @@ export async function executeAgentLoop(
           retryable: iteration < maxIterations
         }
       });
-      
+
       if (iteration >= maxIterations) {
         throw error;
       }
     }
   }
-  
+
   if (!fullResponse && iteration >= maxIterations) {
-    const fallbackMsg = artifacts.length > 0 
+    const fallbackMsg = artifacts.length > 0
       ? `I've completed the requested tasks and generated ${artifacts.length} artifact(s) for you.`
       : "I've processed your request. Let me know if you need anything else.";
     writeSse(res, "chunk", {
@@ -608,7 +693,7 @@ export async function executeAgentLoop(
       runId
     });
   }
-  
+
   if (artifacts.length > 0) {
     writeSse(res, "artifacts", {
       runId,
@@ -616,7 +701,7 @@ export async function executeAgentLoop(
       count: artifacts.length
     });
   }
-  
+
   await emitTraceEvent(runId, "agent_completed", {
     agent: {
       name: requestSpec.primaryAgent,

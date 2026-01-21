@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { type AuthenticatedRequest } from "../types/express";
 import { z } from "zod";
 import { storage } from "../storage";
 import { getUpload, getSheets } from "../services/spreadsheetAnalyzer";
@@ -76,16 +77,16 @@ export function createChatRoutes(): Router {
     try {
       const validation = routerRequestSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ 
-          error: "Invalid request body", 
+        return res.status(400).json({
+          error: "Invalid request body",
           details: validation.error.message,
           code: "VALIDATION_ERROR"
         });
       }
 
       const { message, hasAttachments, attachmentTypes } = validation.data;
-      
-      const attachments = hasAttachments 
+
+      const attachments = hasAttachments
         ? attachmentTypes.length > 0
           ? attachmentTypes.map((type, idx) => ({ type, name: `attachment_${idx}` }))
           : [{ type: 'file', name: 'attached' }]
@@ -137,15 +138,15 @@ export function createChatRoutes(): Router {
     try {
       const validation = agentRunRequestSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ 
-          error: "Invalid request body", 
+        return res.status(400).json({
+          error: "Invalid request body",
           details: validation.error.message,
           code: "VALIDATION_ERROR"
         });
       }
 
       const { message, planHint } = validation.data;
-      
+
       console.log(JSON.stringify({
         timestamp: new Date().toISOString(),
         level: "info",
@@ -153,12 +154,12 @@ export function createChatRoutes(): Router {
         event: "agent_run_started",
         objective: message.slice(0, 100),
       }));
-      
+
       const result = await runAgent(message, planHint);
 
       res.json({
         success: result.success,
-        run_id: result.run_id,
+        run_id: crypto.randomUUID(),
         result: result.result,
         state: {
           objective: result.state.objective,
@@ -171,8 +172,8 @@ export function createChatRoutes(): Router {
     } catch (error: any) {
       const errorMsg = error.message || "Failed to run agent";
       console.error("[ChatRoutes] Agent run error:", JSON.stringify({ error: errorMsg, stack: error.stack?.slice(0, 500) }));
-      res.status(500).json({ 
-        error: errorMsg, 
+      res.status(500).json({
+        error: errorMsg,
         code: "AGENT_RUN_ERROR",
         suggestion: "Check server logs for details. If LLM is unavailable, heuristic fallback should apply."
       });
@@ -197,7 +198,7 @@ export function createChatRoutes(): Router {
   router.post("/uploads/:uploadId/analyze", async (req: Request, res: Response) => {
     try {
       const { uploadId } = req.params;
-      const userId = (req as any).user?.id || "anonymous";
+      const userId = (req as AuthenticatedRequest).user?.id || "anonymous";
 
       const validation = analyzeRequestSchema.safeParse(req.body);
       if (!validation.success) {
@@ -206,13 +207,98 @@ export function createChatRoutes(): Router {
 
       const { messageId, scope, sheetsToAnalyze, prompt } = validation.data;
 
-      const upload = await getUpload(uploadId);
+      // First try spreadsheet uploads table
+      let upload = await getUpload(uploadId);
+      let isGenericFile = false;
+      let genericFileData: { id: string; name: string; type: string; storagePath: string | null; status: string } | null = null;
+
+      // If not found in spreadsheetUploads, check files table
+      if (!upload) {
+        const genericFile = await storage.getFile(uploadId);
+        if (genericFile) {
+          isGenericFile = true;
+          genericFileData = {
+            id: genericFile.id,
+            name: genericFile.name,
+            type: genericFile.type,
+            storagePath: genericFile.storagePath,
+            status: genericFile.status,
+          };
+          // Create a compatible upload object for the rest of the logic
+          upload = {
+            id: genericFile.id,
+            originalFilename: genericFile.name,
+            userId: null,
+            storagePath: genericFile.storagePath || '',
+            storageKey: genericFile.storagePath || '',
+            status: genericFile.status as any,
+            createdAt: new Date(),
+            fileSize: genericFile.size,
+            mimeType: genericFile.type,
+            checksum: '',
+          } as any;
+        }
+      }
+
       if (!upload) {
         return res.status(404).json({ error: "Upload not found" });
       }
 
+      // For generic files (PDF, DOCX, etc.) - use a simpler analysis path
+      if (isGenericFile && genericFileData) {
+        const baseName = (genericFileData.name || 'Document').replace(/\.[^.]+$/, '');
+
+        // Check if file is already processed
+        if (genericFileData.status === 'ready') {
+          // Get the already-processed content from file chunks
+          const chunks = await storage.getFileChunks(uploadId);
+          const content = chunks
+            .sort((a, b) => a.chunkIndex - b.chunkIndex)
+            .map(c => c.content)
+            .join("\n");
+
+          // Create a simple analysis record for tracking
+          const chatAnalysis = await storage.createChatMessageAnalysis({
+            messageId: messageId || null,
+            uploadId,
+            status: "completed",
+            scope,
+            sheetsToAnalyze: [baseName],
+            startedAt: new Date(),
+            completedAt: new Date(),
+            summary: `Documento "${baseName}" procesado. Contenido disponible para análisis.`,
+          });
+
+          return res.json({
+            analysisId: chatAnalysis.id,
+            sessionId: `doc_${uploadId}`,
+            status: "completed" as const,
+            fileContent: content.length > 10000 ? content.substring(0, 10000) + "..." : content,
+            message: `El documento "${genericFileData.name}" ha sido procesado y está listo para consultas.`,
+          });
+        } else if (genericFileData.status === 'processing') {
+          // File is still being processed
+          return res.json({
+            analysisId: `pending_${uploadId}`,
+            sessionId: null,
+            status: "analyzing" as const,
+            message: "El documento aún se está procesando. Por favor, espere unos segundos.",
+          });
+        } else {
+          // File processing failed or unknown status
+          return res.status(400).json({
+            error: "El documento no pudo ser procesado",
+            status: genericFileData.status
+          });
+        }
+      }
+
+      // Original spreadsheet analysis logic
+      // At this point, isGenericFile is false, so upload is from spreadsheetUploads table
+      const spreadsheetUpload = upload as { originalFilename?: string | null; fileName?: string | null };
       let targetSheets: string[];
-      const isSpreadsheet = isSpreadsheetFile(upload.originalFilename || '');
+      const filename = spreadsheetUpload.originalFilename || spreadsheetUpload.fileName || '';
+      const isSpreadsheet = isSpreadsheetFile(filename);
 
       if (isSpreadsheet) {
         const sheets = await getSheets(uploadId);
@@ -231,7 +317,7 @@ export function createChatRoutes(): Router {
           targetSheets = sheets.map(s => s.name);
         }
       } else {
-        const baseName = (upload.originalFilename || 'Document').replace(/\.[^.]+$/, '');
+        const baseName = (filename || 'Document').replace(/\.[^.]+$/, '');
         targetSheets = [baseName];
       }
 
@@ -301,8 +387,8 @@ export function createChatRoutes(): Router {
         error?: string;
       }
 
-      let progressData = { 
-        currentSheet: 0, 
+      let progressData = {
+        currentSheet: 0,
         totalSheets: 0,
         sheets: [] as SheetStatus[]
       };
@@ -310,13 +396,13 @@ export function createChatRoutes(): Router {
         crossSheetSummary?: string;
         sheets: SheetResult[];
       } = { sheets: [] };
-      let overallStatus: "pending" | "analyzing" | "completed" | "failed" = chatAnalysis.status as any;
+      let overallStatus: "pending" | "analyzing" | "completed" | "failed" = chatAnalysis.status as "pending" | "analyzing" | "completed" | "failed";
       let errorMessage: string | undefined;
 
       if (chatAnalysis.sessionId) {
         try {
           const analysisProgress = await getAnalysisProgress(chatAnalysis.sessionId);
-          
+
           progressData = {
             currentSheet: analysisProgress.completedJobs,
             totalSheets: analysisProgress.totalJobs,
@@ -331,7 +417,7 @@ export function createChatRoutes(): Router {
             const results = await getAnalysisResults(chatAnalysis.sessionId);
             if (results) {
               resultsData.crossSheetSummary = results.crossSheetSummary;
-              
+
               resultsData.sheets = analysisProgress.jobs.map(job => {
                 const sheetResults = results.perSheet[job.sheetName];
                 if (!sheetResults) {
@@ -349,11 +435,11 @@ export function createChatRoutes(): Router {
 
                 const PREVIEW_ROW_LIMIT = 100;
                 const PREVIEW_COL_LIMIT = 50;
-                
+
                 let preview: { headers: string[]; rows: any[][]; meta?: { totalRows: number; totalCols: number; truncated: boolean } } | undefined;
                 const tables = sheetResults.outputs?.tables || [];
                 if (tables.length > 0 && Array.isArray(tables[0])) {
-                  const tableData = tables[0] as any[];
+                  const tableData = tables[0] as unknown[];
                   if (tableData.length > 0) {
                     const firstRow = tableData[0];
                     if (typeof firstRow === 'object' && firstRow !== null) {
@@ -362,16 +448,16 @@ export function createChatRoutes(): Router {
                       const totalRows = tableData.length;
                       const totalCols = allHeaders.length;
                       const truncated = totalRows > PREVIEW_ROW_LIMIT || totalCols > PREVIEW_COL_LIMIT;
-                      
+
                       preview = {
                         headers: limitedHeaders,
                         rows: tableData.slice(0, PREVIEW_ROW_LIMIT).map(row => {
-                          const values = Object.values(row) as any[];
+                          const values = Object.values(row as Record<string, unknown>);
                           return values.slice(0, PREVIEW_COL_LIMIT);
                         }),
                         meta: { totalRows, totalCols, truncated },
                       };
-                      
+
                       analysisLogger.trackPreviewGeneration(
                         { uploadId, sessionId: chatAnalysis.sessionId || undefined },
                         Math.min(totalRows, PREVIEW_ROW_LIMIT),
@@ -393,7 +479,7 @@ export function createChatRoutes(): Router {
             }
 
             overallStatus = analysisProgress.status;
-            
+
             if (chatAnalysis.status !== "completed" && chatAnalysis.status !== "failed") {
               await storage.updateChatMessageAnalysis(chatAnalysis.id, {
                 status: analysisProgress.status,
@@ -437,14 +523,14 @@ export function createChatRoutes(): Router {
     try {
       const validation = intentRequestSchema.safeParse(req.body);
       if (!validation.success) {
-        return res.status(400).json({ 
-          error: "Invalid request body", 
-          details: validation.error.message 
+        return res.status(400).json({
+          error: "Invalid request body",
+          details: validation.error.message
         });
       }
 
       const { message, sessionId, userId, skipQualityGate, skipSelfHeal } = validation.data;
-      
+
       const result = await intentEnginePipeline.process(message, {
         sessionId: sessionId || `session_${Date.now()}`,
         userId: userId || 'anonymous',
