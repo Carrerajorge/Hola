@@ -45,17 +45,38 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         return next();
     }
 
-    // Exempt pre-authentication endpoints from CSRF (user has no session/token yet)
+    // Exempt pre-authentication endpoints and essential API routes from CSRF
     const CSRF_EXEMPT_PATHS = [
         "/api/auth/login",
         "/api/auth/admin-login",
         "/api/auth/logout",
+        "/api/auth/google",
+        "/api/auth/google/callback",
+        "/api/auth/microsoft",
+        "/api/auth/microsoft/callback",
+        "/api/auth/magic-link/send",
+        "/api/auth/magic-link/verify",
         "/api/callback",
         "/api/login",
     ];
+
+    // Also exempt paths that start with certain prefixes
+    const CSRF_EXEMPT_PREFIXES = [
+        "/api/chat",
+        "/api/conversations",
+        "/api/messages",
+        "/api/sse",
+        "/api/stream",
+    ];
+
     if (CSRF_EXEMPT_PATHS.some(path => req.path === path || req.originalUrl === path)) {
         return next();
     }
+
+    if (CSRF_EXEMPT_PREFIXES.some(prefix => req.path.startsWith(prefix) || req.originalUrl.startsWith(prefix))) {
+        return next();
+    }
+
 
     const cookies = ensureCookies(req);
 
