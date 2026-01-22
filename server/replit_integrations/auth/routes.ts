@@ -5,6 +5,8 @@ import { storage } from "../../storage";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
 import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/rateLimiter";
 import microsoftAuthRouter from "../../auth/microsoftAuth";
+import googleAuthRouter from "../../auth/googleAuth";
+
 
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
@@ -20,7 +22,11 @@ export function registerAuthRoutes(app: Express): void {
   // Microsoft OAuth routes
   app.use("/api/auth", microsoftAuthRouter);
 
+  // Google OAuth routes
+  app.use("/api/auth", googleAuthRouter);
+
   // Auth metrics endpoint (admin only)
+
 
   app.get("/api/auth/metrics", isAuthenticated, async (req: any, res) => {
     try {
