@@ -63,6 +63,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
     // Also exempt paths that start with certain prefixes
     const CSRF_EXEMPT_PREFIXES = [
         "/api/chat",
+        "/api/chats",  // Added plural form
         "/api/conversations",
         "/api/messages",
         "/api/sse",
