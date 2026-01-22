@@ -175,12 +175,15 @@ router.post("/super/stream", async (req: Request, res: Response) => {
     const runId = run_id || `run_${randomUUID()}`;
 
     // CONTEXT FIX: Augment client messages with server-side history
-    const fullHistory = await conversationMemoryManager.augmentWithHistory(
+    const conversationHistory = await conversationMemoryManager.augmentWithHistory(
       chat_id,
-      clientMessages || [],
+      [
+        { role: "user", content: prompt },
+        { role: "system", content: "You are a SuperAgent." }
+      ] as any,
       6000
     );
-    console.log(`[SuperAgent] Context augmented: ${clientMessages?.length || 0} client msgs -> ${fullHistory.length} total`);
+    console.log(`[SuperAgent] Context augmented: ${clientMessages?.length || 0} client msgs -> ${conversationHistory.length} total`);
 
     const classifiedIntent = classifyPromptIntent(prompt);
     console.log(`[SuperAgent] Intent classified: ${classifiedIntent.category}, topic: "${classifiedIntent.topic.substring(0, 50)}..."`);
@@ -250,12 +253,11 @@ router.post("/super/stream", async (req: Request, res: Response) => {
             currentPhase = "signals";
           }
           break;
-        case "source":
         case "source_signal":
           // Both source and source_signal events increment article counter
           articlesCollected++;
           console.log(`[SuperAgent] source_signal received: articlesCollected=${articlesCollected}, type=${event.event_type}`);
-          const sourceData = event.data || {};
+          const sourceData = (event.data || {}) as any;
           if (sourceData.doi || sourceData.title) {
             traceBus.sourceCollected(
               "SuperAgent",
@@ -280,18 +282,6 @@ router.post("/super/stream", async (req: Request, res: Response) => {
             currentPhase = "verification";
           }
           break;
-        case "source_verified":
-          articlesVerified++;
-          if (event.data?.doi) {
-            traceBus.sourceVerified("SuperAgent", event.data.doi, event.data.title_similarity || 0.9);
-          }
-          traceBus.toolProgress("SuperAgent", `Verified ${articlesVerified} sources`,
-            40 + Math.min(40, (articlesVerified / 50) * 40),
-            {
-              articles_verified: articlesVerified,
-              articles_accepted: articlesVerified  // Frontend shows this
-            }
-          );
           break;
         case "artifact":
           if (currentPhase === "verification") {
@@ -299,11 +289,12 @@ router.post("/super/stream", async (req: Request, res: Response) => {
             traceBus.phaseStarted("SuperAgent", "export", "Generating Excel file");
             currentPhase = "export";
           }
+          const artifactData = (event.data || {}) as any;
           traceBus.artifactCreated(
             "SuperAgent",
-            event.data?.type || "xlsx",
-            event.data?.name || "output.xlsx",
-            event.data?.url || `/api/super/artifacts/${event.data?.id}/download`
+            artifactData?.type || "xlsx",
+            artifactData?.name || "output.xlsx",
+            artifactData?.url || `/api/super/artifacts/${artifactData?.id}/download`
           );
           break;
         case "final":
@@ -322,9 +313,10 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           break;
         case "error":
           if (!runCompleted) {
-            traceBus.runFailed("SuperAgent", event.data?.message || "Unknown error", {
+            const errorData = (event.data || {}) as any;
+            traceBus.runFailed("SuperAgent", errorData?.message || "Unknown error", {
               error_code: "EXECUTION_ERROR",
-              fail_reason: event.data?.message,
+              fail_reason: errorData?.message,
             });
             runCompleted = true;
           }
@@ -333,7 +325,7 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           traceBus.heartbeat();
           break;
         case "search_progress":
-          const searchData = event.data || {};
+          const searchData = (event.data || {}) as any;
           articlesCollected = searchData.candidates_found || articlesCollected;
           traceBus.searchProgress("SuperAgent", {
             provider: (searchData.provider?.toLowerCase() || "openalex") as "openalex" | "crossref" | "semantic_scholar",
@@ -345,7 +337,7 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           });
           break;
         case "progress":
-          const progressData = event.data || {};
+          const progressData = (event.data || {}) as any;
           if (progressData.phase === "signals" && progressData.count) {
             articlesCollected = progressData.count;
             traceBus.progressUpdate("SuperAgent", Math.min(40, (articlesCollected / 50) * 40), {
@@ -354,7 +346,7 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           }
           break;
         case "verify_progress":
-          const verifyData = event.data || {};
+          const verifyData = (event.data || {}) as any;
           articlesVerified = verifyData.ok || 0;
           traceBus.verifyProgress("SuperAgent", {
             checked: verifyData.checked || 0,
@@ -363,7 +355,7 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           });
           break;
         case "accepted_progress":
-          const acceptedData = event.data || {};
+          const acceptedData = (event.data || {}) as any;
           traceBus.acceptedProgress("SuperAgent", {
             accepted: acceptedData.accepted || 0,
             target: acceptedData.target || 50,
@@ -375,11 +367,17 @@ router.post("/super/stream", async (req: Request, res: Response) => {
           });
           break;
         case "export_progress":
-          const exportData = event.data || {};
+          const exportData = (event.data || {}) as any;
           traceBus.exportProgress("SuperAgent", {
             columns_count: exportData.columns_count || 15,
             rows_written: exportData.rows_written || articlesVerified,
             target: exportData.target || 50,
+          });
+          break;
+        case "thought":
+          const thoughtData = (event.data || {}) as any;
+          traceBus.thought("SuperAgent", "Thinking...", {
+            content: thoughtData?.content || "Processing..."
           });
           break;
       }

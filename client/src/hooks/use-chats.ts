@@ -109,6 +109,7 @@ export interface Message {
   confidence?: 'high' | 'medium' | 'low';
   uncertaintyReason?: string;
   metadata?: Record<string, any>;
+  retrievalSteps?: { id: string; label: string; status: "pending" | "active" | "complete" | "error"; detail?: string }[];
 }
 
 export interface Chat {
@@ -622,6 +623,7 @@ export function useChats() {
                 webSources: msg.webSources,
                 confidence: msg.confidence,
                 uncertaintyReason: msg.uncertaintyReason,
+                retrievalSteps: msg.retrievalSteps,
               };
             }),
           };

@@ -9,14 +9,17 @@ import { chunkText, generateEmbeddingsBatch } from "./embeddingService";
 import { StepUpdate } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
+import { globalAuditMiddleware } from "./middleware/audit";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { generateAnonToken } from "./lib/anonToken";
 import { pptExportRouter } from "./routes/pptExport";
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from "./lib/swagger";
 import { createChatsRouter } from "./routes/chatsRouter";
 import { createFilesRouter } from "./routes/filesRouter";
 import { createGptRouter } from "./routes/gptRouter";
 import { createDocumentsRouter } from "./routes/documentsRouter";
-import { createAdminRouter } from "./routes/adminRouter";
+import { createAdminRouter } from "./routes/admin";
 import { createRetrievalAdminRouter } from "./routes/retrievalAdminRouter";
 import { createAgentRouter } from "./routes/agentRouter";
 import { createFigmaRouter } from "./routes/figmaRouter";
@@ -222,6 +225,9 @@ export async function registerRoutes(
   // Global Compression Middleware (Gzip)
   app.use(compression);
 
+  // Global Audit Middleware (Logs mutations)
+  app.use(globalAuditMiddleware);
+
   // Session identity endpoint for consistent user ID across frontend/backend
 
   // Session identity endpoint for consistent user ID across frontend/backend
@@ -297,8 +303,16 @@ export async function registerRoutes(
   app.use("/api/integrations/google/gmail", createGmailRouter());
   app.use("/api/oauth/google/gmail", gmailOAuthRouter);
   app.use("/mcp/gmail", createGmailMcpRouter());
+
+
+  // ... existing imports ...
+
   app.use("/health", healthRouter);
   app.use("/health/pare", createPareHealthRouter());
+
+  // API Documentation
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
   app.get("/metrics", metricsHandler);
   app.get("/api/pare/metrics", (_req: Request, res: Response) => {
     res.json({

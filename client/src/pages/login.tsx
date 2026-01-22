@@ -55,10 +55,8 @@ export default function LoginPage() {
 
         if (response.ok) {
           const data = await response.json();
-          if (data.user) {
-            localStorage.setItem("siragpt_auth_user", JSON.stringify(data.user));
-            queryClient.setQueryData(["/api/auth/user"], data.user);
-          }
+          // Let the AuthProvider and query client handle state sync on redirect/mount
+          // queryClient.setQueryData(["/api/auth/user"], data.user);
           window.location.href = "/";
         } else {
           const data = await response.json();

@@ -28,9 +28,9 @@ Your responsibilities:
 6. Optimize execution order for efficiency
 
 Available specialized agents:
-- ResearchAgent: Web research, information gathering, fact-checking
+- ResearchAssistantAgent: Web research, information gathering, fact-checking
 - CodeAgent: Code generation, review, refactoring, debugging
-- DataAgent: Data analysis, transformation, visualization
+- DataAnalystAgent: Data analysis, transformation, visualization
 - ContentAgent: Content creation, document generation
 - CommunicationAgent: Email, notifications, messaging
 - BrowserAgent: Autonomous web navigation and interaction
@@ -110,7 +110,7 @@ Return a JSON plan with:
 
     const content = response.choices[0].message.content || "{}";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
-    
+
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]) as ExecutionPlan;
     }
@@ -137,7 +137,7 @@ Return a JSON plan with:
 
     for (const group of plan.parallelGroups) {
       const groupSteps = plan.steps.filter(s => group.includes(s.id));
-      
+
       const groupPromises = groupSteps.map(async (step) => {
         const canExecute = step.dependencies.every(d => completedSteps.has(d));
         if (!canExecute) {
@@ -152,11 +152,13 @@ Return a JSON plan with:
             description: step.action,
             input: step.input,
             priority: step.priority as any,
+            retries: 0,
+            maxRetries: 3,
           });
           completedSteps.add(step.id);
           return { stepId: step.id, success: result.success, output: result.output, error: result.error };
         }
-        
+
         const directResult = await this.executeDirectly(step);
         completedSteps.add(step.id);
         return directResult;
@@ -164,7 +166,7 @@ Return a JSON plan with:
 
       const groupResults = await Promise.all(groupPromises);
       results.push(...groupResults);
-      
+
       this.updateState({ progress: Math.round((completedSteps.size / plan.steps.length) * 100) });
     }
 

@@ -20,6 +20,86 @@ export function createChatsRouter() {
     }
   });
 
+  /**
+   * @swagger
+   * /chats/search:
+   *   get:
+   *     summary: Search chat messages
+   *     description: Full-text search across all user messages using Postgres tsvector.
+   *     tags: [Chats]
+   *     parameters:
+   *       - in: query
+   *         name: q
+   *         schema:
+   *           type: string
+   *         required: true
+   *         description: Search query
+   *     responses:
+   *       200:
+   *         description: List of matching messages
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 type: object
+   *                 properties:
+   *                   id:
+   *                     type: string
+   *                   content:
+   *                     type: string
+   *                   role:
+   *                     type: string
+   *       401:
+   *         description: Unauthorized
+   */
+  router.get("/chats/search", async (req, res) => {
+    try {
+      const userId = getSecureUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const { q } = req.query;
+      if (!q || typeof q !== 'string') {
+        return res.status(400).json({ error: "Query parameter 'q' is required" });
+      }
+
+      const messages = await storage.searchMessages(userId, q);
+      res.json(messages);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * @swagger
+   * /chats:
+   *   post:
+   *     summary: Create a new chat
+   *     tags: [Chats]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               title:
+   *                 type: string
+   *               messages:
+   *                 type: array
+   *                 items:
+   *                   type: object
+   *                   properties:
+   *                     role:
+   *                       type: string
+   *                     content:
+   *                       type: string
+   *     responses:
+   *       200:
+   *         description: Chat created
+   */
   router.post("/chats", async (req, res) => {
     try {
       const { title, messages } = req.body;

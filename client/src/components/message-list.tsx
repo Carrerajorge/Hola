@@ -93,6 +93,7 @@ import { LiveExecutionConsole } from "@/components/live-execution-console";
 import { PhaseNarrator } from "@/components/thinking-indicator";
 import { PlanViewer } from "@/components/agent/PlanViewer";
 import { detectClientIntent } from "@/lib/clientIntentDetector";
+import { RetrievalVis } from "@/components/retrieval-vis";
 
 const formatMessageTime = (timestamp: Date | undefined): string => {
   if (!timestamp) return "";
@@ -1793,6 +1794,12 @@ const AssistantMessage = memo(function AssistantMessage({
               </span>
             </div>
           ))}
+        </div>
+      )}
+
+      {message.retrievalSteps && message.retrievalSteps.length > 0 && (
+        <div className="mb-3 w-full max-w-sm">
+          <RetrievalVis steps={message.retrievalSteps} />
         </div>
       )}
 

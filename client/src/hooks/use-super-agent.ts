@@ -14,7 +14,9 @@ export type SSEEventType =
   | "final"
   | "error"
   | "heartbeat"
-  | "progress";
+  | "heartbeat"
+  | "progress"
+  | "thought";
 
 export type SuperAgentPhase =
   | "idle"
@@ -109,6 +111,11 @@ export interface SuperAgentFinal {
   iterations: number;
 }
 
+export interface SuperAgentThought {
+  content: string;
+  timestamp: number;
+}
+
 export interface SuperAgentState {
   sessionId: string | null;
   runId: string | null;
@@ -125,6 +132,7 @@ export interface SuperAgentState {
   error: string | null;
   iteration: number;
   progress: SuperAgentProgress | null;
+  thoughts: SuperAgentThought[];
   narration: string;
 }
 
@@ -144,6 +152,7 @@ const initialState: SuperAgentState = {
   error: null,
   iteration: 0,
   progress: null,
+  thoughts: [],
   narration: "⚡ Iniciando...",
 };
 
@@ -317,6 +326,22 @@ export function useSuperAgentStream(): UseSuperAgentReturn {
 
         case "heartbeat": {
           return nextState;
+        }
+
+        case "thought": {
+          const thoughtData = data as { content: string };
+          return {
+            ...nextState,
+            thoughts: [
+              ...nextState.thoughts,
+              {
+                content: thoughtData.content,
+                timestamp: Date.now()
+              }
+            ],
+            // Update narration to show thinking status if needed, or keep latest
+            narration: "🤔 Razonando..."
+          };
         }
 
         default:

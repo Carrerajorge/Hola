@@ -136,7 +136,8 @@ export const SSEEventTypeSchema = z.enum([
   "filter_progress",
   "export_progress",
   "accepted_progress",
-  "verify_progress"
+  "verify_progress",
+  "thought"
 ]);
 // ...
 

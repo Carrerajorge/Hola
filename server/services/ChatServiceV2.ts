@@ -140,6 +140,11 @@ export interface ChatResponse {
     artifacts?: any[];
     agenticMetadata?: any;
     documentAgenticMetadata?: any;
+    usage?: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+    };
 }
 
 export type LLMProvider = "xai" | "gemini";

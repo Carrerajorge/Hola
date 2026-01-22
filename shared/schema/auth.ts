@@ -1,0 +1,150 @@
+import { sql } from "drizzle-orm";
+import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+// Session storage table for Replit Auth
+export const sessions = pgTable(
+    "sessions",
+    {
+        sid: varchar("sid").primaryKey(),
+        sess: jsonb("sess").notNull(),
+        expire: timestamp("expire").notNull(),
+    },
+    (table) => [index("IDX_session_expire").on(table.expire)]
+);
+
+// Magic Links table for passwordless email authentication
+export const magicLinks = pgTable("magic_links", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull(),
+    token: varchar("token").notNull().unique(),
+    expiresAt: timestamp("expires_at").notNull(),
+    used: boolean("used").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+    index("magic_links_token_idx").on(table.token),
+    index("magic_links_user_idx").on(table.userId),
+]);
+
+export type MagicLink = typeof magicLinks.$inferSelect;
+
+// Users table (compatible with Replit Auth) - Enterprise-grade
+export const users = pgTable("users", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    username: text("username"),
+    password: text("password"),
+    email: text("email").unique(),
+    firstName: varchar("first_name"),
+    lastName: varchar("last_name"),
+    fullName: varchar("full_name"),
+    profileImageUrl: varchar("profile_image_url"),
+    phone: varchar("phone"),
+    company: varchar("company"),
+    role: text("role").default("user"), // admin, editor, viewer, api_only, user
+    plan: text("plan").default("free"), // free, pro, enterprise
+    status: text("status").default("active"), // active, inactive, suspended, pending_verification
+    queryCount: integer("query_count").default(0),
+    tokensConsumed: integer("tokens_consumed").default(0),
+    tokensLimit: integer("tokens_limit").default(100000),
+    creditsBalance: integer("credits_balance").default(0),
+    lastLoginAt: timestamp("last_login_at"),
+    lastIp: varchar("last_ip"),
+    userAgent: text("user_agent"),
+    countryCode: varchar("country_code", { length: 2 }),
+    authProvider: text("auth_provider").default("email"), // email, google, sso
+    is2faEnabled: text("is_2fa_enabled").default("false"),
+    emailVerified: text("email_verified").default("false"),
+    referralCode: varchar("referral_code"),
+    referredBy: varchar("referred_by"),
+    internalNotes: text("internal_notes"),
+    tags: text("tags").array(),
+    subscriptionExpiresAt: timestamp("subscription_expires_at"),
+    dailyRequestsUsed: integer("daily_requests_used").default(0),
+    dailyRequestsLimit: integer("daily_requests_limit").default(3),
+    dailyRequestsResetAt: timestamp("daily_requests_reset_at"),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertUserSchema = createInsertSchema(users).pick({
+    username: true,
+    password: true,
+});
+
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
+
+// User Settings table - one settings record per user
+export const responsePreferencesSchema = z.object({
+    responseStyle: z.enum(['default', 'formal', 'casual', 'concise']).default('default'),
+    responseTone: z.string().default(''),
+    customInstructions: z.string().default(''),
+});
+
+export const userProfileSchema = z.object({
+    nickname: z.string().default(''),
+    occupation: z.string().default(''),
+    bio: z.string().default(''),
+});
+
+export const featureFlagsSchema = z.object({
+    memoryEnabled: z.boolean().default(false),
+    recordingHistoryEnabled: z.boolean().default(false),
+    webSearchAuto: z.boolean().default(true),
+    codeInterpreterEnabled: z.boolean().default(true),
+    canvasEnabled: z.boolean().default(true),
+    voiceEnabled: z.boolean().default(true),
+    voiceAdvanced: z.boolean().default(false),
+    connectorSearchAuto: z.boolean().default(false),
+});
+
+export const privacySettingsSchema = z.object({
+    trainingOptIn: z.boolean().default(false),
+    remoteBrowserDataAccess: z.boolean().default(false),
+});
+
+export const userSettings = pgTable("user_settings", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+    responsePreferences: jsonb("response_preferences").$type<z.infer<typeof responsePreferencesSchema>>(),
+    userProfile: jsonb("user_profile").$type<z.infer<typeof userProfileSchema>>(),
+    featureFlags: jsonb("feature_flags").$type<z.infer<typeof featureFlagsSchema>>(),
+    privacySettings: jsonb("privacy_settings").$type<z.infer<typeof privacySettingsSchema>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+    index("user_settings_user_id_idx").on(table.userId),
+]);
+
+export const insertUserSettingsSchema = createInsertSchema(userSettings).omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+}).extend({
+    responsePreferences: responsePreferencesSchema.optional(),
+    userProfile: userProfileSchema.optional(),
+    featureFlags: featureFlagsSchema.optional(),
+    privacySettings: privacySettingsSchema.optional(),
+});
+
+export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
+export type UserSettings = typeof userSettings.$inferSelect;
+
+// Consent Logs - Audit trail for privacy consent changes
+export const consentLogs = pgTable("consent_logs", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    consentType: text("consent_type").notNull(), // 'training_opt_in', 'remote_browser_access'
+    value: text("value").notNull(), // 'true' or 'false'
+    consentVersion: text("consent_version").default("1.0"),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+    index("consent_logs_user_idx").on(table.userId),
+]);
+
+export type ConsentLog = typeof consentLogs.$inferSelect;

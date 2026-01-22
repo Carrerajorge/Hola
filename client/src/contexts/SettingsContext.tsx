@@ -29,7 +29,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applyTheme(settings.appearance);
-    
+
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => {
       if (settings.appearance === "system") {
@@ -37,7 +37,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         applyAccentColor(settings.accentColor);
       }
     };
-    
+
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, [settings.appearance]);
@@ -48,7 +48,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const wrappedUpdateSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
     updateSetting(key, value);
-    
+
     if (key === "appearance") {
       applyTheme(value as UserSettings["appearance"]);
       setTimeout(() => applyAccentColor(settings.accentColor), 0);
@@ -59,10 +59,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SettingsContext.Provider value={{ 
-      settings, 
-      updateSetting: wrappedUpdateSetting, 
-      updateSettings, 
+    <SettingsContext.Provider value={{
+      settings,
+      updateSetting: wrappedUpdateSetting,
+      updateSettings,
       resetSettings,
       syncSettingsToServer,
       loadSettingsFromServer,

@@ -211,6 +211,16 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
       // userId already extracted above
 
       if (userId) {
+        // 1. Token Quota Check (Read-only)
+        const hasTokenQuota = await usageQuotaService.hasTokenQuota(userId);
+        if (!hasTokenQuota) {
+          return res.status(402).json({
+            error: "Has excedido tu límite de tokens. Actualiza tu plan para continuar.",
+            code: "TOKEN_QUOTA_EXCEEDED"
+          });
+        }
+
+        // 2. Daily Request Limit Check (Increments)
         const usageCheck = await usageQuotaService.checkAndIncrementUsage(userId);
         if (!usageCheck.allowed) {
           return res.status(402).json({
@@ -362,6 +372,13 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
         onAgentProgress: (update) => broadcastAgentUpdate(update.runId, update)
       });
 
+      // Token Usage Accounting
+      if (userId && response.usage?.totalTokens) {
+        usageQuotaService.recordTokenUsage(userId, response.usage.totalTokens).catch(err => {
+          console.error(`[Chat API] Failed to record token usage for user ${userId}:`, err);
+        });
+      }
+
       if (userId) {
         try {
           await storage.createAuditLog({
@@ -375,7 +392,8 @@ export function createChatAiRouter(broadcastAgentUpdate: (runId: string, update:
               documentMode: documentMode || false,
               hasImages: !!images && images.length > 0,
               gptId: gptSessionContract?.gptId || gptConfig?.id || null,
-              configVersion: gptSessionContract?.configVersion || null
+              configVersion: gptSessionContract?.configVersion || null,
+              tokens: response.usage?.totalTokens || 0
             }
           });
         } catch (auditError) {

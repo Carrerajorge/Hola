@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as pkg from "pg";
+import type { PoolClient } from "pg";
 import * as schema from "../shared/schema";
 import { Registry, Histogram, Counter, Gauge } from 'prom-client';
 import { env } from "./config/env";
@@ -14,26 +15,47 @@ const pool = new Pool({
   idleTimeoutMillis: 10000, // Close idle connections faster (10s) to free up resources
   connectionTimeoutMillis: 5000, // Fail fast
   allowExitOnIdle: false,
-  application_name: 'michat_server', // Tag connections for PG logs
+  application_name: 'michat_server_write', // Tag connections for PG logs
 });
+
+// Read Replica Pool (Optional)
+const poolRead = env.DATABASE_READ_URL ? new Pool({
+  connectionString: env.DATABASE_READ_URL,
+  max: env.DB_POOL_MAX || (env.NODE_ENV === 'production' ? 20 : 5),
+  min: env.DB_POOL_MIN || 2,
+  idleTimeoutMillis: 10000,
+  connectionTimeoutMillis: 5000,
+  allowExitOnIdle: false,
+  application_name: 'michat_server_read',
+}) : pool; // Fallback to primary pool if no read replica
 
 pool.on('error', (err: any) => {
   if (err.code === '57P01') {
-    Logger.warn('[DB] Connection terminated by administrator, pool will reconnect automatically');
+    Logger.warn('[DB Write] Connection terminated by administrator, pool will reconnect automatically');
   } else {
-    Logger.error('[DB] Unexpected error on idle client:', err.message || err);
+    Logger.error('[DB Write] Unexpected error on idle client:', err.message || err);
   }
   healthState.consecutiveFailures++;
   updateHealthStatus();
 });
 
+if (env.DATABASE_READ_URL) {
+  poolRead.on('error', (err: any) => {
+    Logger.error('[DB Read] Unexpected error on idle client:', err.message || err);
+  });
+  poolRead.on('connect', () => {
+    Logger.info('[DB Read] New client connected to read pool');
+  });
+}
+
 pool.on('connect', () => {
-  Logger.info('[DB] New client connected to pool');
+  Logger.info('[DB Write] New client connected to pool');
 });
 
-export { pool };
+export { pool, poolRead };
 
 export const db = drizzle(pool, { schema });
+export const dbRead = drizzle(poolRead, { schema });
 
 export type HealthStatus = 'HEALTHY' | 'DEGRADED' | 'UNHEALTHY';
 
@@ -123,7 +145,7 @@ async function performHealthCheck(): Promise<boolean> {
   }
 
   const startTime = Date.now();
-  let client: pg.PoolClient | null = null;
+  let client: PoolClient | null = null;
 
   try {
     const timeoutPromise = new Promise<never>((_, reject) => {

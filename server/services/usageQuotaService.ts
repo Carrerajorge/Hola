@@ -39,7 +39,7 @@ function getNextMidnight(): Date {
 export class UsageQuotaService {
   async checkAndIncrementUsage(userId: string): Promise<UsageCheckResult> {
     const [user] = await db.select().from(users).where(eq(users.id, userId));
-    
+
     if (!user) {
       return {
         allowed: false,
@@ -54,7 +54,7 @@ export class UsageQuotaService {
     const isAdmin = user.email === ADMIN_EMAIL || user.role === "admin";
     const plan = isAdmin ? "admin" : (user.plan || "free");
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
-    
+
     if (isAdmin || planLimits.dailyRequests === -1) {
       return {
         allowed: true,
@@ -72,7 +72,7 @@ export class UsageQuotaService {
     if (!resetAt || now >= resetAt) {
       currentUsed = 0;
       const nextReset = getNextMidnight();
-      
+
       await db.update(users)
         .set({
           dailyRequestsUsed: 1,
@@ -120,7 +120,7 @@ export class UsageQuotaService {
 
   async getUsageStatus(userId: string): Promise<UsageCheckResult> {
     const [user] = await db.select().from(users).where(eq(users.id, userId));
-    
+
     if (!user) {
       return {
         allowed: false,
@@ -171,13 +171,41 @@ export class UsageQuotaService {
 
   async updateUserPlan(userId: string, plan: string): Promise<void> {
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
-    
+
     await db.update(users)
       .set({
         plan,
         dailyRequestsLimit: planLimits.dailyRequests,
         dailyRequestsUsed: 0,
         dailyRequestsResetAt: null,
+        updatedAt: new Date()
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async hasTokenQuota(userId: string): Promise<boolean> {
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    if (!user) return false;
+
+    if (user.role === "admin" || user.plan === "pro" || user.email === ADMIN_EMAIL) {
+      return true;
+    }
+
+    const currentConsumed = user.tokensConsumed || 0;
+    const limit = user.tokensLimit || 100000;
+
+    return currentConsumed < limit;
+  }
+
+  async recordTokenUsage(userId: string, tokens: number): Promise<void> {
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    if (!user) return;
+
+    const currentConsumed = user.tokensConsumed || 0;
+
+    await db.update(users)
+      .set({
+        tokensConsumed: currentConsumed + tokens,
         updatedAt: new Date()
       })
       .where(eq(users.id, userId));

@@ -1,0 +1,858 @@
+node_modules/@types/react-pdf/dist/Document.d.ts(4,36): error TS2503: Cannot find namespace 'JSX'.
+node_modules/@types/react-pdf/dist/Page.d.ts(4,36): error TS2503: Cannot find namespace 'JSX'.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/annotation_storage.d.ts(66,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/annotation_storage.d.ts(80,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/api.d.ts(1410,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/api.d.ts(1466,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/editor/annotation_editor_layer.d.ts(190,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/editor/editor.d.ts(225,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/editor/tools.d.ts(173,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/editor/tools.d.ts(245,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/editor/tools.d.ts(271,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/metadata.d.ts(10,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/src/display/optional_content_config.d.ts(11,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/web/annotation_editor_layer_builder.d.ts(55,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/web/pdf_find_controller.d.ts(83,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/react-pdf/node_modules/pdfjs-dist/types/web/text_accessibility.d.ts(41,5): error TS18028: Private identifiers are only available when targeting ECMAScript 2015 and higher.
+node_modules/@types/request/index.d.ts(389,84): error TS2724: '"/Users/ale/Desktop/Iliagptcom/node_modules/tough-cookie/dist/index"' has no exported member named 'CookieJar'. Did you mean 'Cookie'?
+node_modules/drizzle-orm/mysql-core/db.d.ts(1,38): error TS2307: Cannot find module 'mysql2/promise' or its corresponding type declarations.
+node_modules/drizzle-orm/mysql-core/query-builders/delete.d.ts(36,22): error TS2420: Class 'MySqlDeleteBase<TTable, TQueryResult, TPreparedQueryHKT, TDynamic, TExcludedMethods>' incorrectly implements interface 'SQLWrapper'.
+  Property 'getSQL' is missing in type 'MySqlDeleteBase<TTable, TQueryResult, TPreparedQueryHKT, TDynamic, TExcludedMethods>' but required in type 'SQLWrapper'.
+node_modules/drizzle-orm/mysql-core/query-builders/select.d.ts(249,244): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | ... 4 more ... | "exceptAll"'.
+node_modules/drizzle-orm/mysql-core/query-builders/select.d.ts(275,247): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | ... 4 more ... | "exceptAll"'.
+node_modules/drizzle-orm/mysql-core/query-builders/select.d.ts(301,248): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | ... 4 more ... | "exceptAll"'.
+node_modules/drizzle-orm/mysql-core/query-builders/select.d.ts(342,251): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | ... 4 more ... | "exceptAll"'.
+node_modules/drizzle-orm/mysql-core/query-builders/select.d.ts(368,245): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | ... 4 more ... | "exceptAll"'.
+node_modules/drizzle-orm/mysql-core/query-builders/select.d.ts(409,248): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | ... 4 more ... | "exceptAll"'.
+node_modules/drizzle-orm/mysql-core/query-builders/select.d.ts(561,22): error TS2515: Non-abstract class 'MySqlSelectBase<TTableName, TSelection, TSelectMode, TPreparedQueryHKT, TNullabilityMap, TDynamic, TExcludedMethods, TResult, TSelectedFields>' does not implement inherited abstract member getSQL from class 'MySqlSelectQueryBuilderBase<MySqlSelectHKT, TTableName, TSelection, TSelectMode, TPreparedQueryHKT, TNullabilityMap, TDynamic, TExcludedMethods, TResult, TSelectedFields>'.
+node_modules/drizzle-orm/mysql-core/query-builders/select.types.d.ts(136,1149): error TS2344: Type 'MySqlSetOperatorExcludedMethods' does not satisfy the constraint '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "prepare" | "execute" | "iterator" | "$dynamic" | "catch" | "finally" | ... 10 more ... | "exceptAll"'.
+  Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "prepare" | "execute" | "iterator" | "$dynamic" | "catch" | "finally" | ... 10 more ... | "exceptAll"'.
+node_modules/drizzle-orm/node-postgres/session.d.ts(2,8): error TS1192: Module '"/Users/ale/Desktop/Iliagptcom/node_modules/@types/pg/index"' has no default export.
+node_modules/drizzle-orm/pg-core/query-builders/query.d.ts(23,22): error TS2420: Class 'PgRelationalQuery<TResult>' incorrectly implements interface 'SQLWrapper'.
+  Property 'getSQL' is missing in type 'PgRelationalQuery<TResult>' but required in type 'SQLWrapper'.
+node_modules/drizzle-orm/pg-core/roles.d.ts(7,22): error TS2559: Type 'PgRole' has no properties in common with type 'PgRoleConfig'.
+node_modules/drizzle-orm/singlestore-core/columns/bigint.d.ts(13,22): error TS2515: Non-abstract class 'SingleStoreBigInt53Builder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, { unsigned: boolean; }, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/bigint.d.ts(35,22): error TS2515: Non-abstract class 'SingleStoreBigInt64Builder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, { unsigned: boolean; }, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/binary.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreBinaryBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, SingleStoreBinaryConfig, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/boolean.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreBooleanBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, object, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/char.d.ts(16,22): error TS2515: Non-abstract class 'SingleStoreCharBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, SingleStoreCharConfig<T["enumValues"], T["length"]>, { length: T["length"]; }, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/custom.d.ts(24,22): error TS2515: Non-abstract class 'SingleStoreCustomColumnBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, { fieldConfig: Record<string, any>; customTypeParams: CustomTypeParams<any>; }, { singlestoreColumnBuilderBrand: "SingleStoreCustomColumnBuilderBrand"; }, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/date.d.ts(16,22): error TS2515: Non-abstract class 'SingleStoreDateBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, object, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/date.d.ts(37,22): error TS2515: Non-abstract class 'SingleStoreDateStringBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, object, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/datetime.d.ts(16,22): error TS2515: Non-abstract class 'SingleStoreDateTimeBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, SingleStoreDatetimeConfig<"string" | "date">, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/datetime.d.ts(38,22): error TS2515: Non-abstract class 'SingleStoreDateTimeStringBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, SingleStoreDatetimeConfig<"string" | "date">, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/decimal.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreDecimalBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, SingleStoreDecimalConfig, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/double.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreDoubleBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, SingleStoreDoubleConfig, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/enum.d.ts(19,5): error TS2416: Property 'generatedAlwaysAs' in type 'SingleStoreEnumColumnBuilder<T>' is not assignable to the same property in base type 'SingleStoreColumnBuilder<T, { enumValues: T["enumValues"]; }, object, ColumnBuilderExtraConfig>'.
+  Type '(as: SQL<unknown> | (() => SQL<unknown>) | T["data"], config?: Partial<GeneratedColumnConfig<unknown>>) => HasGenerated<this, {}>' is not assignable to type '(as: SQL<unknown> | (() => SQL<unknown>) | T["data"], config?: Partial<GeneratedColumnConfig<unknown>>) => HasGenerated<this, { type: "always"; }>'.
+    Type 'HasGenerated<this, {}>' is not assignable to type 'HasGenerated<this, { type: "always"; }>'.
+      Type 'HasGenerated<this, {}>' is not assignable to type '{ _: { hasDefault: true; generated: { type: "always"; }; }; }'.
+        The types of '_.generated' are incompatible between these types.
+          Property 'type' is missing in type '{}' but required in type '{ type: "always"; }'.
+node_modules/drizzle-orm/singlestore-core/columns/float.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreFloatBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, SingleStoreFloatConfig, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/int.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreIntBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, SingleStoreIntConfig, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/json.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreJsonBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, object, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/mediumint.d.ts(15,22): error TS2515: Non-abstract class 'SingleStoreMediumIntBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, SingleStoreIntConfig, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/real.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreRealBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, SingleStoreRealConfig, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/serial.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreSerialBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/smallint.d.ts(15,22): error TS2515: Non-abstract class 'SingleStoreSmallIntBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, SingleStoreIntConfig, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/text.d.ts(16,22): error TS2515: Non-abstract class 'SingleStoreTextBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, { textType: SingleStoreTextColumnType; enumValues: T["enumValues"]; }, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/time.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreTimeBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, object, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/timestamp.d.ts(15,22): error TS2515: Non-abstract class 'SingleStoreTimestampBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreDateColumnBaseBuilder<T, SingleStoreTimestampConfig<"string" | "date">, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/timestamp.d.ts(35,22): error TS2515: Non-abstract class 'SingleStoreTimestampStringBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreDateColumnBaseBuilder<T, SingleStoreTimestampConfig<"string" | "date">, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/tinyint.d.ts(15,22): error TS2515: Non-abstract class 'SingleStoreTinyIntBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilderWithAutoIncrement<T, SingleStoreIntConfig, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/varbinary.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreVarBinaryBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, SingleStoreVarbinaryOptions, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/varchar.d.ts(16,22): error TS2515: Non-abstract class 'SingleStoreVarCharBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, SingleStoreVarCharConfig<T["enumValues"], T["length"]>, { length: T["length"]; }, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/vector.d.ts(13,22): error TS2515: Non-abstract class 'SingleStoreVectorBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, SingleStoreVectorConfig, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/columns/year.d.ts(14,22): error TS2515: Non-abstract class 'SingleStoreYearBuilder<T>' does not implement inherited abstract member generatedAlwaysAs from class 'SingleStoreColumnBuilder<T, object, object, ColumnBuilderExtraConfig>'.
+node_modules/drizzle-orm/singlestore-core/db.d.ts(1,38): error TS2307: Cannot find module 'mysql2/promise' or its corresponding type declarations.
+node_modules/drizzle-orm/singlestore-core/query-builders/delete.d.ts(36,22): error TS2420: Class 'SingleStoreDeleteBase<TTable, TQueryResult, TPreparedQueryHKT, TDynamic, TExcludedMethods>' incorrectly implements interface 'SQLWrapper'.
+  Property 'getSQL' is missing in type 'SingleStoreDeleteBase<TTable, TQueryResult, TPreparedQueryHKT, TDynamic, TExcludedMethods>' but required in type 'SQLWrapper'.
+node_modules/drizzle-orm/singlestore-core/query-builders/select.d.ts(199,262): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | "fullJoin" | "for" | "unionAll" | "minus"'.
+node_modules/drizzle-orm/singlestore-core/query-builders/select.d.ts(225,265): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | "fullJoin" | "for" | "unionAll" | "minus"'.
+node_modules/drizzle-orm/singlestore-core/query-builders/select.d.ts(251,266): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | "fullJoin" | "for" | "unionAll" | "minus"'.
+node_modules/drizzle-orm/singlestore-core/query-builders/select.d.ts(277,263): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | "fullJoin" | "for" | "unionAll" | "minus"'.
+node_modules/drizzle-orm/singlestore-core/query-builders/select.d.ts(301,262): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | "fullJoin" | "for" | "unionAll" | "minus"'.
+node_modules/drizzle-orm/singlestore-core/query-builders/select.d.ts(451,22): error TS2515: Non-abstract class 'SingleStoreSelectBase<TTableName, TSelection, TSelectMode, TPreparedQueryHKT, TNullabilityMap, TDynamic, TExcludedMethods, TResult, TSelectedFields>' does not implement inherited abstract member getSQL from class 'SingleStoreSelectQueryBuilderBase<SingleStoreSelectHKT, TTableName, TSelection, TSelectMode, TPreparedQueryHKT, TNullabilityMap, TDynamic, TExcludedMethods, TResult, TSelectedFields>'.
+node_modules/drizzle-orm/singlestore-core/query-builders/select.types.d.ts(130,1185): error TS2344: Type 'SingleStoreSetOperatorExcludedMethods' does not satisfy the constraint '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "prepare" | "execute" | "iterator" | "$dynamic" | "catch" | "finally" | ... 9 more ... | "minus"'.
+  Type '"session"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "prepare" | "execute" | "iterator" | "$dynamic" | "catch" | "finally" | ... 9 more ... | "minus"'.
+node_modules/drizzle-orm/singlestore/driver.d.ts(1,100): error TS2307: Cannot find module 'mysql2' or its corresponding type declarations.
+node_modules/drizzle-orm/singlestore/driver.d.ts(2,39): error TS2307: Cannot find module 'mysql2/promise' or its corresponding type declarations.
+node_modules/drizzle-orm/singlestore/session.d.ts(1,94): error TS2307: Cannot find module 'mysql2/promise' or its corresponding type declarations.
+node_modules/drizzle-orm/sqlite-core/query-builders/query.d.ts(25,22): error TS2420: Class 'SQLiteRelationalQuery<TType, TResult>' incorrectly implements interface 'SQLWrapper'.
+  Property 'getSQL' is missing in type 'SQLiteRelationalQuery<TType, TResult>' but required in type 'SQLWrapper'.
+node_modules/drizzle-orm/sqlite-core/query-builders/select.d.ts(202,247): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"config"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | "fullJoin" | "unionAll"'.
+node_modules/drizzle-orm/sqlite-core/query-builders/select.d.ts(228,250): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"config"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | "fullJoin" | "unionAll"'.
+node_modules/drizzle-orm/sqlite-core/query-builders/select.d.ts(254,251): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"config"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | "fullJoin" | "unionAll"'.
+node_modules/drizzle-orm/sqlite-core/query-builders/select.d.ts(280,248): error TS2344: Type 'string' does not satisfy the constraint 'keyof this & string'.
+  Type 'string' is not assignable to type 'keyof this & string'.
+    Type 'string' is not assignable to type 'keyof this'.
+      Type '"config"' is not assignable to type '"offset" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "$dynamic" | "having" | "groupBy" | "leftJoin" | "rightJoin" | "innerJoin" | "fullJoin" | "unionAll"'.
+node_modules/drizzle-orm/sqlite-core/query-builders/select.d.ts(421,22): error TS2515: Non-abstract class 'SQLiteSelectBase<TTableName, TResultType, TRunResult, TSelection, TSelectMode, TNullabilityMap, TDynamic, TExcludedMethods, TResult, TSelectedFields>' does not implement inherited abstract member getSQL from class 'SQLiteSelectQueryBuilderBase<SQLiteSelectHKT, TTableName, TResultType, TRunResult, TSelection, TSelectMode, TNullabilityMap, TDynamic, TExcludedMethods, TResult, TSelectedFields>'.
+node_modules/drizzle-orm/sqlite-core/query-builders/select.types.d.ts(122,1157): error TS2344: Type 'SQLiteSetOperatorExcludedMethods' does not satisfy the constraint '"values" | "all" | "offset" | "get" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "prepare" | "execute" | "$dynamic" | "catch" | ... 9 more ... | "run"'.
+  Type '"config"' is not assignable to type '"values" | "all" | "offset" | "get" | "_" | "getSQL" | "as" | "union" | "intersect" | "except" | "where" | "orderBy" | "limit" | "toSQL" | "prepare" | "execute" | "$dynamic" | "catch" | ... 9 more ... | "run"'.
+server/db.ts(126,15): error TS2503: Cannot find namespace 'pg'.
+server/lib/anonToken.ts(1,8): error TS1192: Module '"crypto"' has no default export.
+server/routes/userRouter.ts(2,8): error TS1192: Module '"crypto"' has no default export.
+server/routes/userRouter.ts(7,146): error TS2307: Cannot find module '@shared/schema' or its corresponding type declarations.
+server/routes/userRouter.ts(135,21): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(358,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(379,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(406,27): error TS2352: Conversion of type 'Request<{ id: string; } & { provider: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(428,27): error TS2352: Conversion of type 'Request<{ id: string; } & { provider: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(447,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(464,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(484,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(514,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(530,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(564,27): error TS2352: Conversion of type 'Request<{ id: string; } & { linkId: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(580,27): error TS2352: Conversion of type 'Request<{ id: string; } & { linkId: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(596,27): error TS2352: Conversion of type 'Request<{ id: string; } & { linkId: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(647,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(663,27): error TS2352: Conversion of type 'Request<{ id: string; } & { chatId: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(679,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(695,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(711,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(735,27): error TS2352: Conversion of type 'Request<{ id: string; } & { chatId: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(751,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/routes/userRouter.ts(767,27): error TS2352: Conversion of type 'Request<{ id: string; }, any, any, ParsedQs, Record<string, any>>' to type 'AuthenticatedRequest' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Types of property 'user' are incompatible.
+    Property 'claims' is missing in type 'User' but required in type 'AuthenticatedUser'.
+server/services/usageQuotaService.ts(2,23): error TS2307: Cannot find module '@shared/schema' or its corresponding type declarations.
+server/storage.ts(45,8): error TS2305: Module '"../shared/schema"' has no exported member 'Report'.
+server/storage.ts(45,21): error TS2305: Module '"../shared/schema"' has no exported member 'InsertReport'.
+server/storage.ts(55,8): error TS2305: Module '"../shared/schema"' has no exported member 'CompanyKnowledge'.
+server/storage.ts(55,31): error TS2724: '"../shared/schema"' has no exported member named 'InsertCompanyKnowledge'. Did you mean 'InsertGptKnowledge'?
+server/storage.ts(57,8): error TS2305: Module '"../shared/schema"' has no exported member 'ResponseQualityMetric'.
+server/storage.ts(57,36): error TS2305: Module '"../shared/schema"' has no exported member 'InsertResponseQualityMetric'.
+server/storage.ts(59,8): error TS2305: Module '"../shared/schema"' has no exported member 'OfflineMessageQueue'.
+server/storage.ts(59,34): error TS2305: Module '"../shared/schema"' has no exported member 'InsertOfflineMessageQueue'.
+server/storage.ts(81,82): error TS2305: Module '"../shared/schema"' has no exported member 'reports'.
+server/storage.ts(84,29): error TS2305: Module '"../shared/schema"' has no exported member 'companyKnowledge'.
+server/storage.ts(85,3): error TS2305: Module '"../shared/schema"' has no exported member 'responseQualityMetrics'.
+server/storage.ts(85,49): error TS2305: Module '"../shared/schema"' has no exported member 'offlineMessageQueue'.
+server/storage.ts(423,50): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; size: number | SQL<unknown> | Placeholder<string, any>; storagePath: string | ... 1 more ... | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ completedAt?: Date; processingProgress?: number; processingError?: string; totalChunks?: number; uploadedChunks?: number; }' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; size: number | SQL<unknown> | Placeholder<string, any>; storagePath: string | ... 1 more ... | Placeholder<...>; }'.
+      Type '{ completedAt?: Date; processingProgress?: number; processingError?: string; totalChunks?: number; uploadedChunks?: number; }' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; size: number | SQL<unknown> | Placeholder<string, any>; storagePath: string | ... 1 more ... | Placeholder<...>; }': name, type, size, storagePath
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; size: number | SQL<unknown> | Placeholder<string, any>; storagePath: string | ... 1 more ... | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{ completedAt?: Date; processingProgress?: number; processingError?: string; totalChunks?: number; uploadedChunks?: number; }' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; size: number | SQL<unknown> | Placeholder<string, any>; storagePath: string | ... 1 more ... | Placeholder<...>; }[]'.
+      Type '{ completedAt?: Date; processingProgress?: number; processingError?: string; totalChunks?: number; uploadedChunks?: number; }' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; size: number | SQL<unknown> | Placeholder<string, any>; storagePath: string | ... 1 more ... | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(440,49): error TS2353: Object literal may only specify known properties, and 'status' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; type?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; size?: number | ... 1 more ... | PgColumn<...>; storagePath?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(449,49): error TS2353: Object literal may only specify known properties, and 'processingProgress' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; type?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; size?: number | ... 1 more ... | PgColumn<...>; storagePath?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(454,49): error TS2353: Object literal may only specify known properties, and 'processingError' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; type?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; size?: number | ... 1 more ... | PgColumn<...>; storagePath?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(460,7): error TS2353: Object literal may only specify known properties, and 'status' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; type?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; size?: number | ... 1 more ... | PgColumn<...>; storagePath?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(469,7): error TS2353: Object literal may only specify known properties, and 'uploadedChunks' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; type?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; size?: number | ... 1 more ... | PgColumn<...>; storagePath?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(476,55): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { fileId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "file_jobs"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "file_jobs"; dataType: "string"; ... 11 more ...; generated: undefined; }, {}, { ...; }>; ... 6 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ fileId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Property 'fileId' is missing in type '{}' but required in type '{ fileId: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { fileId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "file_jobs"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "file_jobs"; dataType: "string"; ... 11 more ...; generated: undefined; }, {}, { ...; }>; ... 6 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ fileId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ fileId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(495,7): error TS2322: Type 'SQL<number>' is not assignable to type 'number'.
+server/storage.ts(503,55): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { content: string | SQL<unknown> | Placeholder<string, any>; fileId: string | SQL<unknown> | Placeholder<string, any>; chunkIndex: number | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ embedding?: number[]; }[]' is not assignable to parameter of type '{ content: string | SQL<unknown> | Placeholder<string, any>; fileId: string | SQL<unknown> | Placeholder<string, any>; chunkIndex: number | SQL<unknown> | Placeholder<...>; }'.
+      Type '{ embedding?: number[]; }[]' is missing the following properties from type '{ content: string | SQL<unknown> | Placeholder<string, any>; fileId: string | SQL<unknown> | Placeholder<string, any>; chunkIndex: number | SQL<unknown> | Placeholder<...>; }': content, fileId, chunkIndex
+  Overload 2 of 2, '(values: { content: string | SQL<unknown> | Placeholder<string, any>; fileId: string | SQL<unknown> | Placeholder<string, any>; chunkIndex: number | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{ embedding?: number[]; }[]' is not assignable to parameter of type '{ content: string | SQL<unknown> | Placeholder<string, any>; fileId: string | SQL<unknown> | Placeholder<string, any>; chunkIndex: number | SQL<unknown> | Placeholder<...>; }[]'.
+      Type '{ embedding?: number[]; }' is missing the following properties from type '{ content: string | SQL<unknown> | Placeholder<string, any>; fileId: string | SQL<unknown> | Placeholder<string, any>; chunkIndex: number | SQL<unknown> | Placeholder<...>; }': content, fileId, chunkIndex
+server/storage.ts(542,14): error TS2353: Object literal may only specify known properties, and 'embedding' does not exist in type '{ content?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; fileId?: string | SQL<unknown> | PgColumn<...>; chunkIndex?: number | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(573,57): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { runId: string | SQL<unknown> | Placeholder<string, any>; stepType: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "agent_steps"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ runId: string | SQL<unknown> | Placeholder<string, any>; stepType: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ runId: string | SQL<unknown> | Placeholder<string, any>; stepType: string | SQL<unknown> | Placeholder<string, any>; }': runId, stepType
+  Overload 2 of 2, '(values: { runId: string | SQL<unknown> | Placeholder<string, any>; stepType: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "agent_steps"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ runId: string | SQL<unknown> | Placeholder<string, any>; stepType: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ runId: string | SQL<unknown> | Placeholder<string, any>; stepType: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(591,58): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { runId: string | SQL<unknown> | Placeholder<string, any>; assetType: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "agent_assets"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ runId: string | SQL<unknown> | Placeholder<string, any>; assetType: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ runId: string | SQL<unknown> | Placeholder<string, any>; assetType: string | SQL<unknown> | Placeholder<string, any>; }': runId, assetType
+  Overload 2 of 2, '(values: { runId: string | SQL<unknown> | Placeholder<string, any>; assetType: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "agent_assets"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ runId: string | SQL<unknown> | Placeholder<string, any>; assetType: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ runId: string | SQL<unknown> | Placeholder<string, any>; assetType: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(605,61): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { domain: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "domain_policies"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "domain_policies"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 5 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ domain: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Property 'domain' is missing in type '{}' but required in type '{ domain: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { domain: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "domain_policies"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "domain_policies"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 5 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ domain: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ domain: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(636,59): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }': content, role, chatId
+  Overload 2 of 2, '(values: { content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(637,86): error TS2339: Property 'chatId' does not exist on type '{}'.
+server/storage.ts(673,23): error TS2353: Object literal may only specify known properties, and 'status' does not exist in type '{ content?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; role?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; chatId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(687,58): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'requestId' does not exist in type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'chatId' does not exist in type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+server/storage.ts(689,21): error TS2339: Property 'role' does not exist on type 'Partial<{}>'.
+server/storage.ts(690,24): error TS2339: Property 'content' does not exist on type 'Partial<{}>'.
+server/storage.ts(691,26): error TS2339: Property 'requestId' does not exist on type 'Partial<{}>'.
+server/storage.ts(692,30): error TS2339: Property 'userMessageId' does not exist on type 'Partial<{}>'.
+server/storage.ts(693,28): error TS2339: Property 'attachments' does not exist on type 'Partial<{}>'.
+server/storage.ts(729,16): error TS2353: Object literal may only specify known properties, and 'attachments' does not exist in type '{ content?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; role?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; chatId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(736,54): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'attachments' does not exist in type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'chatId' does not exist in type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+server/storage.ts(750,55): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "chat_runs"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }': chatId, clientRequestId
+  Overload 2 of 2, '(values: { chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "chat_runs"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(770,16): error TS2353: Object literal may only specify known properties, and 'status' does not exist in type '{ chatId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; clientRequestId?: string | SQL<unknown> | PgColumn<...>; }'.
+server/storage.ts(781,14): error TS2353: Object literal may only specify known properties, and 'status' does not exist in type '{ chatId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; clientRequestId?: string | SQL<unknown> | PgColumn<...>; }'.
+server/storage.ts(801,14): error TS2353: Object literal may only specify known properties, and 'assistantMessageId' does not exist in type '{ chatId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; clientRequestId?: string | SQL<unknown> | PgColumn<...>; }'.
+server/storage.ts(809,14): error TS2353: Object literal may only specify known properties, and 'lastSeq' does not exist in type '{ chatId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; clientRequestId?: string | SQL<unknown> | PgColumn<...>; }'.
+server/storage.ts(817,67): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }': content, role, chatId
+  Overload 2 of 2, '(values: { content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ content: string | SQL<unknown> | Placeholder<string, any>; role: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(818,47): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "chat_runs"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'userMessageId' does not exist in type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "chat_runs"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'chatId' does not exist in type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; clientRequestId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+server/storage.ts(824,43): error TS2353: Object literal may only specify known properties, and 'runId' does not exist in type '{ content?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; role?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; chatId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(832,62): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { runId: string | SQL<unknown> | Placeholder<string, any>; toolCallId: string | SQL<unknown> | Placeholder<string, any>; toolName: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ runId: string | SQL<unknown> | Placeholder<string, any>; toolCallId: string | SQL<unknown> | Placeholder<string, any>; toolName: string | SQL<unknown> | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ runId: string | SQL<unknown> | Placeholder<string, any>; toolCallId: string | SQL<unknown> | Placeholder<string, any>; toolName: string | SQL<unknown> | Placeholder<...>; }': runId, toolCallId, toolName
+  Overload 2 of 2, '(values: { runId: string | SQL<unknown> | Placeholder<string, any>; toolCallId: string | SQL<unknown> | Placeholder<string, any>; toolName: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ runId: string | SQL<unknown> | Placeholder<string, any>; toolCallId: string | SQL<unknown> | Placeholder<string, any>; toolName: string | SQL<unknown> | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ runId: string | SQL<unknown> | Placeholder<string, any>; toolCallId: string | SQL<unknown> | Placeholder<string, any>; toolName: string | SQL<unknown> | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(857,57): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { email: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "chat_shares"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ email: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ email: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }': email, chatId
+  Overload 2 of 2, '(values: { email: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "chat_shares"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ email: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ email: string | SQL<unknown> | Placeholder<string, any>; chatId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(927,51): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ recommendedModel?: string; runtimePolicy?: { enforceModel?: boolean; modelFallbacks?: string[]; maxTokensOverride?: number; temperatureOverride?: number; allowClientOverride?: boolean; }; toolPermissions?: { ...; }; }' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<...>; }'.
+      Type '{ recommendedModel?: string; runtimePolicy?: { enforceModel?: boolean; modelFallbacks?: string[]; maxTokensOverride?: number; temperatureOverride?: number; allowClientOverride?: boolean; }; toolPermissions?: { ...; }; }' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<...>; }': name, slug, systemPrompt
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{ recommendedModel?: string; runtimePolicy?: { enforceModel?: boolean; modelFallbacks?: string[]; maxTokensOverride?: number; temperatureOverride?: number; allowClientOverride?: boolean; }; toolPermissions?: { ...; }; }' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<...>; }[]'.
+      Type '{ recommendedModel?: string; runtimePolicy?: { enforceModel?: boolean; modelFallbacks?: string[]; maxTokensOverride?: number; temperatureOverride?: number; allowClientOverride?: boolean; }; toolPermissions?: { ...; }; }' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(963,62): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; slug?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; systemPrompt?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(972,33): error TS2353: Object literal may only specify known properties, and 'usageCount' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; slug?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; systemPrompt?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(984,60): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "gpt_categories"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; }': name, slug
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "gpt_categories"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; slug: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(994,58): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { gptId: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<string, any>; versionNumber: number | SQL<...> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ gptId: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<string, any>; versionNumber: number | SQL<...> | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ gptId: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<string, any>; versionNumber: number | SQL<...> | Placeholder<...>; }': gptId, systemPrompt, versionNumber
+  Overload 2 of 2, '(values: { gptId: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<string, any>; versionNumber: number | SQL<...> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ gptId: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<string, any>; versionNumber: number | SQL<...> | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ gptId: string | SQL<unknown> | Placeholder<string, any>; systemPrompt: string | SQL<unknown> | Placeholder<string, any>; versionNumber: number | SQL<...> | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1012,59): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { fileSize: number | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<...>; fileType: string | ... 1 more ... | Placeholder<...>; storageUrl: string | ... 1 more ... | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ fileSize: number | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<...>; fileType: string | ... 1 more ... | Placeholder<...>; storageUrl: string | ... 1 more ... | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ fileSize: number | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<...>; fileType: string | ... 1 more ... | Placeholder<...>; storageUrl: string | ... 1 more ... | Placeholder<...>; }': fileSize, gptId, fileName, fileType, storageUrl
+  Overload 2 of 2, '(values: { fileSize: number | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<...>; fileType: string | ... 1 more ... | Placeholder<...>; storageUrl: string | ... 1 more ... | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ fileSize: number | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<...>; fileType: string | ... 1 more ... | Placeholder<...>; storageUrl: string | ... 1 more ... | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ fileSize: number | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<...>; fileType: string | ... 1 more ... | Placeholder<...>; storageUrl: string | ... 1 more ... | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1029,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ fileSize?: number | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; gptId?: string | SQL<unknown> | PgColumn<...>; fileName?: string | ... 1 more ... | PgColumn<...>; fileType?: string | ... 1 more ... | PgColumn<...>; storageUrl?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(1036,41): error TS2353: Object literal may only specify known properties, and 'isActive' does not exist in type '{ fileSize?: number | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; gptId?: string | SQL<unknown> | PgColumn<...>; fileName?: string | ... 1 more ... | PgColumn<...>; fileType?: string | ... 1 more ... | PgColumn<...>; storageUrl?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(1041,57): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; }': name, endpoint, gptId
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1058,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; endpoint?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; gptId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(1065,39): error TS2353: Object literal may only specify known properties, and 'isActive' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; endpoint?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; gptId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(1070,14): error TS2353: Object literal may only specify known properties, and 'usageCount' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; endpoint?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; gptId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(1101,8): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { userId: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "sidebar_pinned_gpts"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'displayOrder' does not exist in type '{ userId: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { userId: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "sidebar_pinned_gpts"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'userId' does not exist in type '{ userId: string | SQL<unknown> | Placeholder<string, any>; gptId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+server/storage.ts(1144,55): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; provider: string | SQL<unknown> | Placeholder<string, any>; modelId: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; provider: string | SQL<unknown> | Placeholder<string, any>; modelId: string | SQL<unknown> | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; provider: string | SQL<unknown> | Placeholder<string, any>; modelId: string | SQL<unknown> | Placeholder<...>; }': name, provider, modelId
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; provider: string | SQL<unknown> | Placeholder<string, any>; modelId: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; provider: string | SQL<unknown> | Placeholder<string, any>; modelId: string | SQL<unknown> | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; provider: string | SQL<unknown> | Placeholder<string, any>; modelId: string | SQL<unknown> | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1220,55): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { amount: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "payments"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "payments"; dataType: "string"; ... 11 more ...; generated: undefined; }, {}, { ...; }>; ... 7 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ amount: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Property 'amount' is missing in type '{}' but required in type '{ amount: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { amount: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "payments"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "payments"; dataType: "string"; ... 11 more ...; generated: undefined; }, {}, { ...; }>; ... 7 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ amount: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ amount: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1246,55): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { amount: string | SQL<unknown> | Placeholder<string, any>; invoiceNumber: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "invoices"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ amount: string | SQL<unknown> | Placeholder<string, any>; invoiceNumber: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ amount: string | SQL<unknown> | Placeholder<string, any>; invoiceNumber: string | SQL<unknown> | Placeholder<string, any>; }': amount, invoiceNumber
+  Overload 2 of 2, '(values: { amount: string | SQL<unknown> | Placeholder<string, any>; invoiceNumber: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "invoices"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ amount: string | SQL<unknown> | Placeholder<string, any>; invoiceNumber: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ amount: string | SQL<unknown> | Placeholder<string, any>; invoiceNumber: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1273,16): error TS2353: Object literal may only specify known properties, and 'value' does not exist in type '{ key?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; }'.
+server/storage.ts(1279,8): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { key: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "platform_settings"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "platform_settings"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 4 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'value' does not exist in type '{ key: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { key: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "platform_settings"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "platform_settings"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 4 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, but 'key' does not exist in type '{ key: string | SQL<unknown> | Placeholder<string, any>; }[]'. Did you mean to write 'keys'?
+server/storage.ts(1286,56): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { action: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "audit_logs"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "audit_logs"; dataType: "string"; ... 11 more ...; generated: undefined; }, {}, { ...; }>; ... 7 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ action: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Property 'action' is missing in type '{}' but required in type '{ action: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { action: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "audit_logs"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "audit_logs"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 7 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ action: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ action: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1296,65): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { date: Date | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "analytics_snapshots"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "analytics_snapshots"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 8 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ date: Date | SQL<unknown> | Placeholder<string, any>; }'.
+      Property 'date' is missing in type '{}' but required in type '{ date: Date | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { date: Date | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "analytics_snapshots"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "analytics_snapshots"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 8 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ date: Date | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ date: Date | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1352,59): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { title: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; storagePath: string | SQL<unknown> | Placeholder<...>; mediaType: string | ... 1 more ... | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ title: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; storagePath: string | SQL<unknown> | Placeholder<...>; mediaType: string | ... 1 more ... | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ title: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; storagePath: string | SQL<unknown> | Placeholder<...>; mediaType: string | ... 1 more ... | Placeholder<...>; }': title, userId, storagePath, mediaType
+  Overload 2 of 2, '(values: { title: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; storagePath: string | SQL<unknown> | Placeholder<...>; mediaType: string | ... 1 more ... | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ title: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; storagePath: string | SQL<unknown> | Placeholder<...>; mediaType: string | ... 1 more ... | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ title: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; storagePath: string | SQL<unknown> | Placeholder<...>; mediaType: string | ... 1 more ... | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1391,61): error TS2339: Property 'userId' does not exist on type '{}'.
+server/storage.ts(1391,121): error TS2339: Property 'eventTypeId' does not exist on type '{}'.
+server/storage.ts(1394,25): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; eventTypeId?: string | SQL<unknown> | PgColumn<...>; }'.
+server/storage.ts(1399,71): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { userId: string | SQL<unknown> | Placeholder<string, any>; eventTypeId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "notification_preferences"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; eventTypeId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ userId: string | SQL<unknown> | Placeholder<string, any>; eventTypeId: string | SQL<unknown> | Placeholder<string, any>; }': userId, eventTypeId
+  Overload 2 of 2, '(values: { userId: string | SQL<unknown> | Placeholder<string, any>; eventTypeId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "notification_preferences"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; eventTypeId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ userId: string | SQL<unknown> | Placeholder<string, any>; eventTypeId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1458,14): error TS2559: Type '{ responsePreferences: { responseStyle?: "default" | "formal" | "casual" | "concise"; responseTone?: string; customInstructions?: string; }; userProfile: { nickname?: string; occupation?: string; bio?: string; }; featureFlags: { ...; }; privacySettings: { ...; }; updatedAt: Date; }' has no properties in common with type '{ userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; }'.
+server/storage.ts(1465,7): error TS2353: Object literal may only specify known properties, and 'userId' does not exist in type '{ responsePreferences?: { responseStyle?: "default" | "formal" | "casual" | "concise"; responseTone?: string; customInstructions?: string; }; userProfile?: { nickname?: string; occupation?: string; bio?: string; }; featureFlags?: { ...; }; privacySettings?: { ...; }; }'.
+server/storage.ts(1480,60): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { userId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "user_settings"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "user_settings"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 6 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{ responsePreferences?: { responseStyle?: "default" | "formal" | "casual" | "concise"; responseTone?: string; customInstructions?: string; }; userProfile?: { nickname?: string; occupation?: string; bio?: string; }; featureFlags?: { ...; }; privacySettings?: { ...; }; }' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Property 'userId' is missing in type '{ responsePreferences?: { responseStyle?: "default" | "formal" | "casual" | "concise"; responseTone?: string; customInstructions?: string; }; userProfile?: { nickname?: string; occupation?: string; bio?: string; }; featureFlags?: { ...; }; privacySettings?: { ...; }; }' but required in type '{ userId: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { userId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "user_settings"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "user_settings"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 6 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{ responsePreferences?: { responseStyle?: "default" | "formal" | "casual" | "concise"; responseTone?: string; customInstructions?: string; }; userProfile?: { nickname?: string; occupation?: string; bio?: string; }; featureFlags?: { ...; }; privacySettings?: { ...; }; }' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{ responsePreferences?: { responseStyle?: "default" | "formal" | "casual" | "concise"; responseTone?: string; customInstructions?: string; }; userProfile?: { nickname?: string; occupation?: string; bio?: string; }; featureFlags?: { ...; }; privacySettings?: { ...; }; }' is missing the following properties from type '{ userId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1495,67): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; id: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "integration_providers"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; id: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; id: string | SQL<unknown> | Placeholder<string, any>; }': name, id
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; id: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "integration_providers"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; id: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; id: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1517,66): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { userId: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "integration_accounts"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ userId: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; }': userId, providerId
+  Overload 2 of 2, '(values: { userId: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "integration_accounts"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ userId: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1523,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; providerId?: string | SQL<unknown> | PgColumn<...>; }'.
+server/storage.ts(1552,29): error TS2339: Property 'enabledApps' does not exist on type 'Partial<{}>'.
+server/storage.ts(1553,76): error TS2339: Property 'enabledApps' does not exist on type 'Partial<{}>'.
+server/storage.ts(1555,30): error TS2339: Property 'enabledTools' does not exist on type 'Partial<{}>'.
+server/storage.ts(1556,77): error TS2339: Property 'enabledTools' does not exist on type 'Partial<{}>'.
+server/storage.ts(1558,31): error TS2339: Property 'disabledTools' does not exist on type 'Partial<{}>'.
+server/storage.ts(1559,78): error TS2339: Property 'disabledTools' does not exist on type 'Partial<{}>'.
+server/storage.ts(1561,32): error TS2339: Property 'resourceScopes' does not exist on type 'Partial<{}>'.
+server/storage.ts(1562,35): error TS2339: Property 'autoConfirmPolicy' does not exist on type 'Partial<{}>'.
+server/storage.ts(1563,29): error TS2339: Property 'sandboxMode' does not exist on type 'Partial<{}>'.
+server/storage.ts(1564,34): error TS2339: Property 'maxParallelCalls' does not exist on type 'Partial<{}>'.
+server/storage.ts(1569,14): error TS2559: Type '{ enabledApps: any[]; enabledTools: any[]; disabledTools: any[]; resourceScopes: any; autoConfirmPolicy: any; sandboxMode: any; maxParallelCalls: any; updatedAt: Date; }' has no properties in common with type '{ userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; }'.
+server/storage.ts(1577,27): error TS2339: Property 'enabledApps' does not exist on type 'Partial<{}>'.
+server/storage.ts(1578,28): error TS2339: Property 'enabledTools' does not exist on type 'Partial<{}>'.
+server/storage.ts(1579,29): error TS2339: Property 'disabledTools' does not exist on type 'Partial<{}>'.
+server/storage.ts(1580,30): error TS2339: Property 'resourceScopes' does not exist on type 'Partial<{}>'.
+server/storage.ts(1581,33): error TS2339: Property 'autoConfirmPolicy' does not exist on type 'Partial<{}>'.
+server/storage.ts(1582,27): error TS2339: Property 'sandboxMode' does not exist on type 'Partial<{}>'.
+server/storage.ts(1583,32): error TS2339: Property 'maxParallelCalls' does not exist on type 'Partial<{}>'.
+server/storage.ts(1586,67): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { userId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "integration_policies"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "integration_policies"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 9 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Property 'userId' is missing in type '{}' but required in type '{ userId: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { userId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "integration_policies"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "integration_policies"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 9 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ userId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1591,59): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { status: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; toolId: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ status: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; toolId: string | SQL<unknown> | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ status: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; toolId: string | SQL<unknown> | Placeholder<...>; }': status, providerId, toolId
+  Overload 2 of 2, '(values: { status: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; toolId: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ status: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; toolId: string | SQL<unknown> | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ status: string | SQL<unknown> | Placeholder<string, any>; providerId: string | SQL<unknown> | Placeholder<string, any>; toolId: string | SQL<unknown> | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1604,34): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { value: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; consentType: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'ipAddress' does not exist in type '{ value: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; consentType: string | SQL<unknown> | Placeholder<...>; }'.
+  Overload 2 of 2, '(values: { value: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; consentType: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'userId' does not exist in type '{ value: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; consentType: string | SQL<unknown> | Placeholder<...>; }[]'.
+server/storage.ts(1622,24): error TS2339: Property 'token' does not exist on type '{}'.
+server/storage.ts(1623,51): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { token: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; resourceId: string | SQL<unknown> | Placeholder<...>; resourceType: string | ... 1 more ... | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ token: any; }' is not assignable to parameter of type '{ token: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; resourceId: string | SQL<unknown> | Placeholder<...>; resourceType: string | ... 1 more ... | Placeholder<...>; }'.
+      Type '{ token: any; }' is missing the following properties from type '{ token: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; resourceId: string | SQL<unknown> | Placeholder<...>; resourceType: string | ... 1 more ... | Placeholder<...>; }': userId, resourceId, resourceType
+  Overload 2 of 2, '(values: { token: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; resourceId: string | SQL<unknown> | Placeholder<...>; resourceType: string | ... 1 more ... | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'token' does not exist in type '{ token: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; resourceId: string | SQL<unknown> | Placeholder<...>; resourceType: string | ... 1 more ... | Placeholder<...>; }[]'.
+server/storage.ts(1648,14): error TS2353: Object literal may only specify known properties, and 'isRevoked' does not exist in type '{ token?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; resourceId?: string | ... 1 more ... | PgColumn<...>; resourceType?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(1664,9): error TS2353: Object literal may only specify known properties, and 'accessCount' does not exist in type '{ token?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; resourceId?: string | ... 1 more ... | PgColumn<...>; resourceType?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(1759,58): error TS2339: Property 'userId' does not exist on type '{}'.
+server/storage.ts(1762,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; expiresAt?: Date | SQL<unknown> | PgColumn<...>; accessToken?: string | ... 1 more ... | PgColumn<...>; refreshToken?: string | ... 1 more ... | PgColumn<...>; scopes?: string[] | ... 1 more ... | PgColumn<...>; accountEma...'.
+server/storage.ts(1763,50): error TS2339: Property 'userId' does not exist on type '{}'.
+server/storage.ts(1767,63): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { userId: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; accessToken: string | SQL<...> | Placeholder<...>; refreshToken: string | ... 1 more ... | Placeholder<...>; scopes: string[] | ... 1 more ... | Placeholder<...>; accountEmail: string | ... 1 more ... | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; accessToken: string | SQL<...> | Placeholder<...>; refreshToken: string | ... 1 more ... | Placeholder<...>; scopes: string[] | ... 1 more ... | Placeholder<...>; accountEmail: string | ... 1 more ....'.
+      Type '{}' is missing the following properties from type '{ userId: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; accessToken: string | SQL<...> | Placeholder<...>; refreshToken: string | ... 1 more ... | Placeholder<...>; scopes: string[] | ... 1 more ... | Placeholder<...>; accountEmail: string | ... 1 more ....': userId, expiresAt, accessToken, refreshToken, and 2 more.
+  Overload 2 of 2, '(values: { userId: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; accessToken: string | SQL<...> | Placeholder<...>; refreshToken: string | ... 1 more ... | Placeholder<...>; scopes: string[] | ... 1 more ... | Placeholder<...>; accountEmail: string | ... 1 more ... | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ userId: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; accessToken: string | SQL<...> | Placeholder<...>; refreshToken: string | ... 1 more ... | Placeholder<...>; scopes: string[] | ... 1 more ... | Placeholder<...>; accountEmail: string | ... 1 more ....'.
+      Type '{}' is missing the following properties from type '{ userId: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; accessToken: string | SQL<...> | Placeholder<...>; refreshToken: string | ... 1 more ... | Placeholder<...>; scopes: string[] | ... 1 more ... | Placeholder<...>; accountEmail: string | ... 1 more ....': length, pop, push, concat, and 29 more.
+server/storage.ts(1773,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; expiresAt?: Date | SQL<unknown> | PgColumn<...>; accessToken?: string | ... 1 more ... | PgColumn<...>; refreshToken?: string | ... 1 more ... | PgColumn<...>; scopes?: string[] | ... 1 more ... | PgColumn<...>; accountEma...'.
+server/storage.ts(1792,14): error TS2353: Object literal may only specify known properties, and 'status' does not exist in type '{ content?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; role?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; chatId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(1803,14): error TS2353: Object literal may only specify known properties, and 'status' does not exist in type '{ content?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; role?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; chatId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(1854,11): error TS2353: Object literal may only specify known properties, and 'totalCalls' does not exist in type '{ connector?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; hourBucket?: Date | SQL<unknown> | PgColumn<...>; }'.
+server/storage.ts(1864,61): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { connector: string | SQL<unknown> | Placeholder<string, any>; hourBucket: Date | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "connector_usage_hourly"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'totalCalls' does not exist in type '{ connector: string | SQL<unknown> | Placeholder<string, any>; hourBucket: Date | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { connector: string | SQL<unknown> | Placeholder<string, any>; hourBucket: Date | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ ...; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'connector' does not exist in type '{ connector: string | SQL<unknown> | Placeholder<string, any>; hourBucket: Date | SQL<unknown> | Placeholder<string, any>; }[]'.
+server/storage.ts(1947,62): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { provider: string | SQL<unknown> | Placeholder<string, any>; windowStart: Date | SQL<unknown> | Placeholder<string, any>; windowEnd: Date | SQL<...> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ provider: string | SQL<unknown> | Placeholder<string, any>; windowStart: Date | SQL<unknown> | Placeholder<string, any>; windowEnd: Date | SQL<...> | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ provider: string | SQL<unknown> | Placeholder<string, any>; windowStart: Date | SQL<unknown> | Placeholder<string, any>; windowEnd: Date | SQL<...> | Placeholder<...>; }': provider, windowStart, windowEnd
+  Overload 2 of 2, '(values: { provider: string | SQL<unknown> | Placeholder<string, any>; windowStart: Date | SQL<unknown> | Placeholder<string, any>; windowEnd: Date | SQL<...> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ provider: string | SQL<unknown> | Placeholder<string, any>; windowStart: Date | SQL<unknown> | Placeholder<string, any>; windowEnd: Date | SQL<...> | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ provider: string | SQL<unknown> | Placeholder<string, any>; windowStart: Date | SQL<unknown> | Placeholder<string, any>; windowEnd: Date | SQL<...> | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(1993,54): error TS2339: Property 'provider' does not exist on type '{}'.
+server/storage.ts(1996,27): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ provider?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; }'.
+server/storage.ts(1997,48): error TS2339: Property 'provider' does not exist on type '{}'.
+server/storage.ts(2001,59): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { provider: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "cost_budgets"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "cost_budgets"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 7 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ provider: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Property 'provider' is missing in type '{}' but required in type '{ provider: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { provider: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "cost_budgets"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "cost_budgets"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 7 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ provider: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ provider: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2007,54): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { method: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "api_logs"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ method: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ method: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; }': method, endpoint
+  Overload 2 of 2, '(values: { method: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "api_logs"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ method: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ method: string | SQL<unknown> | Placeholder<string, any>; endpoint: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2099,62): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { eventName: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "analytics_events"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "analytics_events"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 9 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ eventName: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Property 'eventName' is missing in type '{}' but required in type '{ eventName: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { eventName: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "analytics_events"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "analytics_events"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 9 more ...; createdAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ eventName: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ eventName: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2175,63): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { policyName: string | SQL<unknown> | Placeholder<string, any>; policyType: string | SQL<unknown> | Placeholder<string, any>; rules: Record<string, any> | SQL<...> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ policyName: string | SQL<unknown> | Placeholder<string, any>; policyType: string | SQL<unknown> | Placeholder<string, any>; rules: Record<string, any> | SQL<...> | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ policyName: string | SQL<unknown> | Placeholder<string, any>; policyType: string | SQL<unknown> | Placeholder<string, any>; rules: Record<string, any> | SQL<...> | Placeholder<...>; }': policyName, policyType, rules
+  Overload 2 of 2, '(values: { policyName: string | SQL<unknown> | Placeholder<string, any>; policyType: string | SQL<unknown> | Placeholder<string, any>; rules: Record<string, any> | SQL<...> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ policyName: string | SQL<unknown> | Placeholder<string, any>; policyType: string | SQL<unknown> | Placeholder<string, any>; rules: Record<string, any> | SQL<...> | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ policyName: string | SQL<unknown> | Placeholder<string, any>; policyType: string | SQL<unknown> | Placeholder<string, any>; rules: Record<string, any> | SQL<...> | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2181,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ policyName?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; policyType?: string | SQL<unknown> | PgColumn<...>; rules?: Record<...> | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(2193,14): error TS2353: Object literal may only specify known properties, and 'isEnabled' does not exist in type '{ policyName?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; policyType?: string | SQL<unknown> | PgColumn<...>; rules?: Record<...> | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(2210,62): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; columns: SQL<unknown> | Placeholder<string, any> | { ...; }[]; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; columns: SQL<unknown> | Placeholder<string, any> | { ...; }[]; }'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; columns: SQL<unknown> | Placeholder<string, any> | { ...; }[]; }': name, type, columns
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; columns: SQL<unknown> | Placeholder<string, any> | { ...; }[]; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; columns: SQL<unknown> | Placeholder<string, any> | { ...; }[]; }[]'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; columns: SQL<unknown> | Placeholder<string, any> | { ...; }[]; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2227,63): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "generated_reports"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; }': name, type
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "generated_reports"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2258,64): error TS2339: Property 'key' does not exist on type '{}'.
+server/storage.ts(2261,28): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ key?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; category?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<...>, {}, {}>; }'.
+server/storage.ts(2262,47): error TS2339: Property 'key' does not exist on type '{}'.
+server/storage.ts(2266,61): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "settings_config"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }': key, category
+  Overload 2 of 2, '(values: { key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "settings_config"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2302,46): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "settings_config"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }': key, category
+  Overload 2 of 2, '(values: { key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "settings_config"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ key: string | SQL<unknown> | Placeholder<string, any>; category: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2319,53): error TS2339: Property 'userPrompt' does not exist on type '{}'.
+server/storage.ts(2319,69): error TS2339: Property 'detectedIntent' does not exist on type '{}'.
+server/storage.ts(2334,11): error TS2353: Object literal may only specify known properties, and 'frequencyCount' does not exist in type '{ userPrompt?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; }'.
+server/storage.ts(2343,25): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { userPrompt: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "agent_gap_logs"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "agent_gap_logs"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 9 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'gapSignature' does not exist in type '{ userPrompt: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { userPrompt: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "agent_gap_logs"; schema: undefined; columns: { id: PgColumn<{ name: "id"; tableName: "agent_gap_logs"; ... 12 more ...; generated: undefined; }, {}, { ...; }>; ... 9 more ...; updatedAt: PgColumn<...>; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'gapSignature' does not exist in type '{ userPrompt: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+server/storage.ts(2359,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ userPrompt?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; }'.
+server/storage.ts(2379,61): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; path: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | ... 1 more ... | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; path: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | ... 1 more ... | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; path: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | ... 1 more ... | Placeholder<...>; }': name, path, uuid, userId
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; path: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | ... 1 more ... | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; path: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | ... 1 more ... | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; path: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | ... 1 more ... | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2385,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; path?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; uuid?: string | ... 1 more ... | PgColumn<...>; userId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(2411,65): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }': name, uuid, userId
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2417,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; uuid?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; userId?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(2499,59): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; ... 4 more ...; extension: string | ... 1 more ... | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; ... 4 more ...; extension: string | ... 1 more ... | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; ... 4 more ...; extension: string | ... 1 more ... | Placeholder<...>; }': name, type, uuid, userId, and 4 more.
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; ... 4 more ...; extension: string | ... 1 more ... | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; ... 4 more ...; extension: string | ... 1 more ... | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ name: string | SQL<unknown> | Placeholder<string, any>; type: string | SQL<unknown> | Placeholder<string, any>; uuid: string | SQL<unknown> | Placeholder<string, any>; ... 4 more ...; extension: string | ... 1 more ... | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+server/storage.ts(2505,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; type?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; ... 5 more ...; extension?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(2513,14): error TS2353: Object literal may only specify known properties, and 'deletedAt' does not exist in type '{ name?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; type?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; ... 5 more ...; extension?: string | ... 1 more ... | PgColumn<...>; }'.
+server/storage.ts(2529,26): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type '{ userId?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}>; }'.
+server/storage.ts(2542,38): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { action: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }): PgInsertBase<PgTableWithColumns<{ name: "library_activity"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'fileId' does not exist in type '{ action: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }'.
+  Overload 2 of 2, '(values: { action: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }[]): PgInsertBase<PgTableWithColumns<{ name: "library_activity"; schema: undefined; columns: { ...; }; dialect: "pg"; }>, ... 4 more ..., never>', gave the following error.
+    Object literal may only specify known properties, and 'userId' does not exist in type '{ action: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; }[]'.
+server/storage.ts(2584,68): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { chatId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; }'.
+      Type '{}' is missing the following properties from type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; }': chatId, fileName, mimeType
+  Overload 2 of 2, '(values: { chatId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; }[]): PgInsertBase<...>', gave the following error.
+    Argument of type '{}' is not assignable to parameter of type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; }[]'.
+      Type '{}' is missing the following properties from type '{ chatId: string | SQL<unknown> | Placeholder<string, any>; fileName: string | SQL<unknown> | Placeholder<string, any>; mimeType: string | SQL<unknown> | Placeholder<...>; }[]': length, pop, push, concat, and 29 more.
+shared/schema/admin.ts(40,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(41,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(63,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(64,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(88,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(89,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(106,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(107,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(130,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(131,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(152,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(153,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(177,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(178,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(206,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(207,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(234,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(235,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(236,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(263,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(264,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(265,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(290,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(291,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(292,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(293,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(313,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(314,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(341,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(342,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(371,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(372,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(394,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(395,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(429,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(430,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(451,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(452,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(477,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(478,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(479,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(503,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(504,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(530,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(531,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(554,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(555,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(597,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(598,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(599,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(626,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/admin.ts(627,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(27,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(28,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(52,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(53,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(73,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(74,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(105,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(106,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(125,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(126,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(143,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(144,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(177,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(178,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(203,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(204,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(232,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(254,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(255,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(256,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(280,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(281,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(308,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(309,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(335,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(336,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(337,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(358,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(359,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(360,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(379,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(380,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(400,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(401,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(402,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(426,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(427,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(447,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(448,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(518,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(519,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(520,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(521,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/agent.ts(522,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/auth.ts(73,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/auth.ts(74,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/auth.ts(123,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/auth.ts(124,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/auth.ts(125,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(36,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(37,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(38,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(72,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(73,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(102,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(103,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(104,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(105,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(130,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(131,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(132,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(156,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(157,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(179,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/chat.ts(180,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/files.ts(29,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/files.ts(30,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/files.ts(57,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/files.ts(58,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/files.ts(77,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/files.ts(104,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/files.ts(105,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(19,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(86,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(87,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(88,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(89,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(116,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(117,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(145,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(146,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(147,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(148,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(182,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(183,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(184,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(185,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(186,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(205,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(206,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(232,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/gpt.ts(233,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/index.ts(10,1): error TS2308: Module "./integration" has already exported a member named 'InsertPareIdempotencyKey'. Consider explicitly re-exporting to resolve the ambiguity.
+shared/schema/index.ts(10,1): error TS2308: Module "./integration" has already exported a member named 'PareIdempotencyKey'. Consider explicitly re-exporting to resolve the ambiguity.
+shared/schema/index.ts(10,1): error TS2308: Module "./integration" has already exported a member named 'PareIdempotencyStatus'. Consider explicitly re-exporting to resolve the ambiguity.
+shared/schema/index.ts(10,1): error TS2308: Module "./integration" has already exported a member named 'insertPareIdempotencyKeySchema'. Consider explicitly re-exporting to resolve the ambiguity.
+shared/schema/index.ts(10,1): error TS2308: Module "./integration" has already exported a member named 'pareIdempotencyKeys'. Consider explicitly re-exporting to resolve the ambiguity.
+shared/schema/index.ts(10,1): error TS2308: Module "./integration" has already exported a member named 'pareIdempotencyStatusEnum'. Consider explicitly re-exporting to resolve the ambiguity.
+shared/schema/integration.ts(25,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(55,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(56,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(57,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(80,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(104,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(105,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(106,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(133,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(134,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(135,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(136,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(159,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(160,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(161,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(185,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(186,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(208,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/integration.ts(209,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(27,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(28,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(65,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(66,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(67,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(114,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(115,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(116,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(148,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(149,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(150,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(230,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(231,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(260,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(261,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(308,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(309,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(334,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(335,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(357,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(358,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(384,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(385,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(412,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(413,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/library.ts(414,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(26,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(27,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(130,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(131,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(132,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(153,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(154,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(182,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(183,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(212,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(213,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(244,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(245,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(268,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(269,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(270,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(294,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(295,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(315,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(316,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(335,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(336,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(422,5): error TS2322: Type 'boolean' is not assignable to type 'never'.
+shared/schema/memory.ts(423,5): error TS2322: Type 'boolean' is not assignable to type 'never'.

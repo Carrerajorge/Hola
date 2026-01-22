@@ -9,15 +9,15 @@ const xaiClient = new OpenAI({
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 
-export class ResearchAgent extends BaseAgent {
+export class ResearchAssistantAgent extends BaseAgent {
   constructor() {
     const config: BaseAgentConfig = {
-      name: "ResearchAgent",
+      name: "ResearchAssistantAgent",
       description: "Specialized agent for web research, information gathering, fact-checking, and knowledge synthesis. Expert at finding and analyzing information from multiple sources.",
       model: DEFAULT_MODEL,
       temperature: 0.2,
       maxTokens: 8192,
-      systemPrompt: `You are the ResearchAgent - an expert researcher and information analyst.
+      systemPrompt: `You are the ResearchAssistantAgent - an expert researcher and information analyst.
 
 Your capabilities:
 1. Web Search: Find relevant information from the internet
@@ -26,6 +26,7 @@ Your capabilities:
 4. Source Analysis: Evaluate credibility and relevance of sources
 5. Knowledge Synthesis: Combine information into coherent insights
 6. Citation Management: Track and format references properly
+7. Document Creation: Generate research reports and summaries
 
 Research methodology:
 - Start with broad searches, then narrow down
@@ -40,8 +41,9 @@ Output format:
 - Key findings with sources
 - Detailed analysis
 - Confidence assessment
-- Recommendations for further research`,
-      tools: ["search_web", "research_deep", "fetch_url", "browser_extract"],
+- Recommendations for further research
+- Research Reports (PDF/DOCX)`,
+      tools: ["search_web", "research_deep", "fetch_url", "browser_extract", "document_create"],
       timeout: 180000,
       maxIterations: 20,
     };
@@ -160,7 +162,7 @@ Return JSON:
     const findings: any[] = [];
     for (let i = 0; i < (plan.searchQueries?.length || 1); i++) {
       const query = plan.searchQueries?.[i] || task.description;
-      
+
       const searchResponse = await xaiClient.chat.completions.create({
         model: this.config.model,
         messages: [
@@ -217,7 +219,8 @@ Provide:
     const response = await xaiClient.chat.completions.create({
       model: this.config.model,
       messages: [
-        { role: "system", content: `${this.config.systemPrompt}
+        {
+          role: "system", content: `${this.config.systemPrompt}
 
 For fact-checking, evaluate:
 1. Source credibility
@@ -246,7 +249,7 @@ Return JSON:
 
     const content = response.choices[0].message.content || "{}";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
-    
+
     return {
       type: "fact_check",
       result: jsonMatch ? JSON.parse(jsonMatch[0]) : { analysis: content },
@@ -331,4 +334,4 @@ Provide comprehensive research findings.`,
   }
 }
 
-export const researchAgent = new ResearchAgent();
+export const researchAgent = new ResearchAssistantAgent();

@@ -25,6 +25,7 @@ import {
   ExternalLink,
   Zap,
   Presentation,
+  Lightbulb,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ import type {
   SuperAgentPhase,
   SuperAgentSource,
   SuperAgentArtifact,
+  SuperAgentThought,
 } from "@/hooks/use-super-agent";
 
 const PHASE_LABELS: Record<SuperAgentPhase, string> = {
@@ -741,13 +743,63 @@ const MinimalShimmerStatus = memo(function MinimalShimmerStatus({
   );
 });
 
+interface ThinkingProcessProps {
+  thoughts: SuperAgentThought[];
+}
+
+const ThinkingProcess = memo(function ThinkingProcess({ thoughts }: ThinkingProcessProps) {
+  const [isOpen, setIsOpen] = useState(true);
+
+  if (thoughts.length === 0) return null;
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
+      <CollapsibleTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full flex items-center justify-between p-2 h-auto text-muted-foreground hover:text-foreground group"
+        >
+          <div className="flex items-center gap-2">
+            <Lightbulb className="h-4 w-4 text-amber-500" />
+            <span className="text-xs font-medium">Proceso de razonamiento ({thoughts.length})</span>
+          </div>
+          <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", isOpen ? "" : "-rotate-90")} />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          className="space-y-2 pl-4 pr-2 py-2 border-l-2 border-muted ml-3"
+        >
+          {thoughts.map((thought, idx) => (
+            <motion.div
+              key={idx}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.05 }}
+              className="text-xs text-muted-foreground"
+            >
+              <span className="opacity-50 mr-2">{idx + 1}.</span>
+              {thought.content}
+            </motion.div>
+          ))}
+        </motion.div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+});
+
 export const SuperAgentDisplay = memo(function SuperAgentDisplay({
   state,
   onRetry,
   onCancel,
   className,
 }: SuperAgentDisplayProps) {
-  const { isRunning, phase, artifacts, error, narration } = state; // Assuming state includes narration from hook, or we might need to use PhaseNarrator directly if not exposed.
+  const { isRunning, phase, artifacts, error, narration, thoughts } = state;
+
   // Actually hook/useSuperAgent likely exposes narration now if mapped?
   // Let's check `SuperAgentState` interface in line 36 of original file imports.
   // Wait, I can't check other files easily right now. I'll assume state might NOT have narration string directly if not added.
@@ -769,6 +821,13 @@ export const SuperAgentDisplay = memo(function SuperAgentDisplay({
       <AnimatePresence mode="wait">
         {isRunning && phase !== 'completed' && !error && (
           <MinimalShimmerStatus narration={displayNarration} isRunning={isRunning} />
+        )}
+      </AnimatePresence>
+
+      {/* Thinking Process Visualization */}
+      <AnimatePresence>
+        {thoughts && thoughts.length > 0 && (
+          <ThinkingProcess thoughts={thoughts} />
         )}
       </AnimatePresence>
 

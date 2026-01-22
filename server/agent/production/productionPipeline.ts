@@ -35,10 +35,10 @@ import { consistencyAgent } from './consistencyAgent';
 import { generateBlueprint } from './blueprintAgent';
 
 // Import existing agents
-import { researchAgent } from '../langgraph/agents/ResearchAgent';
+import { researchAgent } from '../langgraph/agents/ResearchAssistantAgent';
 import { documentAgent } from '../langgraph/agents/DocumentAgent';
 import { qaAgent } from '../langgraph/agents/QAAgent';
-import { dataAgent } from '../langgraph/agents/DataAgent';
+import { dataAgent } from '../langgraph/agents/DataAnalystAgent';
 import { contentAgent } from '../langgraph/agents/ContentAgent';
 
 // Import renderers

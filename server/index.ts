@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { env } from "./config/env"; // Validates env vars immediately on import
+import compression from "compression";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -24,6 +25,7 @@ import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
 initTracing();
 
 const app = express();
+app.set("trust proxy", 1); // Trust first proxy (critical for rate limiting behind load balancers)
 const httpServer = createServer(app);
 
 declare module "http" {
@@ -34,6 +36,9 @@ declare module "http" {
 
 // Request logger middleware with correlation context - must go first
 app.use(requestLoggerMiddleware);
+
+// Compression middleware - should be early to compress all eligible responses
+app.use(compression());
 
 // CORS configuration - must be before other middleware
 app.use(corsMiddleware);
@@ -128,6 +133,10 @@ app.use((req, res, next) => {
     log("Database connection verified successfully");
     startHealthChecks();
     log("Database health checks started");
+
+    // Setup Full-Text Search
+    const { setupFts } = await import("./lib/fts");
+    await setupFts();
   } else {
     log("[WARNING] Database connection failed - some features may not work");
   }

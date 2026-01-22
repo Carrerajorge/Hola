@@ -37,6 +37,7 @@ export const TraceEventSchema = z.object({
     "verify_progress",
     "accepted_progress",
     "export_progress",
+    "thought",
   ]),
   phase: z.enum([
     "planning",
@@ -60,6 +61,10 @@ export const TraceEventSchema = z.object({
     articles_collected: z.number().optional(),
     articles_verified: z.number().optional(),
     articles_accepted: z.number().optional(),
+    queries_current: z.number().optional(),
+    queries_total: z.number().optional(),
+    pages_searched: z.number().optional(),
+    candidates_found: z.number().optional(),
   }).optional(),
   evidence: z.object({
     doi: z.string().optional(),
@@ -72,6 +77,7 @@ export const TraceEventSchema = z.object({
     stacktrace_redacted: z.string().optional(),
     missing_fields: z.array(z.string()).optional(),
   }).optional(),
+  data: z.record(z.any()).optional(),
   ts: z.number(),
 });
 

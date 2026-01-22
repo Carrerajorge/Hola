@@ -173,6 +173,12 @@ export function useVoiceMode(config: VoiceConfig = {}) {
             return;
         }
 
+        // Interrupt any ongoing speech
+        if (synthesis.current) {
+            synthesis.current.cancel();
+            setState(s => ({ ...s, isSpeaking: false }));
+        }
+
         setState(s => ({
             ...s,
             isListening: true,

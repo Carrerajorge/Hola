@@ -188,6 +188,10 @@ export class SuperAgentOrchestrator extends EventEmitter {
     };
   }
 
+  private emitThought(content: string): void {
+    this.emitSSE("thought", { content, timestamp: Date.now() });
+  }
+
   async execute(prompt: string, signal?: AbortSignal): Promise<ExecutionState> {
     this.abortSignal = signal;
 
@@ -198,9 +202,13 @@ export class SuperAgentOrchestrator extends EventEmitter {
         throw new Error("Ejecución cancelada por el usuario");
       }
 
+      this.emitThought("Analizando solicitud del usuario...");
       console.log("[SuperAgent] Orchestrator using PromptUnderstanding for:", prompt.substring(0, 50));
       const processingResult = await this.promptUnderstanding.processFullPrompt(prompt, { useLLM: true });
+
+      this.emitThought("Generando plan de ejecución basado en las tareas detectadas...");
       let contract = this.convertSpecToContract(processingResult.spec, prompt);
+      this.emitThought(`Plan generado: Intención detectada como '${contract.intent}'.`);
 
       console.log("[SuperAgent] Contract generated:", JSON.stringify(contract, null, 2));
 
@@ -208,6 +216,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
         // We can keep validateContract as a sanity check, though LLM is usually better
         const validation = validateContract(contract);
         if (!validation.valid) {
+          this.emitThought("Advertencia: El contrato inicial contiene errores, intentando reparar...");
           console.warn("[SuperAgent] Contract validation failed (using LLM contract anyway):", validation.errors);
           // contract = repairContract(contract); // DISABLED: Trust LLM over legacy validation
         }
@@ -253,6 +262,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
         },
       });
 
+      this.emitThought("Iniciando ejecución del plan por fases...");
       await this.executePhases();
 
       return this.state;
@@ -395,11 +405,14 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
     if (isScientific) {
       if (hasScopus || hasWos) {
+        this.emitThought(`Estrategia: Búsqueda académica propietaria detectada. Usando ${hasScopus ? "Scopus" : ""} ${hasWos ? "Web of Science" : ""}.`);
         await this.executeSignalsWithAcademicDatabases(params.query, params.limit, hasScopus, hasWos);
       } else {
+        this.emitThought("Estrategia: Búsqueda científica solicitada pero sin llaves API propietarias. Usando pipeline OpenAlex.");
         await this.executeSignalsWithOpenAlex(params.query, params.limit);
       }
     } else {
+      this.emitThought("Estrategia: Búsqueda web general para recopilación de señales.");
       await this.executeSignalsWithWebSearch(researchDecision, params.limit);
     }
   }
@@ -785,6 +798,8 @@ export class SuperAgentOrchestrator extends EventEmitter {
       message: "Verificando DOIs y enlaces de artículos…"
     });
     this.emitSSE("progress", { phase: "deep", status: "starting" });
+
+    this.emitThought(`Seleccionando los mejores ${Math.min(20, this.state.sources.length)} candidatos por relevancia para análisis profundo.`);
 
     const topSources = [...this.state.sources]
       .sort((a, b) => b.score - a.score)
@@ -1243,6 +1258,8 @@ export class SuperAgentOrchestrator extends EventEmitter {
     this.state.phase = "verifying";
     this.state.iteration++;
 
+    this.emitThought(`Verificación de Calidad (Iteración ${this.state.iteration}): Evaluando cumplimiento de contrato y consistencia.`);
+
     this.emitSSE("tool_call", {
       id: "tc_quality_gate",
       tool: "quality_gate",
@@ -1268,9 +1285,13 @@ export class SuperAgentOrchestrator extends EventEmitter {
     });
 
     if (!gateResult.passed) {
+      this.emitThought(`Falló verificación de calidad. Motivo principal: ${gateResult.blockers[0]?.reason || "Requisitos no cumplidos"}.`);
+
       const retryDecision = shouldRetry(gateResult, this.state);
 
       if (retryDecision.shouldRetry) {
+        this.emitThought(`Decisión de Agente: Reintentar con estrategia '${retryDecision.strategy}'. Acciones: ${retryDecision.actions.join(", ")}.`);
+
         this.emitSSE("iterate", {
           iteration: this.state.iteration,
           max: this.state.max_iterations,
@@ -1280,7 +1301,11 @@ export class SuperAgentOrchestrator extends EventEmitter {
 
         await this.executeRetryActions(retryDecision.actions);
         await this.executeVerifyPhase();
+      } else {
+        this.emitThought("Decisión de Agente: Máximo de intentos alcanzado o error irrecuperable. Finalizando con advertencias.");
       }
+    } else {
+      this.emitThought("Verificación Exitosa: Todos los criterios de aceptación cumplidos. Procediendo a finalización.");
     }
   }
 
@@ -1300,6 +1325,7 @@ export class SuperAgentOrchestrator extends EventEmitter {
     if (!this.state) return;
 
     this.state.phase = "finalizing";
+    this.emitThought("Generando respuesta final y consolidando artefactos...");
 
     const response = this.buildFinalResponse();
     this.state.final_response = response;

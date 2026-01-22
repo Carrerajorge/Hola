@@ -281,6 +281,43 @@ export class SecurityGuard {
     return [...this.blockedHistory];
   }
 
+  private static readonly PYTHON_DANGEROUS_PATTERNS = [
+    /import\s+(os|subprocess|sys|shutil)/,
+    /from\s+(os|subprocess|sys|shutil)\s+import/,
+    /\b(exec|eval)\s*\(/,
+    /\b(open)\s*\(/,
+    /__import__/,
+    /\.system\s*\(/,
+    /\.popen\s*\(/,
+  ];
+
+  private static readonly JS_DANGEROUS_PATTERNS = [
+    /require\s*\(\s*['"](child_process|fs|os|net|dgram|dns|http|https)['"]\s*\)/,
+    /process\.(exit|kill|dlopen|mainModule)/,
+    /child_process\./,
+    /\b(exec|eval)\s*\(/,
+    /fs\./,
+    /Function\s*\(/,
+  ];
+
+  analyzeCode(code: string, language: "python" | "javascript" | "typescript"): { isSafe: boolean; reason?: string } {
+    const patterns = language === "python"
+      ? SecurityGuard.PYTHON_DANGEROUS_PATTERNS
+      : SecurityGuard.JS_DANGEROUS_PATTERNS;
+
+    for (const pattern of patterns) {
+      if (pattern.test(code)) {
+        this.stats.blocked++;
+        this.logBlocked(`[CODE_ANALYSIS] ${language}`, `Matched dangerous pattern: ${pattern}`);
+        return {
+          isSafe: false,
+          reason: `Code contains dangerous pattern: ${pattern.toString()}`
+        };
+      }
+    }
+    return { isSafe: true };
+  }
+
   private containsShellMetacharacters(command: string): boolean {
     const DANGEROUS_CHARS = /[;&|`$(){}[\]<>\\]/;
     const inQuotes = (text: string): string => {

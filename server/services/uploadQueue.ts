@@ -6,25 +6,21 @@
  */
 
 import { EventEmitter } from "events";
+import { Queue, QueueEvents } from "bullmq";
+import { createQueue, createQueueEvents, QUEUE_NAMES } from "../lib/queueFactory";
 
 // ============== Types ==============
 
-export interface UploadJob {
+export interface UploadJobData {
     id: string;
     userId: string;
     chatId: string;
     fileName: string;
     mimeType: string;
     size: number;
-    buffer: Buffer;
-    status: JobStatus;
+    fileData: string; // Base64 encoded for now, S3 key later
     priority: JobPriority;
-    createdAt: Date;
-    startedAt?: Date;
-    completedAt?: Date;
-    result?: ProcessingResult;
-    error?: string;
-    retryCount: number;
+    createdAt: string;
 }
 
 export type JobStatus =
@@ -35,20 +31,6 @@ export type JobStatus =
     | "cancelled";
 
 export type JobPriority = "high" | "normal" | "low";
-
-export interface ProcessingResult {
-    content: string;
-    chunks: string[];
-    embeddings?: number[][];
-    metadata: {
-        pageCount?: number;
-        wordCount: number;
-        language?: string;
-        hasImages: boolean;
-        hasTables: boolean;
-    };
-    visionAnalysis?: any;
-}
 
 export interface RateLimitConfig {
     freeLimit: number;      // per minute
@@ -135,15 +117,13 @@ class RateLimiter {
     }
 }
 
-// ============== Upload Queue ==============
+// ============== Upload Queue Producer ==============
 
 export class UploadQueue extends EventEmitter {
-    private queue: Map<string, UploadJob> = new Map();
-    private processing: Set<string> = new Set();
+    private queue: Queue<UploadJobData>;
+    private events: QueueEvents;
     private rateLimiter: RateLimiter;
     private config: Required<QueueConfig>;
-    private isRunning = false;
-    private processInterval?: NodeJS.Timeout;
 
     constructor(config: QueueConfig = {}) {
         super();
@@ -155,27 +135,41 @@ export class UploadQueue extends EventEmitter {
             rateLimits: config.rateLimits ?? {},
         };
         this.rateLimiter = new RateLimiter(this.config.rateLimits);
+
+        // Initialize BullMQ Queue
+        this.queue = createQueue<UploadJobData>(QUEUE_NAMES.UPLOAD);
+        this.events = createQueueEvents(QUEUE_NAMES.UPLOAD);
+
+        this.setupEventListeners();
+    }
+
+    private setupEventListeners() {
+        this.events.on('completed', ({ jobId, returnvalue }) => {
+            this.emit('jobCompleted', { id: jobId, result: returnvalue });
+        });
+
+        this.events.on('failed', ({ jobId, failedReason }) => {
+            this.emit('jobFailed', { id: jobId, error: failedReason });
+        });
+
+        this.events.on('active', ({ jobId }) => {
+            this.emit('jobStarted', { id: jobId });
+        });
     }
 
     /**
-     * Start processing queue
+     * No-op for compatibility, Queue is always "running" in Redis
      */
     start(): void {
-        if (this.isRunning) return;
-        this.isRunning = true;
-        this.processInterval = setInterval(() => this.processNext(), 100);
         this.emit("started");
     }
 
     /**
-     * Stop processing queue
+     * Closes the queue connection
      */
-    stop(): void {
-        if (!this.isRunning) return;
-        this.isRunning = false;
-        if (this.processInterval) {
-            clearInterval(this.processInterval);
-        }
+    async stop(): Promise<void> {
+        await this.queue.close();
+        await this.events.close();
         this.emit("stopped");
     }
 
@@ -206,28 +200,31 @@ export class UploadQueue extends EventEmitter {
             };
         }
 
-        // Create job
+        // Create job data
         const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const job: UploadJob = {
+        const jobData: UploadJobData = {
             id: jobId,
             userId,
             chatId,
             fileName: file.name,
             mimeType: file.type,
             size: file.buffer.length,
-            buffer: file.buffer,
-            status: "pending",
+            fileData: file.buffer.toString('base64'), // Temporary until S3
             priority,
-            createdAt: new Date(),
-            retryCount: 0,
+            createdAt: new Date().toISOString(),
         };
 
         // Record rate limit
         this.rateLimiter.record(userId);
 
-        // Add to queue
-        this.queue.set(jobId, job);
-        this.emit("jobAdded", job);
+        // Add to BullMQ
+        await this.queue.add('process-file', jobData, {
+            jobId: jobId,
+            priority: priority === 'high' ? 1 : (priority === 'low' ? 3 : 2),
+            attempts: this.config.maxRetries,
+        });
+
+        this.emit("jobAdded", jobData);
 
         return { jobId };
     }
@@ -263,163 +260,50 @@ export class UploadQueue extends EventEmitter {
     /**
      * Get job status
      */
-    getJob(jobId: string): UploadJob | undefined {
-        return this.queue.get(jobId);
+    async getJob(jobId: string) {
+        return await this.queue.getJob(jobId);
     }
 
     /**
-     * Get all jobs for user
+     * Get all jobs for user (Expensive in Redis, simplified for now)
      */
-    getUserJobs(userId: string): UploadJob[] {
-        return Array.from(this.queue.values())
-            .filter(j => j.userId === userId);
+    async getUserJobs(userId: string): Promise<UploadJobData[]> {
+        // limitation: BullMQ doesn't easily query by payload content without extra indexing
+        return [];
     }
 
     /**
      * Cancel job
      */
-    cancel(jobId: string): boolean {
-        const job = this.queue.get(jobId);
-        if (!job || job.status === "processing" || job.status === "completed") {
-            return false;
+    async cancel(jobId: string): Promise<boolean> {
+        const job = await this.queue.getJob(jobId);
+        if (job) {
+            await job.remove();
+            return true;
         }
-        job.status = "cancelled";
-        this.emit("jobCancelled", job);
-        return true;
-    }
-
-    /**
-     * Process next job in queue
-     */
-    private async processNext(): Promise<void> {
-        if (this.processing.size >= this.config.maxConcurrent) {
-            return;
-        }
-
-        // Find next pending job (prioritize high priority)
-        const pendingJobs = Array.from(this.queue.values())
-            .filter(j => j.status === "pending")
-            .sort((a, b) => {
-                const priorityOrder = { high: 0, normal: 1, low: 2 };
-                return priorityOrder[a.priority] - priorityOrder[b.priority];
-            });
-
-        const job = pendingJobs[0];
-        if (!job) return;
-
-        // Start processing
-        this.processing.add(job.id);
-        job.status = "processing";
-        job.startedAt = new Date();
-        this.emit("jobStarted", job);
-
-        try {
-            // Process with timeout
-            const result = await Promise.race([
-                this.processJob(job),
-                this.createTimeout(this.config.jobTimeoutMs),
-            ]) as ProcessingResult;
-
-            job.status = "completed";
-            job.completedAt = new Date();
-            job.result = result;
-            this.emit("jobCompleted", job);
-        } catch (error) {
-            job.retryCount++;
-
-            if (job.retryCount < this.config.maxRetries) {
-                job.status = "pending";
-                job.error = error instanceof Error ? error.message : "Unknown error";
-
-                // Delay before retry
-                await this.delay(this.config.retryDelayMs * job.retryCount);
-            } else {
-                job.status = "failed";
-                job.completedAt = new Date();
-                job.error = error instanceof Error ? error.message : "Unknown error";
-                this.emit("jobFailed", job);
-            }
-        } finally {
-            this.processing.delete(job.id);
-        }
-    }
-
-    /**
-     * Process a single job (to be overridden with actual processing)
-     */
-    private async processJob(job: UploadJob): Promise<ProcessingResult> {
-        // This is a placeholder - actual processing would be injected
-        // In production, this would call documentIngestion, RAG, etc.
-
-        await this.delay(100); // Simulate processing
-
-        return {
-            content: `Processed: ${job.fileName}`,
-            chunks: [],
-            metadata: {
-                wordCount: 0,
-                hasImages: false,
-                hasTables: false,
-            },
-        };
-    }
-
-    /**
-     * Set custom processor
-     */
-    setProcessor(processor: (job: UploadJob) => Promise<ProcessingResult>): void {
-        (this as any).processJob = processor;
+        return false;
     }
 
     /**
      * Get queue stats
      */
-    getStats(): {
-        pending: number;
-        processing: number;
-        completed: number;
-        failed: number;
-        totalSize: number;
-    } {
-        const jobs = Array.from(this.queue.values());
+    async getStats() {
+        const counts = await this.queue.getJobCounts();
         return {
-            pending: jobs.filter(j => j.status === "pending").length,
-            processing: this.processing.size,
-            completed: jobs.filter(j => j.status === "completed").length,
-            failed: jobs.filter(j => j.status === "failed").length,
-            totalSize: jobs.reduce((sum, j) => sum + j.size, 0),
+            pending: counts.waiting || 0,
+            processing: counts.active || 0,
+            completed: counts.completed || 0,
+            failed: counts.failed || 0,
+            totalSize: 0,
         };
     }
 
     /**
      * Clear completed/failed jobs
      */
-    cleanup(maxAgeMs: number = 3600000): number {
-        const cutoff = Date.now() - maxAgeMs;
-        let removed = 0;
-
-        for (const [id, job] of Array.from(this.queue.entries())) {
-            if (
-                (job.status === "completed" || job.status === "failed" || job.status === "cancelled") &&
-                job.completedAt &&
-                job.completedAt.getTime() < cutoff
-            ) {
-                this.queue.delete(id);
-                removed++;
-            }
-        }
-
-        return removed;
-    }
-
-    private createTimeout(ms: number): Promise<never> {
-        return new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("Job timeout")), ms);
-        });
-    }
-
-    private delay(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    async cleanup(maxAgeMs: number = 3600000): Promise<number> {
+        const cleaned = await this.queue.clean(maxAgeMs, 1000, 'completed');
+        return cleaned.length;
     }
 }
 

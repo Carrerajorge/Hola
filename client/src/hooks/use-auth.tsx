@@ -1,21 +1,31 @@
+import { createContext, ReactNode, useContext, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
 import type { User } from "@shared/schema";
 
 const AUTH_STORAGE_KEY = "siragpt_auth_user";
 const ANON_USER_ID_KEY = "siragpt_anon_user_id";
 const ANON_TOKEN_KEY = "siragpt_anon_token";
 
+interface AuthContextType {
+  user: User | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  login: () => void;
+  logout: () => Promise<void>;
+  refreshAuth: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// --- Storage Helpers ---
+
 function getStoredUser(): User | null {
   try {
     const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (stored) {
-      return JSON.parse(stored);
-    }
-  } catch (e) {
-    // Ignore parse errors
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 function setStoredUser(user: User | null): void {
@@ -25,23 +35,31 @@ function setStoredUser(user: User | null): void {
     } else {
       localStorage.removeItem(AUTH_STORAGE_KEY);
     }
-  } catch (e) {
-    // Ignore storage errors
+  } catch {
+    // Ignore
   }
 }
 
 function clearOldUserData(): void {
   try {
     localStorage.removeItem(AUTH_STORAGE_KEY);
-  } catch (e) {
-    // Ignore storage errors
+  } catch {
+    // Ignore
   }
 }
 
 export function getStoredAnonUserId(): string | null {
   try {
     return localStorage.getItem(ANON_USER_ID_KEY);
-  } catch (e) {
+  } catch {
+    return null;
+  }
+}
+
+export function getStoredAnonToken(): string | null {
+  try {
+    return localStorage.getItem(ANON_TOKEN_KEY);
+  } catch {
     return null;
   }
 }
@@ -49,8 +67,8 @@ export function getStoredAnonUserId(): string | null {
 function setStoredAnonUserId(id: string): void {
   try {
     localStorage.setItem(ANON_USER_ID_KEY, id);
-  } catch (e) {
-    // Ignore storage errors
+  } catch {
+    // Ignore
   }
 }
 
@@ -58,34 +76,20 @@ function clearAnonUserId(): void {
   try {
     localStorage.removeItem(ANON_USER_ID_KEY);
     localStorage.removeItem(ANON_TOKEN_KEY);
-  } catch (e) {
-    // Ignore storage errors
-  }
-}
-
-export function getStoredAnonToken(): string | null {
-  try {
-    return localStorage.getItem(ANON_TOKEN_KEY);
-  } catch (e) {
-    return null;
+  } catch {
+    // Ignore
   }
 }
 
 function setStoredAnonToken(token: string): void {
   try {
     localStorage.setItem(ANON_TOKEN_KEY, token);
-  } catch (e) {
-    // Ignore storage errors
+  } catch {
+    // Ignore
   }
 }
 
-function clearAnonToken(): void {
-  try {
-    localStorage.removeItem(ANON_TOKEN_KEY);
-  } catch (e) {
-    // Ignore storage errors
-  }
-}
+// --- Fetch Logic ---
 
 async function fetchUser(): Promise<User | null> {
   const storedAnonId = getStoredAnonUserId();
@@ -93,7 +97,7 @@ async function fetchUser(): Promise<User | null> {
   if (storedAnonId) {
     headers['X-Anonymous-User-Id'] = storedAnonId;
   }
-  
+
   const response = await fetch("/api/auth/user", {
     credentials: "include",
     headers,
@@ -108,8 +112,9 @@ async function fetchUser(): Promise<User | null> {
 
   if (response.status === 401) {
     clearOldUserData();
-    
+
     try {
+      // Attempt to get anonymous identity
       const identityRes = await fetch("/api/session/identity", {
         credentials: "include",
         headers,
@@ -121,12 +126,15 @@ async function fetchUser(): Promise<User | null> {
           if (identity.token) {
             setStoredAnonToken(identity.token);
           }
-          const anonUser = {
+          // Return a constructed anonymous user object conformant to User type
+          // Note context: strict typing might need partial assertion or fuller mock
+          return {
             id: identity.userId,
-            email: null,
-            isAnonymous: true
-          };
-          return anonUser as any;
+            isAnonymous: true,
+            username: `Guest-${identity.userId.slice(0, 4)}`,
+            role: 'user',
+            // Add other required fields with defaults if necessary, or assume User type considers optional
+          } as unknown as User;
         }
       }
     } catch (e) {
@@ -138,14 +146,17 @@ async function fetchUser(): Promise<User | null> {
   throw new Error(`${response.status}: ${response.statusText}`);
 }
 
-export function useAuth() {
+// --- Provider Component ---
+
+export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  
+
   const { data: user, isLoading, refetch } = useQuery<User | null>({
     queryKey: ["/api/auth/user"],
     queryFn: fetchUser,
     retry: false,
     staleTime: 1000 * 60 * 5, // 5 minutes
+    initialData: getStoredUser, // Hydrate from local storage initially
   });
 
   const login = useCallback(() => {
@@ -158,8 +169,8 @@ export function useAuth() {
         method: "POST",
         credentials: "include",
       });
-    } catch (e) {
-      // Ignore errors, still clear local state
+    } catch {
+      // Ignore errors
     }
     setStoredUser(null);
     queryClient.setQueryData(["/api/auth/user"], null);
@@ -173,12 +184,43 @@ export function useAuth() {
     refetch();
   }, [refetch, queryClient]);
 
-  return {
-    user,
-    isLoading,
-    isAuthenticated: !!user,
-    login,
-    logout,
-    refreshAuth,
-  };
+  // Handle OAuth Callback Logic
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("auth") === "success") {
+      // Trigger a refetch to get the new user session
+      refetch().then((result) => {
+        if (result.data) {
+          // Query update handles storage via fetchUser side-effects, 
+          // but let's ensure consistency if needed.
+          // Actually fetchUser already calls setStoredUser.
+        }
+      });
+      // Clean URL
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [refetch]);
+
+  return (
+    <AuthContext.Provider value={{
+      user: user ?? null,
+      isLoading,
+      isAuthenticated: !!user,
+      login,
+      logout,
+      refreshAuth
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// --- Hook ---
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
 }

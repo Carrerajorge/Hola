@@ -9,15 +9,15 @@ const xaiClient = new OpenAI({
 
 const DEFAULT_MODEL = "grok-4-1-fast-non-reasoning";
 
-export class DataAgent extends BaseAgent {
+export class DataAnalystAgent extends BaseAgent {
   constructor() {
     const config: BaseAgentConfig = {
-      name: "DataAgent",
+      name: "DataAnalystAgent",
       description: "Specialized agent for data analysis, transformation, visualization, and insights extraction. Expert at working with structured and unstructured data.",
       model: DEFAULT_MODEL,
       temperature: 0.2,
       maxTokens: 8192,
-      systemPrompt: `You are the DataAgent - an expert data scientist and analyst.
+      systemPrompt: `You are the DataAnalystAgent - an expert data scientist and analyst.
 
 Your capabilities:
 1. Data Analysis: Statistical analysis, trend identification, pattern recognition
@@ -26,6 +26,7 @@ Your capabilities:
 4. SQL Generation: Complex query writing and optimization
 5. Machine Learning: Feature engineering, model suggestions
 6. Reporting: Automated report generation with insights
+7. Document Creation: Generate spreadsheets and presentation reports
 
 Analysis methodology:
 - Start with data profiling and quality assessment
@@ -39,8 +40,9 @@ Output formats:
 - SQL queries
 - Python/R code for analysis
 - Chart specifications (ECharts, Recharts)
-- Written insights and recommendations`,
-      tools: ["data_analyze", "data_visualize", "data_transform", "data_query"],
+- Written insights and recommendations
+- Excel spreadsheets and PowerPoint presentations`,
+      tools: ["data_analyze", "data_visualize", "data_transform", "data_query", "spreadsheet_create"],
       timeout: 180000,
       maxIterations: 20,
     };
@@ -308,4 +310,4 @@ Return JSON:
   }
 }
 
-export const dataAgent = new DataAgent();
+export const dataAgent = new DataAnalystAgent();

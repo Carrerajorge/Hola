@@ -1,8 +1,8 @@
 import { registerAgent, getAllAgents, getAgent, AGENT_REGISTRY } from "./types";
 import { orchestratorAgent, OrchestratorAgent } from "./OrchestratorAgent";
-import { researchAgent, ResearchAgent } from "./ResearchAgent";
+import { researchAgent, ResearchAssistantAgent } from "./ResearchAssistantAgent";
 import { codeAgent, CodeAgent } from "./CodeAgent";
-import { dataAgent, DataAgent } from "./DataAgent";
+import { dataAgent, DataAnalystAgent } from "./DataAnalystAgent";
 import { contentAgent, ContentAgent } from "./ContentAgent";
 import { communicationAgent, CommunicationAgent } from "./CommunicationAgent";
 import { browserAgent, BrowserAgent } from "./BrowserAgent";
@@ -20,11 +20,11 @@ export {
 export {
   OrchestratorAgent,
   orchestratorAgent,
-  ResearchAgent,
+  ResearchAssistantAgent,
   researchAgent,
   CodeAgent,
   codeAgent,
-  DataAgent,
+  DataAnalystAgent,
   dataAgent,
   ContentAgent,
   contentAgent,
@@ -51,7 +51,7 @@ export function initializeAgents(): void {
   registerAgent(documentAgent);
   registerAgent(qaAgent);
   registerAgent(securityAgent);
-  
+
   console.log(`[AgentRegistry] Initialized ${AGENT_REGISTRY.size} specialized agents`);
 }
 
@@ -86,7 +86,7 @@ export const SPECIALIZED_AGENTS = [
     tools: ["plan", "orchestrate", "decide", "reflect"],
   },
   {
-    name: "ResearchAgent",
+    name: "ResearchAssistantAgent",
     description: "Web research, information gathering, fact-checking",
     capabilities: ["web_search", "deep_research", "fact_check"],
     tools: ["search_web", "research_deep", "fetch_url", "browser_extract"],
@@ -98,7 +98,7 @@ export const SPECIALIZED_AGENTS = [
     tools: ["code_generate", "code_review", "code_refactor", "code_test", "code_debug"],
   },
   {
-    name: "DataAgent",
+    name: "DataAnalystAgent",
     description: "Data analysis, transformation, visualization",
     capabilities: ["analyze_data", "transform_data", "visualize_data"],
     tools: ["data_analyze", "data_visualize", "data_transform", "data_query"],

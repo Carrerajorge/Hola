@@ -1,60 +1,66 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
 
-    <meta property="og:title" content="IliaGPT" />
-    <meta property="og:description" content="AI Agent Platform for autonomous web browsing and document creation." />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://replit.com/public/images/opengraph.png" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@replit" />
-    <meta name="twitter:title" content="IliaGPT" />
-    <meta name="twitter:description" content="AI Agent Platform for autonomous web browsing and document creation." />
-    <meta name="twitter:image" content="https://replit.com/public/images/opengraph.png" />
+<head>
+  <meta charset="UTF-8" />
+  <title>IliaGPT</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
 
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="/favicon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Inter:wght@100..900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-  </head>
-  <body>
-    <div id="root"></div>
-    <script>
-      (function() {
-        const originalError = console.error;
-        const originalWarn = console.warn;
-        const suppressedPatterns = [
-          '[vite] failed to connect to websocket',
-          'Could not parse CSS stylesheet',
-          'adoptedStyleSheets'
-        ];
-        const shouldSuppress = (args) => {
-          const msg = args[0];
-          if (!msg) return false;
-          const str = typeof msg === 'string' ? msg : (msg.message || String(msg));
-          return suppressedPatterns.some(p => str.includes(p));
-        };
-        console.error = function(...args) {
-          if (shouldSuppress(args)) return;
-          originalError.apply(console, args);
-        };
-        console.warn = function(...args) {
-          if (shouldSuppress(args)) return;
-          originalWarn.apply(console, args);
-        };
-      })();
-    </script>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+  <meta property="og:title" content="IliaGPT" />
+  <meta property="og:description" content="AI Agent Platform for autonomous web browsing and document creation." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="https://replit.com/public/images/opengraph.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@replit" />
+  <meta name="twitter:title" content="IliaGPT" />
+  <meta name="twitter:description" content="AI Agent Platform for autonomous web browsing and document creation." />
+  <meta name="twitter:image" content="https://replit.com/public/images/opengraph.png" />
+
+  <link rel="icon" type="image/png" href="/favicon.png" />
+
+  <link rel="apple-touch-icon" href="/favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Inter:wght@100..900&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"
+    integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+</head>
+
+<body>
+  <div id="root"></div>
+  <script>
+    (function () {
+      const originalError = console.error;
+      const originalWarn = console.warn;
+      const suppressedPatterns = [
+        '[vite] failed to connect to websocket',
+        'Could not parse CSS stylesheet',
+        'adoptedStyleSheets'
+      ];
+      const shouldSuppress = (args) => {
+        const msg = args[0];
+        if (!msg) return false;
+        const str = typeof msg === 'string' ? msg : (msg.message || String(msg));
+        return suppressedPatterns.some(p => str.includes(p));
+      };
+      console.error = function (...args) {
+        if (shouldSuppress(args)) return;
+        originalError.apply(console, args);
+      };
+      console.warn = function (...args) {
+        if (shouldSuppress(args)) return;
+        originalWarn.apply(console, args);
+      };
+    })();
+  </script>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>

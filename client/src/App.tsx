@@ -15,8 +15,9 @@ import { BackgroundNotificationContainer } from "@/components/background-notific
 import { CommandPalette } from "@/components/command-palette";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
-import Home from "@/pages/home";
 import { Loader2 } from "lucide-react";
+const Home = lazy(() => import("@/pages/home"));
+import { AuthProvider } from "@/hooks/use-auth";
 
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen">
@@ -37,10 +38,10 @@ function ChatPageRedirect() {
 
   return <Home />;
 }
-import LoginPage from "@/pages/login";
-import SignupPage from "@/pages/signup";
-import LandingPage from "@/pages/landing";
-import NotFound from "@/pages/not-found";
+const LoginPage = lazy(() => import("@/pages/login"));
+const SignupPage = lazy(() => import("@/pages/signup"));
+const LandingPage = lazy(() => import("@/pages/landing"));
+const NotFound = lazy(() => import("@/pages/not-found"));
 
 const ProfilePage = lazy(() => import("@/pages/profile"));
 const BillingPage = lazy(() => import("@/pages/billing"));
@@ -53,28 +54,6 @@ const WorkspacePage = lazy(() => import("@/pages/workspace"));
 const SkillsPage = lazy(() => import("@/pages/skills"));
 const SpreadsheetAnalyzerPage = lazy(() => import("@/pages/SpreadsheetAnalyzer"));
 const MonitoringDashboard = lazy(() => import("@/pages/MonitoringDashboard"));
-
-function AuthCallbackHandler() {
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("auth") === "success") {
-      fetch("/api/auth/user", { credentials: "include" })
-        .then(res => res.ok ? res.json() : null)
-        .then(user => {
-          if (user) {
-            localStorage.setItem("siragpt_auth_user", JSON.stringify(user));
-            queryClient.setQueryData(["/api/auth/user"], user);
-          }
-          queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-        })
-        .catch(() => {
-          queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-        });
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  }, []);
-  return null;
-}
 
 function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
@@ -185,30 +164,32 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <SettingsProvider>
-        <ModelAvailabilityProvider>
-          <TooltipProvider>
-            <SkipLink targetId="main-content" />
-            <OfflineIndicator />
-            <AuthCallbackHandler />
-            <GlobalKeyboardShortcuts />
-            <Toaster />
-            <SonnerToaster
-              position="bottom-right"
-              richColors
-              closeButton
-              toastOptions={{
-                classNames: {
-                  toast: 'text-sm',
-                  actionButton: 'text-xs font-medium',
-                }
-              }}
-            />
-            <Router />
-            <BackgroundNotificationContainer onNavigateToChat={() => { }} />
-          </TooltipProvider>
-        </ModelAvailabilityProvider>
-      </SettingsProvider>
+      <AuthProvider>
+        <SettingsProvider>
+          <ModelAvailabilityProvider>
+            <TooltipProvider>
+              <SkipLink targetId="main-content" />
+              <OfflineIndicator />
+              {/* AuthCallbackHandler removed, moved to AuthProvider */}
+              <GlobalKeyboardShortcuts />
+              <Toaster />
+              <SonnerToaster
+                position="bottom-right"
+                richColors
+                closeButton
+                toastOptions={{
+                  classNames: {
+                    toast: 'text-sm',
+                    actionButton: 'text-xs font-medium',
+                  }
+                }}
+              />
+              <Router />
+              <BackgroundNotificationContainer onNavigateToChat={() => { }} />
+            </TooltipProvider>
+          </ModelAvailabilityProvider>
+        </SettingsProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

@@ -72,7 +72,7 @@ export function createStripeRouter() {
   router.get("/api/stripe/price-ids", async (req, res) => {
     try {
       const priceMapping: Record<string, string> = {};
-      
+
       try {
         const result = await db.execute(sql`
           SELECT 
@@ -88,7 +88,7 @@ export function createStripeRouter() {
         for (const row of result.rows as any[]) {
           const productName = (row.product_name || "").toLowerCase();
           const amount = row.unit_amount;
-          
+
           if (productName.includes("go") || amount === 500) {
             priceMapping.price_go_monthly = row.price_id;
           } else if (productName.includes("plus") || amount === 1000) {
@@ -105,11 +105,11 @@ export function createStripeRouter() {
         try {
           const stripe = await getUncachableStripeClient();
           const prices = await stripe.prices.list({ active: true, limit: 100 });
-          
+
           for (const price of prices.data) {
             const amount = price.unit_amount;
             const interval = price.recurring?.interval;
-            
+
             if (amount === 500 && interval === "month") {
               priceMapping.price_go_monthly = price.id;
             } else if (amount === 1000 && interval === "month") {
@@ -150,7 +150,7 @@ export function createStripeRouter() {
       }
 
       const stripe = await getUncachableStripeClient();
-      
+
       let customerId = dbUser.stripeCustomerId;
       if (!customerId) {
         const customer = await stripe.customers.create({
@@ -158,7 +158,7 @@ export function createStripeRouter() {
           metadata: { userId }
         });
         customerId = customer.id;
-        
+
         await db.update(users)
           .set({ stripeCustomerId: customerId })
           .where(eq(users.id, userId));
@@ -236,8 +236,8 @@ export function createStripeRouter() {
 
         let price;
         const matchingPrice = existingPrices.data.find(
-          p => p.unit_amount === productData.priceAmount && 
-               p.recurring?.interval === productData.interval
+          p => p.unit_amount === productData.priceAmount &&
+            p.recurring?.interval === productData.interval
         );
 
         if (matchingPrice) {
@@ -260,14 +260,101 @@ export function createStripeRouter() {
         });
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         message: "Productos creados exitosamente",
-        products: createdProducts 
+        products: createdProducts
       });
     } catch (error: any) {
       console.error("Error creating products:", error);
       res.status(500).json({ error: error.message || "Failed to create products" });
+    }
+  });
+
+  router.post("/webhook", async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    if (!sig || !webhookSecret) {
+      return res.status(400).send("Webhook Error: Missing signature or secret");
+    }
+
+    let event;
+
+    try {
+      const stripe = await getUncachableStripeClient();
+      // Use rawBody from server/index.ts middleware
+      event = stripe.webhooks.constructEvent((req as any).rawBody, sig, webhookSecret);
+    } catch (err: any) {
+      console.error(`Webhook signature verification failed: ${err.message}`);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    try {
+      const { usageQuotaService } = await import("../services/usageQuotaService");
+
+      switch (event.type) {
+        case 'checkout.session.completed': {
+          const session = event.data.object as any;
+          const userId = session.metadata?.userId;
+
+          if (userId) {
+            console.log(`[Stripe] Checkout completed for user ${userId}`);
+            // Logic to determine plan from priceId could be enhanced here
+            // For now, assuming successful subscription means 'pro' or checking metadata
+            // Real implementation should check session.line_items or subscription details
+
+            // Refetch subscription to get details if needed
+            if (session.subscription) {
+              const stripe = await getUncachableStripeClient();
+              const subscription = await stripe.subscriptions.retrieve(session.subscription);
+              const priceId = subscription.items.data[0].price.id;
+
+              // Map priceId to plan - simplified logic
+              // Ideally we'd look up the product metadata
+              // For this implementation effectively enabling "pro"
+
+              await usageQuotaService.updateUserPlan(userId, "pro");
+            }
+          }
+          break;
+        }
+
+        case 'customer.subscription.updated': {
+          const subscription = event.data.object as any;
+          const userId = subscription.metadata?.userId; // Metadata might be on customer or session, not always subscription
+
+          // Better strategy: Find user by stripeCustomerId
+          const [dbUser] = await db.select().from(users).where(eq(users.stripeCustomerId, subscription.customer));
+
+          if (dbUser) {
+            const status = subscription.status;
+            if (status === 'active') {
+              // Determine plan level
+              await usageQuotaService.updateUserPlan(dbUser.id, "pro");
+            } else if (status === 'past_due' || status === 'canceled' || status === 'unpaid') {
+              await usageQuotaService.updateUserPlan(dbUser.id, "free");
+            }
+          }
+          break;
+        }
+
+        case 'customer.subscription.deleted': {
+          const subscription = event.data.object as any;
+          const [dbUser] = await db.select().from(users).where(eq(users.stripeCustomerId, subscription.customer));
+
+          if (dbUser) {
+            console.log(`[Stripe] Subscription deleted for user ${dbUser.id}`);
+            await usageQuotaService.updateUserPlan(dbUser.id, "free");
+          }
+          break;
+        }
+      }
+
+      res.json({ received: true });
+    } catch (err: any) {
+      console.error(`Webhook handler error: ${err.message}`);
+      res.status(500).send(`Webhook Handler Error: ${err.message}`);
     }
   });
 

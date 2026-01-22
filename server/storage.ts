@@ -89,7 +89,7 @@ import {
 } from "../shared/schema";
 import * as crypto from "crypto";
 import { randomUUID } from "crypto";
-import { db } from "./db";
+import { db, dbRead } from "./db";
 import { eq, sql, desc, and, isNull, ilike, or, type SQL } from "drizzle-orm";
 
 export interface IStorage {
@@ -134,6 +134,7 @@ export interface IStorage {
   getChatMessages(chatId: string, options?: { limit?: number; offset?: number; orderBy?: 'asc' | 'desc' }): Promise<ChatMessage[]>;
   updateChatMessageContent(id: string, content: string, status: string): Promise<ChatMessage | undefined>;
   createChatWithMessages(chat: InsertChat, messages: Partial<InsertChatMessage>[]): Promise<{ chat: Chat; messages: ChatMessage[] }>;
+  searchMessages(userId: string, query: string): Promise<ChatMessage[]>;
   // Chat Run operations (for idempotent message processing)
   createChatRun(run: InsertChatRun): Promise<ChatRun>;
   getChatRun(id: string): Promise<ChatRun | undefined>;
@@ -405,13 +406,15 @@ export class MemStorage implements IStorage {
   }
 
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    return cache.remember(`user:${id}`, 300, async () => {
+      const [result] = await dbRead.select().from(users).where(eq(users.id, id));
+      return result;
+    });
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await dbRead.select().from(users).where(eq(users.username, username));
+    return user;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
@@ -425,15 +428,15 @@ export class MemStorage implements IStorage {
   }
 
   async getFile(id: string): Promise<File | undefined> {
-    const [file] = await db.select().from(files).where(eq(files.id, id));
+    const [file] = await dbRead.select().from(files).where(eq(files.id, id));
     return file;
   }
 
   async getFiles(userId?: string): Promise<File[]> {
     if (userId) {
-      return db.select().from(files).where(eq(files.userId, userId)).orderBy(desc(files.createdAt));
+      return dbRead.select().from(files).where(eq(files.userId, userId)).orderBy(desc(files.createdAt));
     }
-    return db.select().from(files).orderBy(desc(files.createdAt));
+    return dbRead.select().from(files).orderBy(desc(files.createdAt));
   }
 
   async updateFileStatus(id: string, status: string): Promise<File | undefined> {
@@ -478,7 +481,7 @@ export class MemStorage implements IStorage {
   }
 
   async getFileJob(fileId: string): Promise<FileJob | undefined> {
-    const [result] = await db.select().from(fileJobs).where(eq(fileJobs.fileId, fileId));
+    const [result] = await dbRead.select().from(fileJobs).where(eq(fileJobs.fileId, fileId));
     return result;
   }
 
@@ -505,7 +508,7 @@ export class MemStorage implements IStorage {
   }
 
   async getFileChunks(fileId: string): Promise<FileChunk[]> {
-    return db.select().from(fileChunks).where(eq(fileChunks.fileId, fileId));
+    return dbRead.select().from(fileChunks).where(eq(fileChunks.fileId, fileId));
   }
 
   async searchSimilarChunks(embedding: number[], limit: number = 5, userId?: string): Promise<FileChunk[]> {
@@ -525,7 +528,7 @@ export class MemStorage implements IStorage {
       return result.rows as FileChunk[];
     }
 
-    const result = await db.execute(sql`
+    const result = await dbRead.execute(sql`
       SELECT fc.*, f.name as file_name,
         fc.embedding <=> ${embeddingStr}::vector AS distance
       FROM file_chunks fc
@@ -549,12 +552,12 @@ export class MemStorage implements IStorage {
   }
 
   async getAgentRun(id: string): Promise<AgentRun | undefined> {
-    const [result] = await db.select().from(agentRuns).where(eq(agentRuns.id, id));
+    const [result] = await dbRead.select().from(agentRuns).where(eq(agentRuns.id, id));
     return result;
   }
 
   async getAgentRunsByChatId(chatId: string): Promise<AgentRun[]> {
-    return db.select().from(agentRuns).where(eq(agentRuns.conversationId, chatId)).orderBy(desc(agentRuns.startedAt));
+    return dbRead.select().from(agentRuns).where(eq(agentRuns.conversationId, chatId)).orderBy(desc(agentRuns.startedAt));
   }
 
   async updateAgentRunStatus(id: string, status: string, error?: string): Promise<AgentRun | undefined> {
@@ -575,7 +578,7 @@ export class MemStorage implements IStorage {
   }
 
   async getAgentSteps(runId: string): Promise<AgentStep[]> {
-    return db.select().from(agentSteps).where(eq(agentSteps.runId, runId)).orderBy(agentSteps.stepIndex);
+    return dbRead.select().from(agentSteps).where(eq(agentSteps.runId, runId)).orderBy(agentSteps.stepIndex);
   }
 
   async updateAgentStepStatus(id: string, success: string, error?: string): Promise<AgentStep | undefined> {
@@ -593,11 +596,11 @@ export class MemStorage implements IStorage {
   }
 
   async getAgentAssets(runId: string): Promise<AgentAsset[]> {
-    return db.select().from(agentAssets).where(eq(agentAssets.runId, runId));
+    return dbRead.select().from(agentAssets).where(eq(agentAssets.runId, runId));
   }
 
   async getDomainPolicy(domain: string): Promise<DomainPolicy | undefined> {
-    const [result] = await db.select().from(domainPolicies).where(eq(domainPolicies.domain, domain));
+    const [result] = await dbRead.select().from(domainPolicies).where(eq(domainPolicies.domain, domain));
     return result;
   }
 
@@ -612,15 +615,15 @@ export class MemStorage implements IStorage {
   }
 
   async getChat(id: string): Promise<Chat | undefined> {
-    const [result] = await db.select().from(chats).where(eq(chats.id, id));
+    const [result] = await dbRead.select().from(chats).where(eq(chats.id, id));
     return result;
   }
 
   async getChats(userId?: string): Promise<Chat[]> {
     if (userId) {
-      return db.select().from(chats).where(eq(chats.userId, userId)).orderBy(desc(chats.updatedAt));
+      return dbRead.select().from(chats).where(eq(chats.userId, userId)).orderBy(desc(chats.updatedAt));
     }
-    return db.select().from(chats).orderBy(desc(chats.updatedAt));
+    return dbRead.select().from(chats).orderBy(desc(chats.updatedAt));
   }
 
   async updateChat(id: string, updates: Partial<InsertChat>): Promise<Chat | undefined> {
@@ -645,7 +648,7 @@ export class MemStorage implements IStorage {
 
     // Cache for 10 seconds (short TTL because messages are added frequently)
     return cache.remember(cacheKey, 10, async () => {
-      let query = db.select().from(chatMessages).where(eq(chatMessages.chatId, chatId));
+      let query = dbRead.select().from(chatMessages).where(eq(chatMessages.chatId, chatId));
 
       if (orderBy === 'desc') {
         query.orderBy(desc(chatMessages.createdAt));
@@ -663,6 +666,25 @@ export class MemStorage implements IStorage {
 
       return query;
     });
+  }
+
+  async searchMessages(userId: string, query: string): Promise<ChatMessage[]> {
+    // Sanitize query to avoid syntax errors in websearch_to_tsquery
+    const sanitizedQuery = query.replace(/[^\w\sñáéíóúü]/gi, ' ').trim();
+    if (!sanitizedQuery) return [];
+
+    // Use Read Replica for search queries to offload primary
+    const result = await dbRead.execute(sql`
+      SELECT m.* 
+      FROM chat_messages m
+      JOIN chats c ON m.chat_id = c.id
+      WHERE c.user_id = ${userId}
+      AND m.search_vector @@ websearch_to_tsquery('spanish', ${sanitizedQuery})
+      ORDER BY ts_rank(m.search_vector, websearch_to_tsquery('spanish', ${sanitizedQuery})) DESC
+      LIMIT 50
+    `);
+
+    return result.rows as ChatMessage[];
   }
 
 
@@ -752,12 +774,12 @@ export class MemStorage implements IStorage {
   }
 
   async getChatRun(id: string): Promise<ChatRun | undefined> {
-    const [result] = await db.select().from(chatRuns).where(eq(chatRuns.id, id));
+    const [result] = await dbRead.select().from(chatRuns).where(eq(chatRuns.id, id));
     return result;
   }
 
   async getChatRunByClientRequestId(chatId: string, clientRequestId: string): Promise<ChatRun | undefined> {
-    const [result] = await db.select().from(chatRuns).where(
+    const [result] = await dbRead.select().from(chatRuns).where(
       and(eq(chatRuns.chatId, chatId), eq(chatRuns.clientRequestId, clientRequestId))
     );
     return result;
@@ -834,7 +856,7 @@ export class MemStorage implements IStorage {
   }
 
   async getToolInvocation(runId: string, toolCallId: string): Promise<ToolInvocation | undefined> {
-    const [result] = await db.select().from(toolInvocations).where(
+    const [result] = await dbRead.select().from(toolInvocations).where(
       and(eq(toolInvocations.runId, runId), eq(toolInvocations.toolCallId, toolCallId))
     );
     return result;
@@ -859,20 +881,20 @@ export class MemStorage implements IStorage {
   }
 
   async getChatShares(chatId: string): Promise<ChatShare[]> {
-    return db.select().from(chatShares).where(eq(chatShares.chatId, chatId)).orderBy(desc(chatShares.createdAt));
+    return dbRead.select().from(chatShares).where(eq(chatShares.chatId, chatId)).orderBy(desc(chatShares.createdAt));
   }
 
   async getChatSharesByEmail(email: string): Promise<ChatShare[]> {
     const normalizedEmail = email.toLowerCase().trim();
-    return db.select().from(chatShares).where(sql`LOWER(${chatShares.email}) = ${normalizedEmail}`).orderBy(desc(chatShares.createdAt));
+    return dbRead.select().from(chatShares).where(sql`LOWER(${chatShares.email}) = ${normalizedEmail}`).orderBy(desc(chatShares.createdAt));
   }
 
   async getChatSharesByUserId(userId: string): Promise<ChatShare[]> {
-    return db.select().from(chatShares).where(eq(chatShares.recipientUserId, userId)).orderBy(desc(chatShares.createdAt));
+    return dbRead.select().from(chatShares).where(eq(chatShares.recipientUserId, userId)).orderBy(desc(chatShares.createdAt));
   }
 
   async getSharedChatsWithDetails(userId: string): Promise<(Chat & { shareRole: string; shareId: string })[]> {
-    const results = await db
+    const results = await dbRead
       .select({
         id: chats.id,
         title: chats.title,
@@ -896,20 +918,20 @@ export class MemStorage implements IStorage {
 
   async getChatShareByEmailAndChat(email: string, chatId: string): Promise<ChatShare | undefined> {
     const normalizedEmail = email.toLowerCase().trim();
-    const [result] = await db.select().from(chatShares)
+    const [result] = await dbRead.select().from(chatShares)
       .where(sql`LOWER(${chatShares.email}) = ${normalizedEmail} AND ${chatShares.chatId} = ${chatId}`);
     return result;
   }
 
   async getChatShareByUserAndChat(userId: string, chatId: string): Promise<ChatShare | undefined> {
-    const [result] = await db.select().from(chatShares)
+    const [result] = await dbRead.select().from(chatShares)
       .where(sql`${chatShares.recipientUserId} = ${userId} AND ${chatShares.chatId} = ${chatId}`);
     return result;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     const normalizedEmail = email.toLowerCase().trim();
-    const [result] = await db.select().from(users).where(sql`LOWER(${users.email}) = ${normalizedEmail}`);
+    const [result] = await dbRead.select().from(users).where(sql`LOWER(${users.email}) = ${normalizedEmail}`);
     return result;
   }
 
@@ -929,17 +951,17 @@ export class MemStorage implements IStorage {
   }
 
   async getGpt(id: string): Promise<Gpt | undefined> {
-    const [result] = await db.select().from(gpts).where(eq(gpts.id, id));
+    const [result] = await dbRead.select().from(gpts).where(eq(gpts.id, id));
     return result;
   }
 
   async getGptBySlug(slug: string): Promise<Gpt | undefined> {
-    const [result] = await db.select().from(gpts).where(eq(gpts.slug, slug));
+    const [result] = await dbRead.select().from(gpts).where(eq(gpts.slug, slug));
     return result;
   }
 
   async getGpts(filters?: { visibility?: string; categoryId?: string; creatorId?: string }): Promise<Gpt[]> {
-    let query = db.select().from(gpts);
+    let query = dbRead.select().from(gpts);
     if (filters?.visibility) {
       query = query.where(eq(gpts.visibility, filters.visibility)) as typeof query;
     }
@@ -953,7 +975,7 @@ export class MemStorage implements IStorage {
   }
 
   async getPopularGpts(limit: number = 10): Promise<Gpt[]> {
-    return db.select().from(gpts)
+    return dbRead.select().from(gpts)
       .where(eq(gpts.visibility, "public"))
       .orderBy(desc(gpts.usageCount))
       .limit(limit);
@@ -973,7 +995,7 @@ export class MemStorage implements IStorage {
   }
 
   async getGptConversationCount(gptId: string): Promise<number> {
-    const [result] = await db.select({ count: sql<number>`count(*)::int` })
+    const [result] = await dbRead.select({ count: sql<number>`count(*)::int` })
       .from(chats)
       .where(eq(chats.gptId, gptId));
     return result?.count || 0;
@@ -986,7 +1008,7 @@ export class MemStorage implements IStorage {
   }
 
   async getGptCategories(): Promise<GptCategory[]> {
-    return db.select().from(gptCategories).orderBy(gptCategories.sortOrder);
+    return dbRead.select().from(gptCategories).orderBy(gptCategories.sortOrder);
   }
 
   // GPT Version operations
@@ -996,11 +1018,11 @@ export class MemStorage implements IStorage {
   }
 
   async getGptVersions(gptId: string): Promise<GptVersion[]> {
-    return db.select().from(gptVersions).where(eq(gptVersions.gptId, gptId)).orderBy(desc(gptVersions.versionNumber));
+    return dbRead.select().from(gptVersions).where(eq(gptVersions.gptId, gptId)).orderBy(desc(gptVersions.versionNumber));
   }
 
   async getLatestGptVersion(gptId: string): Promise<GptVersion | undefined> {
-    const [result] = await db.select().from(gptVersions)
+    const [result] = await dbRead.select().from(gptVersions)
       .where(eq(gptVersions.gptId, gptId))
       .orderBy(desc(gptVersions.versionNumber))
       .limit(1);
@@ -1014,13 +1036,13 @@ export class MemStorage implements IStorage {
   }
 
   async getGptKnowledge(gptId: string): Promise<GptKnowledge[]> {
-    return db.select().from(gptKnowledge)
+    return dbRead.select().from(gptKnowledge)
       .where(and(eq(gptKnowledge.gptId, gptId), eq(gptKnowledge.isActive, "true")))
       .orderBy(desc(gptKnowledge.createdAt));
   }
 
   async getGptKnowledgeById(id: string): Promise<GptKnowledge | undefined> {
-    const [result] = await db.select().from(gptKnowledge).where(eq(gptKnowledge.id, id));
+    const [result] = await dbRead.select().from(gptKnowledge).where(eq(gptKnowledge.id, id));
     return result;
   }
 
@@ -1043,13 +1065,13 @@ export class MemStorage implements IStorage {
   }
 
   async getGptActions(gptId: string): Promise<GptAction[]> {
-    return db.select().from(gptActions)
+    return dbRead.select().from(gptActions)
       .where(and(eq(gptActions.gptId, gptId), eq(gptActions.isActive, "true")))
       .orderBy(gptActions.name);
   }
 
   async getGptActionById(id: string): Promise<GptAction | undefined> {
-    const [result] = await db.select().from(gptActions).where(eq(gptActions.id, id));
+    const [result] = await dbRead.select().from(gptActions).where(eq(gptActions.id, id));
     return result;
   }
 
@@ -1073,7 +1095,7 @@ export class MemStorage implements IStorage {
 
   // Sidebar Pinned GPTs
   async getSidebarPinnedGpts(userId: string): Promise<any[]> {
-    const pinnedRecords = await db.select()
+    const pinnedRecords = await dbRead.select()
       .from(sidebarPinnedGpts)
       .where(eq(sidebarPinnedGpts.userId, userId))
       .orderBy(sidebarPinnedGpts.displayOrder);
@@ -1109,7 +1131,7 @@ export class MemStorage implements IStorage {
   }
 
   async isGptPinnedToSidebar(userId: string, gptId: string): Promise<boolean> {
-    const [result] = await db.select()
+    const [result] = await dbRead.select()
       .from(sidebarPinnedGpts)
       .where(and(eq(sidebarPinnedGpts.userId, userId), eq(sidebarPinnedGpts.gptId, gptId)));
     return !!result;
@@ -1117,11 +1139,14 @@ export class MemStorage implements IStorage {
 
   // Admin: User management
   async getAllUsers(): Promise<User[]> {
-    return db.select().from(users).orderBy(desc(users.createdAt));
+    return dbRead.select().from(users).orderBy(desc(users.createdAt));
   }
 
   async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
     const [result] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+    if (result) {
+      await cache.delete(`user:${id}`);
+    }
     return result;
   }
 
@@ -1130,7 +1155,7 @@ export class MemStorage implements IStorage {
   }
 
   async getUserStats(): Promise<{ total: number; active: number; newThisMonth: number }> {
-    const allUsers = await db.select().from(users);
+    const allUsers = await dbRead.select().from(users);
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const total = allUsers.length;
@@ -1146,7 +1171,7 @@ export class MemStorage implements IStorage {
   }
 
   async getAiModels(): Promise<AiModel[]> {
-    return db.select().from(aiModels).orderBy(desc(aiModels.createdAt));
+    return dbRead.select().from(aiModels).orderBy(desc(aiModels.createdAt));
   }
 
   async getAiModelsFiltered(filters: { provider?: string; type?: string; status?: string; search?: string; sortBy?: string; sortOrder?: string; page?: number; limit?: number }): Promise<{ models: AiModel[]; total: number }> {
@@ -1170,7 +1195,7 @@ export class MemStorage implements IStorage {
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const allModels = await db.select().from(aiModels).where(whereClause);
+    const allModels = await dbRead.select().from(aiModels).where(whereClause);
     const total = allModels.length;
 
     let sortedModels = [...allModels];
@@ -1195,12 +1220,12 @@ export class MemStorage implements IStorage {
   }
 
   async getAiModelById(id: string): Promise<AiModel | undefined> {
-    const [result] = await db.select().from(aiModels).where(eq(aiModels.id, id));
+    const [result] = await dbRead.select().from(aiModels).where(eq(aiModels.id, id));
     return result;
   }
 
   async getAiModelByModelId(modelId: string, provider: string): Promise<AiModel | undefined> {
-    const [result] = await db.select().from(aiModels).where(
+    const [result] = await dbRead.select().from(aiModels).where(
       and(eq(aiModels.modelId, modelId), eq(aiModels.provider, provider.toLowerCase()))
     );
     return result;
@@ -1222,7 +1247,7 @@ export class MemStorage implements IStorage {
   }
 
   async getPayments(): Promise<Payment[]> {
-    return db.select().from(payments).orderBy(desc(payments.createdAt));
+    return dbRead.select().from(payments).orderBy(desc(payments.createdAt));
   }
 
   async updatePayment(id: string, updates: Partial<InsertPayment>): Promise<Payment | undefined> {
@@ -1231,7 +1256,7 @@ export class MemStorage implements IStorage {
   }
 
   async getPaymentStats(): Promise<{ total: string; thisMonth: string; count: number }> {
-    const allPayments = await db.select().from(payments);
+    const allPayments = await dbRead.select().from(payments);
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const completedPayments = allPayments.filter(p => p.status === "completed");
@@ -1248,7 +1273,7 @@ export class MemStorage implements IStorage {
   }
 
   async getInvoices(): Promise<Invoice[]> {
-    return db.select().from(invoices).orderBy(desc(invoices.createdAt));
+    return dbRead.select().from(invoices).orderBy(desc(invoices.createdAt));
   }
 
   async updateInvoice(id: string, updates: Partial<InsertInvoice>): Promise<Invoice | undefined> {
@@ -1258,12 +1283,16 @@ export class MemStorage implements IStorage {
 
   // Admin: Settings
   async getSetting(key: string): Promise<PlatformSetting | undefined> {
-    const [result] = await db.select().from(platformSettings).where(eq(platformSettings.key, key));
-    return result;
+    return cache.remember(`setting:${key}`, 300, async () => {
+      const [result] = await dbRead.select().from(platformSettings).where(eq(platformSettings.key, key));
+      return result;
+    });
   }
 
   async getSettings(): Promise<PlatformSetting[]> {
-    return db.select().from(platformSettings).orderBy(platformSettings.category);
+    return cache.remember('settings:all', 300, async () => {
+      return dbRead.select().from(platformSettings).orderBy(platformSettings.category);
+    });
   }
 
   async upsertSetting(key: string, value: string, description?: string, category?: string): Promise<PlatformSetting> {
@@ -1273,11 +1302,15 @@ export class MemStorage implements IStorage {
         .set({ value, description, category, updatedAt: new Date() })
         .where(eq(platformSettings.key, key))
         .returning();
+      await cache.delete(`setting:${key}`);
+      await cache.delete('settings:all');
       return result;
     }
     const [result] = await db.insert(platformSettings)
       .values({ key, value, description, category })
       .returning();
+    await cache.delete(`setting:${key}`);
+    await cache.delete('settings:all');
     return result;
   }
 
@@ -1288,7 +1321,7 @@ export class MemStorage implements IStorage {
   }
 
   async getAuditLogs(limit: number = 100): Promise<AuditLog[]> {
-    return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(limit);
+    return dbRead.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(limit);
   }
 
   // Admin: Analytics
@@ -1300,7 +1333,7 @@ export class MemStorage implements IStorage {
   async getAnalyticsSnapshots(days: number = 30): Promise<AnalyticsSnapshot[]> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
-    return db.select().from(analyticsSnapshots)
+    return dbRead.select().from(analyticsSnapshots)
       .where(sql`${analyticsSnapshots.date} >= ${cutoff}`)
       .orderBy(analyticsSnapshots.date);
   }
@@ -1308,7 +1341,7 @@ export class MemStorage implements IStorage {
   async getDashboardMetrics(): Promise<{ users: number; queries: number; revenue: string; uptime: number }> {
     const userStats = await this.getUserStats();
     const paymentStats = await this.getPaymentStats();
-    const allUsers = await db.select().from(users);
+    const allUsers = await dbRead.select().from(users);
     const totalQueries = allUsers.reduce((sum, u) => sum + (u.queryCount || 0), 0);
     return {
       users: userStats.total,
@@ -1325,7 +1358,7 @@ export class MemStorage implements IStorage {
   }
 
   async getReports(): Promise<Report[]> {
-    return db.select().from(reports).orderBy(desc(reports.createdAt));
+    return dbRead.select().from(reports).orderBy(desc(reports.createdAt));
   }
 
   async updateReport(id: string, updates: Partial<InsertReport>): Promise<Report | undefined> {
@@ -1335,7 +1368,7 @@ export class MemStorage implements IStorage {
 
   // Admin: Domain Policies
   async getDomainPolicies(): Promise<DomainPolicy[]> {
-    return db.select().from(domainPolicies).orderBy(desc(domainPolicies.createdAt));
+    return dbRead.select().from(domainPolicies).orderBy(desc(domainPolicies.createdAt));
   }
 
   async updateDomainPolicy(id: string, updates: Partial<InsertDomainPolicy>): Promise<DomainPolicy | undefined> {
@@ -1355,17 +1388,17 @@ export class MemStorage implements IStorage {
 
   async getLibraryItems(userId: string, mediaType?: string): Promise<LibraryItem[]> {
     if (mediaType) {
-      return db.select().from(libraryItems)
+      return dbRead.select().from(libraryItems)
         .where(sql`${libraryItems.userId} = ${userId} AND ${libraryItems.mediaType} = ${mediaType}`)
         .orderBy(desc(libraryItems.createdAt));
     }
-    return db.select().from(libraryItems)
+    return dbRead.select().from(libraryItems)
       .where(eq(libraryItems.userId, userId))
       .orderBy(desc(libraryItems.createdAt));
   }
 
   async getLibraryItem(id: string, userId: string): Promise<LibraryItem | null> {
-    const [result] = await db.select().from(libraryItems)
+    const [result] = await dbRead.select().from(libraryItems)
       .where(sql`${libraryItems.id} = ${id} AND ${libraryItems.userId} = ${userId}`);
     return result || null;
   }
@@ -1379,11 +1412,11 @@ export class MemStorage implements IStorage {
 
   // Notification Preferences
   async getNotificationEventTypes(): Promise<NotificationEventType[]> {
-    return db.select().from(notificationEventTypes).orderBy(notificationEventTypes.sortOrder);
+    return dbRead.select().from(notificationEventTypes).orderBy(notificationEventTypes.sortOrder);
   }
 
   async getNotificationPreferences(userId: string): Promise<NotificationPreference[]> {
-    return db.select().from(notificationPreferences).where(eq(notificationPreferences.userId, userId));
+    return dbRead.select().from(notificationPreferences).where(eq(notificationPreferences.userId, userId));
   }
 
   async upsertNotificationPreference(pref: InsertNotificationPreference): Promise<NotificationPreference> {
@@ -1402,7 +1435,7 @@ export class MemStorage implements IStorage {
 
   // User Settings
   async getUserSettings(userId: string): Promise<UserSettings | null> {
-    const [result] = await db.select().from(userSettings).where(eq(userSettings.userId, userId));
+    const [result] = await dbRead.select().from(userSettings).where(eq(userSettings.userId, userId));
     return result || null;
   }
 
@@ -1483,11 +1516,11 @@ export class MemStorage implements IStorage {
 
   // Integration Management
   async getIntegrationProviders(): Promise<IntegrationProvider[]> {
-    return db.select().from(integrationProviders).orderBy(integrationProviders.name);
+    return dbRead.select().from(integrationProviders).orderBy(integrationProviders.name);
   }
 
   async getIntegrationProvider(id: string): Promise<IntegrationProvider | null> {
-    const [result] = await db.select().from(integrationProviders).where(eq(integrationProviders.id, id));
+    const [result] = await dbRead.select().from(integrationProviders).where(eq(integrationProviders.id, id));
     return result || null;
   }
 
@@ -1497,18 +1530,18 @@ export class MemStorage implements IStorage {
   }
 
   async getIntegrationAccounts(userId: string): Promise<IntegrationAccount[]> {
-    return db.select().from(integrationAccounts)
+    return dbRead.select().from(integrationAccounts)
       .where(eq(integrationAccounts.userId, userId))
       .orderBy(desc(integrationAccounts.createdAt));
   }
 
   async getIntegrationAccount(id: string): Promise<IntegrationAccount | null> {
-    const [result] = await db.select().from(integrationAccounts).where(eq(integrationAccounts.id, id));
+    const [result] = await dbRead.select().from(integrationAccounts).where(eq(integrationAccounts.id, id));
     return result || null;
   }
 
   async getIntegrationAccountByProvider(userId: string, providerId: string): Promise<IntegrationAccount | null> {
-    const [result] = await db.select().from(integrationAccounts)
+    const [result] = await dbRead.select().from(integrationAccounts)
       .where(sql`${integrationAccounts.userId} = ${userId} AND ${integrationAccounts.providerId} = ${providerId}`);
     return result || null;
   }
@@ -1532,15 +1565,15 @@ export class MemStorage implements IStorage {
 
   async getIntegrationTools(providerId?: string): Promise<IntegrationTool[]> {
     if (providerId) {
-      return db.select().from(integrationTools)
+      return dbRead.select().from(integrationTools)
         .where(eq(integrationTools.providerId, providerId))
         .orderBy(integrationTools.name);
     }
-    return db.select().from(integrationTools).orderBy(integrationTools.name);
+    return dbRead.select().from(integrationTools).orderBy(integrationTools.name);
   }
 
   async getIntegrationPolicy(userId: string): Promise<IntegrationPolicy | null> {
-    const [result] = await db.select().from(integrationPolicies).where(eq(integrationPolicies.userId, userId));
+    const [result] = await dbRead.select().from(integrationPolicies).where(eq(integrationPolicies.userId, userId));
     return result || null;
   }
 
@@ -1593,7 +1626,7 @@ export class MemStorage implements IStorage {
   }
 
   async getToolCallLogs(userId: string, limit: number = 100): Promise<ToolCallLog[]> {
-    return db.select().from(toolCallLogs)
+    return dbRead.select().from(toolCallLogs)
       .where(eq(toolCallLogs.userId, userId))
       .orderBy(desc(toolCallLogs.createdAt))
       .limit(limit);
@@ -1611,7 +1644,7 @@ export class MemStorage implements IStorage {
   }
 
   async getConsentLogs(userId: string, limit: number = 50): Promise<ConsentLog[]> {
-    return db.select().from(consentLogs)
+    return dbRead.select().from(consentLogs)
       .where(eq(consentLogs.userId, userId))
       .orderBy(desc(consentLogs.createdAt))
       .limit(limit);
@@ -1625,13 +1658,13 @@ export class MemStorage implements IStorage {
   }
 
   async getSharedLinks(userId: string): Promise<SharedLink[]> {
-    return db.select().from(sharedLinks)
+    return dbRead.select().from(sharedLinks)
       .where(eq(sharedLinks.userId, userId))
       .orderBy(desc(sharedLinks.createdAt));
   }
 
   async getSharedLinkByToken(token: string): Promise<SharedLink | undefined> {
-    const [result] = await db.select().from(sharedLinks).where(eq(sharedLinks.token, token));
+    const [result] = await dbRead.select().from(sharedLinks).where(eq(sharedLinks.token, token));
     return result;
   }
 
@@ -1669,7 +1702,7 @@ export class MemStorage implements IStorage {
 
   // Archived/Deleted Chats
   async getArchivedChats(userId: string): Promise<Chat[]> {
-    return db.select().from(chats)
+    return dbRead.select().from(chats)
       .where(and(eq(chats.userId, userId), eq(chats.archived, 'true')))
       .orderBy(desc(chats.updatedAt));
   }
@@ -1703,7 +1736,7 @@ export class MemStorage implements IStorage {
   }
 
   async getDeletedChats(userId: string): Promise<Chat[]> {
-    return db.select().from(chats)
+    return dbRead.select().from(chats)
       .where(and(eq(chats.userId, userId), sql`${chats.deletedAt} IS NOT NULL`))
       .orderBy(desc(chats.deletedAt));
   }
@@ -1720,13 +1753,13 @@ export class MemStorage implements IStorage {
 
   // Company Knowledge
   async getCompanyKnowledge(userId: string): Promise<CompanyKnowledge[]> {
-    return db.select().from(companyKnowledge)
+    return dbRead.select().from(companyKnowledge)
       .where(eq(companyKnowledge.userId, userId))
       .orderBy(desc(companyKnowledge.createdAt));
   }
 
   async getActiveCompanyKnowledge(userId: string): Promise<CompanyKnowledge[]> {
-    return db.select().from(companyKnowledge)
+    return dbRead.select().from(companyKnowledge)
       .where(and(eq(companyKnowledge.userId, userId), eq(companyKnowledge.isActive, 'true')))
       .orderBy(desc(companyKnowledge.createdAt));
   }
@@ -1750,7 +1783,7 @@ export class MemStorage implements IStorage {
 
   // Gmail OAuth Token operations (Custom MCP)
   async getGmailOAuthToken(userId: string): Promise<GmailOAuthToken | null> {
-    const [token] = await db.select().from(gmailOAuthTokens)
+    const [token] = await dbRead.select().from(gmailOAuthTokens)
       .where(eq(gmailOAuthTokens.userId, userId));
     return token || null;
   }
@@ -1782,7 +1815,7 @@ export class MemStorage implements IStorage {
 
   // Message Idempotency operations
   async findMessageByRequestId(requestId: string): Promise<ChatMessage | null> {
-    const [message] = await db.select().from(chatMessages)
+    const [message] = await dbRead.select().from(chatMessages)
       .where(eq(chatMessages.requestId, requestId));
     return message || null;
   }
@@ -1815,7 +1848,7 @@ export class MemStorage implements IStorage {
   }
 
   async findAssistantResponseForUserMessage(userMessageId: string): Promise<ChatMessage | null> {
-    const [message] = await db.select().from(chatMessages)
+    const [message] = await dbRead.select().from(chatMessages)
       .where(and(
         eq(chatMessages.userMessageId, userMessageId),
         eq(chatMessages.role, 'assistant')
@@ -1830,7 +1863,7 @@ export class MemStorage implements IStorage {
   }
 
   async getQualityMetrics(since: Date, limit: number = 100): Promise<ResponseQualityMetric[]> {
-    return db.select().from(responseQualityMetrics)
+    return dbRead.select().from(responseQualityMetrics)
       .where(sql`${responseQualityMetrics.createdAt} >= ${since}`)
       .orderBy(desc(responseQualityMetrics.createdAt))
       .limit(limit);
@@ -1873,7 +1906,7 @@ export class MemStorage implements IStorage {
   }
 
   async getConnectorUsageStats(connector: string, since: Date): Promise<ConnectorUsageHourly[]> {
-    return db.select().from(connectorUsageHourly)
+    return dbRead.select().from(connectorUsageHourly)
       .where(and(
         eq(connectorUsageHourly.connector, connector),
         sql`${connectorUsageHourly.createdAt} >= ${since}`
@@ -1889,14 +1922,14 @@ export class MemStorage implements IStorage {
 
   async getOfflineMessages(userId: string, status?: string): Promise<OfflineMessageQueue[]> {
     if (status) {
-      return db.select().from(offlineMessageQueue)
+      return dbRead.select().from(offlineMessageQueue)
         .where(and(
           eq(offlineMessageQueue.userId, userId),
           eq(offlineMessageQueue.status, status)
         ))
         .orderBy(offlineMessageQueue.createdAt);
     }
-    return db.select().from(offlineMessageQueue)
+    return dbRead.select().from(offlineMessageQueue)
       .where(eq(offlineMessageQueue.userId, userId))
       .orderBy(offlineMessageQueue.createdAt);
   }
@@ -1949,7 +1982,7 @@ export class MemStorage implements IStorage {
   }
 
   async getProviderMetrics(provider?: string, startDate?: Date, endDate?: Date): Promise<ProviderMetrics[]> {
-    let query = db.select().from(providerMetrics);
+    let query = dbRead.select().from(providerMetrics);
     const conditions: any[] = [];
 
     if (provider) {
@@ -1963,15 +1996,15 @@ export class MemStorage implements IStorage {
     }
 
     if (conditions.length > 0) {
-      return db.select().from(providerMetrics)
+      return dbRead.select().from(providerMetrics)
         .where(and(...conditions))
         .orderBy(desc(providerMetrics.windowStart));
     }
-    return db.select().from(providerMetrics).orderBy(desc(providerMetrics.windowStart));
+    return dbRead.select().from(providerMetrics).orderBy(desc(providerMetrics.windowStart));
   }
 
   async getLatestProviderMetrics(): Promise<ProviderMetrics[]> {
-    const result = await db.execute(sql`
+    const result = await dbRead.execute(sql`
       SELECT DISTINCT ON (provider) *
       FROM provider_metrics
       ORDER BY provider, window_start DESC
@@ -1981,11 +2014,11 @@ export class MemStorage implements IStorage {
 
   // Cost Budgets
   async getCostBudgets(): Promise<CostBudget[]> {
-    return db.select().from(costBudgets).orderBy(costBudgets.provider);
+    return dbRead.select().from(costBudgets).orderBy(costBudgets.provider);
   }
 
   async getCostBudget(provider: string): Promise<CostBudget | undefined> {
-    const [result] = await db.select().from(costBudgets).where(eq(costBudgets.provider, provider));
+    const [result] = await dbRead.select().from(costBudgets).where(eq(costBudgets.provider, provider));
     return result;
   }
 
@@ -2030,32 +2063,32 @@ export class MemStorage implements IStorage {
     let countResult: any;
 
     if (conditions.length > 0) {
-      logs = await db.select().from(apiLogs)
+      logs = await dbRead.select().from(apiLogs)
         .where(and(...conditions))
         .orderBy(desc(apiLogs.createdAt))
         .limit(limit)
         .offset(offset);
-      countResult = await db.select({ count: sql<number>`count(*)` }).from(apiLogs).where(and(...conditions));
+      countResult = await dbRead.select({ count: sql<number>`count(*)` }).from(apiLogs).where(and(...conditions));
     } else {
-      logs = await db.select().from(apiLogs)
+      logs = await dbRead.select().from(apiLogs)
         .orderBy(desc(apiLogs.createdAt))
         .limit(limit)
         .offset(offset);
-      countResult = await db.select({ count: sql<number>`count(*)` }).from(apiLogs);
+      countResult = await dbRead.select({ count: sql<number>`count(*)` }).from(apiLogs);
     }
 
     return { logs, total: Number(countResult[0]?.count || 0) };
   }
 
   async getApiLogStats(): Promise<{ byStatusCode: Record<number, number>; byProvider: Record<string, number> }> {
-    const statusCodeStats = await db.execute(sql`
+    const statusCodeStats = await dbRead.execute(sql`
       SELECT status_code, COUNT(*) as count
       FROM api_logs
       WHERE status_code IS NOT NULL
       GROUP BY status_code
     `);
 
-    const providerStats = await db.execute(sql`
+    const providerStats = await dbRead.execute(sql`
       SELECT provider, COUNT(*) as count
       FROM api_logs
       WHERE provider IS NOT NULL
@@ -2082,14 +2115,14 @@ export class MemStorage implements IStorage {
   }
 
   async getLatestKpiSnapshot(): Promise<KpiSnapshot | undefined> {
-    const [result] = await db.select().from(kpiSnapshots)
+    const [result] = await dbRead.select().from(kpiSnapshots)
       .orderBy(desc(kpiSnapshots.createdAt))
       .limit(1);
     return result;
   }
 
   async getKpiSnapshots(limit: number = 100): Promise<KpiSnapshot[]> {
-    return db.select().from(kpiSnapshots)
+    return dbRead.select().from(kpiSnapshots)
       .orderBy(desc(kpiSnapshots.createdAt))
       .limit(limit);
   }
@@ -2112,7 +2145,7 @@ export class MemStorage implements IStorage {
     }
 
     if (conditions.length > 0) {
-      query = await db.execute(sql`
+      query = await dbRead.execute(sql`
         SELECT event_name, COUNT(*) as count
         FROM analytics_events
         WHERE ${sql.join(conditions, sql` AND `)}
@@ -2120,7 +2153,7 @@ export class MemStorage implements IStorage {
         ORDER BY count DESC
       `);
     } else {
-      query = await db.execute(sql`
+      query = await dbRead.execute(sql`
         SELECT event_name, COUNT(*) as count
         FROM analytics_events
         GROUP BY event_name
@@ -2147,7 +2180,7 @@ export class MemStorage implements IStorage {
 
     const config = configMap[granularity];
 
-    const result = await db.execute(sql`
+    const result = await dbRead.execute(sql`
       SELECT date_trunc(${config.trunc}, created_at) as date, COUNT(*) as count
       FROM users
       WHERE created_at >= NOW() - INTERVAL ${config.interval}
@@ -2163,11 +2196,11 @@ export class MemStorage implements IStorage {
 
   // Security Policies CRUD
   async getSecurityPolicies(): Promise<SecurityPolicy[]> {
-    return db.select().from(securityPolicies).orderBy(desc(securityPolicies.priority));
+    return dbRead.select().from(securityPolicies).orderBy(desc(securityPolicies.priority));
   }
 
   async getSecurityPolicy(id: string): Promise<SecurityPolicy | undefined> {
-    const [result] = await db.select().from(securityPolicies).where(eq(securityPolicies.id, id));
+    const [result] = await dbRead.select().from(securityPolicies).where(eq(securityPolicies.id, id));
     return result;
   }
 
@@ -2198,11 +2231,11 @@ export class MemStorage implements IStorage {
 
   // Report Templates CRUD
   async getReportTemplates(): Promise<ReportTemplate[]> {
-    return db.select().from(reportTemplates).orderBy(desc(reportTemplates.createdAt));
+    return dbRead.select().from(reportTemplates).orderBy(desc(reportTemplates.createdAt));
   }
 
   async getReportTemplate(id: string): Promise<ReportTemplate | undefined> {
-    const [result] = await db.select().from(reportTemplates).where(eq(reportTemplates.id, id));
+    const [result] = await dbRead.select().from(reportTemplates).where(eq(reportTemplates.id, id));
     return result;
   }
 
@@ -2213,13 +2246,13 @@ export class MemStorage implements IStorage {
 
   // Generated Reports CRUD
   async getGeneratedReports(limit: number = 100): Promise<GeneratedReport[]> {
-    return db.select().from(generatedReports)
+    return dbRead.select().from(generatedReports)
       .orderBy(desc(generatedReports.createdAt))
       .limit(limit);
   }
 
   async getGeneratedReport(id: string): Promise<GeneratedReport | undefined> {
-    const [result] = await db.select().from(generatedReports).where(eq(generatedReports.id, id));
+    const [result] = await dbRead.select().from(generatedReports).where(eq(generatedReports.id, id));
     return result;
   }
 
@@ -2242,15 +2275,15 @@ export class MemStorage implements IStorage {
 
   // Settings Config CRUD
   async getSettingsConfig(): Promise<SettingsConfig[]> {
-    return db.select().from(settingsConfig).orderBy(settingsConfig.category, settingsConfig.key);
+    return dbRead.select().from(settingsConfig).orderBy(settingsConfig.category, settingsConfig.key);
   }
 
   async getSettingsConfigByCategory(category: string): Promise<SettingsConfig[]> {
-    return db.select().from(settingsConfig).where(eq(settingsConfig.category, category)).orderBy(settingsConfig.key);
+    return dbRead.select().from(settingsConfig).where(eq(settingsConfig.category, category)).orderBy(settingsConfig.key);
   }
 
   async getSettingsConfigByKey(key: string): Promise<SettingsConfig | undefined> {
-    const [result] = await db.select().from(settingsConfig).where(eq(settingsConfig.key, key));
+    const [result] = await dbRead.select().from(settingsConfig).where(eq(settingsConfig.key, key));
     return result;
   }
 
@@ -2347,11 +2380,11 @@ export class MemStorage implements IStorage {
 
   async getAgentGapLogs(status?: string): Promise<AgentGapLog[]> {
     if (status) {
-      return db.select().from(agentGapLogs)
+      return dbRead.select().from(agentGapLogs)
         .where(eq(agentGapLogs.status, status))
         .orderBy(desc(agentGapLogs.createdAt));
     }
-    return db.select().from(agentGapLogs).orderBy(desc(agentGapLogs.createdAt));
+    return dbRead.select().from(agentGapLogs).orderBy(desc(agentGapLogs.createdAt));
   }
 
   async updateAgentGapLog(id: string, updates: Partial<InsertAgentGapLog>): Promise<AgentGapLog | undefined> {
@@ -2364,13 +2397,13 @@ export class MemStorage implements IStorage {
 
   // Library Folder CRUD
   async getLibraryFolders(userId: string): Promise<LibraryFolder[]> {
-    return db.select().from(libraryFolders)
+    return dbRead.select().from(libraryFolders)
       .where(eq(libraryFolders.userId, userId))
       .orderBy(libraryFolders.name);
   }
 
   async getLibraryFolder(id: string, userId: string): Promise<LibraryFolder | null> {
-    const [result] = await db.select().from(libraryFolders)
+    const [result] = await dbRead.select().from(libraryFolders)
       .where(and(eq(libraryFolders.uuid, id), eq(libraryFolders.userId, userId)));
     return result || null;
   }
@@ -2396,13 +2429,13 @@ export class MemStorage implements IStorage {
 
   // Library Collection CRUD
   async getLibraryCollections(userId: string): Promise<LibraryCollection[]> {
-    return db.select().from(libraryCollections)
+    return dbRead.select().from(libraryCollections)
       .where(eq(libraryCollections.userId, userId))
       .orderBy(desc(libraryCollections.createdAt));
   }
 
   async getLibraryCollection(id: string, userId: string): Promise<LibraryCollection | null> {
-    const [result] = await db.select().from(libraryCollections)
+    const [result] = await dbRead.select().from(libraryCollections)
       .where(and(eq(libraryCollections.uuid, id), eq(libraryCollections.userId, userId)));
     return result || null;
   }
@@ -2450,21 +2483,21 @@ export class MemStorage implements IStorage {
   }
 
   async getCollectionFiles(collectionId: string, userId: string): Promise<LibraryFile[]> {
-    const [collection] = await db.select().from(libraryCollections)
+    const [collection] = await dbRead.select().from(libraryCollections)
       .where(and(eq(libraryCollections.uuid, collectionId), eq(libraryCollections.userId, userId)));
     if (!collection) return [];
-    const fileLinks = await db.select().from(libraryFileCollections)
+    const fileLinks = await dbRead.select().from(libraryFileCollections)
       .where(eq(libraryFileCollections.collectionId, collection.id))
       .orderBy(libraryFileCollections.order);
     if (fileLinks.length === 0) return [];
     const fileIds = fileLinks.map(fl => fl.fileId);
-    return db.select().from(libraryFiles)
+    return dbRead.select().from(libraryFiles)
       .where(sql`${libraryFiles.id} IN (${sql.join(fileIds.map(id => sql`${id}`), sql`, `)})`);
   }
 
   // Enhanced Library File CRUD
   async getLibraryFile(id: string, userId: string): Promise<LibraryFile | null> {
-    const [result] = await db.select().from(libraryFiles)
+    const [result] = await dbRead.select().from(libraryFiles)
       .where(and(eq(libraryFiles.uuid, id), eq(libraryFiles.userId, userId)));
     return result || null;
   }
@@ -2475,7 +2508,7 @@ export class MemStorage implements IStorage {
       conditions.push(eq(libraryFiles.type, options.type));
     }
     if (options?.folderId) {
-      const [folder] = await db.select().from(libraryFolders)
+      const [folder] = await dbRead.select().from(libraryFolders)
         .where(and(eq(libraryFolders.uuid, options.folderId), eq(libraryFolders.userId, userId)));
       if (folder) {
         conditions.push(eq(libraryFiles.folderId, folder.id));
@@ -2490,7 +2523,7 @@ export class MemStorage implements IStorage {
         ) as SQL
       );
     }
-    return db.select().from(libraryFiles)
+    return dbRead.select().from(libraryFiles)
       .where(and(...conditions))
       .orderBy(desc(libraryFiles.createdAt));
   }
@@ -2518,7 +2551,7 @@ export class MemStorage implements IStorage {
 
   // Library Storage Stats
   async getLibraryStorageStats(userId: string): Promise<LibraryStorageStats | null> {
-    const [result] = await db.select().from(libraryStorage).where(eq(libraryStorage.userId, userId));
+    const [result] = await dbRead.select().from(libraryStorage).where(eq(libraryStorage.userId, userId));
     return result || null;
   }
 
@@ -2550,7 +2583,7 @@ export class MemStorage implements IStorage {
   }
 
   async getLibraryActivity(userId: string, limit: number = 50): Promise<LibraryActivityRecord[]> {
-    return db.select().from(libraryActivity)
+    return dbRead.select().from(libraryActivity)
       .where(eq(libraryActivity.userId, userId))
       .orderBy(desc(libraryActivity.createdAt))
       .limit(limit);
@@ -2563,7 +2596,7 @@ export class MemStorage implements IStorage {
   }
 
   async getChatMessageAnalysisByUploadId(uploadId: string): Promise<ChatMessageAnalysis | undefined> {
-    const [result] = await db.select()
+    const [result] = await dbRead.select()
       .from(chatMessageAnalysis)
       .where(eq(chatMessageAnalysis.uploadId, uploadId))
       .orderBy(desc(chatMessageAnalysis.createdAt))
@@ -2586,7 +2619,7 @@ export class MemStorage implements IStorage {
   }
 
   async getConversationDocuments(chatId: string): Promise<ConversationDocument[]> {
-    return db.select()
+    return dbRead.select()
       .from(conversationDocuments)
       .where(eq(conversationDocuments.chatId, chatId))
       .orderBy(conversationDocuments.createdAt);

@@ -44,9 +44,9 @@ export type RouteDecision = z.infer<typeof RouteDecisionSchema>;
 
 const AGENT_ROLE_TO_NAME: Record<SpecializedAgent, string> = {
   orchestrator: "OrchestratorAgent",
-  research: "ResearchAgent",
+  research: "ResearchAssistantAgent",
   code: "CodeAgent",
-  data: "DataAgent",
+  data: "DataAnalystAgent",
   content: "ContentAgent",
   communication: "CommunicationAgent",
   browser: "BrowserAgent",

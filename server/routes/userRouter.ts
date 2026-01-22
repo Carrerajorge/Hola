@@ -8,6 +8,8 @@ import { notificationEventTypes, responsePreferencesSchema, userProfileSchema, f
 import { eq } from "drizzle-orm";
 import { usageQuotaService } from "../services/usageQuotaService";
 import { AuthenticatedRequest, getUserId } from "../types/express";
+import { validateBody } from "../middleware/validateRequest";
+import { z } from "zod";
 
 export function createUserRouter() {
   const router = Router();
@@ -182,7 +184,13 @@ export function createUserRouter() {
     }
   });
 
-  router.put("/api/users/:id/settings", async (req, res) => {
+  const updateUserSettingsSchema = z.object({
+    responsePreferences: responsePreferencesSchema.optional(),
+    userProfile: userProfileSchema.optional(),
+    featureFlags: featureFlagsSchema.optional(),
+  });
+
+  router.put("/api/users/:id/settings", validateBody(updateUserSettingsSchema), async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -203,44 +211,14 @@ export function createUserRouter() {
         }
       }
 
+      // Validated data is now in req.body (or req.validatedBody)
       const { responsePreferences, userProfile, featureFlags } = req.body;
 
       const updates: any = {};
-      const validationErrors: string[] = [];
 
-      if (responsePreferences !== undefined) {
-        const parsed = responsePreferencesSchema.safeParse(responsePreferences);
-        if (!parsed.success) {
-          validationErrors.push(`responsePreferences: ${parsed.error.errors.map(e => e.message).join(', ')}`);
-        } else {
-          updates.responsePreferences = parsed.data;
-        }
-      }
-
-      if (userProfile !== undefined) {
-        const parsed = userProfileSchema.safeParse(userProfile);
-        if (!parsed.success) {
-          validationErrors.push(`userProfile: ${parsed.error.errors.map(e => e.message).join(', ')}`);
-        } else {
-          updates.userProfile = parsed.data;
-        }
-      }
-
-      if (featureFlags !== undefined) {
-        const parsed = featureFlagsSchema.safeParse(featureFlags);
-        if (!parsed.success) {
-          validationErrors.push(`featureFlags: ${parsed.error.errors.map(e => e.message).join(', ')}`);
-        } else {
-          updates.featureFlags = parsed.data;
-        }
-      }
-
-      if (validationErrors.length > 0) {
-        return res.status(400).json({
-          error: "Validation failed",
-          details: validationErrors
-        });
-      }
+      if (responsePreferences) updates.responsePreferences = responsePreferences;
+      if (userProfile) updates.userProfile = userProfile;
+      if (featureFlags) updates.featureFlags = featureFlags;
 
       const settings = await storage.upsertUserSettings(id, updates);
       res.json(settings);
