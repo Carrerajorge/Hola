@@ -2372,6 +2372,7 @@ export function SpreadsheetEditor({
           value={selectedCellData?.formula || selectedCellData?.value || ''}
           onChange={(e) => selectedCell && handleCellChange(selectedCell, e.target.value)}
           data-testid="formula-input"
+          aria-label="Barra de fórmulas"
         />
         <Button
           variant={useVirtualized ? 'default' : 'ghost'}
@@ -2557,6 +2558,7 @@ export function SpreadsheetEditor({
                             onChange={(e) => handleCellChange(key, e.target.value)}
                             onBlur={handleCellBlur}
                             onKeyDown={(e) => handleKeyDown(e, key)}
+                            aria-label={`Editar celda ${getCellKey(rowIndex, colIndex)}`}
                           />
                         ) : (
                           <span className="spreadsheet-cell-content">{cell.value}</span>
@@ -2665,6 +2667,7 @@ export function SpreadsheetEditor({
               onKeyDown={(e) => e.key === 'Enter' && handleAIGenerate()}
               autoFocus
               data-testid="input-ai-prompt"
+              aria-label="Prompt para generar con IA"
             />
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => setShowAIPrompt(false)}>
@@ -2687,6 +2690,7 @@ export function SpreadsheetEditor({
             <button
               onClick={() => setFindReplaceOpen(false)}
               className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              aria-label="Cerrar búsqueda"
             >
               <X className="w-4 h-4" />
             </button>
@@ -2703,6 +2707,7 @@ export function SpreadsheetEditor({
                 onKeyDown={(e) => e.key === 'Enter' && findInSpreadsheet()}
                 autoFocus
                 data-testid="input-find-text"
+                aria-label="Texto a buscar"
               />
             </div>
             <div>
@@ -2714,6 +2719,7 @@ export function SpreadsheetEditor({
                 placeholder="Nuevo texto..."
                 className="w-full px-3 py-1.5 text-sm border rounded focus:ring-1 focus:ring-green-500 outline-none dark:bg-gray-800 dark:border-gray-700"
                 data-testid="input-replace-text"
+                aria-label="Texto para reemplazar"
               />
             </div>
             {findResults.length > 0 && (

@@ -376,12 +376,12 @@ function ArtifactCard({ artifact, compact = false }: ArtifactCardProps) {
             {artifact.url && (
               <>
                 <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
-                  <a href={artifact.url} target="_blank" rel="noopener noreferrer">
+                  <a href={artifact.url} target="_blank" rel="noopener noreferrer" aria-label={`Abrir ${artifact.name}`}>
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
                 </Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
-                  <a href={artifact.url} download>
+                  <a href={artifact.url} download aria-label={`Descargar ${artifact.name}`}>
                     <Download className="h-3.5 w-3.5" />
                   </a>
                 </Button>
@@ -671,7 +671,7 @@ function CitationsPanel({ citations }: CitationsPanelProps) {
               </div>
               {citation.url && (
                 <Button variant="ghost" size="icon" className="h-6 w-6" asChild>
-                  <a href={citation.url} target="_blank" rel="noopener noreferrer">
+                  <a href={citation.url} target="_blank" rel="noopener noreferrer" aria-label={`Abrir fuente: ${citation.source}`}>
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 </Button>
@@ -1009,7 +1009,7 @@ function EnhancedArtifactCard({ artifact }: EnhancedArtifactCardProps) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                  <a href={artifact.url} target="_blank" rel="noopener noreferrer">
+                  <a href={artifact.url} target="_blank" rel="noopener noreferrer" aria-label={`Ver ${artifact.name}`}>
                     <Eye className="h-4 w-4" />
                   </a>
                 </Button>
@@ -1019,7 +1019,7 @@ function EnhancedArtifactCard({ artifact }: EnhancedArtifactCardProps) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                  <a href={artifact.url} download={artifact.name}>
+                  <a href={artifact.url} download={artifact.name} aria-label={`Descargar ${artifact.name}`}>
                     <Download className="h-4 w-4" />
                   </a>
                 </Button>

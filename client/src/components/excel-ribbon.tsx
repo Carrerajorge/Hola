@@ -427,7 +427,7 @@ const Dropdown: React.FC<DropdownProps> = ({ value, options, onChange, width = 1
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
         aria-haspopup="listbox"
-        aria-expanded={isOpen}
+        aria-expanded={isOpen ? "true" : "false"}
       >
         <span className="flex-1 text-left truncate font-medium">{value}</span>
         <span className="w-3 h-3 ml-1 text-gray-500">{Icons.dropdown}</span>
@@ -487,7 +487,7 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ color, onChange, icon, toolti
         title={tooltip}
         aria-label={tooltip}
         aria-haspopup="true"
-        aria-expanded={isOpen}
+        aria-expanded={isOpen ? "true" : "false"}
       >
         <span className="w-4 h-4">{icon}</span>
         <div className="w-4 h-1 rounded-sm -mt-0.5" style={{ backgroundColor: color }} />
@@ -601,7 +601,7 @@ const BorderPicker: React.FC<BorderPickerProps> = ({ onSelect }) => {
         title="Bordes"
         aria-label="Bordes"
         aria-haspopup="true"
-        aria-expanded={isOpen}
+        aria-expanded={isOpen ? "true" : "false"}
       >
         <span className="w-4 h-4">{Icons.borders}</span>
         <span className="w-2.5 h-2.5 text-gray-500">{Icons.dropdown}</span>
@@ -756,7 +756,7 @@ const MergePicker: React.FC<MergePickerProps> = ({ onMerge, onUnmerge }) => {
         title="Combinar celdas"
         aria-label="Combinar celdas"
         aria-haspopup="true"
-        aria-expanded={isOpen}
+        aria-expanded={isOpen ? "true" : "false"}
       >
         <span className="w-4 h-4">{Icons.merge}</span>
         <span className="w-2.5 h-2.5 text-gray-500">{Icons.dropdown}</span>

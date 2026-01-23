@@ -673,6 +673,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           accept="image/*"
                           className="hidden"
                           onChange={handleAvatarUpload}
+                          aria-label="Subir avatar"
                         />
                       </div>
 
@@ -791,6 +792,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           className="hidden"
                           accept=".pdf,.txt,.docx,.xlsx,.csv,.json"
                           onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
+                          aria-label="Cargar archivos de conocimiento"
                         />
                       </div>
 
@@ -1023,6 +1025,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                     onChange={(e) => setPreviewMessage(e.target.value)}
                     className="flex-1 bg-transparent outline-none text-sm"
                     data-testid="input-preview-message"
+                    aria-label="Mensaje de vista previa"
                   />
                   <Button variant="ghost" size="icon" className="h-8 w-8">
                     <Mic className="h-4 w-4" />
