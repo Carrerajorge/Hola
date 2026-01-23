@@ -16,7 +16,7 @@ export function requestLoggerMiddleware(
 ): void {
   const traceId = nanoid(16);
   const startTime = Date.now();
-  
+
   res.setHeader("X-Trace-Id", traceId);
   res.locals.traceId = traceId;
 
@@ -28,7 +28,7 @@ export function requestLoggerMiddleware(
 
   runWithContext(context, () => {
     const requestLogger = logger.child({ traceId });
-    
+
     requestLogger.info("Request started", {
       method: req.method,
       path: req.path,
@@ -39,8 +39,10 @@ export function requestLoggerMiddleware(
 
     res.on("finish", () => {
       const durationMs = Date.now() - startTime;
+      res.setHeader("X-Response-Time", `${durationMs}ms`);
+
       const isError = res.statusCode >= 400;
-      
+
       const logMethod = isError ? "warn" : "info";
       requestLogger[logMethod]("Request completed", {
         method: req.method,

@@ -9,6 +9,26 @@ const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   error: 3,
 };
 
+const SENSITIVE_KEYS = ['password', 'token', 'secret', 'key', 'authorization', 'cookie', 'stripe'];
+
+const redact = (obj: any): any => {
+  if (!obj) return obj;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(redact);
+
+  const newObj: any = {};
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      if (SENSITIVE_KEYS.some(k => key.toLowerCase().includes(k))) {
+        newObj[key] = '***REDACTED***';
+      } else {
+        newObj[key] = redact(obj[key]);
+      }
+    }
+  }
+  return newObj;
+};
+
 interface LogEntry {
   timestamp: string;
   level: LogLevel;
@@ -55,7 +75,7 @@ function formatLogEntry(
   metadata?: Record<string, unknown>
 ): LogEntry {
   const correlationContext = getContext();
-  
+
   const entry: LogEntry = {
     timestamp: new Date().toISOString(),
     level,
@@ -79,13 +99,13 @@ function formatLogEntry(
   }
 
   const { component, userId, chatId, ...otherContext } = context;
-  
+
   if (Object.keys(otherContext).length > 0) {
-    Object.assign(entry, otherContext);
+    Object.assign(entry, redact(otherContext));
   }
 
   if (metadata) {
-    Object.assign(entry, metadata);
+    Object.assign(entry, redact(metadata));
   }
 
   return entry;
@@ -93,7 +113,7 @@ function formatLogEntry(
 
 function writeLog(entry: LogEntry): void {
   const output = JSON.stringify(entry);
-  
+
   switch (entry.level) {
     case "error":
       console.error(output);
@@ -115,7 +135,7 @@ function createLogMethod(
 ): (message: string, metadata?: Record<string, unknown>) => void {
   return (message: string, metadata?: Record<string, unknown>) => {
     if (!shouldLog(level)) return;
-    
+
     const entry = formatLogEntry(level, message, context, metadata);
     writeLog(entry);
   };
