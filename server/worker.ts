@@ -34,7 +34,7 @@ createWorker<UploadJobData, any>(QUEUE_NAMES.UPLOAD, async (job) => {
 // ==========================================
 
 // Types from the old engine
-type TaskType = "chunk" | "embed" | "analyze" | "ocr" | "vision" | "pii" | "quality" | "custom";
+type TaskType = "chunk" | "embed" | "analyze" | "ocr" | "vision" | "pii" | "quality" | "custom" | "pdf-generate" | "excel-parse";
 interface ProcessingTaskData {
     [key: string]: any;
 }
@@ -118,6 +118,28 @@ const processors: Record<TaskType, (data: any) => Promise<any>> = {
 
     custom: async (data: { fn: string }) => {
         return { error: "Custom function execution disabled for security" };
+    },
+
+    "pdf-generate": async (data: any) => {
+        const { generatePdfFromHtml } = await import("./services/pdfGeneration");
+        const buffer = await generatePdfFromHtml(data.html, data.options);
+        // In a real worker, we might upload this buffer to S3/Storage and return the URL.
+        // For this local/hybrid setup, we might return the buffer base64 encoded or save to temp.
+        // Returning base64 for simplicity in this isomorphic setup
+        return { pdfBase64: buffer.toString('base64'), fileName: data.outputFilename };
+    },
+
+    "excel-parse": async (data: any) => {
+        const { parseSpreadsheet } = await import("./services/spreadsheetAnalyzer");
+        const fs = await import("fs/promises");
+
+        // In a real worker, we download from S3. Here we might read from disk if shared volume.
+        // Assuming job data contains a path accessible to worker
+        const buffer = await fs.readFile(data.filePath);
+        const result = await parseSpreadsheet(buffer, data.mimeType);
+
+        // We might store the result in DB here or return it
+        return result;
     }
 };
 

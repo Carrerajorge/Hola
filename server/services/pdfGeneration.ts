@@ -52,7 +52,7 @@ async function getBrowser(): Promise<Browser> {
 function wrapHtmlWithStyles(html: string): string {
   const hasHtmlTag = /<html[\s>]/i.test(html);
   const hasHeadTag = /<head[\s>]/i.test(html);
-  
+
   const printStyles = `
     <style>
       @media print {
@@ -132,7 +132,7 @@ function validateHtml(html: string): void {
   if (!html || typeof html !== "string") {
     throw new Error("HTML content is required and must be a string");
   }
-  
+
   if (html.trim().length === 0) {
     throw new Error("HTML content cannot be empty");
   }
@@ -158,6 +158,22 @@ export async function generatePdfFromHtml(
     },
   };
 
+  if (process.env.ENABLE_BACKGROUND_JOBS === "true") {
+    // Import dynamically to avoid circular dependency issues if any
+    const { dispatchPdfGeneration } = await import("./jobService");
+    // Note: This changes the return type contract if we were strictly typed to Buffer.
+    // In a real app, we'd handle this by returning a JobId or Promise<Buffer> that waits.
+    // For this refactor, we are keeping synchronous behavior unless explicitly offloaded.
+    // IF we want to force offload:
+    // await dispatchPdfGeneration({ html, options: mergedOptions, outputFilename: "output.pdf" });
+    // throw new Error("PDF Generation started in background"); 
+
+    // OPTIONAL: logic to decide if we wait or dispatch. 
+    // For now, let's keep direct execution as default to not break existing flows,
+    // but log that we COULD dispatch.
+    console.log("[pdfGeneration] Background jobs enabled, but direct execution requested for immediate response.");
+  }
+
   let context: BrowserContext | null = null;
 
   try {
@@ -172,7 +188,7 @@ export async function generatePdfFromHtml(
     });
 
     await page.waitForLoadState("domcontentloaded");
-    
+
     await page.evaluate(() => {
       return new Promise<void>((resolve) => {
         if (document.readyState === "complete") {
@@ -203,15 +219,15 @@ export async function generatePdfFromHtml(
     return Buffer.from(pdfBuffer);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    
+
     if (errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
       throw new Error(`PDF generation timed out: ${errorMessage}`);
     }
-    
+
     if (errorMessage.includes("net::ERR_") || errorMessage.includes("Navigation")) {
       throw new Error(`Failed to load HTML content: ${errorMessage}`);
     }
-    
+
     throw new Error(`PDF generation failed: ${errorMessage}`);
   } finally {
     if (context) {

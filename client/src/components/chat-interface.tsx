@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
 import {
   Plus,
@@ -5141,7 +5142,17 @@ IMPORTANTE:
               )}
 
               {/* Messages Area - Compact for document mode */}
-              {hasMessages && (
+              {isConversationStateLoading ? (
+                <div
+                  className={cn(
+                    "flex-1 overflow-y-auto space-y-3 overscroll-contain",
+                    activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                  )}
+                  style={{ paddingBottom: 'var(--composer-height, 120px)' }}
+                >
+                  <SkeletonChatMessages count={3} />
+                </div>
+              ) : hasMessages && (
                 <div
                   className={cn(
                     "flex-1 overflow-y-auto space-y-3 overscroll-contain",
@@ -5541,7 +5552,11 @@ IMPORTANTE:
       ) : (
         <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
           {/* Content Area - conditional based on whether we have messages */}
-          {hasMessages ? (
+          {isConversationStateLoading ? (
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
+              <SkeletonChatMessages count={3} />
+            </div>
+          ) : hasMessages ? (
             <>
               {/* Scrollable messages container */}
               <div

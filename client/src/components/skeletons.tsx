@@ -48,9 +48,9 @@ export function SkeletonMessage({ isUser = false }: { isUser?: boolean }) {
 }
 
 // Chat list skeleton (multiple messages)
-export function SkeletonChatMessages({ count = 3 }: { count?: number }) {
+export function SkeletonChatMessages({ count = 3, className = '' }: { count?: number; className?: string }) {
     return (
-        <div className="space-y-6 p-4">
+        <div className={`space-y-6 ${className}`}>
             {Array.from({ length: count }).map((_, i) => (
                 <SkeletonMessage key={i} isUser={i % 2 === 0} />
             ))}

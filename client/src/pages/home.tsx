@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/sidebar";
+import { SkeletonPage } from "@/components/skeletons";
 import { MiniSidebar } from "@/components/mini-sidebar";
 import { ChatInterface } from "@/components/chat-interface";
 import { GptExplorer, Gpt } from "@/components/gpt-explorer";
@@ -95,7 +96,8 @@ export default function Home() {
     updateMessageAttachments,
     editMessageAndTruncate,
     truncateAndReplaceMessage,
-    truncateMessagesAt
+    truncateMessagesAt,
+    isLoading: isChatsLoading
   } = useChats();
 
   const {
@@ -532,6 +534,10 @@ export default function Home() {
       },
     },
   ]);
+
+  if (isChatsLoading || isLoading) {
+    return <SkeletonPage />;
+  }
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">

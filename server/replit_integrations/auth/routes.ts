@@ -3,7 +3,7 @@ import { authStorage } from "./storage";
 import { isAuthenticated, getAuthMetrics, getSessionStats } from "./replitAuth";
 import { storage } from "../../storage";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
-import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/rateLimiter";
+import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/userRateLimiter";
 import microsoftAuthRouter from "../../auth/microsoftAuth";
 import googleAuthRouter from "../../auth/googleAuth";
 

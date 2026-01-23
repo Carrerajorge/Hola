@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { SkeletonCard } from "@/components/skeletons";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Input } from "@/components/ui/input";
@@ -313,13 +314,7 @@ export function GptExplorer({ open, onOpenChange, onSelectGpt, onCreateGpt, onEd
                   {loading ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {Array.from({ length: 4 }).map((_, i) => (
-                        <div key={i} className="flex items-start gap-4 p-4 rounded-lg bg-muted/30 animate-pulse">
-                          <div className="w-12 h-12 rounded-lg bg-muted"></div>
-                          <div className="flex-1 space-y-2">
-                            <div className="h-4 bg-muted rounded w-3/4"></div>
-                            <div className="h-3 bg-muted rounded w-full"></div>
-                          </div>
-                        </div>
+                        <SkeletonCard key={i} />
                       ))}
                     </div>
                   ) : filteredGpts.length > 0 ? (

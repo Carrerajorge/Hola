@@ -246,3 +246,18 @@ export const rateLimiter = (req: Request, res: Response, next: NextFunction) => 
     createUserRateLimiter(tier)(req, res, next);
 };
 
+
+/**
+ * Get internal stats about active rate limiters
+ */
+export function getRateLimitStats() {
+    const stats: Record<string, any> = {};
+    for (const [key, limiter] of rateLimiters.entries()) {
+        stats[key] = {
+            points: (limiter as any).points,
+            duration: (limiter as any).duration,
+            type: limiter instanceof RateLimiterRedis ? 'Redis' : 'Memory'
+        };
+    }
+    return stats;
+}

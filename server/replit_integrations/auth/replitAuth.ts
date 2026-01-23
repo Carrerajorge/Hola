@@ -9,7 +9,7 @@ import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
 import { storage } from "../../storage";
 import { withRetry } from "../../utils/retry";
-import { rateLimiter as authRateLimiter } from "../../middleware/rateLimiter";
+import { rateLimiter as authRateLimiter } from "../../middleware/userRateLimiter";
 
 const PRE_EMPTIVE_REFRESH_THRESHOLD_SECONDS = 300;
 const AUTH_METRICS = {

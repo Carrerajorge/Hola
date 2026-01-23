@@ -1,0 +1,61 @@
+services:
+  app:
+    build: .
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/iliagpt
+      - REDIS_URL=redis://redis:6379
+      # Add other keys from .env here or mount .env file
+    env_file:
+      - .env.production
+    ports:
+      - "80:5000"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - app-network
+
+  worker:
+    build: .
+    restart: always
+    command: ["node", "dist/worker.cjs"]
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/iliagpt
+      - REDIS_URL=redis://redis:6379
+      # Add other keys from .env here
+    env_file:
+      - .env.production
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - app-network
+
+  postgres:
+    image: pgvector/pgvector:pg15
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: iliagpt
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  redis:
+    image: redis:alpine
+    restart: always
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

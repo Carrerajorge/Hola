@@ -14,12 +14,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Image, Video, FileText, Download, X, FolderOpen, Trash2, Upload, HardDrive } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { 
-  useCloudLibrary, 
-  LibraryFile, 
-  formatFileSize, 
+import {
+  useCloudLibrary,
+  LibraryFile,
+  formatFileSize,
   formatStorageUsage,
-  type FileType 
+  type FileType
 } from "@/hooks/use-cloud-library";
 import { toast } from "@/hooks/use-toast";
 
@@ -29,6 +29,74 @@ interface UserLibraryProps {
 }
 
 type FilterType = "all" | "image" | "video" | "document";
+
+// @ts-expect-error react-window v2 exports Grid, but types are for v1
+import { Grid } from "react-window";
+import { AutoSizer } from "react-virtualized-auto-sizer";
+
+// ... existing imports ...
+
+interface VirtualizedGridProps {
+  items: LibraryFile[];
+  onSelect: (item: LibraryFile) => void;
+  onDelete: (item: LibraryFile) => void;
+  onDownload: (item: LibraryFile) => void;
+}
+
+const GUTTER_SIZE = 16;
+const ITEM_HEIGHT = 200; // Approximate height of card + text
+const OPTS_MIN_COLUMN_WIDTH = 180;
+
+function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: VirtualizedGridProps) {
+  return (
+    <AutoSizer>
+      {({ height, width }) => {
+        const columnCount = Math.floor((width + GUTTER_SIZE) / (OPTS_MIN_COLUMN_WIDTH + GUTTER_SIZE));
+        const safeColumnCount = Math.max(1, columnCount);
+        const columnWidth = (width - (safeColumnCount - 1) * GUTTER_SIZE) / safeColumnCount;
+        const rowCount = Math.ceil(items.length / safeColumnCount);
+
+        return (
+          <Grid
+            columnCount={safeColumnCount}
+            columnWidth={columnWidth + GUTTER_SIZE}
+            height={height}
+            rowCount={rowCount}
+            rowHeight={ITEM_HEIGHT + GUTTER_SIZE}
+            width={width}
+            className="px-6 py-4"
+          >
+            {({ columnIndex, rowIndex, style }) => {
+              const index = rowIndex * safeColumnCount + columnIndex;
+              if (index >= items.length) return null;
+              const item = items[index];
+
+              // Adjust style for gutter
+              const itemStyle = {
+                ...style,
+                left: Number(style.left),
+                top: Number(style.top),
+                width: columnWidth,
+                height: ITEM_HEIGHT,
+              };
+
+              return (
+                <div style={itemStyle}>
+                  <MediaThumbnail
+                    item={item}
+                    onClick={() => onSelect(item)}
+                    onDelete={() => onDelete(item)}
+                    onDownload={() => onDownload(item)}
+                  />
+                </div>
+              );
+            }}
+          </Grid>
+        );
+      }}
+    </AutoSizer>
+  );
+}
 
 function MediaItemSkeleton() {
   return (
@@ -266,11 +334,11 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
   const [lightboxItem, setLightboxItem] = useState<LibraryFile | null>(null);
 
   const filterType = activeTab === "all" ? undefined : activeTab;
-  
-  const { 
-    files, 
+
+  const {
+    files,
     stats,
-    isLoading, 
+    isLoading,
     uploadProgress,
     deleteFile,
     getDownloadUrl,
@@ -437,7 +505,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
               </TabsList>
             </div>
 
-            <ScrollArea className="flex-1 px-6 py-4">
+            <div className="flex-1 overflow-hidden">
               <TabsContent value={activeTab} className="mt-0 h-full">
                 {!isAuthenticated ? (
                   <div className="flex flex-col items-center justify-center py-16 text-center" data-testid="auth-required-state">
@@ -451,7 +519,7 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
                   </div>
                 ) : isLoading ? (
                   <div
-                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
+                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-6"
                     data-testid="loading-skeleton"
                   >
                     {Array.from({ length: 12 }).map((_, i) => (
@@ -461,23 +529,17 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
                 ) : filteredFiles.length === 0 ? (
                   <EmptyState filter={activeTab} />
                 ) : (
-                  <div
-                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
-                    data-testid="media-grid"
-                  >
-                    {filteredFiles.map((item) => (
-                      <MediaThumbnail
-                        key={item.uuid}
-                        item={item}
-                        onClick={() => setLightboxItem(item)}
-                        onDelete={() => handleDelete(item)}
-                        onDownload={() => handleDownload(item)}
-                      />
-                    ))}
+                  <div className="h-full w-full">
+                    <VirtualizedMediaGrid
+                      items={filteredFiles}
+                      onSelect={(item) => setLightboxItem(item)}
+                      onDelete={handleDelete}
+                      onDownload={handleDownload}
+                    />
                   </div>
                 )}
               </TabsContent>
-            </ScrollArea>
+            </div>
           </Tabs>
         </DialogContent>
       </Dialog>
