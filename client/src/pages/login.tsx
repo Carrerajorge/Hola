@@ -75,7 +75,7 @@ export default function LoginPage() {
   const handleGoogleLogin = () => {
     setIsGoogleLoading(true);
     setError("");
-    window.location.href = "/api/login";
+    window.location.href = "/api/auth/google";
   };
 
   const handleMicrosoftLogin = () => {
