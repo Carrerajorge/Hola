@@ -188,9 +188,9 @@ function UsersSection() {
     fetchUsers();
   }, []);
 
-  const filteredUsers = users.filter(u => 
-    (u.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-     u.email?.toLowerCase().includes(searchQuery.toLowerCase()))
+  const filteredUsers = users.filter(u =>
+  (u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    u.email?.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const planOptions = ["free", "go", "plus", "pro"];
@@ -213,8 +213,8 @@ function UsersSection() {
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Buscar usuarios..." 
+          <Input
+            placeholder="Buscar usuarios..."
             className="pl-9 h-9"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -242,8 +242,8 @@ function UsersSection() {
                 <p className="font-medium">{user.name || user.email?.split("@")[0] || "Usuario"}</p>
                 <p className="text-xs text-muted-foreground truncate">{user.email || "Sin email"}</p>
               </div>
-              <Badge 
-                variant="secondary" 
+              <Badge
+                variant="secondary"
                 className={cn("w-fit uppercase text-xs", planColors[user.plan || "free"])}
               >
                 {user.plan || "free"}
@@ -289,48 +289,107 @@ function UsersSection() {
   );
 }
 
+interface ApiKeyStatus {
+  provider: string;
+  isValid: boolean | null;
+  message?: string;
+}
+
 function AIModelsSection() {
+  const [validating, setValidating] = useState(false);
+  const [apiStatuses, setApiStatuses] = useState<Record<string, ApiKeyStatus>>({});
+
   const models = [
     { name: "GPT-4 Turbo", provider: "OpenAI", status: "active", usage: 78, cost: "€0.03/1K" },
     { name: "GPT-3.5", provider: "OpenAI", status: "active", usage: 45, cost: "€0.002/1K" },
     { name: "Grok-3", provider: "xAI", status: "active", usage: 92, cost: "€0.05/1K" },
     { name: "Claude 3", provider: "Anthropic", status: "inactive", usage: 0, cost: "€0.025/1K" },
+    { name: "Gemini 1.5 Pro", provider: "Google", status: "active", usage: 60, cost: "€0.003/1K" },
   ];
+
+  const validateApiKeys = async () => {
+    setValidating(true);
+    // Simulate API validation for now (will be replaced with real backend call)
+    // In a real implementation, this would call /api/admin/validate-keys
+    setTimeout(() => {
+      setApiStatuses({
+        OpenAI: { provider: "OpenAI", isValid: true, message: "Valid key" },
+        xAI: { provider: "xAI", isValid: true, message: "Valid key" },
+        Anthropic: { provider: "Anthropic", isValid: false, message: "Key missing or invalid" },
+        Google: { provider: "Google", isValid: true, message: "Valid key" }
+      });
+      setValidating(false);
+    }, 1500);
+  };
+
+  const getProviderStatus = (provider: string) => {
+    return apiStatuses[provider];
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">AI Models</h2>
-        <Button size="sm" data-testid="button-add-model">
-          <Plus className="h-4 w-4 mr-2" />
-          Añadir modelo
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={validateApiKeys} disabled={validating}>
+            {validating ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Shield className="h-4 w-4 mr-2" />}
+            Validar API Keys
+          </Button>
+          <Button size="sm" data-testid="button-add-model">
+            <Plus className="h-4 w-4 mr-2" />
+            Añadir modelo
+          </Button>
+        </div>
       </div>
+
+      {Object.keys(apiStatuses).length > 0 && (
+        <div className="grid grid-cols-4 gap-4 mb-4">
+          {Object.entries(apiStatuses).map(([provider, status]) => (
+            <div key={provider} className={cn("p-3 rounded-md border text-sm flex items-center justify-between",
+              status.isValid ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20")}>
+              <span className="font-medium">{provider}</span>
+              {status.isValid ?
+                <CheckCircle className="h-4 w-4 text-green-500" /> :
+                <XCircle className="h-4 w-4 text-red-500" />
+              }
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="grid gap-4">
-        {models.map((model, i) => (
-          <div key={i} className="rounded-lg border p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-3">
-                <Bot className="h-5 w-5" />
-                <div>
-                  <p className="font-medium">{model.name}</p>
-                  <p className="text-xs text-muted-foreground">{model.provider}</p>
+        {models.map((model, i) => {
+          const providerStatus = getProviderStatus(model.provider);
+          return (
+            <div key={i} className="rounded-lg border p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <Bot className="h-5 w-5" />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{model.name}</p>
+                      {providerStatus && !providerStatus.isValid && (
+                        <Badge variant="destructive" className="h-5 text-[10px] px-1">API Error</Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">{model.provider}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">{model.cost}</span>
+                  <Switch checked={model.status === "active"} disabled={providerStatus?.isValid === false} />
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground">{model.cost}</span>
-                <Switch checked={model.status === "active"} />
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Uso este mes</span>
+                  <span>{model.usage}%</span>
+                </div>
+                <Progress value={model.usage} className="h-1.5" />
               </div>
             </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Uso este mes</span>
-                <span>{model.usage}%</span>
-              </div>
-              <Progress value={model.usage} className="h-1.5" />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

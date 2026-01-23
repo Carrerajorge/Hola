@@ -1,13 +1,16 @@
 import { Router } from "express";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { createClient } from "redis";
 
 const router = Router();
 
+// Basic liveliness check
 router.get("/live", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// Deep readiness check
 router.get("/ready", async (req, res) => {
   const checks: Record<string, string> = {};
   let allHealthy = true;
@@ -17,20 +20,22 @@ router.get("/ready", async (req, res) => {
     await db.execute(sql`SELECT 1`);
     checks.database = "healthy";
   } catch (error) {
+    console.error("Health check - Database error:", error);
     checks.database = "unhealthy";
     allHealthy = false;
   }
 
-  // Redis check (if configured)
+  // Redis check
   const redisUrl = process.env.REDIS_URL;
   if (redisUrl) {
     try {
-      const Redis = await import("ioredis");
-      const redis = new Redis.default(redisUrl);
+      const redis = createClient({ url: redisUrl });
+      await redis.connect();
       await redis.ping();
       await redis.quit();
       checks.redis = "healthy";
     } catch (error) {
+      console.error("Health check - Redis error:", error);
       checks.redis = "unhealthy";
       allHealthy = false;
     }
@@ -38,8 +43,9 @@ router.get("/ready", async (req, res) => {
     checks.redis = "not_configured";
   }
 
-  // Memory check
-  checks.memory = process.memoryUsage().heapUsed < 500 * 1024 * 1024 ? "healthy" : "warning";
+  // Memory check (warning if > 800MB heap used)
+  const memUsage = process.memoryUsage();
+  checks.memory = memUsage.heapUsed < 800 * 1024 * 1024 ? "healthy" : "warning";
   checks.uptime = process.uptime() > 10 ? "healthy" : "starting";
 
   res.status(allHealthy ? 200 : 503).json({
@@ -50,6 +56,12 @@ router.get("/ready", async (req, res) => {
   });
 });
 
+// Deep health check (alias for /ready)
+router.get("/deep", async (req, res) => {
+  res.redirect("/api/health/ready");
+});
+
+// General info
 router.get("/", async (req, res) => {
   const memUsage = process.memoryUsage();
   res.json({
