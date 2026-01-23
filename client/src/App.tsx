@@ -129,11 +129,11 @@ function GlobalKeyboardShortcuts() {
   );
 }
 
-import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { GlobalErrorBoundary } from "@/components/global-error-boundary";
 
 function Router() {
   return (
-    <ErrorBoundary>
+    <GlobalErrorBoundary>
       <Suspense fallback={<PageLoader />}>
         <main id="main-content" className="flex-1 outline-none" tabIndex={-1}>
           <Switch>
@@ -157,7 +157,7 @@ function Router() {
           </Switch>
         </main>
       </Suspense>
-    </ErrorBoundary>
+    </GlobalErrorBoundary>
   );
 }
 
