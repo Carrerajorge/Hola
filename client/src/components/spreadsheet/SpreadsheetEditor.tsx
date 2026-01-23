@@ -1074,7 +1074,7 @@ export function SpreadsheetEditor({
         <div className="flex items-center gap-1 pr-2 border-r border-gray-600">
           <label className="p-2 hover:bg-gray-700 rounded cursor-pointer transition-colors" title="Importar Excel" data-testid="button-import">
             <Upload className="w-4 h-4 text-gray-300" />
-            <input type="file" accept=".xlsx,.xls,.csv" onChange={handleImport} className="hidden" />
+            <input type="file" accept=".xlsx,.xls,.csv" onChange={handleImport} className="hidden" aria-label="Importar archivo" />
           </label>
           <button onClick={() => handleExport('xlsx')} className="p-2 hover:bg-gray-700 rounded transition-colors" title="Exportar XLSX" data-testid="button-export-xlsx">
             <Download className="w-4 h-4 text-gray-300" />
@@ -1179,6 +1179,7 @@ export function SpreadsheetEditor({
               className={`p-2 rounded transition-colors ${cellFormat.backgroundColor ? 'ring-2 ring-indigo-500' : 'hover:bg-gray-700'}`}
               style={{ backgroundColor: cellFormat.backgroundColor || undefined }}
               data-testid="button-bg-color"
+              aria-label="Color de fondo"
             >
               <Palette className="w-4 h-4 text-gray-300" />
             </button>
@@ -1194,6 +1195,7 @@ export function SpreadsheetEditor({
             <button
               className={`p-2 rounded transition-colors ${cellFormat.textColor ? 'ring-2 ring-indigo-500' : 'hover:bg-gray-700'}`}
               data-testid="button-text-color"
+              aria-label="Color de texto"
             >
               <Type className="w-4 h-4" style={{ color: cellFormat.textColor || '#d1d5db' }} />
             </button>
@@ -1227,6 +1229,7 @@ export function SpreadsheetEditor({
             className="px-3 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white focus:outline-none focus:border-indigo-500"
             placeholder="nombre-archivo.xlsx"
             data-testid="input-filename"
+            aria-label="Nombre del archivo"
           />
           {isModified && <span className="text-yellow-400 text-xs" data-testid="text-modified-indicator">● Sin guardar</span>}
         </div>
@@ -1254,6 +1257,7 @@ export function SpreadsheetEditor({
           className="flex-1 px-3 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white focus:outline-none focus:border-indigo-500"
           placeholder="Ingresa fórmula o valor..."
           data-testid="input-formula"
+          aria-label="Barra de fórmulas"
         />
       </div>
 
@@ -1272,8 +1276,8 @@ export function SpreadsheetEditor({
           <div
             key={index}
             className={`flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer transition-colors ${activeSheet === index
-                ? 'bg-indigo-600 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
             onClick={() => switchSheet(index)}
             data-testid={`tab-sheet-${index}`}
@@ -1285,6 +1289,7 @@ export function SpreadsheetEditor({
                 onClick={(e) => { e.stopPropagation(); removeSheet(index); }}
                 className="p-0.5 hover:bg-gray-500 rounded"
                 data-testid={`button-remove-sheet-${index}`}
+                aria-label={`Eliminar hoja ${sheet.name}`}
               >
                 <Trash2 className="w-3 h-3" />
               </button>
@@ -1296,6 +1301,7 @@ export function SpreadsheetEditor({
           className="p-1.5 hover:bg-gray-700 rounded transition-colors"
           title="Añadir hoja"
           data-testid="button-add-sheet"
+          aria-label="Añadir hoja"
         >
           <Plus className="w-4 h-4 text-gray-400" />
         </button>

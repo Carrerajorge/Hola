@@ -357,6 +357,7 @@ export default function WordEditor({
                         value={htmlContent}
                         onChange={(e) => setHtmlContent(e.target.value)}
                         spellCheck={false}
+                        aria-label="Editor de código fuente HTML"
                     />
                 </div>
             )}
