@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { 
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -20,7 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { 
+import {
   ChevronLeft,
   Plus,
   X,
@@ -85,7 +85,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [savedGptData, setSavedGptData] = useState<Gpt | null>(null);
-  
+
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
@@ -254,7 +254,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
         const savedGpt = await response.json();
         setSavedGptData(savedGpt);
         // Sync all formData with server response without marking dirty
-        syncFormData({ 
+        syncFormData({
           visibility: savedGpt.visibility || "private",
           name: savedGpt.name,
           slug: savedGpt.slug,
@@ -327,7 +327,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
   const handleDeleteGpt = async () => {
     if (!editingGpt) return;
     if (!confirm("¿Estás seguro de que quieres eliminar este GPT?")) return;
-    
+
     try {
       const response = await fetch(`/api/gpts/${editingGpt.id}`, { method: "DELETE" });
       if (response.ok) {
@@ -424,7 +424,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
       });
       return;
     }
-    
+
     try {
       if (editingAction) {
         const response = await fetch(`/api/gpts/${editingGpt.id}/actions/${editingAction.id}`, {
@@ -463,18 +463,18 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
     if (!savedGptData) return;
     const typedVisibility = newVisibility as "private" | "team" | "public";
     const previousVisibility = savedGptData.visibility as "private" | "team" | "public";
-    
+
     // Update immediately for UI responsiveness (without marking dirty)
     syncFormData({ visibility: typedVisibility });
     setSavedGptData(prev => prev ? { ...prev, visibility: typedVisibility } : null);
-    
+
     try {
       const response = await fetch(`/api/gpts/${savedGptData.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ visibility: newVisibility })
       });
-      
+
       if (response.ok) {
         const updatedGpt = await response.json();
         setSavedGptData(updatedGpt);
@@ -547,7 +547,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
               {hasChanges && (
                 <span className="text-sm text-muted-foreground">Actualizaciones pendientes</span>
               )}
-              
+
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-8 w-8" data-testid="button-more-options">
@@ -583,9 +583,9 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 data-testid="button-share"
                 onClick={() => {
                   if (editingGpt) {
@@ -603,9 +603,9 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                 <LinkIcon className="h-4 w-4 mr-2" />
                 Compartir
               </Button>
-              
-              <Button 
-                size="sm" 
+
+              <Button
+                size="sm"
                 onClick={handleSave}
                 disabled={saving || !hasChanges}
                 className="bg-green-600 hover:bg-green-700"
@@ -623,8 +623,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                   onClick={() => setActiveTab("crear")}
                   className={cn(
                     "px-6 py-2 text-sm font-medium rounded-full transition-colors",
-                    activeTab === "crear" 
-                      ? "bg-muted text-foreground" 
+                    activeTab === "crear"
+                      ? "bg-muted text-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                   data-testid="tab-crear"
@@ -635,8 +635,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                   onClick={() => setActiveTab("configurar")}
                   className={cn(
                     "px-6 py-2 text-sm font-medium rounded-full transition-colors",
-                    activeTab === "configurar" 
-                      ? "bg-muted text-foreground" 
+                    activeTab === "configurar"
+                      ? "bg-muted text-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                   data-testid="tab-configurar"
@@ -656,7 +656,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                   ) : (
                     <>
                       <div className="flex justify-center mb-6">
-                        <button 
+                        <button
                           className="w-20 h-20 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center hover:border-muted-foreground/50 transition-colors overflow-hidden"
                           onClick={() => avatarInputRef.current?.click()}
                           data-testid="button-upload-avatar"
@@ -753,7 +753,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                         <p className="text-xs text-muted-foreground">
                           Las conversaciones con tu GPT pueden potencialmente revelar todos los archivos cargados o parte de ellos.
                         </p>
-                        
+
                         {knowledgeFiles.length > 0 && (
                           <div className="space-y-2 mb-3">
                             {knowledgeFiles.map((file) => (
@@ -774,7 +774,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                             ))}
                           </div>
                         )}
-                        
+
                         <Button
                           variant="outline"
                           size="sm"
@@ -821,13 +821,13 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
                       <div className="space-y-3">
                         <Label>Funcionalidades</Label>
-                        
+
                         <div className="flex items-center space-x-2">
                           <Checkbox
                             id="web-browsing"
                             checked={formData.capabilities.webBrowsing}
-                            onCheckedChange={(checked) => 
-                              handleFormChange({ 
+                            onCheckedChange={(checked) =>
+                              handleFormChange({
                                 capabilities: { ...formData.capabilities, webBrowsing: !!checked }
                               })
                             }
@@ -841,8 +841,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           <Checkbox
                             id="canvas"
                             checked={formData.capabilities.canvas}
-                            onCheckedChange={(checked) => 
-                              handleFormChange({ 
+                            onCheckedChange={(checked) =>
+                              handleFormChange({
                                 capabilities: { ...formData.capabilities, canvas: !!checked }
                               })
                             }
@@ -856,8 +856,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           <Checkbox
                             id="image-generation"
                             checked={formData.capabilities.imageGeneration}
-                            onCheckedChange={(checked) => 
-                              handleFormChange({ 
+                            onCheckedChange={(checked) =>
+                              handleFormChange({
                                 capabilities: { ...formData.capabilities, imageGeneration: !!checked }
                               })
                             }
@@ -871,8 +871,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           <Checkbox
                             id="code-interpreter"
                             checked={formData.capabilities.codeInterpreter}
-                            onCheckedChange={(checked) => 
-                              handleFormChange({ 
+                            onCheckedChange={(checked) =>
+                              handleFormChange({
                                 capabilities: { ...formData.capabilities, codeInterpreter: !!checked }
                               })
                             }
@@ -887,8 +887,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           <Checkbox
                             id="word-creation"
                             checked={formData.capabilities.wordCreation}
-                            onCheckedChange={(checked) => 
-                              handleFormChange({ 
+                            onCheckedChange={(checked) =>
+                              handleFormChange({
                                 capabilities: { ...formData.capabilities, wordCreation: !!checked }
                               })
                             }
@@ -902,8 +902,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           <Checkbox
                             id="excel-creation"
                             checked={formData.capabilities.excelCreation}
-                            onCheckedChange={(checked) => 
-                              handleFormChange({ 
+                            onCheckedChange={(checked) =>
+                              handleFormChange({
                                 capabilities: { ...formData.capabilities, excelCreation: !!checked }
                               })
                             }
@@ -917,8 +917,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                           <Checkbox
                             id="ppt-creation"
                             checked={formData.capabilities.pptCreation}
-                            onCheckedChange={(checked) => 
-                              handleFormChange({ 
+                            onCheckedChange={(checked) =>
+                              handleFormChange({
                                 capabilities: { ...formData.capabilities, pptCreation: !!checked }
                               })
                             }
@@ -931,7 +931,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
 
                       <div className="space-y-2">
                         <Label>Acciones</Label>
-                        
+
                         {actions.length > 0 && (
                           <div className="space-y-2 mb-3">
                             {actions.map((action) => (
@@ -964,7 +964,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                             ))}
                           </div>
                         )}
-                        
+
                         <Button
                           variant="outline"
                           size="sm"
@@ -983,8 +983,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
             <div className="w-[400px] flex flex-col bg-muted/20">
               <div className="flex items-center justify-between px-4 py-3 border-b">
                 <span className="text-sm font-medium">Vista previa</span>
-                <Select 
-                  value={previewModelId || (availableModels[0]?.modelId || "")} 
+                <Select
+                  value={previewModelId || (availableModels[0]?.modelId || "")}
                   onValueChange={setPreviewModelId}
                 >
                   <SelectTrigger className="w-[160px] h-8 text-xs">
@@ -1027,8 +1027,8 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                   <Button variant="ghost" size="icon" className="h-8 w-8">
                     <Mic className="h-4 w-4" />
                   </Button>
-                  <Button 
-                    size="icon" 
+                  <Button
+                    size="icon"
                     className="h-8 w-8 rounded-full"
                     disabled={!previewMessage.trim()}
                   >
@@ -1148,7 +1148,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
               <VisuallyHidden>
                 <DialogDescription>Tu GPT ha sido actualizado correctamente</DialogDescription>
               </VisuallyHidden>
-              
+
               <div className="py-4">
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center overflow-hidden">
@@ -1160,14 +1160,14 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                   </div>
                   <div>
                     <h3 className="font-semibold">{savedGptData.name}</h3>
-                    <p className="text-sm text-muted-foreground">Por {savedGptData.creatorUsername || "ti"}</p>
+                    <p className="text-sm text-muted-foreground">Por {(savedGptData as { creatorUsername?: string }).creatorUsername || "ti"}</p>
                   </div>
                 </div>
 
                 <div className="space-y-3">
                   <Label className="text-sm font-medium">Acceso</Label>
-                  
-                  <div 
+
+                  <div
                     className={cn(
                       "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
                       formData.visibility === "private" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
@@ -1192,7 +1192,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                     </div>
                   </div>
 
-                  <div 
+                  <div
                     className={cn(
                       "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
                       formData.visibility === "team" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
@@ -1217,7 +1217,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                     </div>
                   </div>
 
-                  <div 
+                  <div
                     className={cn(
                       "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
                       formData.visibility === "public" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
