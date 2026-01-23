@@ -137,6 +137,9 @@ export class CacheService {
             return [];
         }
     }
+    getRedisClient(): Redis | null {
+        return this.redis;
+    }
 }
 
 export const cache = new CacheService();

@@ -15,7 +15,7 @@ import { securityHeaders, apiSecurityHeaders } from "./middleware/securityHeader
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
 import { pythonServiceManager } from "./lib/pythonServiceManager";
 import { idempotency } from "./middleware/idempotency";
-import { rateLimiter } from "./middleware/rateLimiter";
+import { rateLimiter } from "./middleware/userRateLimiter";
 import { Logger } from "./lib/logger";
 import { initTracing, shutdownTracing, getTracingMetrics } from "./lib/tracing";
 import { apiErrorHandler } from "./middleware/apiErrorHandler";

@@ -6,6 +6,9 @@
 import { Request, Response, NextFunction } from 'express';
 import { RateLimiterMemory, RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
 import Redis from 'ioredis';
+import { cache } from '../lib/cache';
+import { createAlert } from '../lib/alertManager';
+import { logger } from '../utils/logger';
 
 // Rate limit configurations for different endpoints
 const RATE_LIMIT_CONFIGS = {
@@ -49,7 +52,7 @@ const rateLimiters: Map<string, RateLimiterMemory | RateLimiterRedis> = new Map(
 /**
  * Initialize rate limiter for a tier
  */
-function getRateLimiter(tier: RateLimitTier, redisClient?: Redis): RateLimiterMemory | RateLimiterRedis {
+function getRateLimiter(tier: RateLimitTier): RateLimiterMemory | RateLimiterRedis {
     const key = tier;
 
     if (rateLimiters.has(key)) {
@@ -57,6 +60,7 @@ function getRateLimiter(tier: RateLimitTier, redisClient?: Redis): RateLimiterMe
     }
 
     const config = RATE_LIMIT_CONFIGS[tier];
+    const redisClient = cache.getRedisClient();
 
     let limiter: RateLimiterMemory | RateLimiterRedis;
 
@@ -103,15 +107,14 @@ function getRateLimitKey(req: Request): string {
 /**
  * Create user-based rate limiter middleware
  */
-export function createUserRateLimiter(
-    tier: RateLimitTier = 'default',
-    redisClient?: Redis
-) {
-    const limiter = getRateLimiter(tier, redisClient);
-    const config = RATE_LIMIT_CONFIGS[tier];
-
+export function createUserRateLimiter(tier: RateLimitTier = 'default') {
     return async (req: Request, res: Response, next: NextFunction) => {
+        const limiter = getRateLimiter(tier);
+        const config = RATE_LIMIT_CONFIGS[tier];
         const key = getRateLimitKey(req);
+
+        // Allow whitelisted IPs/Users (future implementation)
+        // if (isWhitelisted(req)) return next();
 
         try {
             const result = await limiter.consume(key);
@@ -131,6 +134,15 @@ export function createUserRateLimiter(
                 res.setHeader('X-RateLimit-Remaining', 0);
                 res.setHeader('X-RateLimit-Reset', new Date(Date.now() + error.msBeforeNext).toISOString());
 
+                // Trigger Alert for abuse
+                createAlert({
+                    type: "rate_limit",
+                    service: "api-gateway",
+                    severity: "medium", // Escalate to high if critical endpoint
+                    message: `Rate limit exceeded for ${tier} tier by ${key}`,
+                    resolved: false
+                });
+
                 return res.status(429).json({
                     error: 'Too Many Requests',
                     message: 'Has excedido el límite de solicitudes. Por favor espera antes de intentar de nuevo.',
@@ -139,107 +151,98 @@ export function createUserRateLimiter(
                 });
             }
 
-            // Unknown error, let it pass
-            console.error('Rate limiter error:', error);
+            // Unknown error, let it pass but log it
+            logger.error('Rate limiter error:', { error });
             next();
         }
     };
 }
 
 /**
- * Apply different rate limits based on path
+ * Create a custom rate limiter for specific routes
  */
-export function createSmartRateLimiter(redisClient?: Redis) {
-    const limiters = {
-        chat: createUserRateLimiter('chat', redisClient),
-        documents: createUserRateLimiter('documents', redisClient),
-        auth: createUserRateLimiter('auth', redisClient),
-        ai: createUserRateLimiter('ai', redisClient),
-        default: createUserRateLimiter('default', redisClient),
-    };
+export function createCustomRateLimiter(options: {
+    windowMs: number;
+    maxRequests: number;
+    keyPrefix: string;
+    message?: string;
+}) {
+    const redisClient = cache.getRedisClient();
+    let limiter: RateLimiterMemory | RateLimiterRedis;
+    const duration = Math.ceil(options.windowMs / 1000);
 
-    return (req: Request, res: Response, next: NextFunction) => {
-        const path = req.path.toLowerCase();
+    if (redisClient) {
+        limiter = new RateLimiterRedis({
+            storeClient: redisClient,
+            keyPrefix: options.keyPrefix,
+            points: options.maxRequests,
+            duration: duration,
+        });
+    } else {
+        limiter = new RateLimiterMemory({
+            keyPrefix: options.keyPrefix,
+            points: options.maxRequests,
+            duration: duration,
+        });
+    }
 
-        // Determine which limiter to use based on path
-        if (path.includes('/chat') || path.includes('/message')) {
-            return limiters.chat(req, res, next);
-        }
-        if (path.includes('/document') || path.includes('/export')) {
-            return limiters.documents(req, res, next);
-        }
-        if (path.includes('/auth') || path.includes('/login') || path.includes('/register')) {
-            return limiters.auth(req, res, next);
-        }
-        if (path.includes('/ai') || path.includes('/generate') || path.includes('/model')) {
-            return limiters.ai(req, res, next);
-        }
-
-        return limiters.default(req, res, next);
-    };
-}
-
-/**
- * Rate limit status endpoint
- */
-export function getRateLimitStatus(req: Request): Promise<{
-    tier: RateLimitTier;
-    remaining: number;
-    limit: number;
-    resetTime: Date;
-}> {
-    return new Promise(async (resolve) => {
-        const key = getRateLimitKey(req);
-        const tier: RateLimitTier = 'default';
-        const config = RATE_LIMIT_CONFIGS[tier];
+    return async (req: Request, res: Response, next: NextFunction) => {
+        // Use user ID if authenticated, else IP
+        const userId = (req as any).user?.id;
+        const ip = req.ip || req.socket.remoteAddress || 'unknown';
+        const key = userId ? `user_${userId}` : `ip_${ip}`;
 
         try {
-            const limiter = getRateLimiter(tier);
-            const result = await limiter.get(key);
+            const result = await limiter.consume(key);
 
-            resolve({
-                tier,
-                remaining: result ? result.remainingPoints : config.points,
-                limit: config.points,
-                resetTime: result
-                    ? new Date(Date.now() + result.msBeforeNext)
-                    : new Date(Date.now() + config.duration * 1000),
-            });
-        } catch {
-            resolve({
-                tier,
-                remaining: config.points,
-                limit: config.points,
-                resetTime: new Date(Date.now() + config.duration * 1000),
-            });
+            res.setHeader('X-RateLimit-Limit', options.maxRequests);
+            res.setHeader('X-RateLimit-Remaining', result.remainingPoints);
+            res.setHeader('X-RateLimit-Reset', new Date(Date.now() + result.msBeforeNext).toISOString());
+
+            next();
+        } catch (error) {
+            if (error && typeof error === 'object' && 'msBeforeNext' in error) {
+                const limitErr = error as RateLimiterRes;
+                const retryAfter = Math.ceil(limitErr.msBeforeNext / 1000);
+
+                res.setHeader('Retry-After', retryAfter);
+                res.setHeader('X-RateLimit-Limit', options.maxRequests);
+                res.setHeader('X-RateLimit-Remaining', 0);
+                res.setHeader('X-RateLimit-Reset', new Date(Date.now() + limitErr.msBeforeNext).toISOString());
+
+                return res.status(429).json({
+                    error: 'Too Many Requests',
+                    message: options.message || 'Rate limit exceeded.',
+                    retryAfter
+                });
+            }
+            // Log unknown error
+            console.error('Custom Rate limiter error:', error);
+            next();
         }
-    });
+    };
 }
 
 /**
- * Whitelist check - skip rate limiting for certain users/IPs
+ * Smart Rate Limiter that routes based on path
+ * This is the main middleware to be used in routes
  */
-const whitelist = new Set<string>([
-    // Add admin user IDs or internal IPs here
-    // 'user_1',
-    // 'ip_127.0.0.1',
-]);
+export const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
+    const path = req.path.toLowerCase();
 
-export function isWhitelisted(req: Request): boolean {
-    const key = getRateLimitKey(req);
-    return whitelist.has(key);
-}
+    // Determine which limiter to use based on path
+    let tier: RateLimitTier = 'default';
 
-/**
- * Add to whitelist
- */
-export function addToWhitelist(key: string): void {
-    whitelist.add(key);
-}
+    if (path.includes('/chat') || path.includes('/message')) {
+        tier = 'chat';
+    } else if (path.includes('/document') || path.includes('/export')) {
+        tier = 'documents';
+    } else if (path.includes('/auth') || path.includes('/login') || path.includes('/register')) {
+        tier = 'auth';
+    } else if (path.includes('/ai') || path.includes('/generate') || path.includes('/model')) {
+        tier = 'ai';
+    }
 
-/**
- * Remove from whitelist
- */
-export function removeFromWhitelist(key: string): void {
-    whitelist.delete(key);
-}
+    createUserRateLimiter(tier)(req, res, next);
+};
+
