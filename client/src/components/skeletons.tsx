@@ -27,7 +27,7 @@ export function Skeleton({ className = '', style }: SkeletonProps) {
 
 // Text skeleton (single line)
 export function SkeletonText({ width = '100%' }: { width?: string | number }) {
-    return <Skeleton className="h-4" style={{ width }} />;
+    return <Skeleton className="h-4 w-[var(--sk-width)]" style={{ "--sk-width": width } as React.CSSProperties} />;
 }
 
 // Chat message skeleton
@@ -129,8 +129,8 @@ export function SkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
                     {Array.from({ length: cols }).map((_, colIndex) => (
                         <Skeleton
                             key={colIndex}
-                            className="h-4 flex-1"
-                            style={{ width: `${60 + Math.random() * 40}%` }}
+                            className="h-4 flex-1 w-[var(--sk-table-width)]"
+                            style={{ "--sk-table-width": `${60 + Math.random() * 40}%` } as React.CSSProperties}
                         />
                     ))}
                 </div>
@@ -150,11 +150,11 @@ export function SkeletonCodeBlock() {
             {Array.from({ length: 6 }).map((_, i) => (
                 <Skeleton
                     key={i}
-                    className="h-4"
+                    className="h-4 w-[var(--sk-code-width)] ml-[var(--sk-code-margin)]"
                     style={{
-                        width: `${40 + Math.random() * 50}%`,
-                        marginLeft: i % 3 === 0 ? 0 : Math.random() * 24,
-                    }}
+                        "--sk-code-width": `${40 + Math.random() * 50}%`,
+                        "--sk-code-margin": i % 3 === 0 ? 0 : `${Math.random() * 24}px`,
+                    } as React.CSSProperties}
                 />
             ))}
         </div>

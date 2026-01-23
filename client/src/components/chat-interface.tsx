@@ -5862,6 +5862,7 @@ IMPORTANTE:
               className="absolute top-4 right-4 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
               onClick={() => setLightboxImage(null)}
               data-testid="button-close-lightbox"
+              aria-label="Cerrar imagen"
             >
               <X className="h-5 w-5" />
             </Button>
@@ -5871,6 +5872,7 @@ IMPORTANTE:
               className="absolute top-4 right-16 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
               onClick={(e) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
               data-testid="button-download-lightbox"
+              aria-label="Descargar imagen"
             >
               <Download className="h-5 w-5" />
             </Button>
@@ -5968,6 +5970,7 @@ IMPORTANTE:
                   size="icon"
                   onClick={() => setPreviewFileAttachment(null)}
                   data-testid="button-close-attachment-preview"
+                  aria-label="Cerrar vista previa"
                 >
                   <X className="h-5 w-5" />
                 </Button>

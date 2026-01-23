@@ -588,8 +588,7 @@ function AnalyticsSection() {
                 </div>
                 <div className="h-1.5 bg-muted rounded-full overflow-hidden" style={{ "--prog-width": `${item.value}%` } as React.CSSProperties}>
                   <div
-                    className={cn("h-full rounded-full", item.color)}
-                    style={{ width: "var(--prog-width)" }}
+                    className={cn("h-full rounded-full w-[var(--prog-width)]", item.color)}
                   />
                 </div>
               </div>

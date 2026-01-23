@@ -30,7 +30,6 @@ interface UserLibraryProps {
 
 type FilterType = "all" | "image" | "video" | "document";
 
-// @ts-expect-error react-window v2 exports Grid, but types are for v1
 import { Grid } from "react-window";
 import { AutoSizer } from "react-virtualized-auto-sizer";
 
@@ -180,6 +179,7 @@ function MediaThumbnail({
               onDownload();
             }}
             data-testid={`download-button-${item.uuid}`}
+            aria-label={`Descargar ${item.name}`}
           >
             <Download className="h-5 w-5 text-gray-700" />
           </Button>
@@ -192,6 +192,7 @@ function MediaThumbnail({
               onDelete();
             }}
             data-testid={`delete-button-${item.uuid}`}
+            aria-label={`Eliminar ${item.name}`}
           >
             <Trash2 className="h-5 w-5 text-red-600" />
           </Button>
@@ -233,6 +234,7 @@ function LightboxView({
         className="absolute right-4 top-4 h-10 w-10 rounded-full bg-white/10 text-white hover:bg-white/20"
         onClick={onClose}
         data-testid="lightbox-close"
+        aria-label="Cerrar vista previa"
       >
         <X className="h-6 w-6" />
       </Button>
@@ -245,6 +247,7 @@ function LightboxView({
           onDownload();
         }}
         data-testid="lightbox-download"
+        aria-label="Descargar archivo"
       >
         <Download className="h-5 w-5" />
       </Button>

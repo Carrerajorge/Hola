@@ -420,8 +420,12 @@ const Dropdown: React.FC<DropdownProps> = ({ value, options, onChange, width = 1
   }, []);
 
   return (
-    <div className="relative" ref={dropdownRef} style={{ width }}>
-      <button
+    <div
+      className="relative"
+      ref={dropdownRef}
+      style={{ "--w": width + "px" } as React.CSSProperties}
+    >
+      <div className="w-[var(--w)]">  <button
         className={`flex items-center justify-between w-full h-[22px] px-2 border rounded text-[11px] transition-colors
           ${disabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : 'bg-white border-gray-300 hover:border-gray-400 hover:bg-gray-50'}`}
         onClick={() => !disabled && setIsOpen(!isOpen)}
@@ -431,7 +435,7 @@ const Dropdown: React.FC<DropdownProps> = ({ value, options, onChange, width = 1
       >
         <span className="flex-1 text-left truncate font-medium">{value}</span>
         <span className="w-3 h-3 ml-1 text-gray-500">{Icons.dropdown}</span>
-      </button>
+      </button></div>
       {isOpen && (
         <div
           className="absolute top-full left-0 right-0 mt-0.5 bg-white border border-gray-300 rounded shadow-lg max-h-64 overflow-y-auto z-50"
@@ -490,7 +494,7 @@ const ColorPicker: React.FC<ColorPickerProps> = ({ color, onChange, icon, toolti
         aria-expanded={isOpen ? "true" : "false"}
       >
         <span className="w-4 h-4">{icon}</span>
-        <div className="w-4 h-1 rounded-sm -mt-0.5" style={{ backgroundColor: color }} />
+        <div className="w-4 h-1 rounded-sm -mt-0.5 bg-[var(--bg-col)]" style={{ "--bg-col": color } as React.CSSProperties} />
       </button>
       {isOpen && (
         <div className="absolute top-full left-0 mt-1 p-2 bg-white border border-gray-300 rounded-lg shadow-xl z-50 min-w-[180px]">

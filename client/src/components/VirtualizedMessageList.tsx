@@ -197,6 +197,7 @@ const MessageRowItem = React.memo(({ index, style, data }: { index: number; styl
                                 size="icon"
                                 className="h-6 w-6"
                                 onClick={() => onCopy(message.content)}
+                                aria-label="Copiar mensaje"
                             >
                                 <Copy className="h-3 w-3" />
                             </Button>
@@ -207,6 +208,7 @@ const MessageRowItem = React.memo(({ index, style, data }: { index: number; styl
                                     size="icon"
                                     className="h-6 w-6"
                                     onClick={() => onRegenerateMessage(message.id)}
+                                    aria-label="Regenerar respuesta"
                                 >
                                     <RotateCcw className="h-3 w-3" />
                                 </Button>
@@ -218,6 +220,7 @@ const MessageRowItem = React.memo(({ index, style, data }: { index: number; styl
                                     size="icon"
                                     className="h-6 w-6"
                                     onClick={() => onEditMessage(message.id, message.content)}
+                                    aria-label="Editar mensaje"
                                 >
                                     <Pencil className="h-3 w-3" />
                                 </Button>
@@ -229,6 +232,7 @@ const MessageRowItem = React.memo(({ index, style, data }: { index: number; styl
                                     size="icon"
                                     className="h-6 w-6 text-red-500 hover:text-red-600"
                                     onClick={() => onDeleteMessage(message.id)}
+                                    aria-label="Eliminar mensaje"
                                 >
                                     <Trash2 className="h-3 w-3" />
                                 </Button>
