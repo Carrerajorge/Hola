@@ -2,7 +2,7 @@ import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { HTTP_HEADERS, TIMEOUTS, LIMITS } from "../lib/constants";
 
-interface SearchResult {
+export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
@@ -15,7 +15,7 @@ interface SearchResult {
   canonicalUrl?: string;
 }
 
-interface WebSearchResponse {
+export interface WebSearchResponse {
   query: string;
   results: SearchResult[];
   contents: { url: string; title: string; content: string; imageUrl?: string; siteName?: string; publishedDate?: string }[];
@@ -174,8 +174,8 @@ export async function fetchPageContent(url: string): Promise<PageMetadata | null
         text: article.textContent.replace(/\s+/g, " ").trim(),
         imageUrl,
         canonicalUrl,
-        siteName,
-        publishedDate
+        siteName: siteName || undefined,
+        publishedDate: publishedDate || undefined
       };
     }
 
@@ -183,9 +183,9 @@ export async function fetchPageContent(url: string): Promise<PageMetadata | null
       title: doc.querySelector("title")?.textContent || "",
       text: "",
       imageUrl,
-      canonicalUrl,
-      siteName,
-      publishedDate
+      canonicalUrl: canonicalUrl || undefined,
+      siteName: siteName || undefined,
+      publishedDate: publishedDate || undefined
     };
   } catch {
     return null;
@@ -240,13 +240,13 @@ export async function fetchPageMetadata(url: string): Promise<Omit<PageMetadata,
     const title = doc.querySelector('meta[property="og:title"]')?.getAttribute("content") ||
       doc.querySelector("title")?.textContent || "";
 
-    return { title, imageUrl, canonicalUrl, siteName, publishedDate };
+    return { title, imageUrl, canonicalUrl: canonicalUrl || undefined, siteName: siteName || undefined, publishedDate: publishedDate || undefined };
   } catch {
     return null;
   }
 }
 
-export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RESULTS): Promise<WebSearchResponse> {
+export async function searchWeb(query: string, maxResults: number = LIMITS.MAX_SEARCH_RESULTS): Promise<WebSearchResponse> {
   const results: SearchResult[] = [];
   const seenDomains = new Set<string>();
 
@@ -364,7 +364,7 @@ export async function searchWeb(query: string, maxResults = LIMITS.MAX_SEARCH_RE
   return { query, results: enrichedResults, contents };
 }
 
-export async function searchScholar(query: string, maxResults = LIMITS.MAX_SEARCH_RESULTS): Promise<SearchResult[]> {
+export async function searchScholar(query: string, maxResults: number = LIMITS.MAX_SEARCH_RESULTS): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
 
   try {

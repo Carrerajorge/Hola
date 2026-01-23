@@ -15,6 +15,8 @@ import { buildSystemPromptWithContext, isToolAllowed, getEnforcedModel, type Gpt
 import { intentEnginePipeline, type PipelineOptions } from "../intent-engine";
 import { getCacheService } from "./cache"; // NEW
 import { getStorageService } from "./storage"; // NEW
+import { detectIntent, validateResponse, buildDocumentPrompt, createAuditLog } from "./intentGuard";
+import { DeterministicPipeline } from "../agent/pipelines/deterministicPipeline";
 import OpenAI from "openai";
 
 const AGENTIC_PIPELINE_ENABLED = process.env.AGENTIC_PIPELINE_ENABLED === 'true';
@@ -33,16 +35,6 @@ async function setCachedSearch(query: string, results: any): Promise<void> {
   const cacheKey = `search:${normalizedQuery}`;
   await getCacheService().set(cacheKey, results, CACHE_TTL_SEC);
 }
-
-export type LLMProvider = "xai" | "gemini";
-// ... (Rest of imports and types unchanged)
-
-// ... (Skipping to handleChatRequest refactor logic)
-// I will apply the logic changes below where searchCache was used and where fs was used.
-// Note: handleChatRequest is very long, so I'll target specific blocks if possible or carefully replace the top. 
-// Since I can't selectively pick widely separated chunks easily in one go without context, 
-// I will stick to replacing the top imports/cache functions first, then use another call for the artifact writing if deep in the file.
-// Actually, I'll try to find the `fs.writeFileSync` part later.
 
 
 export type LLMProvider = "xai" | "gemini";
@@ -376,8 +368,18 @@ interface ChatResponse {
   // Agent Verifier Metadata (Improvement 1)
   metadata?: {
     verified?: boolean;
+    verificationResult?: {
+      isValid: boolean;
+      issues: string[];
+      correctedContent?: string;
+    };
     verificationAttempts?: number;
     [key: string]: any;
+  };
+  pipelineTraceability?: {
+    stages: any[];
+    reproducible: boolean;
+    totalDurationMs: number;
   };
   artifact?: any;
   artifacts?: any[];
@@ -477,7 +479,7 @@ export async function handleChatRequest(
       };
       intentEngineResult = await intentEnginePipeline.process(lastMessage.content, pipelineOptions);
       if (intentEngineResult.success) {
-        console.log(`[IntentEngine] Processed: intent=${intentEngineResult.context.intent?.primaryIntent}, quality=${intentEngineResult.qualityScore}`);
+        console.log(`[IntentEngine] Processed: intent=${intentEngineResult.context.intentClassification.intent}, quality=${intentEngineResult.qualityScore}`);
       }
     } catch (error) {
       console.error("[IntentEngine] Pipeline error:", error);
@@ -486,10 +488,10 @@ export async function handleChatRequest(
 
   // Use intent engine results to enhance routing decisions
   const intentContext = intentEngineResult?.success ? {
-    primaryIntent: intentEngineResult.context.intent?.primaryIntent,
+    primaryIntent: intentEngineResult.context.intentClassification.intent,
     constraints: intentEngineResult.context.constraints,
     qualityScore: intentEngineResult.qualityScore,
-    isMultiIntent: (intentEngineResult.context.intent?.subIntents?.length || 0) > 1
+    isMultiIntent: !!intentEngineResult.context.intentClassification.subIntent
   } : null;
 
   // Extract response preferences
@@ -645,8 +647,6 @@ export async function handleChatRequest(
     if (hasActiveDocuments && lastUserMessage) {
       console.log(`[IntentGuard] DOCUMENT DETECTED - Entering document analysis flow`);
 
-      const { detectIntent, validateResponse, buildDocumentPrompt, createAuditLog } = await import("./intentGuard");
-
       const intentContract = detectIntent(
         lastUserMessage.content,
         persistentDocumentContext.length > 0,
@@ -756,7 +756,6 @@ export async function handleChatRequest(
 
         if (isPPT) {
           // Use the new 8-stage deterministic pipeline
-          const { DeterministicPipeline } = await import("../agent/pipelines/deterministicPipeline");
           const pipeline = new DeterministicPipeline();
 
           // Subscribe to stage events for logging
