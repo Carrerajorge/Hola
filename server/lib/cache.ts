@@ -118,6 +118,25 @@ export class CacheService {
 
         return freshData;
     }
+    async scan(pattern: string): Promise<string[]> {
+        if (!this.isConnected || !this.redis) return [];
+
+        try {
+            const keys: string[] = [];
+            let cursor = "0";
+
+            do {
+                const [nextCursor, matches] = await this.redis.scan(cursor, "MATCH", pattern, "COUNT", 100);
+                cursor = nextCursor;
+                keys.push(...matches);
+            } while (cursor !== "0");
+
+            return keys;
+        } catch (error) {
+            Logger.warn(`[Cache] Scan error for pattern ${pattern}`, error);
+            return [];
+        }
+    }
 }
 
 export const cache = new CacheService();
