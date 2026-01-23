@@ -1729,16 +1729,17 @@ export function SpreadsheetEditor({
     applyToSelection(() => ({ backgroundColor }));
   }, [applyToSelection]);
 
-  const updateChartConfig = useCallback((type: 'bar' | 'line' | 'pie', visible: boolean) => {
+  const updateChartConfig = useCallback((type: string, visible: boolean) => {
+    const chartType = type as 'bar' | 'line' | 'pie';
     setWorkbook(prev => ({
       ...prev,
       sheets: prev.sheets.map(s =>
         s.id === prev.activeSheetId
-          ? { ...s, chartConfig: { type, visible, title: s.chartConfig?.title } }
+          ? { ...s, chartConfig: { type: chartType, visible, title: s.chartConfig?.title } }
           : s
       )
     }));
-    setChartType(type);
+    setChartType(chartType);
     setShowChart(visible);
   }, []);
 
