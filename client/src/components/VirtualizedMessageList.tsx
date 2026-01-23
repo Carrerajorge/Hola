@@ -104,143 +104,163 @@ export function VirtualizedMessageList({
         toast({ title: 'Copiado al portapapeles' });
     }, [toast]);
 
-    // Render individual message row
-    const MessageRow = useCallback(({ index, style }: ListChildComponentProps) => {
-        const message = displayMessages[index];
-        if (!message) return null;
-
-        const isUser = message.role === 'user';
-        const isStreamingMessage = message.id === 'streaming';
-
-        return (
-            <div style={style} className="px-4 py-2">
-                <div className={cn(
-                    "flex gap-3 max-w-4xl mx-auto",
-                    isUser && "flex-row-reverse"
-                )}>
-                    {/* Avatar */}
-                    <Avatar className="h-8 w-8 flex-shrink-0">
-                        {isUser ? (
-                            <>
-                                <AvatarFallback className="bg-primary text-primary-foreground">
-                                    <User className="h-4 w-4" />
-                                </AvatarFallback>
-                            </>
-                        ) : (
-                            <>
-                                <AvatarFallback className="bg-muted">
-                                    <Bot className="h-4 w-4" />
-                                </AvatarFallback>
-                            </>
-                        )}
-                    </Avatar>
-
-                    {/* Message Content */}
-                    <div className={cn(
-                        "flex-1 min-w-0 group",
-                        isUser && "text-right"
-                    )}>
-                        <div className={cn(
-                            "inline-block text-left rounded-2xl px-4 py-2 max-w-full",
-                            isUser
-                                ? "bg-primary text-primary-foreground"
-                                : "bg-muted"
-                        )}>
-                            {isUser ? (
-                                <p className="whitespace-pre-wrap break-words">{message.content}</p>
-                            ) : (
-                                <div className="prose prose-sm dark:prose-invert max-w-none">
-                                    <MarkdownRenderer content={message.content} />
-                                    {isStreamingMessage && (
-                                        <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1" />
-                                    )}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Message Actions */}
-                        {!isStreamingMessage && (
-                            <div className={cn(
-                                "flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity",
-                                isUser ? "justify-end" : "justify-start"
-                            )}>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6"
-                                    onClick={() => handleCopy(message.content)}
-                                >
-                                    <Copy className="h-3 w-3" />
-                                </Button>
-
-                                {!isUser && onRegenerateMessage && (
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-6 w-6"
-                                        onClick={() => onRegenerateMessage(message.id)}
-                                    >
-                                        <RotateCcw className="h-3 w-3" />
-                                    </Button>
-                                )}
-
-                                {onEditMessage && (
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-6 w-6"
-                                        onClick={() => onEditMessage(message.id, message.content)}
-                                    >
-                                        <Pencil className="h-3 w-3" />
-                                    </Button>
-                                )}
-
-                                {onDeleteMessage && (
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-6 w-6 text-red-500 hover:text-red-600"
-                                        onClick={() => onDeleteMessage(message.id)}
-                                    >
-                                        <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Timestamp */}
-                        <p className={cn(
-                            "text-xs text-muted-foreground mt-1",
-                            isUser ? "text-right" : "text-left"
-                        )}>
-                            {message.timestamp.toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit'
-                            })}
-                        </p>
-                    </div>
-                </div>
-            </div>
-        );
-    }, [displayMessages, handleCopy, onEditMessage, onDeleteMessage, onRegenerateMessage]);
+    // Data passed to the list items
+    const itemData = useMemo(() => ({
+        messages: displayMessages,
+        onCopy: handleCopy,
+        onEditMessage,
+        onDeleteMessage,
+        onRegenerateMessage
+    }), [displayMessages, handleCopy, onEditMessage, onDeleteMessage, onRegenerateMessage]);
 
     return (
         <div className={cn("flex-1 h-full", className)}>
             <AutoSizer>
-                {({ height, width }) => (
+                {({ height, width }: { height: number; width: number }) => (
                     <List
                         ref={listRef}
                         height={height}
                         width={width}
                         itemCount={displayMessages.length}
                         itemSize={getItemSize}
+                        itemData={itemData}
                         overscanCount={5}
                         className="scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent"
                     >
-                        {MessageRow}
+                        {MessageRowItem}
                     </List>
                 )}
             </AutoSizer>
         </div>
     );
 }
+
+// Extracted and memoized row component
+const MessageRowItem = React.memo(({ index, style, data }: { index: number; style: React.CSSProperties; data: any }) => {
+    const message = data.messages[index];
+    if (!message) return null;
+
+    const { onCopy, onEditMessage, onDeleteMessage, onRegenerateMessage } = data;
+    const isUser = message.role === 'user';
+    const isStreamingMessage = message.id === 'streaming';
+
+    return (
+        <div style={style} className="px-4 py-2">
+            <div className={cn(
+                "flex gap-3 max-w-4xl mx-auto",
+                isUser && "flex-row-reverse"
+            )}>
+                {/* Avatar */}
+                <Avatar className="h-8 w-8 flex-shrink-0">
+                    {isUser ? (
+                        <AvatarFallback className="bg-primary text-primary-foreground">
+                            <User className="h-4 w-4" />
+                        </AvatarFallback>
+                    ) : (
+                        <AvatarFallback className="bg-muted">
+                            <Bot className="h-4 w-4" />
+                        </AvatarFallback>
+                    )}
+                </Avatar>
+
+                {/* Message Content */}
+                <div className={cn(
+                    "flex-1 min-w-0 group",
+                    isUser && "text-right"
+                )}>
+                    <div className={cn(
+                        "inline-block text-left rounded-2xl px-4 py-2 max-w-full",
+                        isUser
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted"
+                    )}>
+                        {isUser ? (
+                            <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        ) : (
+                            <div className="prose prose-sm dark:prose-invert max-w-none">
+                                <MarkdownRenderer content={message.content} />
+                                {isStreamingMessage && (
+                                    <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1" />
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Message Actions */}
+                    {!isStreamingMessage && (
+                        <div className={cn(
+                            "flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity",
+                            isUser ? "justify-end" : "justify-start"
+                        )}>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() => onCopy(message.content)}
+                            >
+                                <Copy className="h-3 w-3" />
+                            </Button>
+
+                            {!isUser && onRegenerateMessage && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6"
+                                    onClick={() => onRegenerateMessage(message.id)}
+                                >
+                                    <RotateCcw className="h-3 w-3" />
+                                </Button>
+                            )}
+
+                            {onEditMessage && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6"
+                                    onClick={() => onEditMessage(message.id, message.content)}
+                                >
+                                    <Pencil className="h-3 w-3" />
+                                </Button>
+                            )}
+
+                            {onDeleteMessage && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-red-500 hover:text-red-600"
+                                    onClick={() => onDeleteMessage(message.id)}
+                                >
+                                    <Trash2 className="h-3 w-3" />
+                                </Button>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Timestamp */}
+                    <p className={cn(
+                        "text-xs text-muted-foreground mt-1",
+                        isUser ? "text-right" : "text-left"
+                    )}>
+                        {message.timestamp.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        })}
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+}, (prevProps, nextProps) => {
+    // Custom comparison for performance
+    // Only re-render if style (scroll position) changes, 
+    // or if the specific message data at this index changes
+    const prevMsg = prevProps.data.messages[prevProps.index];
+    const nextMsg = nextProps.data.messages[nextProps.index];
+
+    return (
+        prevProps.index === nextProps.index &&
+        prevProps.style === nextProps.style &&
+        prevMsg === nextMsg && // Reference equality check is sufficient if messages array preserves references
+        prevProps.data.onCopy === nextProps.data.onCopy // Check handlers didn't change
+    );
+});

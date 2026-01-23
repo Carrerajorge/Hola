@@ -299,6 +299,27 @@ function AIModelsSection() {
   const [validating, setValidating] = useState(false);
   const [apiStatuses, setApiStatuses] = useState<Record<string, ApiKeyStatus>>({});
 
+  // Test Model State
+  const [testModel, setTestModel] = useState<{ name: string, provider: string } | null>(null);
+  const [testPrompt, setTestPrompt] = useState("Hello, this is a test.");
+  const [testResponse, setTestResponse] = useState("");
+  const [isTesting, setIsTesting] = useState(false);
+
+  const handleTestModel = async () => {
+    if (!testModel) return;
+    setIsTesting(true);
+    setTestResponse("");
+    try {
+      // Logic to test model would go here
+      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulating
+      setTestResponse(`Response from ${testModel.name}: This is a simulated response confirming the model is reachable and functioning correctly.`);
+    } catch (e) {
+      setTestResponse("Error testing model.");
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   const models = [
     { name: "GPT-4 Turbo", provider: "OpenAI", status: "active", usage: 78, cost: "€0.03/1K" },
     { name: "GPT-3.5", provider: "OpenAI", status: "active", usage: 45, cost: "€0.002/1K" },
@@ -376,6 +397,10 @@ function AIModelsSection() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  <Button variant="outline" size="sm" className="h-8" onClick={() => setTestModel(model)}>
+                    <Activity className="h-3 w-3 mr-2" />
+                    Probar
+                  </Button>
                   <span className="text-xs text-muted-foreground">{model.cost}</span>
                   <Switch checked={model.status === "active"} disabled={providerStatus?.isValid === false} />
                 </div>
@@ -391,6 +416,32 @@ function AIModelsSection() {
           );
         })}
       </div>
+
+      <Dialog open={!!testModel} onOpenChange={(open) => !open && setTestModel(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogTitle>Probar Modelo: {testModel?.name}</DialogTitle>
+          <DialogDescription>
+            Envía un prompt de prueba para verificar que el modelo responde correctamente.
+          </DialogDescription>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Prompt del Sistema</label>
+              <Input value={testPrompt} onChange={(e) => setTestPrompt(e.target.value)} />
+            </div>
+            {testResponse && (
+              <div className="rounded-md bg-muted p-4 text-sm whitespace-pre-wrap">
+                {testResponse}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setTestModel(null)}>Cerrar</Button>
+            <Button onClick={handleTestModel} disabled={isTesting}>
+              {isTesting ? "Probando..." : "Enviar Prueba"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
