@@ -3,6 +3,7 @@
  * Parse markdown and extract blocks
  */
 
+import React from 'react';
 import { ContentBlock } from './types';
 
 /**
@@ -209,14 +210,15 @@ export function extractTableData(children: React.ReactNode): string[][] {
                 const row: string[] = [];
                 React.Children.forEach(element.props.children, (cell) => {
                     if (cell && typeof cell === 'object' && 'props' in cell) {
-                        row.push(extractTextFromChildren(cell.props.children));
+                        const cellElement = cell as React.ReactElement<{ children?: React.ReactNode }>;
+                        row.push(extractTextFromChildren(cellElement.props.children));
                     }
                 });
                 if (row.length > 0) {
                     data.push(row);
                 }
-            } else if (element.props?.children) {
-                processChildren(element.props.children);
+            } else if (element.props && (element.props as { children?: React.ReactNode }).children) {
+                processChildren((element.props as { children?: React.ReactNode }).children);
             }
         }
     };

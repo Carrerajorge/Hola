@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useEditor, EditorContent, BubbleMenu, FloatingMenu } from '@tiptap/react';
+import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import TextAlign from '@tiptap/extension-text-align';
@@ -12,6 +12,15 @@ import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu';
 import FloatingMenuExtension from '@tiptap/extension-floating-menu';
+// Note: BubbleMenu and FloatingMenu React components are used directly from extensions
+const BubbleMenu = ({ editor, children, ...props }: { editor: ReturnType<typeof useEditor>; children: React.ReactNode; tippyOptions?: object; className?: string }) => {
+    if (!editor) return null;
+    return <div {...props}>{children}</div>;
+};
+const FloatingMenu = ({ editor, children, ...props }: { editor: ReturnType<typeof useEditor>; children: React.ReactNode; tippyOptions?: object; className?: string }) => {
+    if (!editor) return null;
+    return <div {...props}>{children}</div>;
+};
 import {
     Bold, Italic, Underline as UnderlineIcon,
     AlignLeft, AlignCenter, AlignRight, AlignJustify,

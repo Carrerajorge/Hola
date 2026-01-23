@@ -12,13 +12,15 @@ import React from 'react';
 
 interface SkeletonProps {
     className?: string;
+    style?: React.CSSProperties;
 }
 
 // Base skeleton with animation
-export function Skeleton({ className = '' }: SkeletonProps) {
+export function Skeleton({ className = '', style }: SkeletonProps) {
     return (
         <div
             className={`animate-pulse bg-muted/60 rounded ${className}`}
+            style={style}
         />
     );
 }
