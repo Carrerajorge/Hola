@@ -3,9 +3,15 @@ import { ICacheService } from "../lib/interfaces";
 import { Logger } from "../lib/logger";
 
 export class RedisCacheService implements ICacheService {
-    private client: Redis;
+    private client: Redis | null = null;
 
     constructor() {
+        // Only initialize Redis if REDIS_URL is configured
+        if (!process.env.REDIS_URL && !process.env.REDIS_HOST) {
+            Logger.info('[RedisCacheService] No Redis configured, running in no-op mode');
+            return;
+        }
+
         this.client = new Redis({
             host: process.env.REDIS_HOST || 'localhost',
             port: parseInt(process.env.REDIS_PORT || '6379'),
@@ -19,6 +25,7 @@ export class RedisCacheService implements ICacheService {
     }
 
     async get<T>(key: string): Promise<T | null> {
+        if (!this.client) return null;
         try {
             const data = await this.client.get(key);
             if (!data) return null;
@@ -30,6 +37,7 @@ export class RedisCacheService implements ICacheService {
     }
 
     async set<T>(key: string, value: T, ttlSeconds: number = 300): Promise<void> {
+        if (!this.client) return;
         try {
             const data = JSON.stringify(value);
             await this.client.setex(key, ttlSeconds, data);
@@ -39,6 +47,7 @@ export class RedisCacheService implements ICacheService {
     }
 
     async del(key: string): Promise<void> {
+        if (!this.client) return;
         try {
             await this.client.del(key);
         } catch (error) {

@@ -1,15 +1,27 @@
-import { Queue, Worker, QueueEvents, ConnectionOptions } from 'bullmq';
-import IORedis from 'ioredis';
+import { Queue, Worker, QueueEvents } from 'bullmq';
+import IORedis, { RedisOptions } from 'ioredis';
 
-// Shared connection configuration
-const connection: ConnectionOptions = {
+// Shared connection configuration - only connect if Redis is available
+const REDIS_URL = process.env.REDIS_URL;
+const connectionOpts: RedisOptions | null = REDIS_URL ? {
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT || '6379'),
     password: process.env.REDIS_PASSWORD || undefined,
-};
+} : null;
 
-// Reuse the connection for all queues to avoid file descriptor limit issues
-const sharedConnection = new IORedis(connection);
+// Lazy connection - only create when needed and if Redis is configured
+let sharedConnection: IORedis | null = null;
+function getConnection(): IORedis | null {
+    if (!connectionOpts) {
+        console.warn('[QueueFactory] No REDIS_URL configured, queues disabled');
+        return null;
+    }
+    if (!sharedConnection) {
+        sharedConnection = new IORedis(connectionOpts);
+        sharedConnection.on('error', (err) => console.warn('[QueueFactory] Redis error:', err.message));
+    }
+    return sharedConnection;
+}
 
 export const QUEUE_NAMES = {
     UPLOAD: 'upload-queue',
@@ -22,9 +34,12 @@ export const queues = new Map<string, Queue>();
 /**
  * Creates a standard BullMQ Queue
  */
-export function createQueue<T>(name: string) {
+export function createQueue<T>(name: string): Queue<T> | null {
+    const conn = getConnection();
+    if (!conn) return null;
+
     const queue = new Queue<T>(name, {
-        connection: sharedConnection,
+        connection: conn,
         defaultJobOptions: {
             attempts: 3,
             backoff: {
@@ -48,9 +63,12 @@ export function createQueue<T>(name: string) {
 /**
  * Creates a standard BullMQ Worker
  */
-export function createWorker<T, R>(name: string, processor: (job: any) => Promise<R>) {
+export function createWorker<T, R>(name: string, processor: (job: any) => Promise<R>): Worker<T, R> | null {
+    const conn = getConnection();
+    if (!conn) return null;
+
     return new Worker<T, R>(name, processor, {
-        connection: sharedConnection,
+        connection: conn,
         concurrency: parseInt(process.env.WORKER_CONCURRENCY || '5'),
     });
 }
@@ -58,8 +76,11 @@ export function createWorker<T, R>(name: string, processor: (job: any) => Promis
 /**
  * Creates a QueueEvents listener for monitoring
  */
-export function createQueueEvents(name: string) {
+export function createQueueEvents(name: string): QueueEvents | null {
+    const conn = getConnection();
+    if (!conn) return null;
+
     return new QueueEvents(name, {
-        connection: sharedConnection,
+        connection: conn,
     });
 }
