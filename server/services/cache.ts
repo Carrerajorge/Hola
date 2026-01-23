@@ -12,12 +12,19 @@ export class RedisCacheService implements ICacheService {
             return;
         }
 
-        this.client = new Redis({
-            host: process.env.REDIS_HOST || 'localhost',
-            port: parseInt(process.env.REDIS_PORT || '6379'),
-            password: process.env.REDIS_PASSWORD || undefined,
-            keyPrefix: 'cache:',
-        });
+        // Use REDIS_URL directly if available (Docker/production), otherwise use host/port
+        if (process.env.REDIS_URL) {
+            this.client = new Redis(process.env.REDIS_URL, {
+                keyPrefix: 'cache:',
+            });
+        } else {
+            this.client = new Redis({
+                host: process.env.REDIS_HOST || 'localhost',
+                port: parseInt(process.env.REDIS_PORT || '6379'),
+                password: process.env.REDIS_PASSWORD || undefined,
+                keyPrefix: 'cache:',
+            });
+        }
 
         this.client.on('error', (err) => {
             Logger.error('Redis Cache Error', err);

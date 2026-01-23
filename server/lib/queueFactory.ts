@@ -3,21 +3,29 @@ import IORedis, { RedisOptions } from 'ioredis';
 
 // Shared connection configuration - only connect if Redis is available
 const REDIS_URL = process.env.REDIS_URL;
-const connectionOpts: RedisOptions | null = REDIS_URL ? {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD || undefined,
-} : null;
 
 // Lazy connection - only create when needed and if Redis is configured
 let sharedConnection: IORedis | null = null;
 function getConnection(): IORedis | null {
-    if (!connectionOpts) {
+    if (!REDIS_URL && !process.env.REDIS_HOST) {
         console.warn('[QueueFactory] No REDIS_URL configured, queues disabled');
         return null;
     }
     if (!sharedConnection) {
-        sharedConnection = new IORedis(connectionOpts);
+        // Use REDIS_URL directly if available (Docker/production)
+        // BullMQ requires maxRetriesPerRequest: null for blocking operations
+        if (REDIS_URL) {
+            sharedConnection = new IORedis(REDIS_URL, {
+                maxRetriesPerRequest: null,
+            });
+        } else {
+            sharedConnection = new IORedis({
+                host: process.env.REDIS_HOST || 'localhost',
+                port: parseInt(process.env.REDIS_PORT || '6379'),
+                password: process.env.REDIS_PASSWORD || undefined,
+                maxRetriesPerRequest: null,
+            });
+        }
         sharedConnection.on('error', (err) => console.warn('[QueueFactory] Redis error:', err.message));
     }
     return sharedConnection;
