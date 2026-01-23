@@ -58,30 +58,35 @@ function addLog(entry: Omit<LogEntry, "id" | "timestamp">): void {
     logs.splice(0, logs.length - MAX_LOG_ENTRIES);
   }
 
-  // Output al console para desarrollo
-  const prefix = `[${logEntry.component}]`;
-  const reqInfo = logEntry.requestId ? ` [${logEntry.requestId}]` : "";
-  const userInfo = logEntry.userId ? ` (user:${logEntry.userId})` : "";
-  const durationInfo = logEntry.duration !== undefined ? ` ${logEntry.duration}ms` : "";
-  const metaInfo = logEntry.metadata ? ` ${JSON.stringify(logEntry.metadata)}` : "";
-  
-  const formattedMessage = `${prefix}${reqInfo}${userInfo} ${logEntry.message}${durationInfo}${metaInfo}`;
-  
+  // Use standardized logger for output
+  const context = {
+    component: logEntry.component,
+    requestId: logEntry.requestId,
+    userId: logEntry.userId,
+    duration: logEntry.duration,
+  };
+
+  // Metadata merge
+  const metadata = logEntry.metadata || {};
+
   switch (logEntry.level) {
     case "debug":
-      console.debug(formattedMessage);
+      baseLogger.debug(logEntry.message, { ...context, ...metadata });
       break;
     case "info":
-      console.info(formattedMessage);
+      baseLogger.info(logEntry.message, { ...context, ...metadata });
       break;
     case "warn":
-      console.warn(formattedMessage);
+      baseLogger.warn(logEntry.message, { ...context, ...metadata });
       break;
     case "error":
-      console.error(formattedMessage);
+      baseLogger.error(logEntry.message, { ...context, ...metadata });
       break;
   }
 }
+
+// Import base logger
+import { logger as baseLogger } from "../utils/logger";
 
 export function createLogger(component: string): Logger {
   let contextRequestId: string | undefined;
@@ -107,13 +112,13 @@ export function createLogger(component: string): Logger {
     info: createLogMethod("info"),
     warn: createLogMethod("warn"),
     error: createLogMethod("error"),
-    
+
     withRequest(requestId: string, userId?: string): Logger {
       const childLogger = createLogger(component);
       (childLogger as any)._setContext(requestId, userId, contextDuration);
       return childLogger;
     },
-    
+
     withDuration(duration: number): Logger {
       const childLogger = createLogger(component);
       (childLogger as any)._setContext(contextRequestId, contextUserId, duration);
