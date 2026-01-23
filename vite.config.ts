@@ -81,8 +81,11 @@ export default defineConfig({
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'wouter'],
           'vendor-ui': ['@radix-ui/react-dialog', '@radix-ui/react-slot', '@radix-ui/react-tooltip', 'lucide-react', 'framer-motion'],
-          // 'vendor-charts': ['echarts', 'echarts-for-react', 'recharts'],
-          // 'vendor-editors': ['@monaco-editor/react', '@tiptap/react'],
+          // Heavy dependencies - code split for lazy loading
+          'xlsx': ['xlsx'],
+          'cytoscape': ['cytoscape'],
+          // Mermaid diagrams - loaded on demand
+          'mermaid-core': ['mermaid'],
         },
       },
     },

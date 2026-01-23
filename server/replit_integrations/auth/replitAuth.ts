@@ -29,8 +29,8 @@ export function getAuthMetrics() {
 const getOidcConfig = memoize(
   async () => {
     // Mock OIDC config for local development to prevent startup hang
-    if (process.env.REPL_ID === 'local-dev') {
-      console.log('[Auth] Using mock OIDC config for local-dev');
+    if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production') {
+      console.log('[Auth] Using mock OIDC config for local-dev (development only)');
       // openid-client v6 Strategy expects a Configuration object with serverMetadata and clientMetadata
       return {
         serverMetadata: {
@@ -206,8 +206,8 @@ export async function setupAuth(app: Express) {
 
   app.get("/api/login", authRateLimiter, (req, res, next) => {
     // Local Dev Bypass
-    if (process.env.REPL_ID === 'local-dev') {
-      console.log('[Auth] Local dev detected, bypassing OIDC login');
+    if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production') {
+      console.log('[Auth] Local dev detected (development only), bypassing OIDC login');
       return res.redirect('/api/callback?code=local_dev_bypass');
     }
 
@@ -227,7 +227,7 @@ export async function setupAuth(app: Express) {
     const requestId = `cb-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     // Local Dev Bypass
-    if (process.env.REPL_ID === 'local-dev' && req.query.code === 'local_dev_bypass') {
+    if (process.env.REPL_ID === 'local-dev' && process.env.NODE_ENV !== 'production' && req.query.code === 'local_dev_bypass') {
       try {
         console.log(`[Auth] [${requestId}] Handling local dev bypass callback`);
         const mockUser = {
