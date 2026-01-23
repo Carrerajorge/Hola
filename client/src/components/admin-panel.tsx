@@ -271,6 +271,8 @@ function UsersSection() {
                 onChange={(e) => updateUserPlan(user.id, e.target.value)}
                 disabled={updatingUserId === user.id}
                 data-testid={`select-plan-${user.id}`}
+                aria-label="Seleccionar plan de usuario"
+                title="Seleccionar plan de usuario"
               >
                 {planOptions.map(plan => (
                   <option key={plan} value={plan}>{plan.toUpperCase()}</option>
@@ -551,7 +553,13 @@ function AnalyticsSection() {
           <h3 className="text-sm font-medium">Consultas por día</h3>
           <div className="h-32 flex items-end justify-between gap-1">
             {[40, 65, 45, 80, 55, 90, 75].map((h, i) => (
-              <div key={i} className="flex-1 bg-primary/20 rounded-t" style={{ height: `${h}%` }} />
+              <div
+                key={i}
+                className="flex-1 bg-primary/20 rounded-t"
+                style={{ "--bar-height": `${h}%` } as React.CSSProperties}
+              >
+                <div className="w-full h-[var(--bar-height)]" />
+              </div>
             ))}
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
@@ -578,8 +586,11 @@ function AnalyticsSection() {
                   <span>{item.name}</span>
                   <span>{item.value}%</span>
                 </div>
-                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                  <div className={cn("h-full rounded-full", item.color)} style={{ width: `${item.value}%` }} />
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden" style={{ "--prog-width": `${item.value}%` } as React.CSSProperties}>
+                  <div
+                    className={cn("h-full rounded-full", item.color)}
+                    style={{ width: "var(--prog-width)" }}
+                  />
                 </div>
               </div>
             ))}
