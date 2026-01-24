@@ -59,11 +59,30 @@ const FORBID_TAGS = [
     'select', 'textarea', 'meta', 'link', 'base', 'noscript', 'frame', 'frameset',
 ];
 
+// FRONTEND FIX #16: Comprehensive list of forbidden event handler attributes
 const FORBID_ATTR = [
+    // Mouse events
     'onerror', 'onload', 'onclick', 'onmouseover', 'onmouseout', 'onmouseenter',
-    'onmouseleave', 'onkeydown', 'onkeyup', 'onkeypress', 'onfocus', 'onblur',
-    'onchange', 'onsubmit', 'onreset', 'onselect', 'oncontextmenu',
-    'formaction', 'xlink:href', 'xmlns', 'xmlns:xlink',
+    'onmouseleave', 'onmousedown', 'onmouseup', 'onmousemove', 'ondblclick',
+    // Keyboard events
+    'onkeydown', 'onkeyup', 'onkeypress',
+    // Focus events
+    'onfocus', 'onblur', 'onfocusin', 'onfocusout',
+    // Form events
+    'onchange', 'onsubmit', 'onreset', 'onselect', 'oninput', 'oninvalid',
+    // Clipboard events
+    'oncopy', 'oncut', 'onpaste',
+    // Drag events
+    'ondrag', 'ondragend', 'ondragenter', 'ondragleave', 'ondragover', 'ondragstart', 'ondrop',
+    // Media events
+    'onplay', 'onpause', 'onended', 'onvolumechange', 'onseeking', 'onseeked',
+    // Touch events
+    'ontouchstart', 'ontouchend', 'ontouchmove', 'ontouchcancel',
+    // Other potentially dangerous
+    'oncontextmenu', 'onwheel', 'onscroll', 'onresize', 'onbeforeunload', 'onunload',
+    'onanimationstart', 'onanimationend', 'onanimationiteration', 'ontransitionend',
+    // Dangerous attributes
+    'formaction', 'xlink:href', 'xmlns', 'xmlns:xlink', 'srcdoc', 'data',
 ];
 
 // Configure DOMPurify hooks

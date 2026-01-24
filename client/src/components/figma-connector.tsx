@@ -31,7 +31,9 @@ export function FigmaConnector({ onConnectionChange }: FigmaConnectorProps) {
     }
     
     const error = urlParams.get('figma_error');
-    if (error) {
+    // FRONTEND FIX #20: Validate error param is a known error code before displaying
+    const validErrors = ['no_code', 'not_configured', 'token_exchange_failed', 'access_denied'];
+    if (error && (validErrors.includes(error) || error.length < 50)) {
       toast({
         title: "Error de conexión",
         description: getErrorMessage(error),

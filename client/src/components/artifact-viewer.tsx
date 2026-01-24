@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, memo } from "react";
+import DOMPurify from "dompurify";
 import {
   Download,
   Eye,
@@ -25,7 +26,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { getFileTheme, getFileCategory, type FileCategory } from "@/lib/fileTypeTheme";
 import { useAsyncHighlight } from "@/hooks/useAsyncHighlight";
-import { createSafeSvg, sanitizeHtml } from "@/lib/sanitize";
 
 export type ArtifactType =
   | "image"
@@ -466,7 +466,13 @@ const SvgArtifact = memo(function SvgArtifact({
         {svgContent ? (
           <div
             className="svg-container"
-            dangerouslySetInnerHTML={createSafeSvg(svgContent)}
+            // FRONTEND FIX #2: Sanitize SVG content to prevent XSS
+            dangerouslySetInnerHTML={{
+              __html: DOMPurify.sanitize(svgContent, {
+                USE_PROFILES: { svg: true, svgFilters: true },
+                ADD_TAGS: ["use"],
+              }),
+            }}
             onError={() => setHasError(true)}
           />
         ) : svgUrl ? (
@@ -573,8 +579,12 @@ const CodeArtifact = memo(function CodeArtifact({
         ) : (
           <div
             className="p-4 text-sm font-mono"
+            // FRONTEND FIX #3: Sanitize highlighted code HTML
             dangerouslySetInnerHTML={{
-              __html: sanitizeHtml(html || `<pre class="text-slate-300">${previewLines.join('\n')}</pre>`)
+              __html: DOMPurify.sanitize(
+                html || `<pre class="text-slate-300">${previewLines.join('\n')}</pre>`,
+                { ALLOWED_TAGS: ["pre", "code", "span"], ALLOWED_ATTR: ["class"] }
+              ),
             }}
           />
         )}

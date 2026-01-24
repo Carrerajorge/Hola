@@ -56,7 +56,9 @@ function formatDisplayValue(
             dateFormat: opts?.dateFormat || "YYYY-MM-DD",
           });
         }
-      } catch { }
+      } catch {
+        // FRONTEND FIX #19: Intentionally silent - invalid date value, return as-is
+      }
       return value;
     default:
       return value;

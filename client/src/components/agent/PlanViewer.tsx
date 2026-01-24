@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import mermaid from "mermaid";
+import DOMPurify from "dompurify";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -151,7 +152,12 @@ export function PlanViewer({ planId, className, autoRefresh = true }: PlanViewer
 
             mermaid.render(`mermaid-${plan.id}`, diagram).then((renderResult) => {
                 if (mermaidRef.current) {
-                    mermaidRef.current.innerHTML = renderResult.svg;
+                    // FRONTEND FIX #1: Sanitize SVG output from Mermaid to prevent XSS
+                    const sanitizedSvg = DOMPurify.sanitize(renderResult.svg, {
+                        USE_PROFILES: { svg: true, svgFilters: true },
+                        ADD_TAGS: ['use'],
+                    });
+                    mermaidRef.current.innerHTML = sanitizedSvg;
                 }
             });
         }

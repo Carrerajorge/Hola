@@ -282,7 +282,8 @@ function CollaboratorsList({ collaborators }: CollaboratorsListProps) {
                     title={`${collab.userName} (${collab.isOnline ? "online" : "away"})`}
                 >
                     {collab.avatar ? (
-                        <img src={collab.avatar} alt="" className="w-full h-full rounded-full" />
+                        // FRONTEND FIX #6: Add meaningful alt text for accessibility
+                        <img src={collab.avatar} alt={`${collab.userName}'s avatar`} className="w-full h-full rounded-full" />
                     ) : (
                         collab.userName.charAt(0).toUpperCase()
                     )}

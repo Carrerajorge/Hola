@@ -224,8 +224,47 @@ export function AppDetailDialog({
     }
     
     toast.loading(`Conectando con ${app.name}...`, { id: 'connect-toast' });
-    
-    window.location.href = app.connectionEndpoint;
+
+    // FRONTEND FIX #7: Validate connection endpoint URL before redirect
+    const endpoint = app.connectionEndpoint;
+    try {
+      const url = new URL(endpoint, window.location.origin);
+      // Only allow same-origin or explicitly allowed OAuth providers
+      const allowedOrigins = [
+        window.location.origin,
+        'https://accounts.google.com',
+        'https://login.microsoftonline.com',
+        'https://github.com',
+        'https://www.figma.com',
+        'https://api.notion.com',
+        'https://slack.com',
+      ];
+      const isAllowed = allowedOrigins.some(origin =>
+        url.origin === origin || url.href.startsWith('/api/')
+      );
+      if (!isAllowed) {
+        console.warn('[Security] Blocked redirect to untrusted origin:', url.origin);
+        toast.dismiss('connect-toast');
+        setConnectionError({
+          type: 'invalid_endpoint',
+          message: 'Endpoint no válido',
+          details: 'El endpoint de conexión no es de un origen de confianza.',
+          retryable: false
+        });
+        setIsConnecting(false);
+        return;
+      }
+      window.location.href = endpoint;
+    } catch (e) {
+      // If it's a relative URL, allow it
+      if (endpoint.startsWith('/')) {
+        window.location.href = endpoint;
+      } else {
+        console.error('[Security] Invalid connection endpoint:', endpoint);
+        toast.dismiss('connect-toast');
+        setIsConnecting(false);
+      }
+    }
   };
 
   const handleDisconnect = async () => {
