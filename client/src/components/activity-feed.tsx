@@ -349,7 +349,8 @@ function ArtifactCard({ artifact, compact = false }: ArtifactCardProps) {
             variant="outline"
             size="sm"
             className="h-7 gap-1.5 text-xs"
-            onClick={() => artifact.url && window.open(artifact.url, "_blank")}
+            // FRONTEND FIX #36: Add noopener,noreferrer to prevent window.opener attacks
+            onClick={() => artifact.url && window.open(artifact.url, "_blank", "noopener,noreferrer")}
             data-testid={`artifact-${artifact.name}`}
           >
             <Icon className="h-3 w-3" />

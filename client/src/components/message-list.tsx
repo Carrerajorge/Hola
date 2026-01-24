@@ -545,7 +545,8 @@ const AttachmentList = memo(function AttachmentList({
               sheets={att.spreadsheetData.sheets}
               previewData={att.spreadsheetData.previewData}
               onDownload={() => onOpenPreview?.(att)}
-              onExpand={() => window.open(`/spreadsheet-analyzer?uploadId=${att.spreadsheetData!.uploadId}`, '_blank')}
+              // FRONTEND FIX #39: Add noopener,noreferrer to prevent window.opener attacks
+              onExpand={() => window.open(`/spreadsheet-analyzer?uploadId=${att.spreadsheetData!.uploadId}`, '_blank', 'noopener,noreferrer')}
             />
             {att.spreadsheetData.analysisId && (
               <DocumentAnalysisResults

@@ -175,11 +175,24 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
     return priceMapping[planPriceId] || planPriceId;
   };
 
+  // FRONTEND FIX #47: Validate checkout URL to prevent open redirect
+  const ALLOWED_CHECKOUT_HOSTS = ['checkout.stripe.com', 'pay.stripe.com'];
+
+  const isValidCheckoutUrl = (url: string): boolean => {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'https:' &&
+        ALLOWED_CHECKOUT_HOSTS.some(host => parsed.hostname === host || parsed.hostname.endsWith('.' + host));
+    } catch {
+      return false;
+    }
+  };
+
   const handleSubscribe = async (priceId: string, planId: string) => {
     if (!priceId) return;
-    
+
     setLoadingPlan(planId);
-    
+
     try {
       const response = await fetch("/api/checkout", {
         method: "POST",
@@ -188,10 +201,15 @@ export function PricingModal({ open, onClose, quota }: PricingModalProps) {
         },
         body: JSON.stringify({ priceId }),
       });
-      
+
       const data = await response.json();
-      
+
       if (data.url) {
+        // FRONTEND FIX #48: Validate URL before redirect to prevent open redirect
+        if (!isValidCheckoutUrl(data.url)) {
+          console.error("Invalid checkout URL - not a trusted Stripe domain");
+          return;
+        }
         window.location.href = data.url;
       } else if (data.error) {
         console.error("Checkout error:", data.error);

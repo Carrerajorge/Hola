@@ -378,7 +378,8 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
         document.body.removeChild(a);
       } else {
         const fallbackUrl = item.storageUrl || item.storagePath;
-        window.open(fallbackUrl, '_blank');
+        // FRONTEND FIX #35: Add noopener,noreferrer to prevent window.opener attacks
+        window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
       }
     } catch (error) {
       console.error("Download failed:", error);

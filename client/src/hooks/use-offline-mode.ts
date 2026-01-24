@@ -351,8 +351,13 @@ export function useOfflineMode(config: OfflineConfig = {}) {
 // ======== Action Executor ========
 
 async function executeAction(action: PendingAction): Promise<void> {
+    // FRONTEND FIX #50: Avoid logging potentially sensitive data in production
     // In production, this would call actual APIs
-    console.log(`[Offline] Executing action: ${action.type}`, action.data);
+    if (import.meta.env.DEV) {
+        console.log(`[Offline] Executing action: ${action.type}`, action.data);
+    } else {
+        console.log(`[Offline] Executing action: ${action.type}`);
+    }
 
     // Simulate network request
     await new Promise(r => setTimeout(r, 100));
