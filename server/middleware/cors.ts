@@ -100,6 +100,7 @@ export const corsOptions: cors.CorsOptions = {
         'X-Requested-With',
         'X-Request-ID',
         'X-Idempotency-Key',
+        'X-CSRF-Token',
         'Accept',
         'Origin',
     ],
