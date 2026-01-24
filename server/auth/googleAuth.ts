@@ -219,8 +219,15 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 console.warn("[Google Auth] Failed to create audit log:", auditError);
             }
 
-            console.log("[Google Auth] Login successful for:", email);
-            res.redirect(stateData.returnUrl || "/?auth=success");
+            // Force session save before redirect (critical for OAuth flow)
+            req.session.save((saveErr: any) => {
+                if (saveErr) {
+                    console.error("[Google Auth] Session save failed:", saveErr);
+                    return res.redirect("/login?error=session_save_error");
+                }
+                console.log("[Google Auth] Login successful for:", email);
+                res.redirect(stateData.returnUrl || "/?auth=success");
+            });
         });
 
     } catch (error: any) {

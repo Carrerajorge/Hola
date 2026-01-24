@@ -217,8 +217,15 @@ router.get("/microsoft/callback", async (req: Request, res: Response) => {
                 console.warn("[Microsoft Auth] Failed to create audit log:", auditError);
             }
 
-            console.log("[Microsoft Auth] Login successful for:", email);
-            res.redirect(stateData.returnUrl || "/?auth=success");
+            // Force session save before redirect (critical for OAuth flow)
+            req.session.save((saveErr: any) => {
+                if (saveErr) {
+                    console.error("[Microsoft Auth] Session save failed:", saveErr);
+                    return res.redirect("/login?error=session_save_error");
+                }
+                console.log("[Microsoft Auth] Login successful for:", email);
+                res.redirect(stateData.returnUrl || "/?auth=success");
+            });
         });
 
     } catch (error: any) {
