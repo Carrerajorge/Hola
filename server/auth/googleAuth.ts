@@ -9,6 +9,20 @@ import { env } from "../config/env";
 
 const router = Router();
 
+// CANONICAL URL for OAuth redirects (avoid www/non-www mismatch)
+// This MUST match exactly what's registered in Google Cloud Console
+const CANONICAL_DOMAIN = process.env.CANONICAL_DOMAIN || "iliagpt.com";
+
+// Helper to get canonical redirect URI (production uses HTTPS + canonical domain)
+const getCanonicalRedirectUri = (req: Request, path: string): string => {
+    if (env.NODE_ENV === "production") {
+        // Always use canonical domain in production to avoid redirect_uri_mismatch
+        return `https://${CANONICAL_DOMAIN}${path}`;
+    }
+    // Development: use request host
+    return `${req.protocol}://${req.get("host")}${path}`;
+};
+
 // Google OAuth Configuration
 const getGoogleConfig = () => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -73,8 +87,12 @@ router.get("/google", (req: Request, res: Response) => {
     const returnUrl = (req.query.returnUrl as string) || "/";
     stateStore.set(state, { createdAt: Date.now(), returnUrl });
 
-    const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
-    const redirectUri = `${protocol}://${req.get("host")}/api/auth/google/callback`;
+    // Use canonical redirect URI to match Google Cloud Console configuration
+    const redirectUri = getCanonicalRedirectUri(req, "/api/auth/google/callback");
+
+    console.log("[Google Auth] Using redirect_uri:", redirectUri);
+    console.log("[Google Auth] Request host:", req.get("host"));
+    console.log("[Google Auth] Canonical domain:", CANONICAL_DOMAIN);
 
     const params = new URLSearchParams({
         client_id: config.clientId,
@@ -122,8 +140,9 @@ router.get("/google/callback", async (req: Request, res: Response) => {
     }
 
     try {
-        const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
-        const redirectUri = `${protocol}://${req.get("host")}/api/auth/google/callback`;
+        // Use same canonical redirect URI as in /google route
+        const redirectUri = getCanonicalRedirectUri(req, "/api/auth/google/callback");
+        console.log("[Google Auth] Callback - Using redirect_uri:", redirectUri);
 
         // Exchange code for tokens
         const tokenResponse = await fetch(config.tokenUrl, {
@@ -227,13 +246,29 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
             // Force session save before redirect (critical for OAuth flow)
             console.log("[Google Auth] Saving session before redirect...");
+            console.log("[Google Auth] DEBUG - Session cookie settings:", {
+                sessionID: req.sessionID,
+                sessionExists: !!req.session,
+                isSecure: req.secure,
+                protocol: req.protocol,
+                xForwardedProto: req.get('x-forwarded-proto'),
+                host: req.get('host'),
+            });
+
             req.session.save((saveErr: any) => {
                 if (saveErr) {
                     console.error("[Google Auth] Session save failed:", saveErr);
                     return res.redirect("/login?error=session_save_error");
                 }
+
+                // DEBUG: Log response headers to verify Set-Cookie is being sent
                 console.log("[Google Auth] Session saved successfully for:", email);
+                console.log("[Google Auth] DEBUG - Response headers after save:", {
+                    setCookie: res.getHeader('Set-Cookie'),
+                    sessionID: req.sessionID,
+                });
                 console.log("[Google Auth] Redirecting to:", stateData.returnUrl || "/?auth=success");
+
                 res.redirect(stateData.returnUrl || "/?auth=success");
             });
         });
@@ -254,6 +289,53 @@ router.get("/google/status", (_req: Request, res: Response) => {
         configured: config !== null,
         hasClientId: !!process.env.GOOGLE_CLIENT_ID,
         hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+    });
+});
+
+/**
+ * GET /api/auth/google/debug
+ * DEBUG endpoint to check session/cookie status (temporary - remove in production)
+ */
+router.get("/google/debug", (req: Request, res: Response) => {
+    const sessionCookie = req.cookies?.["siragpt.sid"];
+    const hasSession = !!req.session;
+    const hasUser = !!(req as any).user;
+
+    console.log("[Google Auth] DEBUG endpoint called:", {
+        cookies: Object.keys(req.cookies || {}),
+        hasSessionCookie: !!sessionCookie,
+        hasSession,
+        hasUser,
+        sessionID: req.sessionID,
+        isSecure: req.secure,
+        protocol: req.protocol,
+        xForwardedProto: req.get("x-forwarded-proto"),
+        host: req.get("host"),
+        origin: req.get("origin"),
+    });
+
+    res.json({
+        auth: {
+            hasSession,
+            hasUser,
+            sessionID: req.sessionID,
+            userEmail: hasUser ? (req as any).user?.claims?.email : null,
+        },
+        cookies: {
+            hasSessionCookie: !!sessionCookie,
+            receivedCookies: Object.keys(req.cookies || {}),
+        },
+        request: {
+            isSecure: req.secure,
+            protocol: req.protocol,
+            xForwardedProto: req.get("x-forwarded-proto"),
+            host: req.get("host"),
+            origin: req.get("origin"),
+        },
+        config: {
+            canonicalDomain: CANONICAL_DOMAIN,
+            nodeEnv: env.NODE_ENV,
+        },
     });
 });
 

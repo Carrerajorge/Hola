@@ -93,8 +93,18 @@ export function getSession() {
     tableName: "sessions",
   });
   const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
-  // Use "none" only for Replit deployments (cross-origin), "lax" for standard deployments
+  // CRITICAL FIX: Use SameSite=None for OAuth flows (cross-origin redirect from Google/Microsoft)
+  // SameSite=Lax blocks cookies on cross-site POST/redirects which breaks OAuth callback
   const isReplitDeployment = !!process.env.REPL_SLUG;
+  const useNoneSameSite = isReplitDeployment || isProduction;
+
+  console.log("[Session] Config:", {
+    isProduction,
+    isReplitDeployment,
+    sameSite: useNoneSameSite ? "none" : "lax",
+    secure: isProduction,
+  });
+
   return session({
     name: "siragpt.sid",
     secret: process.env.SESSION_SECRET!,
@@ -106,9 +116,11 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isReplitDeployment ? "none" as const : "lax" as const,
+      // SameSite=None required for OAuth callback to work (cross-origin redirect)
+      sameSite: useNoneSameSite ? "none" as const : "lax" as const,
       maxAge: sessionTtl,
       path: "/",
+      // Don't set domain - let browser use host-only cookie for iliagpt.com
     },
   });
 }
