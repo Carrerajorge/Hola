@@ -28,15 +28,26 @@ function getStoredUser(): User | null {
   }
 }
 
+// FRONTEND FIX #5: Only store non-sensitive user data in localStorage
 function setStoredUser(user: User | null): void {
   try {
     if (user) {
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+      // Only store minimal user info, never store tokens or sensitive data
+      const safeUserData = {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        plan: user.plan,
+        avatarUrl: user.avatarUrl,
+        // Explicitly exclude: password, tokens, secrets, etc.
+      };
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(safeUserData));
     } else {
       localStorage.removeItem(AUTH_STORAGE_KEY);
     }
   } catch {
-    // Ignore
+    // Ignore storage errors
   }
 }
 

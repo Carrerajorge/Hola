@@ -47,7 +47,9 @@ function formatDisplayValue(value: string, numberFormat?: string): string {
         if (!isNaN(date.getTime())) {
           return date.toLocaleDateString('es-ES');
         }
-      } catch { }
+      } catch {
+        // FRONTEND FIX #19: Intentionally silent - invalid date value, return as-is
+      }
       return value;
     default:
       return value;

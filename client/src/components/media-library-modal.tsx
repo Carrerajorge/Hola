@@ -480,9 +480,10 @@ export function MediaLibraryModal({
                   >
                     <div className="h-12 w-12 rounded-lg overflow-hidden bg-muted flex-shrink-0">
                       {item.thumbnailBase64 ? (
-                        <img src={item.thumbnailBase64} alt="" className="h-full w-full object-cover" />
+                        // FRONTEND FIX #10: Add meaningful alt text for accessibility
+                        <img src={item.thumbnailBase64} alt={`Thumbnail for ${item.name}`} className="h-full w-full object-cover" />
                       ) : item.type === 'image' ? (
-                        <img src={item.url} alt="" className="h-full w-full object-cover" />
+                        <img src={item.url} alt={item.name || 'Media image'} className="h-full w-full object-cover" />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center">
                           {item.type === 'video' ? (

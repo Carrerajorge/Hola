@@ -64,7 +64,8 @@ const InlineSourceBadge = memo(function InlineSourceBadge({ name, url }: { name:
           <div className="bg-popover border border-border rounded-lg shadow-lg p-2 min-w-[160px] max-w-[240px]">
             <div className="flex items-center gap-2">
               {!imageError ? (
-                <img src={faviconUrl} alt="" className="w-4 h-4 rounded-full object-contain" />
+                // FRONTEND FIX #15: Add meaningful alt text for favicon
+                <img src={faviconUrl} alt={`${name || domain} favicon`} className="w-4 h-4 rounded-full object-contain" />
               ) : (
                 <Globe className="w-4 h-4 text-muted-foreground" />
               )}

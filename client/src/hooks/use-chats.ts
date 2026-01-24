@@ -345,7 +345,10 @@ function debouncedLocalStorageSave(chats: Chat[], storageKey: string): void {
           }))
         }));
         localStorage.setItem(storageKey, JSON.stringify(chatsForStorage));
-        console.log(`[Debounce] Saved ${pendingChatsToSave.length} chats to localStorage`);
+        // FRONTEND FIX #14: Only log in development to reduce noise in production
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`[Debounce] Saved ${pendingChatsToSave.length} chats to localStorage`);
+        }
       } catch (e) {
         console.warn("[Debounce] Failed to save chats to localStorage:", e);
         localStorage.removeItem(storageKey);

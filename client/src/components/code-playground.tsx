@@ -429,6 +429,42 @@ async function executeJS(code: string): Promise<ExecutionResult> {
     const output: string[] = [];
     const errors: string[] = [];
 
+    // FRONTEND FIX #21: Block potentially dangerous code patterns
+    const dangerousPatterns = [
+        /eval\s*\(/i,
+        /Function\s*\(/i,
+        /document\s*\.\s*(cookie|write)/i,
+        /localStorage/i,
+        /sessionStorage/i,
+        /XMLHttpRequest/i,
+        /fetch\s*\(/i,
+        /import\s*\(/i,
+        /require\s*\(/i,
+        /window\s*\.\s*open/i,
+        /\.innerHTML\s*=/i,
+    ];
+
+    for (const pattern of dangerousPatterns) {
+        if (pattern.test(code)) {
+            return {
+                success: false,
+                output: [],
+                errors: [`Blocked: Code contains potentially unsafe pattern: ${pattern.source}`],
+                executionTime: 0
+            };
+        }
+    }
+
+    // FRONTEND FIX #22: Limit code length to prevent DoS
+    if (code.length > 50000) {
+        return {
+            success: false,
+            output: [],
+            errors: ['Code exceeds maximum length of 50,000 characters'],
+            executionTime: 0
+        };
+    }
+
     // Create isolated console
     const customConsole = {
         log: (...args: any[]) => output.push(args.map(String).join(" ")),

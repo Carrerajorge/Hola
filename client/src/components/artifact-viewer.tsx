@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, memo } from "react";
+import DOMPurify from "dompurify";
 import {
   Download,
   Eye,
@@ -465,7 +466,13 @@ const SvgArtifact = memo(function SvgArtifact({
         {svgContent ? (
           <div
             className="svg-container"
-            dangerouslySetInnerHTML={{ __html: svgContent }}
+            // FRONTEND FIX #2: Sanitize SVG content to prevent XSS
+            dangerouslySetInnerHTML={{
+              __html: DOMPurify.sanitize(svgContent, {
+                USE_PROFILES: { svg: true, svgFilters: true },
+                ADD_TAGS: ['use'],
+              })
+            }}
             onError={() => setHasError(true)}
           />
         ) : svgUrl ? (
@@ -572,8 +579,12 @@ const CodeArtifact = memo(function CodeArtifact({
         ) : (
           <div
             className="p-4 text-sm font-mono"
+            // FRONTEND FIX #3: Sanitize highlighted code HTML
             dangerouslySetInnerHTML={{
-              __html: highlightedHtml || `<pre class="text-slate-300">${previewLines.join('\n')}</pre>`
+              __html: DOMPurify.sanitize(
+                highlightedHtml || `<pre class="text-slate-300">${previewLines.join('\n')}</pre>`,
+                { ALLOWED_TAGS: ['pre', 'code', 'span'], ALLOWED_ATTR: ['class'] }
+              )
             }}
           />
         )}

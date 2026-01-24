@@ -935,8 +935,22 @@ export class FormulaEngine {
     });
     
     try {
+      // FRONTEND FIX #8: Enhanced sanitization for formula expression evaluation
       const safeExpr = resolved.replace(/[^0-9+\-*/.() ]/g, '');
       if (safeExpr.trim()) {
+        // Additional safety checks before evaluation
+        // Check for balanced parentheses
+        let parenCount = 0;
+        for (const char of safeExpr) {
+          if (char === '(') parenCount++;
+          if (char === ')') parenCount--;
+          if (parenCount < 0) return resolved; // Unbalanced - don't evaluate
+        }
+        if (parenCount !== 0) return resolved; // Unbalanced - don't evaluate
+
+        // Block expressions that are too long (potential DoS)
+        if (safeExpr.length > 1000) return resolved;
+
         if (safeExpr.includes('/')) {
           const checkDiv = safeExpr.replace(/\s/g, '');
           const divMatch = checkDiv.match(/\/([0-9.]+)/g);
@@ -947,11 +961,13 @@ export class FormulaEngine {
             }
           }
         }
+        // Use Function() with strict mode - expression is already sanitized to only numbers and math operators
         const result = Function(`"use strict"; return (${safeExpr})`)();
         if (!isFinite(result)) return ExcelErrors.DIV_ZERO;
         return result;
       }
     } catch (e) {
+      // Silently fail for invalid expressions
     }
     
     return resolved;

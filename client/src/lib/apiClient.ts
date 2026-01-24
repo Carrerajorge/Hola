@@ -1,5 +1,11 @@
 import { getStoredAnonUserId, getStoredAnonToken } from "@/hooks/use-auth";
 
+// FRONTEND FIX #11: Safer cookie parsing helper
+function getCookie(name: string): string | null {
+  const match = document.cookie.match(new RegExp(`(^|;\\s*)${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[2]) : null;
+}
+
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const anonUserId = getStoredAnonUserId();
   const anonToken = getStoredAnonToken();
@@ -12,11 +18,8 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
     headers.set("X-Anonymous-Token", anonToken);
   }
 
-  // Add CSRF Token from cookie
-  const csrfToken = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith("XSRF-TOKEN="))
-    ?.split("=")[1];
+  // FRONTEND FIX #12: Use safer cookie parsing for CSRF token
+  const csrfToken = getCookie("XSRF-TOKEN");
 
   if (csrfToken) {
     headers.set("X-CSRF-Token", csrfToken);
@@ -40,10 +43,8 @@ export function getAnonUserIdHeader(): Record<string, string> {
     headers["X-Anonymous-Token"] = anonToken;
   }
 
-  const csrfToken = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith("XSRF-TOKEN="))
-    ?.split("=")[1];
+  // FRONTEND FIX #13: Use safer cookie parsing helper
+  const csrfToken = getCookie("XSRF-TOKEN");
 
   if (csrfToken) {
     headers["X-CSRF-Token"] = csrfToken;

@@ -223,7 +223,9 @@ Usa el formato de marcado especificado para generar el contenido.`;
       // const parsed = JSON.parse(e.target.value);
       // loadDeck(parsed);
       // Careful with live updates during typing
-    } catch (e) { }
+    } catch {
+      // FRONTEND FIX #9: Intentionally silent - user is typing and JSON may be incomplete
+    }
   };
 
   return (
