@@ -47,6 +47,7 @@ interface CommandPaletteProps {
     onOpenSkills?: () => void;
     onOpenLibrary?: () => void;
     onOpenSettings?: () => void;
+    onOpenShortcuts?: () => void;
     onToggleTheme?: () => void;
     isDarkMode?: boolean;
     chats?: Array<{ id: string; title: string }>;
@@ -61,6 +62,7 @@ export function CommandPalette({
     onOpenSkills,
     onOpenLibrary,
     onOpenSettings,
+    onOpenShortcuts,
     onToggleTheme,
     isDarkMode = false,
     chats = [],
@@ -142,7 +144,7 @@ export function CommandPalette({
             subtitle: "Ver todos los atajos",
             icon: <Keyboard className="w-4 h-4" />,
             shortcut: "?",
-            action: () => { /* TODO: Open shortcuts modal */ onClose(); },
+            action: () => { onOpenShortcuts?.(); onClose(); },
             category: "settings",
         },
         {
