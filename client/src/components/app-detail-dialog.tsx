@@ -291,7 +291,8 @@ export function AppDetailDialog({
           toast.info('Redirigiéndote para completar la desconexión...', {
             duration: 3000
           });
-          window.open(data.disconnectUrl, '_blank');
+          // FRONTEND FIX #40: Add noopener,noreferrer to prevent window.opener attacks
+          window.open(data.disconnectUrl, '_blank', 'noopener,noreferrer');
         }
         
         setIsConnected(false);

@@ -402,7 +402,8 @@ function UsersSection() {
   });
 
   const handleExport = (format: "csv" | "json") => {
-    window.open(`/api/admin/users/export?format=${format}`, "_blank");
+    // FRONTEND FIX #34: Add noopener,noreferrer to prevent window.opener attacks
+    window.open(`/api/admin/users/export?format=${format}`, "_blank", "noopener,noreferrer");
   };
 
   const filteredAndSortedUsers = users
@@ -4585,7 +4586,8 @@ function ReportsSection() {
   };
 
   const handleDownload = (reportId: string) => {
-    window.open(`/api/admin/reports/download/${reportId}`, "_blank");
+    // FRONTEND FIX #37: Add noopener,noreferrer to prevent window.opener attacks
+    window.open(`/api/admin/reports/download/${reportId}`, "_blank", "noopener,noreferrer");
   };
 
   if (templatesLoading) {

@@ -17,9 +17,11 @@ interface Props {
 
 export default function RawHtmlBlock({ block, context }: Props) {
     const theme = useContentTheme();
-    const { html, sanitized } = block;
+    const { html } = block;
 
-    const safeHtml = sanitized ? html : sanitizeHtml(html);
+    // FRONTEND FIX #41: Always sanitize HTML regardless of sanitized flag
+    // The sanitized flag should not bypass sanitization for security
+    const safeHtml = sanitizeHtml(html);
 
     return (
         <div
