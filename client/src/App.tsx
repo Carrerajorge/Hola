@@ -13,6 +13,7 @@ import { SearchModal } from "@/components/search-modal";
 import { ToolCatalog } from "@/components/tool-catalog";
 import { BackgroundNotificationContainer } from "@/components/background-notification";
 import { CommandPalette } from "@/components/command-palette";
+import { KeyboardShortcutsModal } from "@/components/modals/KeyboardShortcutsModal";
 import { OfflineIndicator } from "@/components/OfflineIndicator";
 import { SkipLink } from "@/lib/accessibility";
 import { Loader2 } from "lucide-react";
@@ -60,6 +61,7 @@ function GlobalKeyboardShortcuts() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [toolCatalogOpen, setToolCatalogOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
   const { chats } = useChats();
 
   const handleNewChat = useCallback(() => {
@@ -79,7 +81,12 @@ function GlobalKeyboardShortcuts() {
     setSearchOpen(false);
     setToolCatalogOpen(false);
     setCommandPaletteOpen(false);
+    setShortcutsModalOpen(false);
     window.dispatchEvent(new CustomEvent("close-all-dialogs"));
+  }, []);
+
+  const handleOpenShortcuts = useCallback(() => {
+    setShortcutsModalOpen(true);
   }, []);
 
   const handleOpenSettings = useCallback(() => {
@@ -122,8 +129,13 @@ function GlobalKeyboardShortcuts() {
         onClose={() => setCommandPaletteOpen(false)}
         onNewChat={handleNewChat}
         onOpenSettings={() => { setCommandPaletteOpen(false); setLocation("/settings"); }}
+        onOpenShortcuts={handleOpenShortcuts}
         chats={chats}
         onSelectChat={handleSelectChat}
+      />
+      <KeyboardShortcutsModal
+        isOpen={shortcutsModalOpen}
+        onClose={() => setShortcutsModalOpen(false)}
       />
     </>
   );

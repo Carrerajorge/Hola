@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Bell, Moon, Globe, Volume2, Keyboard, Palette } from "lucide-react";
+import { KeyboardShortcutsModal } from "@/components/modals/KeyboardShortcutsModal";
 
 export default function SettingsPage() {
   const [, setLocation] = useLocation();
@@ -13,6 +14,7 @@ export default function SettingsPage() {
   const [darkMode, setDarkMode] = useState(false);
   const [soundEffects, setSoundEffects] = useState(true);
   const [language, setLanguage] = useState("es");
+  const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-background">
@@ -143,7 +145,12 @@ export default function SettingsPage() {
                     <p className="text-sm text-muted-foreground">Ver y personalizar atajos</p>
                   </div>
                 </div>
-                <Button variant="outline" size="sm" data-testid="button-keyboard-shortcuts">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="button-keyboard-shortcuts"
+                  onClick={() => setShortcutsModalOpen(true)}
+                >
                   Ver atajos
                 </Button>
               </div>
@@ -151,6 +158,11 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      <KeyboardShortcutsModal
+        isOpen={shortcutsModalOpen}
+        onClose={() => setShortcutsModalOpen(false)}
+      />
     </div>
   );
 }
