@@ -11,10 +11,14 @@ const router = Router();
 
 // Microsoft OAuth Configuration
 const getMicrosoftConfig = () => {
-    // These are guaranteed to exist by server/env.ts validation
     const clientId = env.MICROSOFT_CLIENT_ID;
     const clientSecret = env.MICROSOFT_CLIENT_SECRET;
     const tenantId = env.MICROSOFT_TENANT_ID;
+
+    // Check if all required credentials are present
+    if (!clientId || !clientSecret || !tenantId) {
+        return null;
+    }
 
     return {
         clientId,
@@ -195,6 +199,8 @@ router.get("/microsoft/callback", async (req: Request, res: Response) => {
                 return res.redirect("/login?error=session_error");
             }
 
+            console.log("[Microsoft Auth] req.login() successful, sessionID:", req.sessionID);
+
             // Update last login
             try {
                 await authStorage.updateUserLogin(`ms_${msUser.id}`, {
@@ -218,12 +224,14 @@ router.get("/microsoft/callback", async (req: Request, res: Response) => {
             }
 
             // Force session save before redirect (critical for OAuth flow)
+            console.log("[Microsoft Auth] Saving session before redirect...");
             req.session.save((saveErr: any) => {
                 if (saveErr) {
                     console.error("[Microsoft Auth] Session save failed:", saveErr);
                     return res.redirect("/login?error=session_save_error");
                 }
-                console.log("[Microsoft Auth] Login successful for:", email);
+                console.log("[Microsoft Auth] Session saved successfully for:", email);
+                console.log("[Microsoft Auth] Redirecting to:", stateData.returnUrl || "/?auth=success");
                 res.redirect(stateData.returnUrl || "/?auth=success");
             });
         });

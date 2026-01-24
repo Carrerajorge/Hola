@@ -15,6 +15,10 @@ const getGoogleConfig = () => {
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
     if (!clientId || !clientSecret) {
+        console.warn("[Google Auth] Missing credentials:", {
+            hasClientId: !!clientId,
+            hasClientSecret: !!clientSecret,
+        });
         return null;
     }
 
@@ -197,6 +201,8 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 return res.redirect("/login?error=session_error");
             }
 
+            console.log("[Google Auth] req.login() successful, sessionID:", req.sessionID);
+
             // Update last login
             try {
                 await authStorage.updateUserLogin(`google_${googleUser.id}`, {
@@ -220,12 +226,14 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             }
 
             // Force session save before redirect (critical for OAuth flow)
+            console.log("[Google Auth] Saving session before redirect...");
             req.session.save((saveErr: any) => {
                 if (saveErr) {
                     console.error("[Google Auth] Session save failed:", saveErr);
                     return res.redirect("/login?error=session_save_error");
                 }
-                console.log("[Google Auth] Login successful for:", email);
+                console.log("[Google Auth] Session saved successfully for:", email);
+                console.log("[Google Auth] Redirecting to:", stateData.returnUrl || "/?auth=success");
                 res.redirect(stateData.returnUrl || "/?auth=success");
             });
         });
@@ -241,7 +249,12 @@ router.get("/google/callback", async (req: Request, res: Response) => {
  * Returns whether Google OAuth is configured
  */
 router.get("/google/status", (_req: Request, res: Response) => {
-    res.json({ configured: isGoogleConfigured() });
+    const config = getGoogleConfig();
+    res.json({
+        configured: config !== null,
+        hasClientId: !!process.env.GOOGLE_CLIENT_ID,
+        hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+    });
 });
 
 export default router;
