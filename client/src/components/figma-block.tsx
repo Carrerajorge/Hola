@@ -114,12 +114,13 @@ export function FigmaBlock({ diagram, fileUrl }: FigmaBlockProps) {
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.5));
   const handleResetZoom = useCallback(() => setZoom(1), []);
 
+  // FRONTEND FIX #27: Add noopener,noreferrer to external links
   const handleEditInFigma = () => {
     if (fileUrl) {
-      window.open(fileUrl, '_blank');
+      window.open(fileUrl, '_blank', 'noopener,noreferrer');
     } else {
       // Open Figma new file page
-      window.open('https://www.figma.com/files/recents-and-sharing/recently-viewed', '_blank');
+      window.open('https://www.figma.com/files/recents-and-sharing/recently-viewed', '_blank', 'noopener,noreferrer');
       toast({
         title: "Abre Figma",
         description: "Crea un nuevo archivo de diseño y recrea el diagrama mostrado aquí.",

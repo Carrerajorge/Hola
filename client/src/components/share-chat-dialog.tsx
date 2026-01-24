@@ -243,18 +243,19 @@ export function ShareChatDialog({ chatId, chatTitle, children }: ShareChatDialog
   };
 
   // Social sharing
+  // FRONTEND FIX #26: Add noopener,noreferrer to prevent window.opener attacks
   const shareViaWhatsApp = () => {
     const text = encodeURIComponent(`¡Mira esta conversación! ${shareLink}`);
-    window.open(`https://wa.me/?text=${text}`, '_blank');
+    window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
   };
 
   const shareViaTwitter = () => {
     const text = encodeURIComponent(`Mira esta conversación sobre "${chatTitle}"`);
-    window.open(`https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(shareLink)}`, '_blank');
+    window.open(`https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(shareLink)}`, '_blank', 'noopener,noreferrer');
   };
 
   const shareViaLinkedIn = () => {
-    window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareLink)}`, '_blank');
+    window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareLink)}`, '_blank', 'noopener,noreferrer');
   };
 
   const shareViaEmail = () => {

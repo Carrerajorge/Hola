@@ -281,7 +281,8 @@ export function MediaLibraryModal({
       onSelect?.(item);
       onOpenChange(false);
     } else {
-      window.open(item.url, '_blank');
+      // FRONTEND FIX #28: Add noopener,noreferrer to prevent opener attacks
+      window.open(item.url, '_blank', 'noopener,noreferrer');
     }
   }, [selectable, onSelect, onOpenChange]);
 
@@ -512,7 +513,8 @@ export function MediaLibraryModal({
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8"
-                        onClick={(e) => { e.stopPropagation(); window.open(item.url, '_blank'); }}
+                        // FRONTEND FIX #29: Add noopener,noreferrer
+                        onClick={(e) => { e.stopPropagation(); window.open(item.url, '_blank', 'noopener,noreferrer'); }}
                       >
                         <ExternalLink className="h-4 w-4" />
                       </Button>
