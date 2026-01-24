@@ -97,7 +97,26 @@ export function createUserRouter() {
     }
   });
 
+  // SECURITY FIX #34: Restrict seed endpoint to development/admin only
   router.post("/api/notification-event-types/seed", async (req, res) => {
+    // Only allow in development or for authenticated admin users
+    const isProduction = process.env.NODE_ENV === 'production';
+    const user = (req as AuthenticatedRequest).user;
+    const userId = user?.claims?.sub;
+
+    if (isProduction) {
+      // In production, require admin authentication
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      // Check if user is admin
+      const userEmail = user?.claims?.email?.toLowerCase();
+      const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (!adminEmails.includes(userEmail || '')) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+    }
+
     try {
       const eventTypesToSeed = [
         { id: 'ai_response_ready', name: 'Respuestas de IA', description: 'Notificaciones cuando una respuesta larga está lista', category: 'ai_updates', severity: 'normal', defaultChannels: 'push', sortOrder: 1 },
@@ -249,7 +268,23 @@ export function createUserRouter() {
     }
   });
 
+  // SECURITY FIX #35: Restrict seed endpoint to development/admin only
   router.post("/api/integrations/seed", async (req, res) => {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const user = (req as AuthenticatedRequest).user;
+    const userId = user?.claims?.sub;
+
+    if (isProduction) {
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+      const userEmail = user?.claims?.email?.toLowerCase();
+      const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      if (!adminEmails.includes(userEmail || '')) {
+        return res.status(403).json({ error: "Admin access required" });
+      }
+    }
+
     try {
       const providersToSeed = [
         {

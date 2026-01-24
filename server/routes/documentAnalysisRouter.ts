@@ -22,10 +22,26 @@ router.post('/analyze', upload.single('file'), async (req: Request, res: Respons
       return res.status(400).json({ error: 'No file provided' });
     }
 
+    // SECURITY FIX #17: Safe JSON parsing with try-catch
+    let analysisModules: string[] | undefined;
+    if (req.body.modules) {
+      try {
+        const parsed = JSON.parse(req.body.modules);
+        // SECURITY FIX #18: Validate parsed value is an array of strings
+        if (Array.isArray(parsed) && parsed.every(item => typeof item === 'string')) {
+          analysisModules = parsed;
+        } else {
+          return res.status(400).json({ error: 'Invalid modules format - must be array of strings' });
+        }
+      } catch (e) {
+        return res.status(400).json({ error: 'Invalid JSON in modules parameter' });
+      }
+    }
+
     const options: AnalysisOptions = {
       includeOCR: req.body.includeOCR !== 'false',
       generateSummary: req.body.generateSummary === 'true',
-      analysisModules: req.body.modules ? JSON.parse(req.body.modules) : undefined
+      analysisModules
     };
 
     const buffer = req.file.buffer;

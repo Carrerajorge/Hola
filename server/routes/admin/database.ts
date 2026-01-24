@@ -236,11 +236,19 @@ databaseRouter.get("/tables/:tableName", async (req, res) => {
     }
 });
 
+// SECURITY FIX #39: Query length limit
+const MAX_QUERY_LENGTH = 10000;
+
 databaseRouter.post("/query", async (req, res) => {
     try {
         const { query } = req.body;
         if (!query || typeof query !== 'string') {
             return res.status(400).json({ error: "Query is required" });
+        }
+
+        // SECURITY FIX #40: Enforce query length limit
+        if (query.length > MAX_QUERY_LENGTH) {
+            return res.status(400).json({ error: `Query too long. Maximum ${MAX_QUERY_LENGTH} characters allowed.` });
         }
 
         // Security: Only allow SELECT statements (including CTEs with WITH...SELECT)
@@ -254,7 +262,7 @@ databaseRouter.post("/query", async (req, res) => {
             });
         }
 
-        // Block dangerous patterns - comprehensive list for SQL injection prevention
+        // SECURITY FIX #36: Enhanced dangerous patterns list for SQL injection prevention
         const dangerousPatterns = [
             /;\s*(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|TRUNCATE|GRANT|REVOKE)/i,
             /INTO\s+OUTFILE/i,
@@ -265,6 +273,17 @@ databaseRouter.post("/query", async (req, res) => {
             /pg_read_file/i,
             /lo_import/i,
             /lo_export/i,
+            // SECURITY FIX #37: Additional dangerous functions
+            /pg_ls_dir/i,
+            /pg_stat_file/i,
+            /current_setting\s*\(/i,
+            /set_config\s*\(/i,
+            /dblink/i,
+            /pg_execute_server_program/i,
+            /COPY\s+FROM/i,
+            // SECURITY FIX #38: Block comment-based bypass attempts
+            /\/\*[\s\S]*?(DROP|DELETE|UPDATE|INSERT)/i,
+            /--.*?(DROP|DELETE|UPDATE|INSERT)/i,
         ];
         for (const pattern of dangerousPatterns) {
             if (pattern.test(query)) {

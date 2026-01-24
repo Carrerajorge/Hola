@@ -6,32 +6,51 @@ import { users, excelDocuments } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
-const ADMIN_EMAIL = "carrerajorge874@gmail.com";
+// SECURITY FIX #1: Admin emails now from environment variable instead of hardcoded
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "").split(",").filter(Boolean).map(e => e.trim().toLowerCase());
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
     try {
         const userReq = req as AuthenticatedRequest;
-        const userEmail = userReq.user?.claims?.email;
+        const userEmail = userReq.user?.claims?.email?.toLowerCase();
         const userId = userReq.user?.claims?.sub;
 
-        let isAdmin = userEmail === ADMIN_EMAIL;
+        // SECURITY FIX #2: Require authentication first
+        if (!userId && !userEmail) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
 
-        if (!isAdmin && userId) {
+        let isAdmin = false;
+
+        // SECURITY FIX #3: Check database role first (preferred method)
+        if (userId) {
             const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
             isAdmin = user?.role === "admin";
+        }
+
+        // SECURITY FIX #4: Email whitelist only as fallback for initial setup
+        if (!isAdmin && userEmail && ADMIN_EMAILS.length > 0 && ADMIN_EMAILS.includes(userEmail)) {
+            isAdmin = true;
+            // Log when fallback is used for audit purposes
+            console.warn(`[Admin] Using email whitelist fallback for: ${userEmail}`);
         }
 
         if (!isAdmin) {
             await storage.createAuditLog({
                 action: "admin_access_denied",
                 resource: "admin_panel",
-                details: { email: userEmail, userId, path: req.path }
+                details: {
+                    email: userEmail ? `${userEmail.substring(0, 3)}***` : undefined, // SECURITY FIX #5: Mask email in logs
+                    userId: userId ? userId.substring(0, 8) + "***" : undefined, // Mask userId in logs
+                    path: req.path,
+                    ip: req.ip
+                }
             });
             return res.status(403).json({ error: "Admin access restricted" });
         }
         next();
     } catch (error) {
-        console.error("[Admin] Authorization check failed:", error);
+        console.error("[Admin] Authorization check failed:", error instanceof Error ? error.message : "Unknown error");
         return res.status(500).json({ error: "Authorization check failed" });
     }
 }

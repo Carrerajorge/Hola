@@ -3,6 +3,23 @@ import { storage } from "../storage";
 import { sendShareNotificationEmail } from "../services/emailService";
 import { getSecureUserId, getOrCreateSecureUserId } from "../lib/anonUserHelper";
 
+// SECURITY FIX #44: Message content length limits
+const MAX_MESSAGE_LENGTH = 100000; // 100KB max message
+const MAX_TITLE_LENGTH = 200;
+
+// SECURITY FIX #45: Validate and sanitize message content
+function validateMessageContent(content: any): { valid: boolean; error?: string; sanitized?: string } {
+  if (typeof content !== 'string') {
+    return { valid: false, error: 'Content must be a string' };
+  }
+  if (content.length > MAX_MESSAGE_LENGTH) {
+    return { valid: false, error: `Content exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters` };
+  }
+  // Remove null bytes which can cause issues
+  const sanitized = content.replace(/\0/g, '');
+  return { valid: true, sanitized };
+}
+
 export function createChatsRouter() {
   const router = Router();
 
@@ -428,6 +445,18 @@ export function createChatsRouter() {
       const { role, content, requestId, clientRequestId, userMessageId, attachments, sources, figmaDiagram, googleFormPreview, gmailPreview, generatedImage } = req.body;
       if (!role || !content) {
         return res.status(400).json({ error: "role and content are required" });
+      }
+
+      // SECURITY FIX #46: Validate message content length and format
+      const contentValidation = validateMessageContent(content);
+      if (!contentValidation.valid) {
+        return res.status(400).json({ error: contentValidation.error });
+      }
+      const sanitizedContent = contentValidation.sanitized || content;
+
+      // SECURITY FIX #47: Validate role is allowed value
+      if (!['user', 'assistant', 'system'].includes(role)) {
+        return res.status(400).json({ error: "Invalid role. Must be 'user', 'assistant', or 'system'" });
       }
 
       // Run-based idempotency for user messages

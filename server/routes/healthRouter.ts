@@ -5,6 +5,28 @@ import { createClient } from "redis";
 
 const router = Router();
 
+// SECURITY FIX #22: Rate limit health checks to prevent DoS via resource-intensive probes
+let lastHealthCheck: { timestamp: number; result: any } | null = null;
+const HEALTH_CACHE_MS = 5000; // Cache health results for 5 seconds
+
+// SECURITY FIX #23: Check if internal request (from load balancer, kubernetes, etc.)
+const isInternalRequest = (req: any): boolean => {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const ip = req.ip || req.connection?.remoteAddress;
+
+  // Allow localhost, private IPs, and requests with specific internal headers
+  const internalIPs = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+  const privateIPPrefixes = ['10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.', '192.168.'];
+
+  if (internalIPs.includes(ip)) return true;
+  if (privateIPPrefixes.some(prefix => ip?.startsWith(prefix) || ip?.startsWith(`::ffff:${prefix}`))) return true;
+
+  // Check for internal health check headers
+  if (req.headers['x-health-check-internal'] === process.env.HEALTH_CHECK_SECRET) return true;
+
+  return false;
+};
+
 // Basic liveliness check
 router.get("/live", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -62,24 +84,39 @@ router.get("/deep", async (req, res) => {
 });
 
 // General info
+// SECURITY FIX #24: Limit memory info exposure in production
 router.get("/", async (req, res) => {
   const memUsage = process.memoryUsage();
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  // Only return detailed memory info for internal requests in production
+  const showDetailedInfo = !isProduction || isInternalRequest(req);
+
   res.json({
     status: "ok",
     version: process.env.npm_package_version || "1.0.0",
-    node: process.version,
-    memory: {
-      heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + "MB",
-      heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + "MB",
-      rss: Math.round(memUsage.rss / 1024 / 1024) + "MB"
-    },
-    uptime: Math.floor(process.uptime()) + "s",
+    // SECURITY FIX #25: Don't expose node version in production
+    ...(showDetailedInfo && {
+      node: process.version,
+      memory: {
+        heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + "MB",
+        heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + "MB",
+        rss: Math.round(memUsage.rss / 1024 / 1024) + "MB"
+      },
+      uptime: Math.floor(process.uptime()) + "s",
+    }),
     timestamp: new Date().toISOString()
   });
 });
 
 // Prometheus-compatible metrics endpoint
+// SECURITY FIX #26: Restrict metrics endpoint to internal requests only
 router.get("/metrics", async (req, res) => {
+  // SECURITY FIX #27: Require internal access for sensitive metrics
+  if (process.env.NODE_ENV === 'production' && !isInternalRequest(req)) {
+    return res.status(403).json({ error: "Metrics endpoint restricted to internal access" });
+  }
+
   const memUsage = process.memoryUsage();
   const uptimeSeconds = Math.floor(process.uptime());
 

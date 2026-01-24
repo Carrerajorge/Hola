@@ -1,4 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
+
+// SECURITY FIX #41: Generate CSP nonce for inline scripts
+export function generateCspNonce(): string {
+  return crypto.randomBytes(16).toString('base64');
+}
 
 export interface SecurityHeadersConfig {
   enableHSTS?: boolean;
@@ -166,6 +172,10 @@ export function apiSecurityHeaders() {
       "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
       "Pragma": "no-cache",
       "Expires": "0",
+      // SECURITY FIX #42: Add Cross-Origin headers for API security
+      "Cross-Origin-Resource-Policy": "same-origin",
+      // SECURITY FIX #43: Prevent MIME type sniffing
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }

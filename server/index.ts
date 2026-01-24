@@ -64,16 +64,28 @@ app.use("/api", idempotency);
 // Legacy request tracer middleware for stats
 app.use(requestTracerMiddleware);
 
+// SECURITY FIX #14: Reduced default body size limit from 100mb to 10mb
+// Use specific larger limits only where needed (file uploads)
+const DEFAULT_BODY_LIMIT = process.env.MAX_BODY_SIZE || '10mb';
+const LARGE_BODY_LIMIT = '50mb'; // For file uploads only
+
 app.use(
   express.json({
-    limit: '100mb',
+    limit: DEFAULT_BODY_LIMIT,
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
+    // SECURITY FIX #15: Strict JSON parsing to reject malformed JSON
+    strict: true,
   }),
 );
 
-app.use(express.urlencoded({ extended: false, limit: '100mb' }));
+app.use(express.urlencoded({
+  extended: false,
+  limit: DEFAULT_BODY_LIMIT,
+  // SECURITY FIX #16: Limit parameter count to prevent parameter pollution
+  parameterLimit: 1000
+}));
 
 export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);

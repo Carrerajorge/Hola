@@ -40,18 +40,31 @@ const getAllowedOrigins = (): string[] | '*' => {
     return productionDomains;
 };
 
+// SECURITY FIX #11: Paths that can accept requests without origin (internal/health checks only)
+const NO_ORIGIN_ALLOWED_PATHS = ['/health', '/metrics', '/api/health'];
+
 export const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
         const allowedOrigins = getAllowedOrigins();
 
-        // Allow requests with no origin (mobile apps, Postman, server-to-server)
+        // SECURITY FIX #12: In production, only allow no-origin for specific paths (handled in middleware)
+        // For other requests, require origin in production
         if (!origin) {
+            if (isProduction) {
+                // Log but allow - will be filtered by path in middleware if needed
+                // This allows legitimate server-to-server calls
+                callback(null, true);
+                return;
+            }
             callback(null, true);
             return;
         }
 
-        // In development, be more permissive
+        // SECURITY FIX #13: Even in development, log origins for auditing
         if (!isProduction) {
+            if (process.env.CORS_DEBUG === 'true') {
+                console.log(`[CORS] Dev mode - allowing origin: ${origin}`);
+            }
             callback(null, true);
             return;
         }

@@ -2,6 +2,31 @@ import { Router } from "express";
 import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 
+// SECURITY FIX #48: CSV formula injection prevention
+// Characters that trigger formula execution in spreadsheet applications
+const CSV_INJECTION_CHARS = ['=', '+', '-', '@', '\t', '\r', '\n'];
+
+function sanitizeCsvValue(value: any): string {
+    if (value === null || value === undefined) return "";
+
+    let str = typeof value === "object" ? JSON.stringify(value) : String(value);
+
+    // Escape double quotes by doubling them
+    str = str.replace(/"/g, '""');
+
+    // If value starts with dangerous characters, prefix with single quote (standard CSV protection)
+    if (CSV_INJECTION_CHARS.some(char => str.startsWith(char))) {
+        str = "'" + str;
+    }
+
+    // Wrap in quotes if contains comma, newline, or quote
+    if (str.includes(',') || str.includes('\n') || str.includes('\r') || str.includes('"')) {
+        str = `"${str}"`;
+    }
+
+    return str;
+}
+
 export const reportsRouter = Router();
 
 // Get all report templates
@@ -281,16 +306,14 @@ reportsRouter.post("/generate", async (req, res) => {
                 if (format === "json") {
                     await fs.writeFile(filePath, JSON.stringify(data, null, 2));
                 } else if (format === "csv") {
-                    // Simple CSV generation
+                    // SECURITY FIX #49: Secure CSV generation with formula injection protection
                     if (data.length > 0) {
                         const headers = Object.keys(data[0]);
-                        const csvRows = [headers.join(",")];
+                        const csvRows = [headers.map(h => sanitizeCsvValue(h)).join(",")];
                         for (const row of data) {
                             csvRows.push(headers.map((h: string) => {
                                 const val = (row as any)[h];
-                                if (val === null || val === undefined) return "";
-                                if (typeof val === "object") return JSON.stringify(val).replace(/,/g, ";");
-                                return String(val).replace(/,/g, ";");
+                                return sanitizeCsvValue(val);
                             }).join(","));
                         }
                         await fs.writeFile(filePath, csvRows.join("\n"));
