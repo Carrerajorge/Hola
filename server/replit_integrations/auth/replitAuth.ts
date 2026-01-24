@@ -93,6 +93,8 @@ export function getSession() {
     tableName: "sessions",
   });
   const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
+  // Use "none" only for Replit deployments (cross-origin), "lax" for standard deployments
+  const isReplitDeployment = !!process.env.REPL_SLUG;
   return session({
     name: "siragpt.sid",
     secret: process.env.SESSION_SECRET!,
@@ -104,7 +106,7 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? "none" as const : "lax" as const,
+      sameSite: isReplitDeployment ? "none" as const : "lax" as const,
       maxAge: sessionTtl,
       path: "/",
     },
