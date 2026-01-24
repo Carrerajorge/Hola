@@ -27,10 +27,13 @@ export const csrfTokenMiddleware = (req: Request, res: Response, next: NextFunct
     // Only set the token if it doesn't exist or we want to rotate it
     if (!cookies[CSRF_COOKIE_NAME]) {
         const token = crypto.randomUUID();
+        const isProduction = process.env.NODE_ENV === "production";
+        // Use "none" only for Replit deployments (cross-origin), "lax" for standard deployments
+        const isReplitDeployment = !!process.env.REPL_SLUG;
         res.cookie(CSRF_COOKIE_NAME, token, {
             httpOnly: false, // Must be readable by client JS to header-ize it
-            secure: process.env.NODE_ENV === "production",
-            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+            secure: isProduction,
+            sameSite: isReplitDeployment ? "none" : "lax",
             path: "/",
         });
     }
