@@ -89,6 +89,7 @@ export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
   const isTest = process.env.NODE_ENV === "test";
+  const isReplitDeployment = !!process.env.REPL_SLUG;
 
   // Tests should be hermetic and must not require DB migrations just to serve a request.
   // Use the default MemoryStore in test env.
@@ -103,7 +104,6 @@ export function getSession() {
           tableName: "sessions",
         });
       })();
-
   return session({
     name: "siragpt.sid",
     secret: process.env.SESSION_SECRET!,
@@ -115,7 +115,7 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? "none" as const : "lax" as const,
+      sameSite: isReplitDeployment ? "none" as const : "lax" as const,
       maxAge: sessionTtl,
       path: "/",
     },
