@@ -24,11 +24,14 @@ export default function MathBlock({ block, context }: Props) {
 
     const renderedMath = useMemo(() => {
         try {
+            // FRONTEND FIX #23: Disable trust option to prevent XSS via KaTeX commands
             return katex.renderToString(expression, {
                 displayMode,
                 throwOnError: false,
                 strict: false,
-                trust: true,
+                trust: false, // Disable trust to prevent command injection
+                maxSize: 10, // FRONTEND FIX #24: Limit output size to prevent DoS
+                maxExpand: 1000, // Limit macro expansion
                 macros: {
                     '\\R': '\\mathbb{R}',
                     '\\N': '\\mathbb{N}',
@@ -38,7 +41,9 @@ export default function MathBlock({ block, context }: Props) {
                 },
             });
         } catch (e) {
-            return `<span class="text-red-500">Error: ${expression}</span>`;
+            // FRONTEND FIX #25: Escape error message to prevent XSS
+            const safeExpr = expression.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return `<span class="text-red-500">Error: ${safeExpr}</span>`;
         }
     }, [expression, displayMode]);
 
