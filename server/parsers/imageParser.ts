@@ -2,10 +2,21 @@ import Tesseract from "tesseract.js";
 import OpenAI from "openai";
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 
-const openai = new OpenAI({ 
-  baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
-});
+// Lazy initialization to avoid startup errors when API key is not configured
+let openaiClient: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI | null {
+  if (!process.env.XAI_API_KEY) {
+    return null;
+  }
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      baseURL: "https://api.x.ai/v1",
+      apiKey: process.env.XAI_API_KEY
+    });
+  }
+  return openaiClient;
+}
 
 export class ImageParser implements FileParser {
   name = "image";
@@ -21,11 +32,13 @@ export class ImageParser implements FileParser {
 
   async parse(content: Buffer, type: DetectedFileType): Promise<ParsedResult> {
     // Try AI Vision first for better accuracy
-    try {
-      const base64Image = content.toString("base64");
-      const mimeType = type.mimeType || "image/png";
-      
-      const response = await openai.chat.completions.create({
+    const openai = getOpenAIClient();
+    if (openai) {
+      try {
+        const base64Image = content.toString("base64");
+        const mimeType = type.mimeType || "image/png";
+
+        const response = await openai.chat.completions.create({
         model: "grok-2-vision-1212",
         messages: [
           {
@@ -49,17 +62,18 @@ export class ImageParser implements FileParser {
 
       const text = response.choices[0]?.message?.content?.trim() || "";
       
-      if (text && text.length > 0) {
-        return {
-          text,
-          metadata: {
-            method: "ai-vision",
-            model: "grok-2-vision-1212",
-          },
-        };
+        if (text && text.length > 0) {
+          return {
+            text,
+            metadata: {
+              method: "ai-vision",
+              model: "grok-2-vision-1212",
+            },
+          };
+        }
+      } catch (error) {
+        console.error("AI Vision OCR failed, falling back to Tesseract:", error);
       }
-    } catch (error) {
-      console.error("AI Vision OCR failed, falling back to Tesseract:", error);
     }
 
     // Fallback to Tesseract with robust error handling

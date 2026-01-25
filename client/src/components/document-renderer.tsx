@@ -2,6 +2,7 @@ import React, { memo, useMemo, useState, useEffect, useRef, lazy, Suspense, useC
 import { cn } from "@/lib/utils";
 import { parseDocument, detectFormat, type DocumentFormat } from "@/lib/rstParser";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import { sanitizeHtml } from "@/lib/sanitize";
 
 const MarkdownRenderer = lazy(() => import("./markdown-renderer"));
 
@@ -102,10 +103,13 @@ function splitIntoChunks(content: string, chunkSize: number): ContentChunk[] {
 }
 
 const RstContent = memo(function RstContent({ html, className }: { html: string; className?: string }) {
+  // SECURITY: Sanitize HTML to prevent XSS attacks
+  const sanitizedHtml = useMemo(() => sanitizeHtml(html), [html]);
+
   return (
-    <div 
+    <div
       className={cn("rst-content", className)}
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
       data-testid="rst-content"
     />
   );
