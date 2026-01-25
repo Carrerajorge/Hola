@@ -26,7 +26,8 @@ const PLAN_LIMITS: Record<string, PlanLimits> = {
   admin: { dailyRequests: -1, model: "grok-4-1-fast-non-reasoning" },
 };
 
-const ADMIN_EMAIL = "carrerajorge874@gmail.com";
+// SECURITY: Admin email moved to environment variable
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
 
 function getNextMidnight(): Date {
   const now = new Date();
@@ -51,7 +52,8 @@ export class UsageQuotaService {
       };
     }
 
-    const isAdmin = user.email === ADMIN_EMAIL || user.role === "admin";
+    // SECURITY: Check admin status using env variable and database role
+    const isAdmin = (ADMIN_EMAIL && user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || user.role === "admin";
     const plan = isAdmin ? "admin" : (user.plan || "free");
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
 
@@ -66,32 +68,40 @@ export class UsageQuotaService {
     }
 
     const now = new Date();
-    const resetAt = user.dailyRequestsResetAt;
-    let currentUsed = user.dailyRequestsUsed || 0;
+    const nextReset = getNextMidnight();
 
-    if (!resetAt || now >= resetAt) {
-      currentUsed = 0;
-      const nextReset = getNextMidnight();
+    // FIX: Use atomic SQL operation to prevent race condition
+    // This performs the check and increment in a single atomic operation
+    const result = await db.execute(sql`
+      UPDATE users
+      SET
+        daily_requests_used = CASE
+          WHEN daily_requests_reset_at IS NULL OR NOW() >= daily_requests_reset_at
+          THEN 1
+          ELSE COALESCE(daily_requests_used, 0) + 1
+        END,
+        daily_requests_reset_at = CASE
+          WHEN daily_requests_reset_at IS NULL OR NOW() >= daily_requests_reset_at
+          THEN ${nextReset}
+          ELSE daily_requests_reset_at
+        END,
+        daily_requests_limit = ${planLimits.dailyRequests},
+        updated_at = NOW()
+      WHERE id = ${userId}
+        AND (
+          -- Allow if reset needed
+          daily_requests_reset_at IS NULL
+          OR NOW() >= daily_requests_reset_at
+          -- Or if under limit
+          OR COALESCE(daily_requests_used, 0) < ${planLimits.dailyRequests}
+        )
+      RETURNING
+        daily_requests_used as used,
+        daily_requests_reset_at as reset_at
+    `);
 
-      await db.update(users)
-        .set({
-          dailyRequestsUsed: 1,
-          dailyRequestsResetAt: nextReset,
-          dailyRequestsLimit: planLimits.dailyRequests,
-          updatedAt: now
-        })
-        .where(eq(users.id, userId));
-
-      return {
-        allowed: true,
-        remaining: planLimits.dailyRequests - 1,
-        limit: planLimits.dailyRequests,
-        resetAt: nextReset,
-        plan
-      };
-    }
-
-    if (currentUsed >= planLimits.dailyRequests) {
+    // If no rows updated, user has exceeded limit
+    if (result.rows.length === 0) {
       return {
         allowed: false,
         remaining: 0,
@@ -102,18 +112,13 @@ export class UsageQuotaService {
       };
     }
 
-    await db.update(users)
-      .set({
-        dailyRequestsUsed: currentUsed + 1,
-        updatedAt: now
-      })
-      .where(eq(users.id, userId));
+    const updatedData = result.rows[0] as { used: number; reset_at: Date };
 
     return {
       allowed: true,
-      remaining: planLimits.dailyRequests - currentUsed - 1,
+      remaining: planLimits.dailyRequests - updatedData.used,
       limit: planLimits.dailyRequests,
-      resetAt: user.dailyRequestsResetAt,
+      resetAt: updatedData.reset_at,
       plan
     };
   }
@@ -131,7 +136,7 @@ export class UsageQuotaService {
       };
     }
 
-    const isAdmin = user.email === ADMIN_EMAIL || user.role === "admin";
+    const isAdmin = (ADMIN_EMAIL && user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) || user.role === "admin";
     const plan = isAdmin ? "admin" : (user.plan || "free");
     const isPaid = plan !== "free" && plan !== "admin";
     const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
@@ -187,7 +192,7 @@ export class UsageQuotaService {
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     if (!user) return false;
 
-    if (user.role === "admin" || user.plan === "pro" || user.email === ADMIN_EMAIL) {
+    if (user.role === "admin" || user.plan === "pro" || (ADMIN_EMAIL && user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
       return true;
     }
 

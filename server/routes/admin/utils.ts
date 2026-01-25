@@ -6,7 +6,8 @@ import { users, excelDocuments } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
-const ADMIN_EMAIL = "carrerajorge874@gmail.com";
+// SECURITY: Admin email moved to environment variable
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
     try {
@@ -14,8 +15,15 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         const userEmail = userReq.user?.claims?.email;
         const userId = userReq.user?.claims?.sub;
 
-        let isAdmin = userEmail === ADMIN_EMAIL;
+        // SECURITY: Check both email (from env) and database role
+        let isAdmin = false;
 
+        // Check against env-configured admin email (if set)
+        if (ADMIN_EMAIL && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+            isAdmin = true;
+        }
+
+        // Always verify against database role for proper authorization
         if (!isAdmin && userId) {
             const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
             isAdmin = user?.role === "admin";

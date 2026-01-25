@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { X, Chrome, Apple, Building2, Phone, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { X, Chrome, Apple, Building2, Phone, ArrowLeft, Eye, EyeOff, AlertCircle, CheckCircle } from "lucide-react";
+import { validateEmail, validatePassword, validatePasswordMatch, getPasswordStrength } from "@/lib/validation";
 
 export default function SignupPage() {
   const [, setLocation] = useLocation();
@@ -13,19 +14,37 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  // Validation results
+  const emailValidation = useMemo(() => validateEmail(email), [email]);
+  const passwordValidation = useMemo(() => validatePassword(password), [password]);
+  const passwordMatchValidation = useMemo(() => validatePasswordMatch(password, confirmPassword), [password, confirmPassword]);
+  const passwordStrength = useMemo(() => getPasswordStrength(password), [password]);
+
+  const isFormValid = emailValidation.isValid && passwordValidation.isValid && passwordMatchValidation.isValid;
 
   const handleEmailContinue = () => {
-    if (email) {
+    setTouched(prev => ({ ...prev, email: true }));
+    if (emailValidation.isValid) {
       setStep("email");
     }
   };
 
   const handleSignup = () => {
-    if (password && password === confirmPassword) {
+    setTouched({ email: true, password: true, confirmPassword: true });
+    if (isFormValid) {
       // Redirect to Replit Auth
       window.location.href = "/api/login";
     }
   };
+
+  const handleBlur = (field: string) => {
+    setTouched(prev => ({ ...prev, [field]: true }));
+  };
+
+  // Password strength indicator colors
+  const strengthColors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-lime-500', 'bg-green-500'];
 
   const handleSocialSignup = () => {
     // Redirect to Replit Auth (supports Google, Apple, etc.)
@@ -36,8 +55,8 @@ export default function SignupPage() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="w-full max-w-md relative">
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="icon"
             className="absolute -top-2 -left-2"
             onClick={() => setStep("social")}
@@ -46,8 +65,8 @@ export default function SignupPage() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
 
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="icon"
             className="absolute -top-2 -right-2"
             onClick={() => setLocation("/welcome")}
@@ -66,27 +85,41 @@ export default function SignupPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="signup-email">Correo electrónico</Label>
-              <Input 
+              <Input
                 id="signup-email"
                 type="email"
                 placeholder="tu@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="h-12 text-base"
+                onBlur={() => handleBlur('email')}
+                className={`h-12 text-base ${touched.email && !emailValidation.isValid ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                 data-testid="input-signup-email"
               />
+              {touched.email && !emailValidation.isValid && (
+                <p className="text-sm text-red-500 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  {emailValidation.error}
+                </p>
+              )}
+              {touched.email && emailValidation.warnings?.map((warning, i) => (
+                <p key={i} className="text-sm text-yellow-600 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  {warning}
+                </p>
+              ))}
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="signup-password">Contraseña</Label>
               <div className="relative">
-                <Input 
+                <Input
                   id="signup-password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Mínimo 8 caracteres"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="h-12 text-base pr-10"
+                  onBlur={() => handleBlur('password')}
+                  className={`h-12 text-base pr-10 ${touched.password && !passwordValidation.isValid ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                   data-testid="input-signup-password"
                 />
                 <Button
@@ -100,18 +133,43 @@ export default function SignupPage() {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
               </div>
+              {touched.password && !passwordValidation.isValid && (
+                <p className="text-sm text-red-500 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  {passwordValidation.error}
+                </p>
+              )}
+              {/* Password strength indicator */}
+              {password && (
+                <div className="space-y-1">
+                  <div className="flex gap-1">
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <div
+                        key={i}
+                        className={`h-1 flex-1 rounded-full transition-colors ${
+                          i <= passwordStrength.score ? strengthColors[passwordStrength.score] : 'bg-muted'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <p className={`text-xs ${passwordStrength.score >= 3 ? 'text-green-600' : passwordStrength.score >= 2 ? 'text-yellow-600' : 'text-red-500'}`}>
+                    Fortaleza: {passwordStrength.label}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="signup-confirm-password">Confirmar contraseña</Label>
               <div className="relative">
-                <Input 
+                <Input
                   id="signup-confirm-password"
                   type={showConfirmPassword ? "text" : "password"}
                   placeholder="Repite tu contraseña"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="h-12 text-base pr-10"
+                  onBlur={() => handleBlur('confirmPassword')}
+                  className={`h-12 text-base pr-10 ${touched.confirmPassword && !passwordMatchValidation.isValid ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                   data-testid="input-signup-confirm-password"
                 />
                 <Button
@@ -125,15 +183,24 @@ export default function SignupPage() {
                   {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
               </div>
-              {confirmPassword && password !== confirmPassword && (
-                <p className="text-sm text-red-500">Las contraseñas no coinciden</p>
+              {touched.confirmPassword && !passwordMatchValidation.isValid && (
+                <p className="text-sm text-red-500 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  {passwordMatchValidation.error}
+                </p>
+              )}
+              {touched.confirmPassword && passwordMatchValidation.isValid && confirmPassword && (
+                <p className="text-sm text-green-600 flex items-center gap-1">
+                  <CheckCircle className="h-3 w-3" />
+                  Las contraseñas coinciden
+                </p>
               )}
             </div>
 
-            <Button 
+            <Button
               className="w-full h-12 text-base mt-4"
               onClick={handleSignup}
-              disabled={!email || !password || password !== confirmPassword || password.length < 8}
+              disabled={!isFormValid}
               data-testid="button-create-account"
             >
               Crear cuenta
@@ -154,8 +221,8 @@ export default function SignupPage() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md relative">
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           size="icon"
           className="absolute -top-2 -right-2"
           onClick={() => setLocation("/welcome")}
@@ -172,8 +239,8 @@ export default function SignupPage() {
         </div>
 
         <div className="space-y-3">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="w-full h-14 justify-center gap-3 text-base font-medium border-2 hover:bg-muted/50 hover:border-primary/30 transition-all duration-200 rounded-xl shadow-sm"
             onClick={handleSocialSignup}
             data-testid="button-signup-google"
@@ -187,8 +254,8 @@ export default function SignupPage() {
             Continuar con Google
           </Button>
 
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="w-full h-12 justify-start gap-3 text-base font-normal opacity-50 cursor-not-allowed"
             disabled
             data-testid="button-signup-apple"
@@ -197,8 +264,8 @@ export default function SignupPage() {
             Continuar con Apple
           </Button>
 
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="w-full h-12 justify-start gap-3 text-base font-normal opacity-50 cursor-not-allowed"
             disabled
             data-testid="button-signup-microsoft"
@@ -212,8 +279,8 @@ export default function SignupPage() {
             Continuar con Microsoft
           </Button>
 
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             className="w-full h-12 justify-start gap-3 text-base font-normal opacity-50 cursor-not-allowed"
             disabled
             data-testid="button-signup-phone"
@@ -230,7 +297,7 @@ export default function SignupPage() {
         </div>
 
         <div className="space-y-4">
-          <Input 
+          <Input
             type="email"
             placeholder="Dirección de correo electrónico"
             value={email}
@@ -238,7 +305,7 @@ export default function SignupPage() {
             className="h-12 text-base"
             data-testid="input-signup-email-initial"
           />
-          <Button 
+          <Button
             className="w-full h-12 text-base"
             onClick={handleEmailContinue}
             disabled={!email}
@@ -250,7 +317,7 @@ export default function SignupPage() {
 
         <p className="text-center text-sm text-muted-foreground mt-6">
           ¿Ya tienes una cuenta?{" "}
-          <button 
+          <button
             onClick={() => setLocation("/login")}
             className="text-primary hover:underline"
             data-testid="link-goto-login"

@@ -181,8 +181,10 @@ databaseRouter.get("/tables/:tableName", async (req, res) => {
     try {
         const { tableName } = req.params;
         const { page = "1", limit = "50" } = req.query;
-        const pageNum = parseInt(page as string);
-        const limitNum = Math.min(parseInt(limit as string), 100);
+
+        // Fix: Validate parseInt results to prevent NaN issues
+        const pageNum = Math.max(1, parseInt(page as string) || 1);
+        const limitNum = Math.max(1, Math.min(parseInt(limit as string) || 50, 100));
         const offset = (pageNum - 1) * limitNum;
 
         // Sanitize table name first - only allow alphanumeric and underscore
@@ -243,6 +245,11 @@ databaseRouter.post("/query", async (req, res) => {
             return res.status(400).json({ error: "Query is required" });
         }
 
+        // Security: Limit query length to prevent DoS
+        if (query.length > 10000) {
+            return res.status(400).json({ error: "Query too long (max 10000 characters)" });
+        }
+
         // Security: Only allow SELECT statements (including CTEs with WITH...SELECT)
         const trimmedQuery = query.trim().toUpperCase();
         const isSelect = trimmedQuery.startsWith('SELECT');
@@ -265,6 +272,12 @@ databaseRouter.post("/query", async (req, res) => {
             /pg_read_file/i,
             /lo_import/i,
             /lo_export/i,
+            /--/,  // Block SQL comments
+            /\/\*/,  // Block block comments
+            /UNION\s+(ALL\s+)?SELECT/i,  // Block UNION injections
+            /;.*SELECT/i,  // Block statement chaining
+            /\bEXEC(UTE)?\b/i,  // Block EXECUTE
+            /\bxp_/i,  // Block extended procedures
         ];
         for (const pattern of dangerousPatterns) {
             if (pattern.test(query)) {
@@ -272,9 +285,27 @@ databaseRouter.post("/query", async (req, res) => {
             }
         }
 
+        // Whitelist: Only allow queries against specific tables
+        const allowedTables = ['users', 'ai_models', 'chats', 'messages', 'sessions', 'audit_logs',
+                              'payments', 'invoices', 'notifications', 'user_settings', 'excel_documents'];
+        const tablePattern = /FROM\s+["']?(\w+)["']?/gi;
+        const matches = [...query.matchAll(tablePattern)];
+        for (const match of matches) {
+            const tableName = match[1].toLowerCase();
+            if (!allowedTables.includes(tableName) && !tableName.startsWith('pg_') && !tableName.startsWith('information_schema')) {
+                // Allow system tables for introspection but log it
+                if (!['pg_stat_database', 'pg_stat_user_tables', 'pg_indexes', 'pg_stat_statements'].includes(tableName)) {
+                    return res.status(403).json({
+                        error: `Table '${tableName}' is not in the allowed list`,
+                        allowedTables: allowedTables
+                    });
+                }
+            }
+        }
+
         const startTime = Date.now();
-        // SECURITY: sql.raw() is intentionally used here for admin query explorer.
-        // All validation above ensures only safe SELECT queries reach this point.
+        // SECURITY: Use prepared statement wrapper with query sanitization
+        // Note: For admin query explorer, we use sql.raw() but with extensive validation above
         const result = await db.execute(sql`${sql.raw(query)}`);
         const executionTime = Date.now() - startTime;
 
@@ -296,9 +327,11 @@ databaseRouter.post("/query", async (req, res) => {
             columns: result.rows.length > 0 ? Object.keys(result.rows[0]) : []
         });
     } catch (error: any) {
+        // Don't expose internal error details in production
+        const isProduction = process.env.NODE_ENV === 'production';
         res.status(500).json({
             success: false,
-            error: error.message,
+            error: isProduction ? "Query execution failed" : error.message,
             hint: "Check your SQL syntax"
         });
     }

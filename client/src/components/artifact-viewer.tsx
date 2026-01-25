@@ -25,6 +25,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { getFileTheme, getFileCategory, type FileCategory } from "@/lib/fileTypeTheme";
 import { useAsyncHighlight } from "@/hooks/useAsyncHighlight";
+import { createSafeSvg, sanitizeHtml } from "@/lib/sanitize";
 
 export type ArtifactType =
   | "image"
@@ -465,7 +466,7 @@ const SvgArtifact = memo(function SvgArtifact({
         {svgContent ? (
           <div
             className="svg-container"
-            dangerouslySetInnerHTML={{ __html: svgContent }}
+            dangerouslySetInnerHTML={createSafeSvg(svgContent)}
             onError={() => setHasError(true)}
           />
         ) : svgUrl ? (
@@ -573,7 +574,7 @@ const CodeArtifact = memo(function CodeArtifact({
           <div
             className="p-4 text-sm font-mono"
             dangerouslySetInnerHTML={{
-              __html: highlightedHtml || `<pre class="text-slate-300">${previewLines.join('\n')}</pre>`
+              __html: sanitizeHtml(highlightedHtml || `<pre class="text-slate-300">${previewLines.join('\n')}</pre>`)
             }}
           />
         )}
