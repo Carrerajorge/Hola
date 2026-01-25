@@ -667,8 +667,10 @@ export function createRegistryRouter(): Router {
       const filePath = path.join(artifactsDir, filename);
 
       // SECURITY: Prevent path traversal attacks
+      const artifactsRoot = path.resolve(artifactsDir);
       const realPath = path.resolve(filePath);
-      if (!realPath.startsWith(path.resolve(artifactsDir))) {
+      const relativePath = path.relative(artifactsRoot, realPath);
+      if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
         return res.status(403).json({
           success: false,
           error: "Invalid file path - access denied",
@@ -733,8 +735,10 @@ export function createRegistryRouter(): Router {
       const filePath = path.join(artifactsDir, filename);
 
       // SECURITY: Prevent path traversal attacks
+      const artifactsRoot = path.resolve(artifactsDir);
       const realPath = path.resolve(filePath);
-      if (!realPath.startsWith(path.resolve(artifactsDir))) {
+      const relativePath = path.relative(artifactsRoot, realPath);
+      if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
         return res.status(403).json({
           success: false,
           error: "Invalid file path - access denied",
@@ -788,8 +792,10 @@ export function createRegistryRouter(): Router {
       const filePath = path.join(artifactsDir, filename);
       
       // Prevent path traversal attacks
+      const artifactsRoot = path.resolve(artifactsDir);
       const realPath = path.resolve(filePath);
-      if (!realPath.startsWith(path.resolve(artifactsDir))) {
+      const relativePath = path.relative(artifactsRoot, realPath);
+      if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
         return res.status(403).json({
           success: false,
           error: "Invalid file path",
