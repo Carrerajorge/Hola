@@ -58,7 +58,8 @@ export function requestLoggerMiddleware(
 
     res.on("finish", () => {
       const durationMs = Date.now() - startTime;
-      res.setHeader("X-Response-Time", `${durationMs}ms`);
+      // NOTE: Cannot set headers here - response already sent
+      // X-Response-Time is set via res.locals for logging only
 
       const isError = res.statusCode >= 400;
 
