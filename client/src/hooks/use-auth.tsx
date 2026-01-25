@@ -1,3 +1,5 @@
+
+
 import { createContext, ReactNode, useContext, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { User } from "@shared/schema";
@@ -98,42 +100,57 @@ async function fetchUser(): Promise<User | null> {
     headers['X-Anonymous-User-Id'] = storedAnonId;
   }
 
+  console.log("[Auth] fetchUser start", {
+    hasStoredAnonId: !!storedAnonId,
+    path: window.location.pathname,
+    search: window.location.search,
+  });
+
   const response = await fetch("/api/auth/user", {
     credentials: "include",
     headers,
   });
 
+  console.log("[Auth] /api/auth/user response", {
+    status: response.status,
+    ok: response.ok,
+  });
+
   if (response.ok) {
     const user = await response.json();
+    console.log("[Auth] /api/auth/user success", {
+      id: user?.id,
+      email: user?.email,
+      role: user?.role,
+    });
     setStoredUser(user);
     clearAnonUserId();
     return user;
   }
 
-  if (response.status === 401) {
-    clearOldUserData();
-
+  const tryAnonymousIdentity = async (): Promise<User | null> => {
     try {
-      // Attempt to get anonymous identity
       const identityRes = await fetch("/api/session/identity", {
         credentials: "include",
         headers,
       });
+      console.log("[Auth] /api/session/identity response", {
+        status: identityRes.status,
+        ok: identityRes.ok,
+      });
       if (identityRes.ok) {
         const identity = await identityRes.json();
+        console.log("[Auth] /api/session/identity payload", identity);
         if (identity.userId) {
           setStoredAnonUserId(identity.userId);
           if (identity.token) {
             setStoredAnonToken(identity.token);
           }
-          // Return a constructed anonymous user object conformant to User type
-          // Note context: strict typing might need partial assertion or fuller mock
           return {
             id: identity.userId,
             isAnonymous: true,
             username: `Guest-${identity.userId.slice(0, 4)}`,
             role: 'user',
-            // Add other required fields with defaults if necessary, or assume User type considers optional
           } as unknown as User;
         }
       }
@@ -141,9 +158,15 @@ async function fetchUser(): Promise<User | null> {
       console.error("Failed to get session identity:", e);
     }
     return null;
+  };
+
+  if (response.status === 401 || response.status === 403) {
+    clearOldUserData();
+    return await tryAnonymousIdentity();
   }
 
-  throw new Error(`${response.status}: ${response.statusText}`);
+  console.error("Auth fetch failed:", response.status, response.statusText);
+  return await tryAnonymousIdentity();
 }
 
 // --- Provider Component ---
@@ -155,8 +178,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryKey: ["/api/auth/user"],
     queryFn: fetchUser,
     retry: false,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 30, // 30 seconds (reduced from 5 minutes for faster OAuth updates)
     initialData: getStoredUser, // Hydrate from local storage initially
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 
   const login = useCallback(() => {
@@ -179,27 +204,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = "/welcome";
   }, [queryClient]);
 
-  const refreshAuth = useCallback(() => {
+  const refreshAuth = useCallback(async () => {
+    // Clear the cache to force a fresh fetch
+    queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
     queryClient.invalidateQueries({ queryKey: ["/api/models/available"] });
-    refetch();
+    // Force refetch immediately
+    await refetch();
   }, [refetch, queryClient]);
 
   // Handle OAuth Callback Logic
   useEffect(() => {
+    console.log("[Auth] AuthProvider mounted", {
+      cachedUser: getStoredUser()?.id ?? null,
+      path: window.location.pathname,
+      search: window.location.search,
+    });
     const params = new URLSearchParams(window.location.search);
     if (params.get("auth") === "success") {
+      console.log('[Auth] OAuth callback detected, forcing auth refresh...');
+      // Invalidate cache to force fresh fetch
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       // Trigger a refetch to get the new user session
       refetch().then((result) => {
         if (result.data) {
-          // Query update handles storage via fetchUser side-effects, 
-          // but let's ensure consistency if needed.
-          // Actually fetchUser already calls setStoredUser.
+          console.log('[Auth] User authenticated after OAuth:', result.data.email || result.data.id);
+          setStoredUser(result.data);
+        } else {
+          console.warn('[Auth] OAuth callback but no user data received');
         }
       });
       // Clean URL
       window.history.replaceState({}, "", window.location.pathname);
     }
-  }, [refetch]);
+  }, [refetch, queryClient]);
+
+  useEffect(() => {
+    console.log("[Auth] AuthProvider state", {
+      isLoading,
+      hasUser: !!user,
+      userId: user?.id ?? null,
+      userEmail: (user as any)?.email ?? null,
+    });
+  }, [isLoading, user]);
 
   return (
     <AuthContext.Provider value={{
