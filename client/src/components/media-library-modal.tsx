@@ -480,9 +480,9 @@ export function MediaLibraryModal({
                   >
                     <div className="h-12 w-12 rounded-lg overflow-hidden bg-muted flex-shrink-0">
                       {item.thumbnailBase64 ? (
-                        <img src={item.thumbnailBase64} alt="" className="h-full w-full object-cover" />
+                        <img src={item.thumbnailBase64} alt={`Miniatura de ${item.name}`} className="h-full w-full object-cover" />
                       ) : item.type === 'image' ? (
-                        <img src={item.url} alt="" className="h-full w-full object-cover" />
+                        <img src={item.url} alt={item.name || 'Imagen de la biblioteca'} className="h-full w-full object-cover" />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center">
                           {item.type === 'video' ? (
@@ -512,24 +512,27 @@ export function MediaLibraryModal({
                         size="icon"
                         className="h-8 w-8"
                         onClick={(e) => { e.stopPropagation(); window.open(item.url, '_blank'); }}
+                        aria-label={`Abrir ${item.name} en nueva pestaña`}
                       >
-                        <ExternalLink className="h-4 w-4" />
+                        <ExternalLink className="h-4 w-4" aria-hidden="true" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8"
                         onClick={(e) => { e.stopPropagation(); handleDownload(item); }}
+                        aria-label={`Descargar ${item.name}`}
                       >
-                        <Download className="h-4 w-4" />
+                        <Download className="h-4 w-4" aria-hidden="true" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-red-500 hover:text-red-600"
                         onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
+                        aria-label={`Eliminar ${item.name}`}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     </div>
                   </div>
