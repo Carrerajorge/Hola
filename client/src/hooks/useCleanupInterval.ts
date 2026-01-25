@@ -170,4 +170,9 @@ export function usePolling(
   }, [enabled, interval, setCleanupInterval, clearInterval]);
 }
 
+/**
+ * Alias for useCleanupInterval for consistency
+ */
+export const useSafeInterval = useCleanupInterval;
+
 export default useCleanupInterval;

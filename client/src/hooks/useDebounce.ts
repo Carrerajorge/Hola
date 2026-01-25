@@ -24,11 +24,11 @@ export function useDebounce<T>(value: T, delay: number): T {
  * Hook that returns a debounced callback function
  * The callback only fires after the specified delay has passed without being called
  */
-export function useDebouncedCallback<T extends (...args: any[]) => any>(
-  callback: T,
+export function useDebouncedCallback<Args extends unknown[], R>(
+  callback: (...args: Args) => R,
   delay: number,
   deps: React.DependencyList = []
-): T {
+): (...args: Args) => void {
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const callbackRef = useRef(callback);
 
@@ -37,7 +37,7 @@ export function useDebouncedCallback<T extends (...args: any[]) => any>(
     callbackRef.current = callback;
   }, [callback]);
 
-  const debouncedCallback = useCallback((...args: Parameters<T>) => {
+  const debouncedCallback = useCallback((...args: Args) => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
@@ -45,7 +45,7 @@ export function useDebouncedCallback<T extends (...args: any[]) => any>(
     timeoutRef.current = setTimeout(() => {
       callbackRef.current(...args);
     }, delay);
-  }, [delay, ...deps]) as T;
+  }, [delay, ...deps]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -63,22 +63,22 @@ export function useDebouncedCallback<T extends (...args: any[]) => any>(
  * Hook that returns a throttled callback function
  * The callback only fires at most once per specified interval
  */
-export function useThrottledCallback<T extends (...args: any[]) => any>(
-  callback: T,
+export function useThrottledCallback<Args extends unknown[], R>(
+  callback: (...args: Args) => R,
   limit: number,
   deps: React.DependencyList = []
-): T {
+): (...args: Args) => void {
   const lastRunRef = useRef(0);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const callbackRef = useRef(callback);
-  const lastArgsRef = useRef<Parameters<T> | null>(null);
+  const lastArgsRef = useRef<Args | null>(null);
 
   // Keep callback ref up to date
   useEffect(() => {
     callbackRef.current = callback;
   }, [callback]);
 
-  const throttledCallback = useCallback((...args: Parameters<T>) => {
+  const throttledCallback = useCallback((...args: Args) => {
     const now = Date.now();
     const timeSinceLastRun = now - lastRunRef.current;
 
@@ -101,7 +101,7 @@ export function useThrottledCallback<T extends (...args: any[]) => any>(
         }
       }, limit - timeSinceLastRun);
     }
-  }, [limit, ...deps]) as T;
+  }, [limit, ...deps]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -177,5 +177,10 @@ export function useDebouncedSearch(initialValue: string = '', delay: number = 30
     isSearching: inputValue !== debouncedValue,
   };
 }
+
+/**
+ * Alias for useDebounce for consistency with the naming pattern
+ */
+export const useDebouncedValue = useDebounce;
 
 export default useDebounce;

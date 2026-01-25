@@ -196,4 +196,38 @@ export function useResponsiveImage(sources: {
   return currentSrc;
 }
 
+/**
+ * Hook for progressive image loading
+ * Shows a low-quality placeholder first, then loads the full image
+ */
+export function useProgressiveImage(
+  lowQualitySrc: string,
+  highQualitySrc: string
+): { src: string; isLoading: boolean } {
+  const [src, setSrc] = useState(lowQualitySrc);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    setSrc(lowQualitySrc);
+    setIsLoading(true);
+
+    const img = new Image();
+    img.onload = () => {
+      setSrc(highQualitySrc);
+      setIsLoading(false);
+    };
+    img.onerror = () => {
+      setIsLoading(false);
+    };
+    img.src = highQualitySrc;
+
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [lowQualitySrc, highQualitySrc]);
+
+  return { src, isLoading };
+}
+
 export default useLazyImage;
