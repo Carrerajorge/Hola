@@ -169,13 +169,27 @@ function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | 
 }
 
 class LLMGateway {
-  private xaiClient: OpenAI;
+  private _xaiClient: OpenAI | null = null;
   private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
   private rateLimitByUser: Map<string, RateLimitState> = new Map();
   private requestCache: Map<string, { response: LLMResponse; expiresAt: number }> = new Map();
   private inFlightRequests: Map<string, InFlightRequest> = new Map();
   private streamCheckpoints: Map<string, StreamCheckpoint> = new Map();
   private tokenUsageHistory: TokenUsageRecord[] = [];
+
+  // Lazy getter for XAI client
+  private get xaiClient(): OpenAI {
+    if (!this._xaiClient) {
+      if (!process.env.XAI_API_KEY) {
+        throw new Error("XAI_API_KEY not configured. Please set the XAI_API_KEY environment variable.");
+      }
+      this._xaiClient = new OpenAI({
+        baseURL: "https://api.x.ai/v1",
+        apiKey: process.env.XAI_API_KEY,
+      });
+    }
+    return this._xaiClient;
+  }
 
   private metrics: {
     totalRequests: number;
@@ -196,11 +210,6 @@ class LLMGateway {
   };
 
   constructor() {
-    this.xaiClient = new OpenAI({
-      baseURL: "https://api.x.ai/v1",
-      apiKey: process.env.XAI_API_KEY,
-    });
-
     // Initialize circuit breakers for each provider
     this.circuitBreakers.set("xai", this.createCircuitBreaker());
     this.circuitBreakers.set("gemini", this.createCircuitBreaker());
