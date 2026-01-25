@@ -39,10 +39,8 @@ export function requestLoggerMiddleware(
 
     res.on("finish", () => {
       const durationMs = Date.now() - startTime;
-
-      // Headers are already sent by the time the 'finish' event fires.
-      // Only set response headers before headers are sent.
-      // (We still log duration here.)
+      // NOTE: Cannot set headers here - response already sent.
+      // Only set response headers before headers are sent. (We still log duration here.)
 
       const isError = res.statusCode >= 400;
 
