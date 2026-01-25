@@ -1,58 +1,129 @@
 import { Router } from "express";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { createClient } from "redis";
+import { getRedisStatus, isRedisAvailable } from "../lib/redisConfig";
 
 const router = Router();
+
+// Configurable memory threshold (default 800MB, can override via env)
+const MEMORY_WARNING_THRESHOLD = parseInt(process.env.MEMORY_WARNING_THRESHOLD_MB || '800') * 1024 * 1024;
 
 // Basic liveliness check
 router.get("/live", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Deep readiness check
+// Deep readiness check with expanded service checks
 router.get("/ready", async (req, res) => {
-  const checks: Record<string, string> = {};
+  const checks: Record<string, { status: string; latencyMs?: number; details?: any }> = {};
   let allHealthy = true;
+  let hasWarnings = false;
 
-  // Database check
+  // Database check with latency measurement
+  const dbStart = Date.now();
   try {
     await db.execute(sql`SELECT 1`);
-    checks.database = "healthy";
-  } catch (error) {
+    checks.database = {
+      status: "healthy",
+      latencyMs: Date.now() - dbStart
+    };
+  } catch (error: any) {
     console.error("Health check - Database error:", error);
-    checks.database = "unhealthy";
+    checks.database = {
+      status: "unhealthy",
+      latencyMs: Date.now() - dbStart,
+      details: { error: error.message }
+    };
     allHealthy = false;
   }
 
-  // Redis check
-  const redisUrl = process.env.REDIS_URL;
-  if (redisUrl) {
+  // Redis check using unified configuration
+  const redisStatus = getRedisStatus();
+  if (redisStatus.configured) {
+    const redisStart = Date.now();
     try {
-      const redis = createClient({ url: redisUrl });
-      await redis.connect();
-      await redis.ping();
-      await redis.quit();
-      checks.redis = "healthy";
-    } catch (error) {
-      console.error("Health check - Redis error:", error);
-      checks.redis = "unhealthy";
+      const available = await isRedisAvailable();
+      checks.redis = {
+        status: available ? "healthy" : "unhealthy",
+        latencyMs: Date.now() - redisStart,
+        details: { connectionStatus: redisStatus.status }
+      };
+      if (!available) allHealthy = false;
+    } catch (error: any) {
+      checks.redis = {
+        status: "unhealthy",
+        latencyMs: Date.now() - redisStart,
+        details: { error: error.message }
+      };
       allHealthy = false;
     }
   } else {
-    checks.redis = "not_configured";
+    checks.redis = { status: "not_configured" };
   }
 
-  // Memory check (warning if > 800MB heap used)
+  // Memory check with configurable threshold
   const memUsage = process.memoryUsage();
-  checks.memory = memUsage.heapUsed < 800 * 1024 * 1024 ? "healthy" : "warning";
-  checks.uptime = process.uptime() > 10 ? "healthy" : "starting";
+  const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+  const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
+  const memoryHealthy = memUsage.heapUsed < MEMORY_WARNING_THRESHOLD;
+  checks.memory = {
+    status: memoryHealthy ? "healthy" : "warning",
+    details: {
+      heapUsedMB,
+      heapTotalMB,
+      rssMB: Math.round(memUsage.rss / 1024 / 1024),
+      thresholdMB: MEMORY_WARNING_THRESHOLD / 1024 / 1024
+    }
+  };
+  if (!memoryHealthy) hasWarnings = true;
 
-  res.status(allHealthy ? 200 : 503).json({
-    status: allHealthy ? "ready" : "degraded",
+  // Process uptime check
+  const uptimeSeconds = Math.floor(process.uptime());
+  checks.uptime = {
+    status: uptimeSeconds > 10 ? "healthy" : "starting",
+    details: { seconds: uptimeSeconds }
+  };
+
+  // External services health checks
+  // OpenAI/Anthropic API availability (lightweight check)
+  const externalServices: Record<string, { configured: boolean; envVar: string }> = {
+    openai: { configured: !!process.env.OPENAI_API_KEY, envVar: 'OPENAI_API_KEY' },
+    anthropic: { configured: !!process.env.ANTHROPIC_API_KEY, envVar: 'ANTHROPIC_API_KEY' },
+    google_ai: { configured: !!process.env.GEMINI_API_KEY, envVar: 'GEMINI_API_KEY' },
+    stripe: { configured: !!process.env.STRIPE_SECRET_KEY, envVar: 'STRIPE_SECRET_KEY' },
+  };
+
+  checks.external_services = {
+    status: "info",
+    details: Object.fromEntries(
+      Object.entries(externalServices).map(([name, info]) => [
+        name,
+        info.configured ? "configured" : "not_configured"
+      ])
+    )
+  };
+
+  // Determine overall status
+  let overallStatus: "ready" | "degraded" | "unhealthy";
+  let httpStatus: number;
+
+  if (!allHealthy) {
+    overallStatus = "unhealthy";
+    httpStatus = 503;
+  } else if (hasWarnings) {
+    overallStatus = "degraded";
+    httpStatus = 200;
+  } else {
+    overallStatus = "ready";
+    httpStatus = 200;
+  }
+
+  res.status(httpStatus).json({
+    status: overallStatus,
     checks,
-    uptime: Math.floor(process.uptime()),
-    timestamp: new Date().toISOString()
+    uptime: uptimeSeconds,
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || "1.0.0"
   });
 });
 

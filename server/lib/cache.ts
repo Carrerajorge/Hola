@@ -1,10 +1,15 @@
 import Redis from 'ioredis';
 import { Logger } from './logger';
 
+// Cache tags for invalidation
+export type CacheTag = 'user' | 'chat' | 'document' | 'settings' | 'subscription' | 'model' | 'session';
+
 export class CacheService {
     private redis: Redis | null = null;
     private isConnected = false;
     private readonly defaultTTL = 60; // 60 seconds
+    // Tag to keys mapping for invalidation
+    private tagIndex = new Map<string, Set<string>>();
 
     constructor() {
         this.initialize();
@@ -61,14 +66,29 @@ export class CacheService {
     }
 
     /**
-     * Set item in cache
+     * Set item in cache with optional tags for invalidation
      */
-    async set(key: string, value: any, ttlSeconds: number = this.defaultTTL): Promise<void> {
+    async set(key: string, value: any, ttlSeconds: number = this.defaultTTL, tags?: CacheTag[]): Promise<void> {
         if (!this.isConnected || !this.redis) return;
 
         try {
             const serialized = JSON.stringify(value);
             await this.redis.setex(key, ttlSeconds, serialized);
+
+            // Track tags for invalidation
+            if (tags && tags.length > 0) {
+                for (const tag of tags) {
+                    const tagKey = `cache:tag:${tag}`;
+                    if (!this.tagIndex.has(tagKey)) {
+                        this.tagIndex.set(tagKey, new Set());
+                    }
+                    this.tagIndex.get(tagKey)!.add(key);
+
+                    // Also store in Redis for distributed invalidation
+                    await this.redis.sadd(tagKey, key);
+                    await this.redis.expire(tagKey, ttlSeconds + 60);
+                }
+            }
         } catch (error) {
             Logger.warn(`[Cache] Set error for key ${key}`, error);
         }
@@ -81,8 +101,75 @@ export class CacheService {
         if (!this.isConnected || !this.redis) return;
         try {
             await this.redis.del(key);
+            // Remove from tag index
+            for (const [, keys] of this.tagIndex) {
+                keys.delete(key);
+            }
         } catch (error) {
             Logger.warn(`[Cache] Delete error for key ${key}`, error);
+        }
+    }
+
+    /**
+     * Invalidate all cache entries with a specific tag
+     */
+    async invalidateByTag(tag: CacheTag): Promise<number> {
+        if (!this.isConnected || !this.redis) return 0;
+
+        const tagKey = `cache:tag:${tag}`;
+        let deletedCount = 0;
+
+        try {
+            // Get all keys for this tag from Redis
+            const keys = await this.redis.smembers(tagKey);
+
+            if (keys.length > 0) {
+                deletedCount = await this.redis.del(...keys);
+                await this.redis.del(tagKey);
+                Logger.info(`[Cache] Invalidated ${deletedCount} keys for tag: ${tag}`);
+            }
+
+            this.tagIndex.delete(tagKey);
+        } catch (error) {
+            Logger.warn(`[Cache] Invalidation error for tag ${tag}`, error);
+        }
+
+        return deletedCount;
+    }
+
+    /**
+     * Invalidate cache entries matching a pattern
+     */
+    async invalidateByPattern(pattern: string): Promise<number> {
+        if (!this.isConnected || !this.redis) return 0;
+
+        let deletedCount = 0;
+
+        try {
+            const keys = await this.scan(pattern);
+            if (keys.length > 0) {
+                deletedCount = await this.redis.del(...keys);
+                Logger.info(`[Cache] Invalidated ${deletedCount} keys matching: ${pattern}`);
+            }
+        } catch (error) {
+            Logger.warn(`[Cache] Pattern invalidation error for ${pattern}`, error);
+        }
+
+        return deletedCount;
+    }
+
+    /**
+     * Clear all cache entries
+     */
+    async flush(): Promise<void> {
+        if (!this.isConnected || !this.redis) return;
+
+        try {
+            await this.redis.flushdb();
+            this.tagIndex.clear();
+            Logger.info('[Cache] Cache flushed');
+        } catch (error) {
+            Logger.warn('[Cache] Flush error', error);
         }
     }
 

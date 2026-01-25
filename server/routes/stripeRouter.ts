@@ -3,6 +3,7 @@ import { getUncachableStripeClient, getStripePublishableKey } from "../stripeCli
 import { db } from "../db";
 import { users } from "@shared/schema";
 import { eq, sql } from "drizzle-orm";
+import { withRetry } from "../lib/retryUtility";
 
 const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interval?: string }> = {
   price_go_monthly: { name: "Go", amount: 500, interval: "month" },
@@ -104,7 +105,11 @@ export function createStripeRouter() {
       if (Object.keys(priceMapping).length === 0) {
         try {
           const stripe = await getUncachableStripeClient();
-          const prices = await stripe.prices.list({ active: true, limit: 100 });
+          // Add retry logic for Stripe API calls
+          const prices = await withRetry(
+            () => stripe.prices.list({ active: true, limit: 100 }),
+            { maxAttempts: 3, initialDelayMs: 1000 }
+          );
 
           for (const price of prices.data) {
             const amount = price.unit_amount;
@@ -153,10 +158,14 @@ export function createStripeRouter() {
 
       let customerId = dbUser.stripeCustomerId;
       if (!customerId) {
-        const customer = await stripe.customers.create({
-          email: dbUser.email || undefined,
-          metadata: { userId }
-        });
+        // Add retry logic for customer creation
+        const customer = await withRetry(
+          () => stripe.customers.create({
+            email: dbUser.email || undefined,
+            metadata: { userId }
+          }),
+          { maxAttempts: 3, initialDelayMs: 1000 }
+        );
         customerId = customer.id;
 
         await db.update(users)
@@ -167,15 +176,19 @@ export function createStripeRouter() {
       const domain = process.env.REPLIT_DOMAINS?.split(',')[0] || 'localhost:5000';
       const protocol = domain.includes('localhost') ? 'http' : 'https';
 
-      const session = await stripe.checkout.sessions.create({
-        customer: customerId,
-        payment_method_types: ['card'],
-        line_items: [{ price: priceId, quantity: 1 }],
-        mode: 'subscription',
-        success_url: `${protocol}://${domain}/?subscription=success`,
-        cancel_url: `${protocol}://${domain}/?subscription=cancelled`,
-        metadata: { userId }
-      });
+      // Add retry logic for session creation
+      const session = await withRetry(
+        () => stripe.checkout.sessions.create({
+          customer: customerId,
+          payment_method_types: ['card'],
+          line_items: [{ price: priceId, quantity: 1 }],
+          mode: 'subscription',
+          success_url: `${protocol}://${domain}/?subscription=success`,
+          cancel_url: `${protocol}://${domain}/?subscription=cancelled`,
+          metadata: { userId }
+        }),
+        { maxAttempts: 3, initialDelayMs: 1000 }
+      );
 
       res.json({ url: session.url });
     } catch (error: any) {
