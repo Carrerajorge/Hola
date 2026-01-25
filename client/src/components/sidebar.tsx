@@ -491,6 +491,16 @@ export function Sidebar({
               <DropdownMenuItem
                 onClick={(e) => {
                   e.stopPropagation();
+                  handleLogout();
+                }}
+                data-testid={`menu-logout-${chat.id}`}
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Cerrar sesión
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
                   setDeletingChatId(chat.id);
                 }}
                 className="text-red-500 focus:text-red-500"
