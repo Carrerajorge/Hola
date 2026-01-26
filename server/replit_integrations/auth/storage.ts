@@ -1,3 +1,15 @@
+/**
+ * FIX: Auth Storage - Guardar todos los campos correctamente
+ * 
+ * PROBLEMA: El upsertUser no guardaba:
+ * - authProvider
+ * - username
+ * - fullName
+ * - emailVerified
+ * 
+ * SOLUCIÓN: Actualizar el tipo UpsertUser y la función upsertUser
+ */
+
 import { users, type User } from "@shared/schema";
 import { db } from "../../db";
 import { eq, or } from "drizzle-orm";
@@ -5,14 +17,16 @@ import { eq, or } from "drizzle-orm";
 export type UpsertUser = {
   id: string;
   email?: string | null;
+  username?: string | null;
+  fullName?: string | null;
   firstName?: string | null;
   lastName?: string | null;
   profileImageUrl?: string | null;
   role?: string | null;
+  authProvider?: string | null;
+  emailVerified?: string | null;
 };
 
-// Interface for auth storage operations
-// (IMPORTANT) These user operations are mandatory for Replit Auth.
 export interface IAuthStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
@@ -46,18 +60,20 @@ class AuthStorage implements IAuthStorage {
     const logContext = { id: userData.id, email: userData.email };
     
     try {
-      // First check if user exists by ID
       const existingById = await this.getUser(userData.id);
       
       if (existingById) {
-        // User exists, update
         const [updatedUser] = await db
           .update(users)
           .set({
             email: userData.email ?? existingById.email,
+            username: userData.username ?? existingById.username,
+            fullName: userData.fullName ?? existingById.fullName,
             firstName: userData.firstName ?? existingById.firstName,
             lastName: userData.lastName ?? existingById.lastName,
             profileImageUrl: userData.profileImageUrl ?? existingById.profileImageUrl,
+            authProvider: userData.authProvider ?? existingById.authProvider,
+            emailVerified: userData.emailVerified ?? existingById.emailVerified,
             updatedAt: new Date(),
           })
           .where(eq(users.id, userData.id))
@@ -67,6 +83,7 @@ class AuthStorage implements IAuthStorage {
           event: "user_updated",
           userId: updatedUser.id,
           email: updatedUser.email,
+          authProvider: updatedUser.authProvider,
           durationMs: Date.now() - startTime,
           timestamp: new Date().toISOString(),
         }));
@@ -74,18 +91,20 @@ class AuthStorage implements IAuthStorage {
         return updatedUser;
       }
       
-      // User doesn't exist, check by email to prevent duplicates
       if (userData.email) {
         const existingByEmail = await this.getUserByEmail(userData.email);
         if (existingByEmail) {
-          // Update existing user with new ID (Replit ID)
           const [updatedUser] = await db
             .update(users)
             .set({
               id: userData.id,
+              username: userData.username ?? existingByEmail.username,
+              fullName: userData.fullName ?? existingByEmail.fullName,
               firstName: userData.firstName ?? existingByEmail.firstName,
               lastName: userData.lastName ?? existingByEmail.lastName,
               profileImageUrl: userData.profileImageUrl ?? existingByEmail.profileImageUrl,
+              authProvider: userData.authProvider ?? existingByEmail.authProvider,
+              emailVerified: userData.emailVerified ?? existingByEmail.emailVerified,
               updatedAt: new Date(),
             })
             .where(eq(users.email, userData.email))
@@ -95,6 +114,7 @@ class AuthStorage implements IAuthStorage {
             event: "user_updated_by_email",
             userId: updatedUser.id,
             email: updatedUser.email,
+            authProvider: updatedUser.authProvider,
             previousId: existingByEmail.id,
             durationMs: Date.now() - startTime,
             timestamp: new Date().toISOString(),
@@ -104,15 +124,18 @@ class AuthStorage implements IAuthStorage {
         }
       }
       
-      // Create new user
       const [newUser] = await db
         .insert(users)
         .values({
           id: userData.id,
           email: userData.email,
+          username: userData.username ?? (userData.email ? userData.email.split("@")[0] : null),
+          fullName: userData.fullName,
           firstName: userData.firstName,
           lastName: userData.lastName,
           profileImageUrl: userData.profileImageUrl,
+          authProvider: userData.authProvider ?? "email",
+          emailVerified: userData.emailVerified ?? "false",
           role: "user",
           plan: "free",
           createdAt: new Date(),
@@ -124,6 +147,7 @@ class AuthStorage implements IAuthStorage {
         event: "user_created",
         userId: newUser.id,
         email: newUser.email,
+        authProvider: newUser.authProvider,
         role: newUser.role,
         plan: newUser.plan,
         durationMs: Date.now() - startTime,
@@ -141,7 +165,6 @@ class AuthStorage implements IAuthStorage {
         timestamp: new Date().toISOString(),
       }));
       
-      // Re-throw to ensure the caller knows the operation failed
       throw new Error(`Failed to upsert user: ${error.message}`);
     }
   }
