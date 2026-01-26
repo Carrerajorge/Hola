@@ -1,113 +1,121 @@
-/**
- * Skeleton Components
- * 
- * Skeleton loading states for:
- * - Chat messages
- * - Sidebar items
- * - Cards
- * - Tables
- */
-
-import React from 'react';
+import { cn } from "@/lib/utils";
 
 interface SkeletonProps {
     className?: string;
-    style?: React.CSSProperties;
 }
 
-// Base skeleton with animation
-export function Skeleton({ className = '', style }: SkeletonProps) {
+// Base skeleton with shimmer effect
+function Skeleton({ className }: SkeletonProps) {
     return (
         <div
-            className={`animate-pulse bg-muted/60 rounded ${className}`}
-            style={style}
+            className={cn(
+                "animate-pulse rounded-md bg-muted skeleton-shimmer",
+                className
+            )}
         />
     );
 }
 
-// Text skeleton (single line)
-export function SkeletonText({ width = '100%' }: { width?: string | number }) {
-    return <Skeleton className="h-4 w-[var(--sk-width)]" style={{ "--sk-width": width } as React.CSSProperties} />;
+// Premium skeleton with gradient shimmer
+function SkeletonPremium({ className }: SkeletonProps) {
+    return (
+        <div
+            className={cn(
+                "relative overflow-hidden rounded-md bg-muted",
+                className
+            )}
+        >
+            <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+        </div>
+    );
 }
 
 // Chat message skeleton
-export function SkeletonMessage({ isUser = false }: { isUser?: boolean }) {
+export function SkeletonChatMessage({ isUser = false }: { isUser?: boolean }) {
     return (
-        <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
-            <Skeleton className="w-8 h-8 rounded-full flex-shrink-0" />
-            <div className={`flex-1 space-y-2 ${isUser ? 'items-end' : ''} max-w-[70%]`}>
-                <Skeleton className="h-4 w-24" />
-                <div className="space-y-2">
-                    <Skeleton className="h-4 w-full" />
-                    <Skeleton className="h-4 w-5/6" />
-                    <Skeleton className="h-4 w-4/6" />
-                </div>
+        <div className={cn("flex gap-3 p-4", isUser && "flex-row-reverse")}>
+            <SkeletonPremium className="h-8 w-8 rounded-full shrink-0" />
+            <div className={cn("flex-1 space-y-2", isUser && "flex flex-col items-end")}>
+                <SkeletonPremium className="h-4 w-24" />
+                <SkeletonPremium className={cn("h-16", isUser ? "w-3/4" : "w-full")} />
             </div>
         </div>
     );
 }
 
 // Chat list skeleton (multiple messages)
-export function SkeletonChatMessages({ count = 3, className = '' }: { count?: number; className?: string }) {
+export function SkeletonChatMessages({ count = 3 }: { count?: number }) {
     return (
-        <div className={`space-y-6 ${className}`}>
+        <div className="space-y-2">
             {Array.from({ length: count }).map((_, i) => (
-                <SkeletonMessage key={i} isUser={i % 2 === 0} />
+                <SkeletonChatMessage key={i} isUser={i % 2 === 1} />
             ))}
         </div>
     );
 }
 
 // Sidebar chat item skeleton
-export function SkeletonSidebarItem() {
+export function SkeletonChatItem() {
     return (
-        <div className="flex items-center gap-3 p-2 rounded-lg">
-            <Skeleton className="w-5 h-5 rounded" />
+        <div className="flex items-center gap-3 px-3 py-2">
+            <SkeletonPremium className="h-4 w-4 rounded" />
             <div className="flex-1 space-y-1.5">
-                <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="h-3 w-1/2" />
+                <SkeletonPremium className="h-3.5 w-3/4" />
+                <SkeletonPremium className="h-2.5 w-1/2" />
             </div>
         </div>
     );
 }
 
-// Sidebar skeleton (multiple items)
-export function SkeletonSidebar({ count = 8 }: { count?: number }) {
+// Sidebar skeleton (full)
+export function SkeletonSidebar() {
     return (
-        <div className="space-y-1 p-2">
+        <div className="w-72 border-r bg-sidebar p-4 space-y-4">
             {/* Header */}
-            <div className="flex items-center justify-between p-2 mb-4">
-                <Skeleton className="h-6 w-32" />
-                <Skeleton className="h-8 w-8 rounded-lg" />
+            <div className="flex items-center justify-between">
+                <SkeletonPremium className="h-8 w-8 rounded-lg" />
+                <SkeletonPremium className="h-8 w-8 rounded-lg" />
             </div>
 
-            {/* Items */}
-            {Array.from({ length: count }).map((_, i) => (
-                <SkeletonSidebarItem key={i} />
-            ))}
+            {/* Search */}
+            <SkeletonPremium className="h-10 w-full rounded-lg" />
+
+            {/* Section header */}
+            <SkeletonPremium className="h-3 w-16 mt-4" />
+
+            {/* Chat items */}
+            <div className="space-y-1">
+                {Array.from({ length: 8 }).map((_, i) => (
+                    <SkeletonChatItem key={i} />
+                ))}
+            </div>
         </div>
     );
 }
 
 // Card skeleton
-export function SkeletonCard() {
+export function SkeletonCard({ hasImage = false }: { hasImage?: boolean }) {
     return (
-        <div className="rounded-lg border p-4 space-y-4">
-            <div className="flex items-center gap-3">
-                <Skeleton className="w-10 h-10 rounded-full" />
-                <div className="space-y-1.5 flex-1">
-                    <Skeleton className="h-4 w-1/3" />
-                    <Skeleton className="h-3 w-1/4" />
-                </div>
+        <div className="rounded-xl border bg-card p-4 space-y-3 card-hover">
+            {hasImage && <SkeletonPremium className="h-32 w-full rounded-lg" />}
+            <SkeletonPremium className="h-5 w-3/4" />
+            <SkeletonPremium className="h-3 w-full" />
+            <SkeletonPremium className="h-3 w-2/3" />
+            <div className="flex gap-2 pt-2">
+                <SkeletonPremium className="h-8 w-20 rounded-full" />
+                <SkeletonPremium className="h-8 w-20 rounded-full" />
             </div>
-            <div className="space-y-2">
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-            </div>
-            <div className="flex gap-2">
-                <Skeleton className="h-8 w-20 rounded-lg" />
-                <Skeleton className="h-8 w-20 rounded-lg" />
-            </div>
+        </div>
+    );
+}
+
+// Grid of cards skeleton
+export function SkeletonCardGrid({ count = 6, hasImage = true }: { count?: number; hasImage?: boolean }) {
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Array.from({ length: count }).map((_, i) => (
+                <SkeletonCard key={i} hasImage={hasImage} />
+            ))}
         </div>
     );
 }
@@ -117,20 +125,19 @@ export function SkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
     return (
         <div className="rounded-lg border overflow-hidden">
             {/* Header */}
-            <div className="flex border-b bg-muted/30 p-3 gap-4">
+            <div className="flex gap-4 p-4 bg-muted/50 border-b">
                 {Array.from({ length: cols }).map((_, i) => (
-                    <Skeleton key={i} className="h-4 flex-1" />
+                    <SkeletonPremium key={i} className="h-4 flex-1" />
                 ))}
             </div>
 
             {/* Rows */}
             {Array.from({ length: rows }).map((_, rowIndex) => (
-                <div key={rowIndex} className="flex p-3 gap-4 border-b last:border-0">
+                <div key={rowIndex} className="flex gap-4 p-4 border-b last:border-0">
                     {Array.from({ length: cols }).map((_, colIndex) => (
-                        <Skeleton
+                        <SkeletonPremium
                             key={colIndex}
-                            className="h-4 flex-1 w-[var(--sk-table-width)]"
-                            style={{ "--sk-table-width": `${60 + Math.random() * 40}%` } as React.CSSProperties}
+                            className={cn("h-4 flex-1", colIndex === 0 && "w-1/4 flex-none")}
                         />
                     ))}
                 </div>
@@ -139,24 +146,15 @@ export function SkeletonTable({ rows = 5, cols = 4 }: { rows?: number; cols?: nu
     );
 }
 
-// Code block skeleton
-export function SkeletonCodeBlock() {
+// Profile skeleton
+export function SkeletonProfile() {
     return (
-        <div className="rounded-lg bg-muted/30 p-4 space-y-2">
-            <div className="flex items-center justify-between mb-3">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-6 w-16 rounded" />
+        <div className="flex items-center gap-4">
+            <SkeletonPremium className="h-16 w-16 rounded-full" />
+            <div className="space-y-2">
+                <SkeletonPremium className="h-5 w-32" />
+                <SkeletonPremium className="h-3 w-48" />
             </div>
-            {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton
-                    key={i}
-                    className="h-4 w-[var(--sk-code-width)] ml-[var(--sk-code-margin)]"
-                    style={{
-                        "--sk-code-width": `${40 + Math.random() * 50}%`,
-                        "--sk-code-margin": i % 3 === 0 ? 0 : `${Math.random() * 24}px`,
-                    } as React.CSSProperties}
-                />
-            ))}
         </div>
     );
 }
@@ -164,33 +162,37 @@ export function SkeletonCodeBlock() {
 // Full page skeleton
 export function SkeletonPage() {
     return (
-        <div className="flex h-screen">
-            {/* Sidebar */}
-            <div className="w-64 border-r">
-                <SkeletonSidebar />
-            </div>
-
-            {/* Main content */}
-            <div className="flex-1 flex flex-col">
-                {/* Header */}
-                <div className="h-14 border-b flex items-center justify-between px-4">
-                    <Skeleton className="h-6 w-48" />
-                    <div className="flex gap-2">
-                        <Skeleton className="h-8 w-8 rounded-lg" />
-                        <Skeleton className="h-8 w-8 rounded-lg" />
-                    </div>
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 overflow-auto p-4">
-                    <SkeletonChatMessages count={4} />
-                </div>
-
-                {/* Input */}
-                <div className="border-t p-4">
-                    <Skeleton className="h-12 w-full rounded-lg" />
-                </div>
+        <div className="min-h-screen flex">
+            <SkeletonSidebar />
+            <div className="flex-1 p-8 space-y-6">
+                <SkeletonProfile />
+                <SkeletonPremium className="h-10 w-full max-w-2xl rounded-xl" />
+                <SkeletonCardGrid count={3} />
             </div>
         </div>
     );
 }
+
+// Input skeleton
+export function SkeletonInput() {
+    return (
+        <div className="space-y-2">
+            <SkeletonPremium className="h-3 w-20" />
+            <SkeletonPremium className="h-10 w-full rounded-lg" />
+        </div>
+    );
+}
+
+// Form skeleton
+export function SkeletonForm({ fields = 4 }: { fields?: number }) {
+    return (
+        <div className="space-y-6">
+            {Array.from({ length: fields }).map((_, i) => (
+                <SkeletonInput key={i} />
+            ))}
+            <SkeletonPremium className="h-10 w-32 rounded-lg" />
+        </div>
+    );
+}
+
+export { Skeleton, SkeletonPremium };
