@@ -1,5 +1,5 @@
 /**
- * E2E Tests - MICHAT PRO 3.0
+ * E2E Tests - ILIAGPT PRO 3.0
  * End-to-end tests for document generation and error scenarios
  */
 

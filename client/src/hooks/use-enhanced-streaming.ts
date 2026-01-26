@@ -1,5 +1,5 @@
 /**
- * Enhanced Streaming Hook - MICHAT PRO 3.0
+ * Enhanced Streaming Hook - ILIAGPT PRO 3.0
  * 
  * Word-by-word streaming with typing effect,
  * markdown parsing, and error recovery.

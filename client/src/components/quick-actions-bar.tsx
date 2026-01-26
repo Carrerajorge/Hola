@@ -1,5 +1,5 @@
 /**
- * Quick Actions Bar - MICHAT PRO 3.0
+ * Quick Actions Bar - ILIAGPT PRO 3.0
  * 
  * Floating action bar for message interactions:
  * Copy, Edit, Regenerate, Export, Branch

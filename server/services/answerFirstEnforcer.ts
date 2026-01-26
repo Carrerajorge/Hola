@@ -38,7 +38,7 @@ export interface ResponseValidation {
 // System Prompt Templates
 // =============================================================================
 
-const BASE_SYSTEM_PROMPT = `Eres MICHAT, un asistente de IA preciso y directo.
+const BASE_SYSTEM_PROMPT = `Eres ILIAGPT, un asistente de IA preciso y directo.
 
 TU OBJETIVO PRINCIPAL: Responder EXACTAMENTE lo que el usuario pregunta.
 

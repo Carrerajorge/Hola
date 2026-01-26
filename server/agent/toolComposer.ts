@@ -1,5 +1,5 @@
 /**
- * Tool Composition Engine for MICHAT PRO 3.0
+ * Tool Composition Engine for ILIAGPT PRO 3.0
  * 
  * Permite crear pipelines de herramientas dinámicamente,
  * optimizar secuencias, aprender mejores combinaciones,

@@ -1,5 +1,5 @@
 /**
- * Tool Discovery Service - MICHAT PRO 3.0
+ * Tool Discovery Service - ILIAGPT PRO 3.0
  * 
  * AI learns to use new tools automatically.
  * Dynamic tool registration and capability matching.

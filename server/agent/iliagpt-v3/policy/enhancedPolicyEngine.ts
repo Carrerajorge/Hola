@@ -1,4 +1,4 @@
-import { MichatError } from "../errors";
+import { IliagptError } from "../errors";
 import { sanitizeUserInput } from "../config";
 import type { 
   AgentDefinition, 

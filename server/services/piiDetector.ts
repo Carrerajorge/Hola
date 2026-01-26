@@ -1,5 +1,5 @@
 /**
- * PII Detector & Redactor - MICHAT PRO 3.0 (10x Enhanced)
+ * PII Detector & Redactor - ILIAGPT PRO 3.0 (10x Enhanced)
  * 
  * Detects and redacts Personally Identifiable Information.
  * Supports multiple detection patterns and custom rules.

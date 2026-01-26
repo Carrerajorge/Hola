@@ -1,6 +1,6 @@
 /**
- * PWA Enhancement Service - MICHAT PRO 3.0
- * 
+ * PWA Enhancement Service - ILIAGPT PRO 3.0
+ *
  * Progressive Web App features and service worker management.
  * Offline support, push notifications, install prompts.
  */

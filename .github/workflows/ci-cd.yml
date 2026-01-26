@@ -1,4 +1,4 @@
-# MICHAT CI/CD Pipeline
+# ILIAGPT CI/CD Pipeline
 # GitHub Actions workflow for testing, building, and deploying
 
 name: CI/CD Pipeline

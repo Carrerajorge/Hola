@@ -1,5 +1,5 @@
 /**
- * Command Palette - MICHAT PRO 3.0
+ * Command Palette - ILIAGPT PRO 3.0
  * 
  * Quick access to all features via ⌘K / Ctrl+K
  * Inspired by VS Code, Linear, Raycast

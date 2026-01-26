@@ -1,5 +1,5 @@
 /**
- * Data Retention Service - MICHAT PRO 3.0
+ * Data Retention Service - ILIAGPT PRO 3.0
  * 
  * Configurable data retention policies for compliance.
  * Automatic data cleanup and archival.

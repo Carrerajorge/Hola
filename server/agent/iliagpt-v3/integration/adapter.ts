@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { MichatSystem, MichatToolRegistry, MichatAgentRegistry } from "../index";
-import { MichatError } from "../errors";
+import { IliagptSystem, IliagptToolRegistry, IliagptAgentRegistry } from "../index";
+import { IliagptError } from "../errors";
 import { uid, nowISO } from "../config";
 import type { 
   ToolDefinition, 
@@ -128,11 +128,11 @@ export function adaptLegacyUser(user?: {
   };
 }
 
-export class MichatBridge {
-  private system: MichatSystem;
+export class IliagptBridge {
+  private system: IliagptSystem;
 
   constructor(config?: Partial<ResolvedConfig>) {
-    this.system = new MichatSystem({ config });
+    this.system = new IliagptSystem({ config });
     this.setupEventBridge();
   }
 
@@ -203,7 +203,7 @@ export class MichatBridge {
     });
 
     if (!policyCheck.allowed) {
-      throw new MichatError("E_POLICY_DENIED", policyCheck.reason || "Access denied by legacy policy", {
+      throw new IliagptError("E_POLICY_DENIED", policyCheck.reason || "Access denied by legacy policy", {
         tool: toolName,
         user: user?.id,
       });
@@ -229,7 +229,7 @@ export class MichatBridge {
       });
 
       if (!policyCheck.allowed) {
-        throw new MichatError("E_POLICY_DENIED", policyCheck.reason || "Access denied by legacy policy", {
+        throw new IliagptError("E_POLICY_DENIED", policyCheck.reason || "Access denied by legacy policy", {
           tool: step.tool,
           step: step.id,
         });
@@ -272,15 +272,15 @@ export class MichatBridge {
   }
 }
 
-let globalBridge: MichatBridge | null = null;
+let globalBridge: IliagptBridge | null = null;
 
-export function getMichatBridge(config?: Partial<ResolvedConfig>): MichatBridge {
+export function getIliagptBridge(config?: Partial<ResolvedConfig>): IliagptBridge {
   if (!globalBridge) {
-    globalBridge = new MichatBridge(config);
+    globalBridge = new IliagptBridge(config);
   }
   return globalBridge;
 }
 
-export function resetMichatBridge(): void {
+export function resetIliagptBridge(): void {
   globalBridge = null;
 }

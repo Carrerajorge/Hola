@@ -7,7 +7,7 @@
 
 import { Message, generateRequestId } from '@/hooks/use-chats';
 
-const DB_NAME = 'michat-offline';
+const DB_NAME = 'iliagpt-offline';
 const DB_VERSION = 1;
 const STORE_QUEUE = 'message_queue';
 

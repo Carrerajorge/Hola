@@ -1,5 +1,5 @@
 /**
- * Contextual Personas Service - MICHAT PRO 3.0
+ * Contextual Personas Service - ILIAGPT PRO 3.0
  * 
  * Adaptive AI personalities based on context.
  * User preferences, task type, and conversation history.

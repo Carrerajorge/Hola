@@ -15,7 +15,7 @@ const pool = new Pool({
   idleTimeoutMillis: 10000, // Close idle connections faster (10s) to free up resources
   connectionTimeoutMillis: 5000, // Fail fast
   allowExitOnIdle: false,
-  application_name: 'michat_server_write', // Tag connections for PG logs
+  application_name: 'iliagpt_server_write', // Tag connections for PG logs
 });
 
 // Read Replica Pool (Optional)
@@ -26,7 +26,7 @@ const poolRead = env.DATABASE_READ_URL ? new Pool({
   idleTimeoutMillis: 10000,
   connectionTimeoutMillis: 5000,
   allowExitOnIdle: false,
-  application_name: 'michat_server_read',
+  application_name: 'iliagpt_server_read',
 }) : pool; // Fallback to primary pool if no read replica
 
 pool.on('error', (err: any) => {

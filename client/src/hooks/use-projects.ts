@@ -20,7 +20,7 @@ export interface Project {
     updatedAt: number;
 }
 
-const STORAGE_KEY = "michat-projects";
+const STORAGE_KEY = "iliagpt-projects";
 
 export function useProjects() {
     const [projects, setProjects] = useState<Project[]>([]);

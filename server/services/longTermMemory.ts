@@ -1,5 +1,5 @@
 /**
- * Long-Term Memory Layer - MICHAT PRO 3.0
+ * Long-Term Memory Layer - ILIAGPT PRO 3.0
  * 
  * Persistent memory across conversations for personalized AI experience.
  * Stores user preferences, facts, and interaction patterns.

@@ -1,5 +1,5 @@
 /**
- * Integration Tests - MICHAT PRO 3.0
+ * Integration Tests - ILIAGPT PRO 3.0
  * Tests for component integration and communication
  */
 

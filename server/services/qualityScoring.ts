@@ -1,5 +1,5 @@
 /**
- * Quality Scoring Service - MICHAT PRO 3.0
+ * Quality Scoring Service - ILIAGPT PRO 3.0
  * 
  * Measure and track AI response quality.
  * Automated evaluation and feedback collection.

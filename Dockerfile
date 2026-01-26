@@ -1,4 +1,4 @@
-# MICHAT Dockerfile
+# ILIAGPT Dockerfile
 # Multi-stage build for production
 
 # ============================================
@@ -46,7 +46,7 @@ WORKDIR /app
 
 # Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 michat
+RUN adduser --system --uid 1001 iliagpt
 
 # Set environment
 ENV NODE_ENV=production
@@ -62,10 +62,10 @@ COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/client/public ./client/public
 
 # Set ownership to non-root user
-RUN chown -R michat:nodejs /app
+RUN chown -R iliagpt:nodejs /app
 
 # Switch to non-root user
-USER michat
+USER iliagpt
 
 # Expose port
 EXPOSE 5000

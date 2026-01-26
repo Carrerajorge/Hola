@@ -1,9 +1,9 @@
 ---
-description: Run continuous improvement audit on MICHAT
+description: Run continuous improvement audit on ILIAGPT
 ---
 // turbo-all
 
-# MICHAT Continuous Improvement Workflow
+# ILIAGPT Continuous Improvement Workflow
 
 This workflow analyzes the codebase, identifies critical issues, and implements fixes automatically.
 
@@ -35,7 +35,7 @@ For each issue:
 ## Phase 4: Deploy
 
 1. Push changes to Git
-2. Notify user to pull on VPS: `git pull && npm run build && pm2 restart michat`
+2. Notify user to pull on VPS: `git pull && npm run build && pm2 restart iliagpt`
 
 ## Phase 5: Repeat
 

@@ -446,7 +446,7 @@ export function buildContentSpec(
     return {
         title: outline.title,
         subtitle: outline.subtitle,
-        authors: ['MICHAT AI'],
+        authors: ['ILIAGPT AI'],
         date: new Date().toISOString().split('T')[0],
         abstract: sections.find(s =>
             outline.sections.find(os => os.id === s.id)?.type === 'executive_summary'

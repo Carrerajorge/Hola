@@ -92,5 +92,5 @@ export class ConsoleLogger implements Logger {
 }
 
 export const globalLogger = new ConsoleLogger(
-  (process.env.MICHAT_LOG_LEVEL as LogLevel) || "info"
+  (process.env.ILIAGPT_LOG_LEVEL as LogLevel) || "info"
 );

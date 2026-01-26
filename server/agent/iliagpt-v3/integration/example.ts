@@ -1,32 +1,32 @@
 /**
- * Example integration of MichatBridge with chatService
+ * Example integration of IliagptBridge with chatService
  * 
- * This shows how to wire the MICHAT v3 enterprise architecture
+ * This shows how to wire the ILIAGPT v3 enterprise architecture
  * into the existing IliaGPT tool execution flow.
  * 
  * To enable enterprise features:
- * 1. Set MICHAT_V3_ENABLED=true in environment
+ * 1. Set ILIAGPT_V3_ENABLED=true in environment
  * 2. Initialize the bridge at application startup
  * 3. Route tool execution through the bridge
  */
 
-import { getMichatBridge, LegacyToolConfig, resetMichatBridge } from "./adapter";
+import { getIliagptBridge, LegacyToolConfig, resetIliagptBridge } from "./adapter";
 
 // Feature flag for gradual rollout
-const MICHAT_V3_ENABLED = process.env.MICHAT_V3_ENABLED === "true";
+const ILIAGPT_V3_ENABLED = process.env.ILIAGPT_V3_ENABLED === "true";
 
 /**
- * Initialize the MICHAT v3 bridge with optional tools
+ * Initialize the ILIAGPT v3 bridge with optional tools
  */
-export function initializeMichatBridge(legacyTools?: LegacyToolConfig[]): void {
-  if (!MICHAT_V3_ENABLED) {
-    console.log("[MICHAT] Enterprise mode disabled");
+export function initializeIliagptBridge(legacyTools?: LegacyToolConfig[]): void {
+  if (!ILIAGPT_V3_ENABLED) {
+    console.log("[ILIAGPT] Enterprise mode disabled");
     return;
   }
 
-  console.log("[MICHAT] Initializing enterprise mode...");
+  console.log("[ILIAGPT] Initializing enterprise mode...");
   
-  const bridge = getMichatBridge({
+  const bridge = getIliagptBridge({
     TIMEOUT_MS: 30000,
     MAX_CONCURRENCY: 10,
     ENABLE_AUDIT: true,
@@ -38,15 +38,15 @@ export function initializeMichatBridge(legacyTools?: LegacyToolConfig[]): void {
     for (const tool of legacyTools) {
       try {
         bridge.registerLegacyTool(tool);
-        console.log(`[MICHAT] Registered tool: ${tool.name}`);
+        console.log(`[ILIAGPT] Registered tool: ${tool.name}`);
       } catch (error) {
-        console.error(`[MICHAT] Failed to register tool ${tool.name}:`, error);
+        console.error(`[ILIAGPT] Failed to register tool ${tool.name}:`, error);
       }
     }
   }
 
   const toolCount = bridge.tools.list().length;
-  console.log(`[MICHAT] Enterprise mode active with ${toolCount} tools`);
+  console.log(`[ILIAGPT] Enterprise mode active with ${toolCount} tools`);
 }
 
 /**
@@ -59,12 +59,12 @@ export async function executeToolEnterprise(
   user?: { id?: string; email?: string; plan?: string },
   runId?: string
 ): Promise<{ success: boolean; result?: unknown; error?: string }> {
-  if (!MICHAT_V3_ENABLED) {
-    return { success: false, error: "Enterprise mode not enabled. Set MICHAT_V3_ENABLED=true" };
+  if (!ILIAGPT_V3_ENABLED) {
+    return { success: false, error: "Enterprise mode not enabled. Set ILIAGPT_V3_ENABLED=true" };
   }
 
   // Use enterprise runner with all resilience features
-  const bridge = getMichatBridge();
+  const bridge = getIliagptBridge();
   
   try {
     const result = await bridge.executeTool(toolName, params, user, runId);
@@ -76,7 +76,7 @@ export async function executeToolEnterprise(
     // Log circuit breaker state for debugging
     const circuitState = bridge.getCircuitState(toolName);
     if (circuitState?.state === "OPEN") {
-      console.warn(`[MICHAT] Circuit breaker OPEN for tool: ${toolName}`);
+      console.warn(`[ILIAGPT] Circuit breaker OPEN for tool: ${toolName}`);
     }
     
     return { 
@@ -90,11 +90,11 @@ export async function executeToolEnterprise(
  * Get enterprise observability data
  */
 export function getEnterpriseMetrics() {
-  if (!MICHAT_V3_ENABLED) {
+  if (!ILIAGPT_V3_ENABLED) {
     return null;
   }
   
-  const bridge = getMichatBridge();
+  const bridge = getIliagptBridge();
   const tools = bridge.tools.list();
   
   return {
@@ -115,11 +115,11 @@ export function getEnterpriseAuditLog(
   filter?: { actor?: string; resource?: string },
   limit?: number
 ) {
-  if (!MICHAT_V3_ENABLED) {
+  if (!ILIAGPT_V3_ENABLED) {
     return [];
   }
   
-  const bridge = getMichatBridge();
+  const bridge = getIliagptBridge();
   return bridge.getAuditLog(filter, limit);
 }
 
@@ -127,5 +127,5 @@ export function getEnterpriseAuditLog(
  * Reset bridge for testing
  */
 export function resetEnterprise(): void {
-  resetMichatBridge();
+  resetIliagptBridge();
 }

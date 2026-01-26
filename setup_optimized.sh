@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# MICHAT - High Performance Server Setup Script
+# ILIAGPT - High Performance Server Setup Script
 # =============================================================================
 # Este script configura un servidor Ubuntu 24.04/22.04 para alta concurrencia.
 # Ejecútalo como root: bash setup_optimized.sh
@@ -13,7 +13,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}[+] Iniciando configuración de Alto Rendimiento para MICHAT...${NC}"
+echo -e "${GREEN}[+] Iniciando configuración de Alto Rendimiento para ILIAGPT...${NC}"
 
 # 1. Actualización del Sistema
 echo -e "${YELLOW}[1/7] Actualizando sistema...${NC}"
@@ -23,7 +23,7 @@ apt install -y curl git build-essential nginx ufw htop software-properties-commo
 # 2. Configuración del Kernel (Sysctl) para Alta Concurrencia
 echo -e "${YELLOW}[2/7] Optimizando Sysctl para alto tráfico...${NC}"
 cat <<EOF >> /etc/sysctl.conf
-# MICHAT Optimizations
+# ILIAGPT Optimizations
 fs.file-max = 2097152
 net.core.somaxconn = 65535
 net.virtual_waiting_queues = 2048
@@ -38,7 +38,7 @@ sysctl -p
 
 # Aumentar límite de archivos abiertos (ulimit)
 echo -e "${YELLOW}[+] Configurando límites de archivos (ulimit)...${NC}"
-cat <<EOF > /etc/security/limits.d/michat.conf
+cat <<EOF > /etc/security/limits.d/iliagpt.conf
 root soft nofile 65535
 root hard nofile 65535
 * soft nofile 65535
@@ -70,15 +70,15 @@ ufw allow 'Nginx Full'
 
 # 7. Crear directorio y clonar (Prepare folder)
 echo -e "${YELLOW}[7/7] Preparando directorio de app...${NC}"
-mkdir -p /var/www/michat
-chown -R $USER:$USER /var/www/michat
+mkdir -p /var/www/iliagpt
+chown -R $USER:$USER /var/www/iliagpt
 
 echo -e "${GREEN}======================================================${NC}"
 echo -e "${GREEN}¡Configuración Base Completada!${NC}"
 echo -e "${GREEN}======================================================${NC}"
 echo -e "Pasos siguientes:"
 echo -e "1. ${YELLOW}Navegar al directorio:${NC}"
-echo -e "   cd /var/www/michat"
+echo -e "   cd /var/www/iliagpt"
 echo -e "2. ${YELLOW}Clonar repo y desplegar:${NC}"
 echo -e "   git clone https://github.com/Carrerajorge/Hola.git ."
 echo -e "   cp .env.production.example .env.production"

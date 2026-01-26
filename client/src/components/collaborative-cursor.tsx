@@ -1,5 +1,5 @@
 /**
- * Collaborative Cursor Component - MICHAT PRO 3.0
+ * Collaborative Cursor Component - ILIAGPT PRO 3.0
  * 
  * Real-time cursor presence for collaborative editing.
  * Shows other users' positions and selections.

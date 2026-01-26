@@ -1,5 +1,5 @@
 /**
- * Response Anonymizer - MICHAT PRO 3.0
+ * Response Anonymizer - ILIAGPT PRO 3.0
  * 
  * Removes references to document/file names from AI responses.
  * Ensures user privacy and cleaner responses.

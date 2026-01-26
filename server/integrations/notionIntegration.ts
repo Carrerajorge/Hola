@@ -1,5 +1,5 @@
 /**
- * Notion Integration Service - MICHAT PRO 3.0
+ * Notion Integration Service - ILIAGPT PRO 3.0
  * 
  * Sync with Notion for notes and knowledge base.
  * Bi-directional page and database sync.
@@ -62,7 +62,7 @@ export interface NotionBlock {
 }
 
 export interface SyncConfig {
-    direction: "notion_to_michat" | "michat_to_notion" | "bidirectional";
+    direction: "notion_to_iliagpt" | "iliagpt_to_notion" | "bidirectional";
     autoSync: boolean;
     syncInterval: number;
     includeSubpages: boolean;
@@ -233,7 +233,7 @@ export class NotionIntegration {
     // ======== Sync ========
 
     /**
-     * Sync page to MICHAT
+     * Sync page to ILIAGPT
      */
     async syncToMichat(pageId: string): Promise<{
         title: string;
@@ -259,7 +259,7 @@ export class NotionIntegration {
     }
 
     /**
-     * Sync from MICHAT to Notion
+     * Sync from ILIAGPT to Notion
      */
     async syncFromMichat(
         parentId: string,

@@ -1,5 +1,5 @@
 /**
- * Background Notification Component - MICHAT PRO 3.0
+ * Background Notification Component - ILIAGPT PRO 3.0
  * Toast notifications for background task completion
  */
 

@@ -1,5 +1,5 @@
 /**
- * Hierarchical Task Network (HTN) Planner for MICHAT PRO 3.0
+ * Hierarchical Task Network (HTN) Planner for ILIAGPT PRO 3.0
  * 
  * Planificador jerárquico que descompone objetivos complejos en subtareas
  * ejecutables, con soporte para replanificación y optimización.

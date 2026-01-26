@@ -1,5 +1,5 @@
 /**
- * Prompt Template Library - MICHAT PRO 3.0
+ * Prompt Template Library - ILIAGPT PRO 3.0
  * 
  * Reusable prompt templates with categories and variables.
  */

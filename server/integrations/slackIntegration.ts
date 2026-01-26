@@ -1,7 +1,7 @@
 /**
- * Slack Integration Service - MICHAT PRO 3.0
+ * Slack Integration Service - ILIAGPT PRO 3.0
  * 
- * Enables MICHAT as a Slack bot for team collaboration.
+ * Enables ILIAGPT as a Slack bot for team collaboration.
  * Supports DMs, channel mentions, and thread responses.
  */
 

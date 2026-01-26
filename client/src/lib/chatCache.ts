@@ -67,7 +67,7 @@ interface ChatCacheDB extends DBSchema {
     };
 }
 
-const DB_NAME = 'michat-cache';
+const DB_NAME = 'iliagpt-cache';
 const DB_VERSION = 1;
 
 let dbInstance: IDBPDatabase<ChatCacheDB> | null = null;

@@ -1,5 +1,5 @@
 /**
- * Split Editor Component - MICHAT PRO 3.0
+ * Split Editor Component - ILIAGPT PRO 3.0
  * 
  * Side-by-side editing of code and documents.
  * Resizable panes with synchronized scrolling.

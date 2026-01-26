@@ -1,4 +1,4 @@
-import { MichatError } from "../errors";
+import { IliagptError } from "../errors";
 import type { ResolvedConfig } from "../types";
 
 export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
@@ -161,7 +161,7 @@ export function withCircuitBreaker<T>(
   toolName: string
 ): Promise<T> {
   if (!cb.canExecute()) {
-    throw new MichatError("E_CIRCUIT_OPEN", `Circuit open: ${toolName}`, {
+    throw new IliagptError("E_CIRCUIT_OPEN", `Circuit open: ${toolName}`, {
       tool: toolName,
       circuit: cb.snapshot(),
     });

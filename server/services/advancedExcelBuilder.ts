@@ -1,5 +1,5 @@
 /**
- * Advanced Excel Builder for MICHAT PRO 3.0
+ * Advanced Excel Builder for ILIAGPT PRO 3.0
  * 
  * Features:
  * - Smart formula generation
@@ -237,7 +237,7 @@ export class AdvancedExcelBuilder {
             : options.theme || EXCEL_THEMES.professional;
 
         // Set workbook properties
-        this.workbook.creator = "MICHAT PRO";
+        this.workbook.creator = "ILIAGPT PRO";
         this.workbook.created = new Date();
     }
 

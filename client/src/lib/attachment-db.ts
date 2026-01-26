@@ -10,7 +10,7 @@
  * - Document previews
  */
 
-const DB_NAME = 'michat-attachments';
+const DB_NAME = 'iliagpt-attachments';
 const DB_VERSION = 1;
 const STORE_IMAGES = 'images';
 const STORE_FILES = 'files';

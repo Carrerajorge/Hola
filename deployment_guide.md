@@ -1,6 +1,6 @@
 # Guía de Despliegue en VPS (Vía GitHub)
 
-Esta guía detalla los pasos para desplegar MICHAT en tu VPS utilizando GitHub como fuente de verdad.
+Esta guía detalla los pasos para desplegar ILIAGPT en tu VPS utilizando GitHub como fuente de verdad.
 
 ## Requisitos Previos
 
@@ -34,9 +34,9 @@ Si aún no has clonado el proyecto:
 cd /opt
 
 # Clona el repo (te pedirá credenciales o usa una clave SSH)
-git clone https://github.com/usuario/repo.git michat
+git clone https://github.com/usuario/repo.git iliagpt
 
-cd michat
+cd iliagpt
 ```
 
 ### 2.2 Actualizar el código (Despliegues subsiguientes)
@@ -44,7 +44,7 @@ cd michat
 Si ya tienes el repositorio clonado:
 
 ```bash
-cd /opt/michat
+cd /opt/iliagpt
 git pull origin main
 ```
 

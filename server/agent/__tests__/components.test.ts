@@ -1,5 +1,5 @@
 /**
- * Unit Tests - MICHAT PRO 3.0 Components
+ * Unit Tests - ILIAGPT PRO 3.0 Components
  * Tests for Knowledge Graph, HTN Planner, Tool Composer
  */
 

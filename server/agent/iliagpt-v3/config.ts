@@ -24,15 +24,15 @@ export type ConfigInput = z.input<typeof ConfigSchema>;
 
 export function resolveConfig(input: Partial<ConfigInput> = {}): ResolvedConfig {
   const envConfig: Partial<ConfigInput> = {
-    MODEL: process.env.XAI_MODEL || process.env.MICHAT_MODEL,
-    API_KEY: process.env.XAI_API_KEY || process.env.MICHAT_API_KEY,
-    BASE_URL: process.env.XAI_BASE_URL || process.env.MICHAT_BASE_URL,
-    TEMPERATURE: process.env.MICHAT_TEMPERATURE ? parseFloat(process.env.MICHAT_TEMPERATURE) : undefined,
-    MAX_TOKENS: process.env.MICHAT_MAX_TOKENS ? parseInt(process.env.MICHAT_MAX_TOKENS) : undefined,
-    TIMEOUT_MS: process.env.MICHAT_TIMEOUT_MS ? parseInt(process.env.MICHAT_TIMEOUT_MS) : undefined,
-    MAX_CONCURRENCY: process.env.MICHAT_MAX_CONCURRENCY ? parseInt(process.env.MICHAT_MAX_CONCURRENCY) : undefined,
-    LOG_LEVEL: (process.env.MICHAT_LOG_LEVEL as any) || undefined,
-    ENABLE_AUDIT: process.env.MICHAT_ENABLE_AUDIT === "true" ? true : process.env.MICHAT_ENABLE_AUDIT === "false" ? false : undefined,
+    MODEL: process.env.XAI_MODEL || process.env.ILIAGPT_MODEL,
+    API_KEY: process.env.XAI_API_KEY || process.env.ILIAGPT_API_KEY,
+    BASE_URL: process.env.XAI_BASE_URL || process.env.ILIAGPT_BASE_URL,
+    TEMPERATURE: process.env.ILIAGPT_TEMPERATURE ? parseFloat(process.env.ILIAGPT_TEMPERATURE) : undefined,
+    MAX_TOKENS: process.env.ILIAGPT_MAX_TOKENS ? parseInt(process.env.ILIAGPT_MAX_TOKENS) : undefined,
+    TIMEOUT_MS: process.env.ILIAGPT_TIMEOUT_MS ? parseInt(process.env.ILIAGPT_TIMEOUT_MS) : undefined,
+    MAX_CONCURRENCY: process.env.ILIAGPT_MAX_CONCURRENCY ? parseInt(process.env.ILIAGPT_MAX_CONCURRENCY) : undefined,
+    LOG_LEVEL: (process.env.ILIAGPT_LOG_LEVEL as any) || undefined,
+    ENABLE_AUDIT: process.env.ILIAGPT_ENABLE_AUDIT === "true" ? true : process.env.ILIAGPT_ENABLE_AUDIT === "false" ? false : undefined,
   };
 
   const mergedConfig = {

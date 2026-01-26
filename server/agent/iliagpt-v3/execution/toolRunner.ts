@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MichatError, wrapError } from "../errors";
+import { IliagptError, wrapError } from "../errors";
 import { withTimeout, jitter, sleep, clamp, nowISO, redactSecrets } from "../config";
 import { Tracer } from "../observability/tracer";
 import { RateLimiter } from "../resilience/rateLimiter";
@@ -48,7 +48,7 @@ export class EnterpriseToolRunner {
     const cb = this.cbRegistry.get(`tool:${toolName}`);
     if (!cb.canExecute()) {
       ctx.metrics.inc("tool.circuit_open", { tool: toolName });
-      throw new MichatError("E_CIRCUIT_OPEN", `Circuit open: ${toolName}`, {
+      throw new IliagptError("E_CIRCUIT_OPEN", `Circuit open: ${toolName}`, {
         tool: toolName,
         circuit: cb.snapshot(),
       });
@@ -68,7 +68,7 @@ export class EnterpriseToolRunner {
     if (!this.rateLimiter.allow(rlKey)) {
       ctx.metrics.inc("tool.rate_limited", { tool: toolName });
       cb.onFailure();
-      throw new MichatError("E_RATE_LIMIT", `Rate limited: ${toolName}`, {
+      throw new IliagptError("E_RATE_LIMIT", `Rate limited: ${toolName}`, {
         tool: toolName,
         key: rlKey,
       });
@@ -78,7 +78,7 @@ export class EnterpriseToolRunner {
     if (!parsed.success) {
       ctx.metrics.inc("tool.bad_params", { tool: toolName });
       cb.onFailure();
-      throw new MichatError(
+      throw new IliagptError(
         "E_BAD_PARAMS",
         `Invalid parameters for ${toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
         { tool: toolName, issues: parsed.error.issues }
@@ -110,7 +110,7 @@ export class EnterpriseToolRunner {
             ).catch((err: unknown) => {
               const errMsg = err instanceof Error ? err.message : String(err);
               if (errMsg.startsWith("Timeout")) {
-                throw new MichatError("E_TIMEOUT", `Timeout executing ${toolName}`, {
+                throw new IliagptError("E_TIMEOUT", `Timeout executing ${toolName}`, {
                   tool: toolName,
                   timeoutMs,
                 });
@@ -170,7 +170,7 @@ export class EnterpriseToolRunner {
         });
 
         const isPermanent = 
-          err instanceof MichatError && 
+          err instanceof IliagptError && 
           ["E_BAD_PARAMS", "E_POLICY_DENIED"].includes(err.code);
 
         if (attempt < retries && !isPermanent) {

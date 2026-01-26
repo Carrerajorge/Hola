@@ -1,5 +1,5 @@
 /**
- * Push Notifications Service - MICHAT PRO 3.0
+ * Push Notifications Service - ILIAGPT PRO 3.0
  * 
  * Web push notifications for real-time alerts.
  * Supports service workers and notification preferences.
@@ -383,7 +383,7 @@ export class PushNotificationService {
      */
     notifyUpdate(userId: string, version: string, changes: string): Promise<{ sent: number; failed: number }> {
         return this.send(userId, {
-            title: `MICHAT ${version} Available`,
+            title: `ILIAGPT ${version} Available`,
             body: changes,
             icon: "/icons/update.png",
             tag: "update",

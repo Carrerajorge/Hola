@@ -1,4 +1,4 @@
-import { MichatError } from "../errors";
+import { IliagptError } from "../errors";
 import type { ServiceRegistry as IServiceRegistry } from "../types";
 
 export class ServiceRegistry implements IServiceRegistry {
@@ -26,7 +26,7 @@ export class ServiceRegistry implements IServiceRegistry {
       return instance;
     }
 
-    throw new MichatError("E_INTERNAL", `Service not registered: ${key}`, { service: key });
+    throw new IliagptError("E_INTERNAL", `Service not registered: ${key}`, { service: key });
   }
 
   has(key: string): boolean {

@@ -1,5 +1,5 @@
 /**
- * Progress Milestones - MICHAT PRO 3.0
+ * Progress Milestones - ILIAGPT PRO 3.0
  * 
  * Visual tracker for complex multi-step tasks.
  * Shows progress through milestones with animations.

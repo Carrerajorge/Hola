@@ -1,5 +1,5 @@
 /**
- * Document Preview Panel - MICHAT PRO 3.0
+ * Document Preview Panel - ILIAGPT PRO 3.0
  * 
  * Inline preview for PDF, Word, Excel, images without downloading.
  */

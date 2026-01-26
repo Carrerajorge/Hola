@@ -1,5 +1,5 @@
 /**
- * Performance Monitor - MICHAT PRO 3.0
+ * Performance Monitor - ILIAGPT PRO 3.0
  * Real-time metrics collection and alerting system
  */
 

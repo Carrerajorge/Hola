@@ -1,5 +1,5 @@
 /**
- * Task Decomposition Engine - MICHAT PRO 3.0
+ * Task Decomposition Engine - ILIAGPT PRO 3.0
  * 
  * Automatically decomposes complex tasks into manageable sub-tasks
  * with dependency detection and optimal execution ordering.

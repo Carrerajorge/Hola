@@ -184,7 +184,7 @@ export function getEnvOrDefault(key: string, defaultValue: string): string {
  */
 export function generateEnvExample(): string {
     const lines = [
-        '# MICHAT Environment Configuration',
+        '# ILIAGPT Environment Configuration',
         '# Copy this file to .env and fill in your values',
         '',
         '# Server',
@@ -194,7 +194,7 @@ export function generateEnvExample(): string {
         'LOG_LEVEL=info',
         '',
         '# Database (Required)',
-        'DATABASE_URL=postgresql://user:password@localhost:5432/michat',
+        'DATABASE_URL=postgresql://user:password@localhost:5432/iliagpt',
         '',
         '# Authentication (Required)',
         'JWT_ACCESS_SECRET=your-32-char-minimum-access-secret',

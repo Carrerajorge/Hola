@@ -108,7 +108,7 @@ function formatProblemDetails(
     const code = isAppError ? error.code : 'INTERNAL_ERROR';
 
     const problem: ProblemDetails = {
-        type: `https://api.michat.ai/errors/${code.toLowerCase()}`,
+        type: `https://api.iliagpt.ai/errors/${code.toLowerCase()}`,
         title: getErrorTitle(statusCode),
         status: statusCode,
         detail: isAppError ? error.message : 'Ha ocurrido un error interno',

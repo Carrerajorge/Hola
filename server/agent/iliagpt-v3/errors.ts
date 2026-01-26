@@ -1,4 +1,4 @@
-export type MichatErrorCode =
+export type IliagptErrorCode =
   | "E_TIMEOUT"
   | "E_RATE_LIMIT"
   | "E_CIRCUIT_OPEN"
@@ -10,28 +10,28 @@ export type MichatErrorCode =
   | "E_WORKFLOW_DAG"
   | "E_INTERNAL";
 
-export class MichatError extends Error {
-  readonly code: MichatErrorCode;
+export class IliagptError extends Error {
+  readonly code: IliagptErrorCode;
   readonly context: Record<string, unknown>;
   readonly timestamp: string;
   readonly isRetryable: boolean;
 
   constructor(
-    code: MichatErrorCode,
+    code: IliagptErrorCode,
     message: string,
     context: Record<string, unknown> = {}
   ) {
     super(`[${code}] ${message}`);
-    this.name = "MichatError";
+    this.name = "IliagptError";
     this.code = code;
     this.context = context;
     this.timestamp = new Date().toISOString();
     this.isRetryable = this.determineRetryable(code);
-    Object.setPrototypeOf(this, MichatError.prototype);
+    Object.setPrototypeOf(this, IliagptError.prototype);
   }
 
-  private determineRetryable(code: MichatErrorCode): boolean {
-    const nonRetryableCodes: MichatErrorCode[] = [
+  private determineRetryable(code: IliagptErrorCode): boolean {
+    const nonRetryableCodes: IliagptErrorCode[] = [
       "E_POLICY_DENIED",
       "E_TOOL_NOT_FOUND",
       "E_AGENT_NOT_FOUND",
@@ -53,29 +53,29 @@ export class MichatError extends Error {
     };
   }
 
-  static isRateLimitError(err: unknown): err is MichatError {
-    return err instanceof MichatError && err.code === "E_RATE_LIMIT";
+  static isRateLimitError(err: unknown): err is IliagptError {
+    return err instanceof IliagptError && err.code === "E_RATE_LIMIT";
   }
 
-  static isCircuitOpenError(err: unknown): err is MichatError {
-    return err instanceof MichatError && err.code === "E_CIRCUIT_OPEN";
+  static isCircuitOpenError(err: unknown): err is IliagptError {
+    return err instanceof IliagptError && err.code === "E_CIRCUIT_OPEN";
   }
 
-  static isTimeoutError(err: unknown): err is MichatError {
-    return err instanceof MichatError && err.code === "E_TIMEOUT";
+  static isTimeoutError(err: unknown): err is IliagptError {
+    return err instanceof IliagptError && err.code === "E_TIMEOUT";
   }
 
-  static isPolicyError(err: unknown): err is MichatError {
-    return err instanceof MichatError && err.code === "E_POLICY_DENIED";
+  static isPolicyError(err: unknown): err is IliagptError {
+    return err instanceof IliagptError && err.code === "E_POLICY_DENIED";
   }
 
-  static isMichatError(err: unknown): err is MichatError {
-    return err instanceof MichatError;
+  static isIliagptError(err: unknown): err is IliagptError {
+    return err instanceof IliagptError;
   }
 }
 
-export function wrapError(err: unknown, fallbackCode: MichatErrorCode = "E_INTERNAL"): MichatError {
-  if (err instanceof MichatError) {
+export function wrapError(err: unknown, fallbackCode: IliagptErrorCode = "E_INTERNAL"): IliagptError {
+  if (err instanceof IliagptError) {
     return err;
   }
   
@@ -85,7 +85,7 @@ export function wrapError(err: unknown, fallbackCode: MichatErrorCode = "E_INTER
       ? err 
       : "Unknown error";
   
-  return new MichatError(fallbackCode, message, {
+  return new IliagptError(fallbackCode, message, {
     originalError: err instanceof Error ? err.name : typeof err,
     stack: err instanceof Error ? err.stack : undefined,
   });

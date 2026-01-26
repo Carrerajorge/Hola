@@ -237,7 +237,7 @@ async function syncPendingMessages(): Promise<void> {
 
 self.addEventListener('push', (event: any) => {
     const data = event.data?.json() || {
-        title: 'MICHAT',
+        title: 'ILIAGPT',
         body: 'Nuevo mensaje',
         icon: '/icons/icon-192x192.png',
     };

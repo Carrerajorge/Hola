@@ -1,5 +1,5 @@
 /**
- * Analytics Dashboard - MICHAT PRO 3.0
+ * Analytics Dashboard - ILIAGPT PRO 3.0
  * 
  * Usage metrics and performance analytics.
  */

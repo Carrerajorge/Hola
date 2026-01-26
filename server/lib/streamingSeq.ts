@@ -1,5 +1,5 @@
 /**
- * Streaming Sequence Service - MICHAT PRO 3.0
+ * Streaming Sequence Service - ILIAGPT PRO 3.0
  * 
  * Manages per-conversation lastSeq tracking for streaming reconnection.
  * Uses MemoryCache (Redis-backed with local fallback) for persistence.

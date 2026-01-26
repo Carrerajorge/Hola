@@ -1,5 +1,5 @@
 /**
- * WebSocket Optimization Service - MICHAT PRO 3.0
+ * WebSocket Optimization Service - ILIAGPT PRO 3.0
  * 
  * Enhanced WebSocket with compression, batching,
  * reconnection, and multiplexing.

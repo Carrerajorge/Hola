@@ -1754,7 +1754,7 @@ export function ChatInterface({
     if (navigator.share) {
       try {
         await navigator.share({
-          title: "MICHAT Response",
+          title: "ILIAGPT Response",
           text: content
         });
       } catch (e) {
@@ -5697,7 +5697,7 @@ IMPORTANTE:
                             <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
                           </span>
                         )
-                        : "Soy MICHAT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                        : "Soy ILIAGPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
                     }
                   </motion.p>
                   {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (

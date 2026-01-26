@@ -1,6 +1,6 @@
 /**
- * Usage Dashboard Component - MICHAT PRO 3.0
- * 
+ * Usage Dashboard Component - ILIAGPT PRO 3.0
+ *
  * Analytics dashboard for usage metrics.
  * Charts, trends, and insights.
  */

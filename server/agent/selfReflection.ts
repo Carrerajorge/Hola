@@ -1,5 +1,5 @@
 /**
- * Self-Reflection Loop - MICHAT PRO 3.0
+ * Self-Reflection Loop - ILIAGPT PRO 3.0
  * 
  * Allows agents to verify their own work before delivering.
  * Implements critique, correction, and quality verification.

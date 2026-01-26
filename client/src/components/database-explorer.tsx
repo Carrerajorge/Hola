@@ -1,5 +1,5 @@
 /**
- * Database Explorer Component - MICHAT PRO 3.0
+ * Database Explorer Component - ILIAGPT PRO 3.0
  * 
  * Visual SQL query builder and data explorer.
  * Schema browser, query execution, and results table.
@@ -47,7 +47,7 @@ interface QueryHistory {
 // ============== Mock Data ==============
 
 const MOCK_DATABASE: DatabaseConfig = {
-    name: "michat_db",
+    name: "iliagpt_db",
     type: "postgresql",
     tables: [
         {

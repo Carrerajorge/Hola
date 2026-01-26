@@ -73,7 +73,7 @@ export function downloadExport(chats: Chat[], filename?: string): void {
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename || `michat-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = filename || `iliagpt-backup-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

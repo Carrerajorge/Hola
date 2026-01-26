@@ -1,5 +1,5 @@
 /**
- * Super Document Analyzer - MICHAT PRO 3.0 (10x Enhanced)
+ * Super Document Analyzer - ILIAGPT PRO 3.0 (10x Enhanced)
  * 
  * Unified API that combines all document analysis capabilities.
  * Multi-model fusion, parallel processing, smart caching, PII protection.

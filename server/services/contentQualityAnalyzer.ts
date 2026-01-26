@@ -1,5 +1,5 @@
 /**
- * Content Quality Analyzer - MICHAT PRO 3.0 (10x Enhanced)
+ * Content Quality Analyzer - ILIAGPT PRO 3.0 (10x Enhanced)
  * 
  * Analyzes document quality, type, language, and readability.
  * Provides intelligent content classification.

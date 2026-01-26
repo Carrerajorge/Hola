@@ -1,5 +1,5 @@
 /**
- * Split View Layout - MICHAT PRO 3.0
+ * Split View Layout - ILIAGPT PRO 3.0
  * 
  * Resizable split panel for document + chat side-by-side view
  */

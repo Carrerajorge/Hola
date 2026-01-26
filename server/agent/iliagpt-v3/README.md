@@ -1,10 +1,10 @@
-# MICHAT v3 Integration Analysis
+# ILIAGPT v3 Integration Analysis
 
-## Architecture Mapping: IliaGPT → MICHAT v3
+## Architecture Mapping: IliaGPT → ILIAGPT v3
 
 ### Existing Components to Reuse/Enhance
 
-| IliaGPT Component | Location | MICHAT v3 Equivalent | Status |
+| IliaGPT Component | Location | ILIAGPT v3 Equivalent | Status |
 |-------------------|----------|---------------------|--------|
 | PolicyEngine | `server/agent/policyEngine.ts` | PolicyEngine (RBAC) | Enhance |
 | AgentEventBus | `server/agent/eventBus.ts` | EventBus | ✓ Reuse |
@@ -14,10 +14,10 @@
 
 ### New Components to Implement
 
-| MICHAT v3 Component | Priority | Description |
+| ILIAGPT v3 Component | Priority | Description |
 |--------------------|----------|-------------|
 | ServiceRegistry | High | Lightweight DI container |
-| MichatError | High | Structured errors with codes |
+| IliagptError | High | Structured errors with codes |
 | CircuitBreaker | High | Failure isolation pattern |
 | Bulkhead | Medium | Concurrency limiting per tool |
 | TTLCache | Medium | Cache with TTL for tool results |
@@ -55,10 +55,10 @@
 ## Directory Structure
 
 ```
-server/agent/michat-v3/
+server/agent/iliagpt-v3/
 ├── README.md                 # This file
 ├── types.ts                  # Base types and interfaces
-├── errors.ts                 # MichatError class
+├── errors.ts                 # IliagptError class
 ├── config.ts                 # Configuration with Zod
 ├── registry/
 │   ├── serviceRegistry.ts    # DI container
@@ -91,13 +91,13 @@ server/agent/michat-v3/
 
 ## Usage
 
-### Basic Usage with MichatSystem
+### Basic Usage with IliagptSystem
 
 ```typescript
-import { MichatSystem } from './server/agent/michat-v3';
+import { IliagptSystem } from './server/agent/iliagpt-v3';
 import { z } from 'zod';
 
-const system = new MichatSystem();
+const system = new IliagptSystem();
 
 // Register a tool
 system.tools.register({
@@ -123,9 +123,9 @@ const result = await system.executeTool(
 ### Integration with Legacy IliaGPT
 
 ```typescript
-import { getMichatBridge } from './server/agent/michat-v3/integration';
+import { getIliagptBridge } from './server/agent/iliagpt-v3/integration';
 
-const bridge = getMichatBridge();
+const bridge = getIliagptBridge();
 
 // Register legacy tools
 bridge.registerLegacyTool({
@@ -169,10 +169,10 @@ const workflowResult = await system.runWorkflow([
 ### Feature Flag Integration
 
 ```typescript
-import { initializeMichatBridge, executeToolEnterprise } from './server/agent/michat-v3/integration';
+import { initializeIliagptBridge, executeToolEnterprise } from './server/agent/iliagpt-v3/integration';
 
-// Set MICHAT_V3_ENABLED=true in environment to enable
-initializeMichatBridge();
+// Set ILIAGPT_V3_ENABLED=true in environment to enable
+initializeIliagptBridge();
 
 // Execute tool with enterprise features (timeout, retries, circuit breaker)
 const result = await executeToolEnterprise(
@@ -190,8 +190,8 @@ if (result.success) {
 
 ## Enabling Enterprise Mode
 
-1. Set environment variable: `MICHAT_V3_ENABLED=true`
-2. Call `initializeMichatBridge()` at application startup
+1. Set environment variable: `ILIAGPT_V3_ENABLED=true`
+2. Call `initializeIliagptBridge()` at application startup
 3. Use `executeToolEnterprise()` for tool execution with all resilience features
 
 The feature flag allows gradual rollout without affecting existing functionality.

@@ -1,5 +1,5 @@
 /**
- * A/B Testing Service - MICHAT PRO 3.0
+ * A/B Testing Service - ILIAGPT PRO 3.0
  * 
  * Run experiments on prompts, models, and UI variations.
  * Statistical analysis and performance tracking.

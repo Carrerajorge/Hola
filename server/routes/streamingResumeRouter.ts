@@ -1,5 +1,5 @@
 /**
- * Streaming Resume Router - MICHAT PRO 3.0
+ * Streaming Resume Router - ILIAGPT PRO 3.0
  * 
  * API endpoints for streaming reconnection support.
  */
