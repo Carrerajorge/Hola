@@ -1,5 +1,5 @@
 /**
- * Document Cache - MICHAT PRO 3.0 (10x Enhanced)
+ * Document Cache - ILIAGPT PRO 3.0 (10x Enhanced)
  * 
  * Multi-layer caching for processed documents.
  * Supports TTL, LRU eviction, and cache warming.

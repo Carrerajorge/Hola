@@ -1,5 +1,5 @@
 /**
- * Agent Team Orchestrator - MICHAT PRO 3.0
+ * Agent Team Orchestrator - ILIAGPT PRO 3.0
  * 
  * Coordinates multiple specialized agents to work on complex tasks.
  * Handles parallel execution, result merging, and conflict resolution.

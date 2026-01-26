@@ -1,5 +1,5 @@
 /**
- * Encryption Layer - MICHAT PRO 3.0
+ * Encryption Layer - ILIAGPT PRO 3.0
  * 
  * End-to-end encryption for conversations.
  * Key management, message encryption/decryption.

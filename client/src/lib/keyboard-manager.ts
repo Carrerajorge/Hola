@@ -1,6 +1,6 @@
 /**
- * Power User Keyboard Config - MICHAT PRO 3.0
- * 
+ * Power User Keyboard Config - ILIAGPT PRO 3.0
+ *
  * Advanced keyboard shortcuts and customization.
  */
 

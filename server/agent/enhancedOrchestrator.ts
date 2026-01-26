@@ -1,5 +1,5 @@
 /**
- * Enhanced Orchestrator Integration for MICHAT PRO 3.0
+ * Enhanced Orchestrator Integration for ILIAGPT PRO 3.0
  * 
  * Integrates new components (Knowledge Graph, HTN Planner, Self-Healing,
  * Decision Engine, Collaboration Protocol, Tool Composer) with the

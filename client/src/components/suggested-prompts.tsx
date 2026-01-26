@@ -1,8 +1,8 @@
 /**
  * Suggested Prompts Component
- * 
+ *
  * Shows suggested conversation starters when the chat is empty
- * to help users get started with MICHAT
+ * to help users get started with ILIAGPT
  */
 
 import { useState } from "react";

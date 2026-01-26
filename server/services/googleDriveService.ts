@@ -176,14 +176,14 @@ export async function createFolder(
 }
 
 /**
- * Get or create MICHAT folder
+ * Get or create ILIAGPT folder
  */
 export async function getMichatFolder(userId: number): Promise<string> {
     const drive = getDriveClient(userId);
 
-    // Search for existing MICHAT folder
+    // Search for existing ILIAGPT folder
     const response = await drive.files.list({
-        q: "name='MICHAT' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+        q: "name='ILIAGPT' and mimeType='application/vnd.google-apps.folder' and trashed=false",
         fields: 'files(id)',
         pageSize: 1,
     });
@@ -193,7 +193,7 @@ export async function getMichatFolder(userId: number): Promise<string> {
     }
 
     // Create new folder
-    const folder = await createFolder(userId, 'MICHAT');
+    const folder = await createFolder(userId, 'ILIAGPT');
     return folder.id;
 }
 
@@ -361,10 +361,10 @@ export function createGoogleDriveRouter() {
             const { fileName, mimeType, data, folderId } = req.body;
             const buffer = Buffer.from(data, 'base64');
 
-            // Get or create MICHAT folder
-            const michatFolderId = folderId || await getMichatFolder(userId);
+            // Get or create ILIAGPT folder
+            const iliagptFolderId = folderId || await getMichatFolder(userId);
 
-            const result = await uploadFile(userId, fileName, mimeType, buffer, michatFolderId);
+            const result = await uploadFile(userId, fileName, mimeType, buffer, iliagptFolderId);
             res.json(result);
         } catch (error: any) {
             console.error('Upload error:', error);

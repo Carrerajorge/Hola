@@ -1,5 +1,5 @@
 /**
- * Response Cache Layer - MICHAT PRO 3.0
+ * Response Cache Layer - ILIAGPT PRO 3.0
  * 
  * Intelligent caching for similar queries.
  * Reduces API costs 30-50% and improves latency.

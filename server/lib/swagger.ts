@@ -4,12 +4,12 @@ const options: swaggerJsdoc.Options = {
     definition: {
         openapi: '3.0.0',
         info: {
-            title: 'MICHAT PRO API',
+            title: 'ILIAGPT PRO API',
             version: '1.0.0',
-            description: 'API documentation for MICHAT PRO 3.0',
+            description: 'API documentation for ILIAGPT PRO 3.0',
             contact: {
                 name: 'API Support',
-                email: 'support@michat.pro',
+                email: 'support@iliagpt.com',
             },
         },
         servers: [

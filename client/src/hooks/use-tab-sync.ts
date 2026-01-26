@@ -1,5 +1,5 @@
 /**
- * Multi-Tab Synchronization Hook - MICHAT PRO 3.0
+ * Multi-Tab Synchronization Hook - ILIAGPT PRO 3.0
  * 
  * Uses BroadcastChannel API to sync streaming state and notifications
  * across multiple browser tabs.
@@ -8,7 +8,7 @@
 import { useEffect, useCallback, useRef } from "react";
 import { useStreamingStore } from "@/stores/streamingStore";
 
-const CHANNEL_NAME = "michat-streaming-sync";
+const CHANNEL_NAME = "iliagpt-streaming-sync";
 
 interface SyncMessage {
     type: "notification" | "run-complete" | "run-start" | "ping" | "pong";

@@ -1194,7 +1194,7 @@ export function Composer({
 
       <div id="composer-hint" className="text-center text-[10px] text-zinc-400/50 dark:text-zinc-600/60 mt-2 font-normal tracking-wide select-none">
         <span className="sr-only">Press Enter to send, Shift+Enter for new line, or Cmd+Enter to send quickly. </span>
-        MICHAT puede cometer errores. Verifica la información importante.
+        ILIAGPT puede cometer errores. Verifica la información importante.
       </div>
 
     </div>

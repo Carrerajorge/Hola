@@ -1,7 +1,7 @@
 /**
- * GitHub Integration Service - MICHAT PRO 3.0
+ * GitHub Integration Service - ILIAGPT PRO 3.0
  * 
- * Connects MICHAT with GitHub for code collaboration.
+ * Connects ILIAGPT with GitHub for code collaboration.
  * Supports repos, issues, PRs, and code search.
  */
 

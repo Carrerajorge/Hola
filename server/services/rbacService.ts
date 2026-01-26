@@ -1,5 +1,5 @@
 /**
- * Role-Based Access Control - MICHAT PRO 3.0
+ * Role-Based Access Control - ILIAGPT PRO 3.0
  * 
  * Granular permission system for enterprise use.
  * Roles, permissions, and resource-level access control.

@@ -1,5 +1,5 @@
 /**
- * Reasoning Chain Components - MICHAT PRO 3.0
+ * Reasoning Chain Components - ILIAGPT PRO 3.0
  * 
  * Visual display of agent thinking process:
  * [Thinking] → [Planning] → [Executing] → [Verifying]

@@ -1,5 +1,5 @@
 /**
- * Voice First Mode Hook - MICHAT PRO 3.0
+ * Voice First Mode Hook - ILIAGPT PRO 3.0
  * 
  * Voice input/output for hands-free operation.
  * Speech recognition and text-to-speech.

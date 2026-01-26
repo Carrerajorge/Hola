@@ -1,5 +1,5 @@
 /**
- * Code Playground Component - MICHAT PRO 3.0
+ * Code Playground Component - ILIAGPT PRO 3.0
  * 
  * Interactive code editor with live execution.
  * Supports multiple languages and real-time output.
@@ -61,7 +61,7 @@ function greet(name) {
   return \`Hello, \${name}!\`;
 }
 
-console.log(greet("MICHAT"));`,
+console.log(greet("ILIAGPT"));`,
     },
     typescript: {
         name: "TypeScript",
@@ -74,7 +74,7 @@ interface User {
 }
 
 const user: User = {
-  name: "MICHAT",
+  name: "ILIAGPT",
   age: 1
 };
 
@@ -88,7 +88,7 @@ console.log(\`User: \${user.name}\`);`,
 def greet(name):
     return f"Hello, {name}!"
 
-print(greet("MICHAT"))`,
+print(greet("ILIAGPT"))`,
     },
     html: {
         name: "HTML",
@@ -108,7 +108,7 @@ print(greet("MICHAT"))`,
   </style>
 </head>
 <body>
-  <h1>MICHAT Playground</h1>
+  <h1>ILIAGPT Playground</h1>
   <p>Edit this HTML and see the preview!</p>
 </body>
 </html>`,
@@ -138,7 +138,7 @@ print(greet("MICHAT"))`,
         icon: "📋",
         runnable: true,
         template: `{
-  "name": "MICHAT",
+  "name": "ILIAGPT",
   "version": "3.0.0",
   "features": [
     "Multi-model AI",

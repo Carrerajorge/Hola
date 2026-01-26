@@ -1,5 +1,5 @@
 /**
- * Plan Optimizer Service - MICHAT PRO 3.0
+ * Plan Optimizer Service - ILIAGPT PRO 3.0
  * 
  * AI agent plan optimization and auto-improvement.
  * Analyzes execution patterns and suggests optimizations.

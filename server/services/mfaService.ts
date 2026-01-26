@@ -7,7 +7,7 @@ import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
 
-const APP_NAME = 'MICHAT';
+const APP_NAME = 'ILIAGPT';
 const BACKUP_CODES_COUNT = 10;
 
 interface MfaSetupResult {

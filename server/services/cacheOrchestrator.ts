@@ -24,7 +24,7 @@ import type { Chat, ChatMessage } from '../../shared/schema';
 const L0_MAX_SIZE = 1000; // Max items in memory
 const L0_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const L1_TTL_SECONDS = 3600; // 1 hour
-const CACHE_KEY_PREFIX = 'michat:v1:';
+const CACHE_KEY_PREFIX = 'iliagpt:v1:';
 
 // ============================================================================
 // L0: IN-MEMORY CACHE

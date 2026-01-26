@@ -1,5 +1,5 @@
 /**
- * Model Fusion Engine - MICHAT PRO 3.0 (10x Enhanced)
+ * Model Fusion Engine - ILIAGPT PRO 3.0 (10x Enhanced)
  * 
  * Combines multiple AI models for superior accuracy.
  * Uses confidence-weighted fusion and auto-selection.

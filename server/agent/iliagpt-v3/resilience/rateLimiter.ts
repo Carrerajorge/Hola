@@ -1,4 +1,4 @@
-import { MichatError } from "../errors";
+import { IliagptError } from "../errors";
 
 export class TokenBucket {
   private tokens: number;
@@ -113,7 +113,7 @@ export function withRateLimit<T>(
   tokens: number = 1
 ): Promise<T> {
   if (!limiter.allow(key, tokens)) {
-    throw new MichatError("E_RATE_LIMIT", `Rate limit exceeded: ${key}`, {
+    throw new IliagptError("E_RATE_LIMIT", `Rate limit exceeded: ${key}`, {
       key,
       available: limiter.getAvailable(key),
     });

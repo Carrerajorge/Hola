@@ -25,7 +25,7 @@ export type {
   TracerSpan,
 } from "./types";
 
-export { MichatError, MichatErrorCode, wrapError } from "./errors";
+export { IliagptError, IliagptErrorCode, wrapError } from "./errors";
 export { resolveConfig, clamp, jitter, sleep, nowISO, uid, withTimeout, sanitizeUserInput, safeJsonParse, redactSecrets } from "./config";
 
 export { ServiceRegistry, globalServiceRegistry } from "./registry";
@@ -49,7 +49,7 @@ import { TTLCache as _TTLCache, InMemoryMemory as _InMemoryMemory } from "./resi
 import { EnhancedPolicyEngine as _EnhancedPolicyEngine } from "./policy/enhancedPolicyEngine";
 import { EnterpriseToolRunner as _EnterpriseToolRunner, ToolRegistry as IToolRegistry } from "./execution/toolRunner";
 import { WorkflowEngine as _WorkflowEngine, CancellationToken as _CancellationToken } from "./execution/workflowEngine";
-import { MichatError as _MichatError } from "./errors";
+import { IliagptError as _IliagptError } from "./errors";
 import type { 
   ResolvedConfig, 
   ToolContext, 
@@ -65,12 +65,12 @@ import type {
 } from "./types";
 import { z } from "zod";
 
-export class MichatToolRegistry implements IToolRegistry {
+export class IliagptToolRegistry implements IToolRegistry {
   private tools = new Map<string, ToolDefinition<any, any>>();
 
   register<TParams extends z.ZodTypeAny, TResult>(tool: ToolDefinition<TParams, TResult>): void {
     if (this.tools.has(tool.name)) {
-      throw new _MichatError("E_INTERNAL", `Tool already registered: ${tool.name}`);
+      throw new _IliagptError("E_INTERNAL", `Tool already registered: ${tool.name}`);
     }
     this.tools.set(tool.name, tool);
   }
@@ -78,7 +78,7 @@ export class MichatToolRegistry implements IToolRegistry {
   get(name: string): ToolDefinition<any, any> {
     const tool = this.tools.get(name);
     if (!tool) {
-      throw new _MichatError("E_TOOL_NOT_FOUND", `Tool not found: ${name}`);
+      throw new _IliagptError("E_TOOL_NOT_FOUND", `Tool not found: ${name}`);
     }
     return tool;
   }
@@ -106,12 +106,12 @@ export class MichatToolRegistry implements IToolRegistry {
   }
 }
 
-export class MichatAgentRegistry {
+export class IliagptAgentRegistry {
   private agents = new Map<string, AgentDefinition>();
 
   register(agent: AgentDefinition): void {
     if (this.agents.has(agent.id)) {
-      throw new _MichatError("E_INTERNAL", `Agent already registered: ${agent.id}`);
+      throw new _IliagptError("E_INTERNAL", `Agent already registered: ${agent.id}`);
     }
     this.agents.set(agent.id, agent);
   }
@@ -119,7 +119,7 @@ export class MichatAgentRegistry {
   get(id: string): AgentDefinition {
     const agent = this.agents.get(id);
     if (!agent) {
-      throw new _MichatError("E_AGENT_NOT_FOUND", `Agent not found: ${id}`);
+      throw new _IliagptError("E_AGENT_NOT_FOUND", `Agent not found: ${id}`);
     }
     return agent;
   }
@@ -141,16 +141,16 @@ export class MichatAgentRegistry {
   }
 }
 
-export interface MichatSystemOptions {
+export interface IliagptSystemOptions {
   config?: Partial<ResolvedConfig>;
   llmAdapter?: LLMAdapter;
   policyEngine?: _EnhancedPolicyEngine;
 }
 
-export class MichatSystem {
+export class IliagptSystem {
   public readonly config: ResolvedConfig;
-  public readonly tools: MichatToolRegistry;
-  public readonly agents: MichatAgentRegistry;
+  public readonly tools: IliagptToolRegistry;
+  public readonly agents: IliagptAgentRegistry;
 
   private readonly services: _ServiceRegistry;
   private readonly logger: _ConsoleLogger;
@@ -166,11 +166,11 @@ export class MichatSystem {
 
   private conversation: ChatMessage[] = [];
 
-  constructor(options: MichatSystemOptions = {}) {
+  constructor(options: IliagptSystemOptions = {}) {
     this.config = _resolveConfig(options.config ?? {});
     
-    this.tools = new MichatToolRegistry();
-    this.agents = new MichatAgentRegistry();
+    this.tools = new IliagptToolRegistry();
+    this.agents = new IliagptAgentRegistry();
     this.services = new _ServiceRegistry();
     
     this.logger = new _ConsoleLogger(this.config.LOG_LEVEL);
@@ -244,7 +244,7 @@ export class MichatSystem {
       const decision = this.policy.canUseTool({ agent, toolName: call.tool, user, tool });
       
       if (!decision.allow) {
-        throw new _MichatError("E_POLICY_DENIED", decision.reason ?? "Policy denied", {
+        throw new _IliagptError("E_POLICY_DENIED", decision.reason ?? "Policy denied", {
           agent: agent.id,
           tool: call.tool,
         });
@@ -268,7 +268,7 @@ export class MichatSystem {
         const decision = this.policy.canUseTool({ agent, toolName: step.tool, user, tool });
         
         if (!decision.allow) {
-          throw new _MichatError("E_POLICY_DENIED", decision.reason ?? "Policy denied", {
+          throw new _IliagptError("E_POLICY_DENIED", decision.reason ?? "Policy denied", {
             agent: agent.id,
             tool: step.tool,
           });

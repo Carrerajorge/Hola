@@ -1,5 +1,5 @@
 /**
- * Upload Queue Service - MICHAT PRO 3.0
+ * Upload Queue Service - ILIAGPT PRO 3.0
  * 
  * Scalable document processing queue with rate limiting.
  * Designed for millions of users.

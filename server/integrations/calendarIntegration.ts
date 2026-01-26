@@ -1,5 +1,5 @@
 /**
- * Calendar Integration Service - MICHAT PRO 3.0
+ * Calendar Integration Service - ILIAGPT PRO 3.0
  * 
  * Google Calendar / Outlook integration.
  * Event scheduling, reminders, and AI scheduling.

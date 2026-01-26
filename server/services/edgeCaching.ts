@@ -1,5 +1,5 @@
 /**
- * Edge Caching Service - MICHAT PRO 3.0
+ * Edge Caching Service - ILIAGPT PRO 3.0
  * 
  * CDN-like caching at the edge for low latency.
  * Multi-region support with intelligent routing.

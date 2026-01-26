@@ -1,6 +1,6 @@
 /**
- * MICHAT Service Worker
- * 
+ * ILIAGPT Service Worker
+ *
  * Features:
  * - Offline caching of static assets
  * - Network-first strategy for API calls
@@ -12,9 +12,9 @@
 
 declare const self: ServiceWorkerGlobalScope;
 
-const CACHE_NAME = "michat-cache-v1";
-const STATIC_CACHE = "michat-static-v1";
-const API_CACHE = "michat-api-v1";
+const CACHE_NAME = "iliagpt-cache-v1";
+const STATIC_CACHE = "iliagpt-static-v1";
+const API_CACHE = "iliagpt-api-v1";
 
 // Assets to cache immediately
 const PRECACHE_ASSETS = [
@@ -213,7 +213,7 @@ self.addEventListener("push", (event) => {
     };
 
     event.waitUntil(
-        self.registration.showNotification(data.title || "MICHAT", options)
+        self.registration.showNotification(data.title || "ILIAGPT", options)
     );
 });
 

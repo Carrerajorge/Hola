@@ -1,7 +1,7 @@
 export { 
-  MichatBridge, 
-  getMichatBridge, 
-  resetMichatBridge,
+  IliagptBridge, 
+  getIliagptBridge, 
+  resetIliagptBridge,
   adaptLegacyTool,
   adaptLegacyAgent,
   adaptLegacyUser,
@@ -9,7 +9,7 @@ export {
 } from "./adapter";
 
 export {
-  initializeMichatBridge,
+  initializeIliagptBridge,
   executeToolEnterprise,
   getEnterpriseMetrics,
   getEnterpriseAuditLog,
@@ -17,12 +17,12 @@ export {
 } from "./example";
 
 export {
-  bootstrapMichatV3,
-  isMichatEnabled,
-  michatExecuteTool,
-  michatRunWorkflow,
-  michatRegisterTool,
-  michatGetMetrics,
-  michatGetAuditLog,
-  michatGetCircuitState,
+  bootstrapIliagptV3,
+  isIliagptEnabled,
+  iliagptExecuteTool,
+  iliagptRunWorkflow,
+  iliagptRegisterTool,
+  iliagptGetMetrics,
+  iliagptGetAuditLog,
+  iliagptGetCircuitState,
 } from "./bootstrap";

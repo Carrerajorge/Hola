@@ -1,14 +1,14 @@
 #!/bin/bash
-# MICHAT VPS Deployment Script
+# ILIAGPT VPS Deployment Script
 # Usage: ./deploy.sh
 
 set -e
 
 VPS_USER="root"
 VPS_HOST="69.62.98.126"
-VPS_PATH="/var/www/michat"
+VPS_PATH="/var/www/iliagpt"
 
-echo "🚀 Deploying MICHAT to VPS..."
+echo "🚀 Deploying ILIAGPT to VPS..."
 
 # 1. Build locally
 echo "📦 Building locally..."
@@ -23,9 +23,9 @@ git push origin main
 echo ""
 echo "✅ Code pushed! Now run these commands on VPS:"
 echo ""
-echo "  cd /var/www/michat"
+echo "  cd /var/www/iliagpt"
 echo "  git pull origin main"
-echo "  npm run build" 
-echo "  pm2 restart michat"
+echo "  npm run build"
+echo "  pm2 restart iliagpt"
 echo ""
 echo "Or connect via: ssh root@69.62.98.126"

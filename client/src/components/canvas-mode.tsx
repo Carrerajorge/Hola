@@ -1,5 +1,5 @@
 /**
- * Canvas Mode Component - MICHAT PRO 3.0
+ * Canvas Mode Component - ILIAGPT PRO 3.0
  * 
  * Infinite canvas for visual collaboration.
  * Supports nodes, connections, images, and real-time editing.

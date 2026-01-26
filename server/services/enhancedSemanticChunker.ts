@@ -1,5 +1,5 @@
 /**
- * Enhanced Semantic Chunker - MICHAT PRO 3.0 (10x Enhanced)
+ * Enhanced Semantic Chunker - ILIAGPT PRO 3.0 (10x Enhanced)
  * 
  * Context-aware chunking that preserves structure and meaning.
  * Handles tables, code blocks, and cross-references intelligently.

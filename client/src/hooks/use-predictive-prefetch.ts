@@ -1,5 +1,5 @@
 /**
- * Predictive Prefetch Hook - MICHAT PRO 3.0
+ * Predictive Prefetch Hook - ILIAGPT PRO 3.0
  * 
  * Intelligently preloads likely responses and data.
  * Reduces perceived latency through prediction.

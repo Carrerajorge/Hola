@@ -1,5 +1,5 @@
 /**
- * Parallel Processing Engine - MICHAT PRO 3.0 (Distributed)
+ * Parallel Processing Engine - ILIAGPT PRO 3.0 (Distributed)
  * 
  * Distributed job orchestration using BullMQ Flows.
  * Replaces in-memory WorkerPool with Redis-backed Flows.

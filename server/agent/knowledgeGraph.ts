@@ -1,5 +1,5 @@
 /**
- * Knowledge Graph Engine for MICHAT PRO 3.0
+ * Knowledge Graph Engine for ILIAGPT PRO 3.0
  * 
  * Almacena conocimiento estructurado con relaciones semánticas,
  * permite razonamiento causal y actualización continua.

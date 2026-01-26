@@ -1,4 +1,4 @@
-import { MichatError } from "../errors";
+import { IliagptError } from "../errors";
 import { uid } from "../config";
 import { Semaphore } from "../resilience/bulkhead";
 import type { 
@@ -83,13 +83,13 @@ export class WorkflowEngine {
     try {
       while (remaining.size > 0) {
         if (token.isCancelled) {
-          throw new MichatError("E_INTERNAL", `Workflow cancelled: ${token.cancellationReason || "No reason provided"}`);
+          throw new IliagptError("E_INTERNAL", `Workflow cancelled: ${token.cancellationReason || "No reason provided"}`);
         }
 
         const runnable = Array.from(remaining.values()).filter(canRun);
 
         if (runnable.length === 0 && currentlyRunning.size === 0) {
-          throw new MichatError("E_WORKFLOW_DAG", "Invalid DAG: circular dependencies or deadlock detected");
+          throw new IliagptError("E_WORKFLOW_DAG", "Invalid DAG: circular dependencies or deadlock detected");
         }
 
         if (runnable.length === 0) {
@@ -191,7 +191,7 @@ export class WorkflowEngine {
     for (const step of steps) {
       for (const dep of step.dependsOn ?? []) {
         if (!stepIds.has(dep)) {
-          throw new MichatError("E_WORKFLOW_DAG", `Missing dependency: ${dep} (referenced in step ${step.id})`);
+          throw new IliagptError("E_WORKFLOW_DAG", `Missing dependency: ${dep} (referenced in step ${step.id})`);
         }
       }
     }
@@ -219,7 +219,7 @@ export class WorkflowEngine {
 
     for (const step of steps) {
       if (hasCycle(step.id)) {
-        throw new MichatError("E_WORKFLOW_DAG", `Circular dependency detected involving step: ${step.id}`);
+        throw new IliagptError("E_WORKFLOW_DAG", `Circular dependency detected involving step: ${step.id}`);
       }
     }
   }

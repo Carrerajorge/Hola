@@ -1,5 +1,5 @@
 /**
- * Learning System - MICHAT PRO 3.0
+ * Learning System - ILIAGPT PRO 3.0
  * User preference learning and pattern recognition
  */
 

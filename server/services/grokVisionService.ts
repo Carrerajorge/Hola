@@ -1,5 +1,5 @@
 /**
- * Grok Vision Service - MICHAT PRO 3.0
+ * Grok Vision Service - ILIAGPT PRO 3.0
  * 
  * Image analysis using Grok 2 Vision API.
  * Extracts text, tables, charts, and descriptions from images.

@@ -1,5 +1,5 @@
 /**
- * Notification Sound - MICHAT PRO 3.0
+ * Notification Sound - ILIAGPT PRO 3.0
  * Web Audio API based notification sounds
  */
 

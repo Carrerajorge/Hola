@@ -1,5 +1,5 @@
 /**
- * Offline Mode Hook - MICHAT PRO 3.0
+ * Offline Mode Hook - ILIAGPT PRO 3.0
  * 
  * Enables offline functionality with local caching,
  * sync queue, and intelligent reconnection.
@@ -47,11 +47,11 @@ export interface OfflineConfig {
 // ============== Storage Keys ==============
 
 const STORAGE_KEYS = {
-    pendingActions: "michat_pending_actions",
-    cachedMessages: "michat_cached_messages",
-    cachedChats: "michat_cached_chats",
-    lastSync: "michat_last_sync",
-    offlineSettings: "michat_offline_settings",
+    pendingActions: "iliagpt_pending_actions",
+    cachedMessages: "iliagpt_cached_messages",
+    cachedChats: "iliagpt_cached_chats",
+    lastSync: "iliagpt_last_sync",
+    offlineSettings: "iliagpt_offline_settings",
 };
 
 // ============== Helpers ==============

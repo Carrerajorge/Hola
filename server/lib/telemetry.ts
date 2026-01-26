@@ -22,7 +22,7 @@ export interface TelemetryConfig {
 }
 
 const DEFAULT_CONFIG: TelemetryConfig = {
-    serviceName: "michat",
+    serviceName: "iliagpt",
     serviceVersion: process.env.APP_VERSION || "1.0.0",
     environment: process.env.NODE_ENV || "development",
     exporterType: "console",

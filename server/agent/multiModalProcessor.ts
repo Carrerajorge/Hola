@@ -1,5 +1,5 @@
 /**
- * Multi-Modal Processor for MICHAT PRO 3.0
+ * Multi-Modal Processor for ILIAGPT PRO 3.0
  * 
  * Processes multiple content types:
  * - Image analysis with vision AI

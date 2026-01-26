@@ -1,5 +1,5 @@
 /**
- * Unified Document Analyzer - MICHAT PRO 3.0
+ * Unified Document Analyzer - ILIAGPT PRO 3.0
  * 
  * Combines all document/image analysis services into one API.
  * Integrates: RAG, Vision, OCR, Anonymization, Queue

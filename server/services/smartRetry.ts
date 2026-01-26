@@ -1,5 +1,5 @@
 /**
- * Smart Retry System - MICHAT PRO 3.0
+ * Smart Retry System - ILIAGPT PRO 3.0
  * 
  * Intelligent retry with exponential backoff and model fallback.
  */

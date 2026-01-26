@@ -1,5 +1,5 @@
 /**
- * Self-Healing System for MICHAT PRO
+ * Self-Healing System for ILIAGPT PRO
  * 
  * Autonomous error detection, diagnosis, and remediation system.
  * Learns from failures to improve future execution.

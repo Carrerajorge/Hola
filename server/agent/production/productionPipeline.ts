@@ -242,7 +242,7 @@ export class ProductionPipeline extends EventEmitter {
 
             this.contentSpec = {
                 title: blueprint.outline.title,
-                authors: ['MICHAT AI'],
+                authors: ['ILIAGPT AI'],
                 date: new Date().toISOString().split('T')[0],
                 sections: blueprint.outline.sections.map(s => ({
                     id: s.id,

@@ -1,5 +1,5 @@
 /**
- * Autonomous Decision Engine for MICHAT PRO
+ * Autonomous Decision Engine for ILIAGPT PRO
  * 
  * Enables the agent to make intelligent decisions without user intervention.
  * Uses confidence scoring, context analysis, and learned preferences.

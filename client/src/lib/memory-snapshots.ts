@@ -10,7 +10,7 @@
 
 import { Message, Chat } from '@/hooks/use-chats';
 
-const DB_NAME = 'michat-snapshots';
+const DB_NAME = 'iliagpt-snapshots';
 const DB_VERSION = 1;
 const STORE_SNAPSHOTS = 'snapshots';
 

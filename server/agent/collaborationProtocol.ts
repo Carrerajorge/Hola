@@ -1,5 +1,5 @@
 /**
- * Agent Collaboration Protocol for MICHAT PRO 3.0
+ * Agent Collaboration Protocol for ILIAGPT PRO 3.0
  * 
  * Protocolo de comunicación estructurada entre agentes:
  * - Mensajes tipados (request, inform, propose, confirm, reject)

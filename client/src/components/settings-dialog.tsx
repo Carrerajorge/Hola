@@ -524,7 +524,7 @@ function AppsSection() {
         <div>
           <h2 className="text-xl font-semibold" data-testid="text-apps-title">Aplicaciones e Integraciones</h2>
           <p className="text-sm text-muted-foreground mt-1" data-testid="text-apps-description">
-            Conecta y administra las aplicaciones que MICHAT puede usar
+            Conecta y administra las aplicaciones que ILIAGPT puede usar
           </p>
         </div>
         <div className="flex items-center justify-center py-8">
@@ -540,7 +540,7 @@ function AppsSection() {
         <div>
           <h2 className="text-xl font-semibold" data-testid="text-apps-title">Aplicaciones e Integraciones</h2>
           <p className="text-sm text-muted-foreground mt-1" data-testid="text-apps-description">
-            Conecta y administra las aplicaciones que MICHAT puede usar
+            Conecta y administra las aplicaciones que ILIAGPT puede usar
           </p>
         </div>
         <Button
@@ -938,7 +938,7 @@ function DataControlsSection() {
             <div className="flex-1 pr-4">
               <span className="text-sm block">Datos del navegador remoto</span>
               <span className="text-xs text-muted-foreground">
-                Permite que MICHAT acceda a datos de sesiones de navegación remota (cookies, DOM, capturas).
+                Permite que ILIAGPT acceda a datos de sesiones de navegación remota (cookies, DOM, capturas).
               </span>
             </div>
             <Switch
@@ -1611,7 +1611,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div>
                   <span className="text-sm font-medium">Estilo y tonos de base</span>
                   <p className="text-sm text-muted-foreground">
-                    Configura el estilo y el tono que MICHAT utiliza al responder.
+                    Configura el estilo y el tono que ILIAGPT utiliza al responder.
                   </p>
                 </div>
                 <Select
@@ -1649,7 +1649,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <div className="space-y-2">
               <span className="text-sm font-medium">Apodo</span>
               <Input
-                placeholder="¿Cómo debería llamarte MICHAT?"
+                placeholder="¿Cómo debería llamarte ILIAGPT?"
                 value={settings.nickname}
                 onChange={(e) => updateSetting("nickname", e.target.value)}
                 data-testid="input-nickname"
@@ -1682,7 +1682,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <div className="space-y-4">
               <div className="flex items-center justify-between py-2">
                 <div className="flex-1 pr-4">
-                  <span className="text-sm block">Permite que MICHAT guarde y use memorias al responder.</span>
+                  <span className="text-sm block">Permite que ILIAGPT guarde y use memorias al responder.</span>
                 </div>
                 <Switch
                   checked={settings.allowMemories}
@@ -1695,7 +1695,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Consultar el historial de grabaciones</span>
                   <span className="text-xs text-muted-foreground">
-                    Permite que MICHAT consulte transcripciones y notas de grabaciones anteriores.
+                    Permite que ILIAGPT consulte transcripciones y notas de grabaciones anteriores.
                   </span>
                 </div>
                 <Switch
@@ -1709,7 +1709,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Búsqueda en la web</span>
                   <span className="text-xs text-muted-foreground">
-                    Dejar que MICHAT busque automáticamente las respuestas en la web.
+                    Dejar que ILIAGPT busque automáticamente las respuestas en la web.
                   </span>
                 </div>
                 <Switch
@@ -1723,7 +1723,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Código</span>
                   <span className="text-xs text-muted-foreground">
-                    Dejar que MICHAT ejecute el código con el Intérprete de código.
+                    Dejar que ILIAGPT ejecute el código con el Intérprete de código.
                   </span>
                 </div>
                 <Switch
@@ -1737,7 +1737,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Lienzo</span>
                   <span className="text-xs text-muted-foreground">
-                    Colaborar con MICHAT en texto y código.
+                    Colaborar con ILIAGPT en texto y código.
                   </span>
                 </div>
                 <Switch
@@ -1749,9 +1749,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
               <div className="flex items-center justify-between py-2">
                 <div className="flex-1 pr-4">
-                  <span className="text-sm block">MICHAT Voice</span>
+                  <span className="text-sm block">ILIAGPT Voice</span>
                   <span className="text-xs text-muted-foreground">
-                    Habilitar el modo de voz en MICHAT
+                    Habilitar el modo de voz en ILIAGPT
                   </span>
                 </div>
                 <Switch
@@ -1779,7 +1779,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <div className="flex-1 pr-4">
                   <span className="text-sm block">Búsqueda del conector</span>
                   <span className="text-xs text-muted-foreground">
-                    Dejar que MICHAT busque automáticamente las respuestas en las fuentes conectadas.
+                    Dejar que ILIAGPT busque automáticamente las respuestas en las fuentes conectadas.
                   </span>
                 </div>
                 <Switch
@@ -1800,7 +1800,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Programaciones</h2>
             <p className="text-sm text-muted-foreground">
-              MICHAT puede programarse para ejecutarse nuevamente después de completar una tarea.
+              ILIAGPT puede programarse para ejecutarse nuevamente después de completar una tarea.
               Selecciona <span className="inline-flex items-center"><Calendar className="h-3 w-3 mx-1" /></span> Programar en el menú de <span className="font-medium">⋯</span> en una conversación para configurar ejecuciones futuras.
             </p>
             <Button variant="outline" data-testid="button-manage-schedules">
@@ -1893,9 +1893,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               <Separator />
 
               <div className="pt-2">
-                <h3 className="text-base font-medium">Inicio de sesión seguro con MICHAT</h3>
+                <h3 className="text-base font-medium">Inicio de sesión seguro con ILIAGPT</h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Inicia sesión en sitios web y aplicaciones en toda la red con la seguridad confiable de MICHAT.
+                  Inicia sesión en sitios web y aplicaciones en toda la red con la seguridad confiable de ILIAGPT.
                 </p>
               </div>
             </div>

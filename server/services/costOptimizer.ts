@@ -1,5 +1,5 @@
 /**
- * Cost Optimizer - MICHAT PRO 3.0
+ * Cost Optimizer - ILIAGPT PRO 3.0
  * 
  * Tracks, analyzes, and optimizes AI model costs.
  * Provides recommendations and budget alerts.

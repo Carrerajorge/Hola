@@ -1,5 +1,5 @@
 /**
- * API Tester Component - MICHAT PRO 3.0
+ * API Tester Component - ILIAGPT PRO 3.0
  * 
  * Postman-like interface for testing APIs.
  * Request builder, response viewer, history.

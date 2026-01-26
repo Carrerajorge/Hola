@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: MICHAT API
+  title: ILIAGPT API
   description: |
-    API pública de MICHAT - Asistente de IA avanzado para productividad y documentos.
+    API pública de ILIAGPT - Asistente de IA avanzado para productividad y documentos.
     
     ## Autenticación
     La API utiliza tokens Bearer JWT. Incluye el token en el header `Authorization`:
@@ -21,15 +21,15 @@ info:
     - `500`: Error interno del servidor
   version: 1.0.0
   contact:
-    name: MICHAT Support
-    email: api@michat.ai
+    name: ILIAGPT Support
+    email: api@iliagpt.com
   license:
     name: Proprietary
 
 servers:
   - url: http://localhost:5000/api
     description: Development
-  - url: https://api.michat.ai/v1
+  - url: https://api.iliagpt.com/v1
     description: Production
 
 tags:

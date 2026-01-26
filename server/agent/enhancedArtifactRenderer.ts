@@ -1,5 +1,5 @@
 /**
- * Enhanced Artifact Renderer Integration for MICHAT PRO 3.0
+ * Enhanced Artifact Renderer Integration for ILIAGPT PRO 3.0
  * 
  * Extends the existing artifactRenderer with:
  * - Professional PPT themes from pptTemplateEngine
