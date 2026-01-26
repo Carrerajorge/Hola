@@ -111,10 +111,13 @@ export class ChatRepository {
       throw new ValidationError("chatId is required to create message");
     }
     logRepositoryAction({ action: "createChatMessage", resourceId: message.chatId });
-    
-    const [result] = await db.insert(chatMessages).values(message).returning();
-    await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, message.chatId));
-    return result;
+
+    // Use transaction to ensure atomicity
+    return db.transaction(async (tx) => {
+      const [result] = await tx.insert(chatMessages).values(message).returning();
+      await tx.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, message.chatId));
+      return result;
+    });
   }
 
   async getChatMessages(chatId: string): Promise<ChatMessage[]> {

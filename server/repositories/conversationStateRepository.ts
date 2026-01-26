@@ -134,20 +134,23 @@ export class ConversationStateRepository {
   }
 
   async addArtifact(data: InsertConversationArtifact): Promise<ConversationArtifact> {
-    const [artifact] = await db
-      .insert(conversationArtifacts)
-      .values(data)
-      .returning();
+    // Use transaction to ensure atomicity
+    return db.transaction(async (tx) => {
+      const [artifact] = await tx
+        .insert(conversationArtifacts)
+        .values(data)
+        .returning();
 
-    await db
-      .update(conversationStates)
-      .set({
-        artifactCount: sql`${conversationStates.artifactCount} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(conversationStates.id, data.stateId));
+      await tx
+        .update(conversationStates)
+        .set({
+          artifactCount: sql`${conversationStates.artifactCount} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(conversationStates.id, data.stateId));
 
-    return artifact;
+      return artifact;
+    });
   }
 
   async getArtifacts(stateId: string): Promise<ConversationArtifact[]> {
@@ -173,27 +176,30 @@ export class ConversationStateRepository {
   }
 
   async addImage(data: InsertConversationImage): Promise<ConversationImage> {
-    // Mark ALL previous images in this conversation as not latest
-    await db
-      .update(conversationImages)
-      .set({ isLatest: "false" })
-      .where(eq(conversationImages.stateId, data.stateId));
+    // Use transaction to ensure atomicity across all 3 operations
+    return db.transaction(async (tx) => {
+      // Mark ALL previous images in this conversation as not latest
+      await tx
+        .update(conversationImages)
+        .set({ isLatest: "false" })
+        .where(eq(conversationImages.stateId, data.stateId));
 
-    const [image] = await db
-      .insert(conversationImages)
-      .values({ ...data, isLatest: "true" })
-      .returning();
+      const [image] = await tx
+        .insert(conversationImages)
+        .values({ ...data, isLatest: "true" })
+        .returning();
 
-    await db
-      .update(conversationStates)
-      .set({
-        imageCount: sql`${conversationStates.imageCount} + 1`,
-        lastImageId: image.id,
-        updatedAt: new Date(),
-      })
-      .where(eq(conversationStates.id, data.stateId));
+      await tx
+        .update(conversationStates)
+        .set({
+          imageCount: sql`${conversationStates.imageCount} + 1`,
+          lastImageId: image.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(conversationStates.id, data.stateId));
 
-    return image;
+      return image;
+    });
   }
 
   async getImages(stateId: string): Promise<ConversationImage[]> {

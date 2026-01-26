@@ -636,8 +636,17 @@ export class MemStorage implements IStorage {
   }
 
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
-    const [result] = await db.insert(chatMessages).values(message).returning();
-    await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, message.chatId));
+    // Use transaction to ensure atomicity
+    const result = await db.transaction(async (tx) => {
+      const [insertedMessage] = await tx.insert(chatMessages).values(message).returning();
+      await tx.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, message.chatId));
+      return insertedMessage;
+    });
+
+    // Invalidate cache for this chat's messages
+    cache.forget(`messages:${message.chatId}:all:0:asc`);
+    cache.forget(`messages:${message.chatId}:all:0:desc`);
+
     return result;
   }
 
@@ -744,27 +753,36 @@ export class MemStorage implements IStorage {
       savedAt: new Date().toISOString()
     };
 
-    if (docGenMessage) {
-      // Update existing message with the document attachment
-      const existingAttachments = Array.isArray(docGenMessage.attachments) ? docGenMessage.attachments : [];
-      const [result] = await db.update(chatMessages)
-        .set({ attachments: [...existingAttachments, attachment] })
-        .where(eq(chatMessages.id, docGenMessage.id))
-        .returning();
-      await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
-      return result;
-    } else {
-      // Fallback: create new system message if no "Documento generado" message found
-      const [result] = await db.insert(chatMessages).values({
-        chatId,
-        role: "system",
-        content: `Documento guardado: ${document.title}`,
-        attachments: [attachment],
-        status: "done"
-      }).returning();
-      await db.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
-      return result;
-    }
+    // Use transaction for atomicity
+    const result = await db.transaction(async (tx) => {
+      if (docGenMessage) {
+        // Update existing message with the document attachment
+        const existingAttachments = Array.isArray(docGenMessage.attachments) ? docGenMessage.attachments : [];
+        const [updated] = await tx.update(chatMessages)
+          .set({ attachments: [...existingAttachments, attachment] })
+          .where(eq(chatMessages.id, docGenMessage.id))
+          .returning();
+        await tx.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
+        return updated;
+      } else {
+        // Fallback: create new system message if no "Documento generado" message found
+        const [inserted] = await tx.insert(chatMessages).values({
+          chatId,
+          role: "system",
+          content: `Documento guardado: ${document.title}`,
+          attachments: [attachment],
+          status: "done"
+        }).returning();
+        await tx.update(chats).set({ updatedAt: new Date() }).where(eq(chats.id, chatId));
+        return inserted;
+      }
+    });
+
+    // Invalidate cache
+    cache.forget(`messages:${chatId}:all:0:asc`);
+    cache.forget(`messages:${chatId}:all:0:desc`);
+
+    return result;
   }
 
   // Chat Run operations (for idempotent message processing)
