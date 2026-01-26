@@ -63,20 +63,57 @@ const geminiAI = new GoogleGenAI({
 
 // ============== Model Specs ==============
 
+// ============================================
+// DEFAULT MODELS - Updated January 2026
+// ============================================
 const DEFAULT_MODELS: ModelSpec[] = [
     {
-        id: "grok-3",
+        id: "grok-4-fast",
         provider: "grok",
-        model: "grok-3",
-        weight: 0.6,
-        capabilities: ["reasoning", "code", "analysis"],
+        model: "grok-4-fast",
+        weight: 0.5,
+        capabilities: ["reasoning", "code", "analysis", "2M-context"],
     },
     {
-        id: "gemini-2.5-flash",
+        id: "gemini-3-flash",
         provider: "gemini",
-        model: "gemini-2.5-flash",
+        model: "gemini-3-flash-preview",
+        weight: 0.5,
+        capabilities: ["multimodal", "reasoning", "fast"],
+    },
+];
+
+const REASONING_MODELS: ModelSpec[] = [
+    {
+        id: "grok-4-reasoning",
+        provider: "grok",
+        model: "grok-4.1-fast-reasoning",
+        weight: 0.6,
+        capabilities: ["deep-reasoning", "analysis"],
+    },
+    {
+        id: "gemini-3-deep-think",
+        provider: "gemini",
+        model: "gemini-3-deep-think",
         weight: 0.4,
-        capabilities: ["multimodal", "long-context", "fast"],
+        capabilities: ["reasoning", "complex-problems"],
+    },
+];
+
+const FAST_MODELS: ModelSpec[] = [
+    {
+        id: "grok-3-mini-fast",
+        provider: "grok",
+        model: "grok-3-mini-fast",
+        weight: 0.5,
+        capabilities: ["fast", "efficient"],
+    },
+    {
+        id: "gemini-2.5-flash-lite",
+        provider: "gemini",
+        model: "gemini-2.5-flash-lite",
+        weight: 0.5,
+        capabilities: ["fast", "high-throughput"],
     },
 ];
 
@@ -86,14 +123,31 @@ const VISION_MODELS: ModelSpec[] = [
         provider: "grok",
         model: "grok-2-vision-1212",
         weight: 0.5,
-        capabilities: ["vision", "ocr"],
+        capabilities: ["vision", "ocr", "image-analysis"],
     },
     {
         id: "gemini-2.5-flash",
         provider: "gemini",
         model: "gemini-2.5-flash",
         weight: 0.5,
-        capabilities: ["vision", "multimodal"],
+        capabilities: ["vision", "multimodal", "image-understanding"],
+    },
+];
+
+const CODE_MODELS: ModelSpec[] = [
+    {
+        id: "grok-code",
+        provider: "grok",
+        model: "grok-code-fast-1",
+        weight: 0.6,
+        capabilities: ["code", "agentic", "programming"],
+    },
+    {
+        id: "gemini-2.5-pro",
+        provider: "gemini",
+        model: "gemini-2.5-pro",
+        weight: 0.4,
+        capabilities: ["code", "long-context", "analysis"],
     },
 ];
 

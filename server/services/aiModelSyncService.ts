@@ -221,7 +221,7 @@ export async function syncModelsForProvider(provider: string): Promise<{ added: 
         });
         result.updated++;
       } else {
-        // New models are created as INACTIVE by default
+        // New models are created as ACTIVE by default
         await storage.createAiModel({
           name: model.name,
           provider: provider.toLowerCase(),
@@ -235,8 +235,8 @@ export async function syncModelsForProvider(provider: string): Promise<{ added: 
           description: model.description,
           isDeprecated: model.isDeprecated ? "true" : "false",
           releaseDate: model.releaseDate,
-          status: "inactive",
-          isEnabled: "false", // Disabled by default - user must activate
+          status: "active",
+          isEnabled: "true", // Enabled by default
           lastSyncAt: new Date(),
         });
         result.added++;

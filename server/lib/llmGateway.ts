@@ -126,43 +126,95 @@ const PROVIDER_MODELS = {
   },
 };
 
+// ============================================
+// ALL KNOWN MODELS - Updated January 2026
+// ============================================
 const KNOWN_GEMINI_MODELS = new Set([
-  GEMINI_MODELS.FLASH_PREVIEW.toLowerCase(),
-  GEMINI_MODELS.FLASH.toLowerCase(),
-  GEMINI_MODELS.PRO.toLowerCase(),
+  // Gemini 3 Series (Latest)
+  "gemini-3-flash-preview",
+  "gemini-3-pro",
+  "gemini-3-pro-image",
+  "gemini-3-deep-think",
+  // Gemini 2.5 Series (Production)
+  "gemini-2.5-pro",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash-image",
+  // Gemini 2.0 Series (Stable)
   "gemini-2.0-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-pro",
+  "gemini-2.0-flash-exp",
   "gemini-2.0-pro",
+  // Gemini 1.5 Series (Legacy)
+  "gemini-1.5-pro",
+  "gemini-1.5-flash",
+  // Specialized
+  "imagen-4",
+  "imagen-3",
+  "veo-3",
+  "text-embedding-004",
 ]);
 
 const KNOWN_XAI_MODELS = new Set([
-  MODELS.TEXT.toLowerCase(),
-  MODELS.VISION.toLowerCase(),
-  "grok-4-1-fast-non-reasoning",
+  // Grok 4.1 Series (Latest)
+  "grok-4.1-fast",
+  "grok-4.1-fast-reasoning",
+  // Grok 4 Series
+  "grok-4",
+  "grok-4-fast",
   "grok-4-fast-reasoning",
-  "grok-4-fast-non-reasoning",
   "grok-4-0709",
+  // Grok 3 Series (Stable)
+  "grok-3",
   "grok-3-fast",
+  "grok-3-mini",
+  "grok-3-mini-fast",
+  // Grok 2 Series (Legacy)
+  "grok-2",
+  "grok-2-vision-1212",
+  "grok-beta",
+  // Specialized
+  "grok-code-fast-1",
+  "grok-2-image-1212",
 ]);
 
-function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | null {
+const KNOWN_OPENAI_MODELS = new Set([
+  // GPT-5 Series (Latest)
+  "gpt-5", "gpt-5.2", "gpt-5.2-codex", "gpt-5.1", "gpt-5-mini", "gpt-5-nano",
+  // GPT-4.1 Series
+  "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+  // GPT-4o Series
+  "gpt-4o", "gpt-4o-mini",
+  // O-Series Reasoning
+  "o3", "o3-pro", "o3-mini", "o4-mini", "o4-mini-high", "o1", "o1-pro", "o1-mini",
+  // Specialized
+  "sora-2", "gpt-image-1.5", "dall-e-3", "whisper-1", "text-embedding-3-large",
+]);
+
+function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | "openai" | null {
   if (!model) return null;
 
   const normalizedModel = model.toLowerCase();
 
+  // Check exact matches first
   if (KNOWN_GEMINI_MODELS.has(normalizedModel)) {
     return "gemini";
   }
   if (KNOWN_XAI_MODELS.has(normalizedModel)) {
     return "xai";
   }
+  if (KNOWN_OPENAI_MODELS.has(normalizedModel)) {
+    return "openai";
+  }
 
-  if (/gemini/i.test(model)) {
+  // Pattern-based detection
+  if (/gemini|imagen|veo/i.test(model)) {
     return "gemini";
   }
   if (/grok/i.test(model)) {
     return "xai";
+  }
+  if (/gpt|o1|o3|o4|dall-e|whisper|sora/i.test(model)) {
+    return "openai";
   }
 
   return null;

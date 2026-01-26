@@ -2,7 +2,38 @@ import { GoogleGenAI } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
+// ============================================
+// GEMINI MODELS - Updated January 2026
+// ============================================
 export const GEMINI_MODELS = {
+  // Gemini 3 Series (Latest)
+  GEMINI_3_FLASH_PREVIEW: "gemini-3-flash-preview",
+  GEMINI_3_PRO: "gemini-3-pro",
+  GEMINI_3_PRO_IMAGE: "gemini-3-pro-image",
+  GEMINI_3_DEEP_THINK: "gemini-3-deep-think",
+
+  // Gemini 2.5 Series (Production)
+  GEMINI_2_5_PRO: "gemini-2.5-pro",
+  GEMINI_2_5_FLASH: "gemini-2.5-flash",
+  GEMINI_2_5_FLASH_LITE: "gemini-2.5-flash-lite",
+  GEMINI_2_5_FLASH_IMAGE: "gemini-2.5-flash-image",
+
+  // Gemini 2.0 Series (Stable)
+  GEMINI_2_0_FLASH: "gemini-2.0-flash",
+  GEMINI_2_0_FLASH_EXP: "gemini-2.0-flash-exp",
+  GEMINI_2_0_PRO: "gemini-2.0-pro",
+
+  // Gemini 1.5 Series (Legacy)
+  GEMINI_1_5_PRO: "gemini-1.5-pro",
+  GEMINI_1_5_FLASH: "gemini-1.5-flash",
+
+  // Specialized
+  IMAGEN_4: "imagen-4",
+  IMAGEN_3: "imagen-3",
+  VEO_3: "veo-3",
+  EMBEDDING: "text-embedding-004",
+
+  // Default aliases
   FLASH_PREVIEW: "gemini-3-flash-preview",
   FLASH: "gemini-2.5-flash",
   PRO: "gemini-2.5-pro",
