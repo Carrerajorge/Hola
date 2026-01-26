@@ -1,10 +1,10 @@
 /**
- * Google OAuth Authentication - CORREGIDO
+ * Google OAuth Authentication - CORREGIDO V2
  * Implements OAuth 2.0 for Google account login
  * 
- * CAMBIOS REALIZADOS:
- * - Reemplazado stateStore (Map en memoria) por tabla en base de datos
- * - Esto soluciona el problema cuando hay múltiples réplicas del servidor
+ * CAMBIOS:
+ * - Corregido error ERR_HTTP_HEADERS_SENT
+ * - Mejor manejo del flujo de respuestas
  */
 import { Router, Request, Response } from "express";
 import { authStorage } from "../replit_integrations/auth/storage";
@@ -46,7 +46,7 @@ const generateState = (): string => {
     return Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
-// Cleanup old states every 5 minutes (ahora limpia de la base de datos)
+// Cleanup old states every 5 minutes
 setInterval(async () => {
     try {
         const now = new Date();
@@ -72,7 +72,6 @@ router.get("/google", async (req: Request, res: Response) => {
     const state = generateState();
     const returnUrl = (req.query.returnUrl as string) || "/";
     
-    // Guardar estado en la base de datos en lugar de memoria
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
     
     try {
@@ -87,16 +86,8 @@ router.get("/google", async (req: Request, res: Response) => {
         return res.redirect("/login?error=internal_error");
     }
 
-    // IMPORTANTE: Usar siempre HTTPS en producción
-    // Y usar el dominio correcto que está registrado en Google Cloud Console
     const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
     const host = req.get("host");
-    
-    // Si tienes un dominio específico configurado, úsalo
-    // const redirectUri = env.NODE_ENV === "production" 
-    //     ? "https://iliagpt.com/api/auth/google/callback"
-    //     : `${protocol}://${host}/api/auth/google/callback`;
-    
     const redirectUri = `${protocol}://${host}/api/auth/google/callback`;
 
     const params = new URLSearchParams({
@@ -111,7 +102,7 @@ router.get("/google", async (req: Request, res: Response) => {
 
     const authUrl = `${config.authorizationUrl}?${params.toString()}`;
     console.log("[Google Auth] Redirecting to Google login");
-    res.redirect(authUrl);
+    return res.redirect(authUrl);
 });
 
 /**
@@ -132,22 +123,22 @@ router.get("/google/callback", async (req: Request, res: Response) => {
     }
 
     // Verificar estado desde la base de datos
-    let stateData;
+    let stateData: { returnUrl: string } | null = null;
     try {
         const results = await db.select()
             .from(oauthStates)
             .where(eq(oauthStates.state, state as string))
             .limit(1);
         
-        stateData = results[0];
-        
-        if (!stateData) {
+        if (!results[0]) {
             console.error("[Google Auth] Invalid or expired state - not found in database");
             return res.redirect("/login?error=google_invalid_state");
         }
         
+        stateData = { returnUrl: results[0].returnUrl };
+        
         // Verificar si expiró
-        if (new Date() > new Date(stateData.expiresAt)) {
+        if (new Date() > new Date(results[0].expiresAt)) {
             console.error("[Google Auth] State expired");
             await db.delete(oauthStates).where(eq(oauthStates.state, state as string));
             return res.redirect("/login?error=google_state_expired");
@@ -156,8 +147,8 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         // Eliminar el estado usado (one-time use)
         await db.delete(oauthStates).where(eq(oauthStates.state, state as string));
         
-    } catch (error) {
-        console.error("[Google Auth] Error verifying state:", error);
+    } catch (dbError) {
+        console.error("[Google Auth] Error verifying state:", dbError);
         return res.redirect("/login?error=internal_error");
     }
 
@@ -165,6 +156,9 @@ router.get("/google/callback", async (req: Request, res: Response) => {
     if (!config) {
         return res.redirect("/login?error=google_not_configured");
     }
+
+    // Guardar returnUrl para usarla después
+    const finalReturnUrl = stateData?.returnUrl || "/";
 
     try {
         const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
@@ -231,7 +225,6 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         let user = await authStorage.getUserByEmail(email);
 
         if (!user) {
-            // Create new user
             user = await authStorage.upsertUser({
                 id: `google_${googleUser.id}`,
                 email,
@@ -245,7 +238,6 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             });
             console.log("[Google Auth] Created new user:", email);
         } else {
-            // Update existing user
             user = await authStorage.upsertUser({
                 id: user.id,
                 email,
@@ -276,41 +268,43 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
         };
 
-        req.login(sessionUser, async (loginErr) => {
-            if (loginErr) {
-                console.error("[Google Auth] Session creation failed:", loginErr);
-                return res.redirect("/login?error=session_error");
-            }
-
-            // Update last login
-            try {
-                await authStorage.updateUserLogin(`google_${googleUser.id}`, {
-                    ipAddress: req.ip || req.socket.remoteAddress || null,
-                    userAgent: req.headers["user-agent"] || null,
-                });
-
-                await storage.createAuditLog({
-                    userId: `google_${googleUser.id}`,
-                    action: "user_login",
-                    resource: "auth",
-                    details: {
-                        email,
-                        provider: "google_oauth",
-                    },
-                    ipAddress: req.ip || req.socket.remoteAddress || null,
-                    userAgent: req.headers["user-agent"] || null,
-                });
-            } catch (auditError) {
-                console.warn("[Google Auth] Failed to create audit log:", auditError);
-            }
-
-            console.log("[Google Auth] Login successful for:", email);
-            res.redirect(stateData.returnUrl || "/?auth=success");
+        // Usar promesa para manejar req.login correctamente
+        await new Promise<void>((resolve, reject) => {
+            req.login(sessionUser, (loginErr) => {
+                if (loginErr) {
+                    reject(loginErr);
+                } else {
+                    resolve();
+                }
+            });
         });
+
+        // Update last login (no bloquear la respuesta)
+        authStorage.updateUserLogin(user.id, {
+            ipAddress: req.ip || req.socket.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null,
+        }).catch(err => console.warn("[Google Auth] Failed to update login:", err));
+
+        storage.createAuditLog({
+            userId: user.id,
+            action: "user_login",
+            resource: "auth",
+            details: {
+                email,
+                provider: "google_oauth",
+            },
+            ipAddress: req.ip || req.socket.remoteAddress || null,
+            userAgent: req.headers["user-agent"] || null,
+        }).catch(err => console.warn("[Google Auth] Failed to create audit log:", err));
+
+        console.log("[Google Auth] Login successful for:", email);
+        return res.redirect(finalReturnUrl + "?auth=success");
 
     } catch (error: any) {
         console.error("[Google Auth] Callback error:", error);
-        return res.redirect("/login?error=google_error");
+        if (!res.headersSent) {
+            return res.redirect("/login?error=google_error");
+        }
     }
 });
 
