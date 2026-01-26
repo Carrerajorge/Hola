@@ -25,7 +25,7 @@ export const csrfTokenMiddleware = (req: Request, res: Response, next: NextFunct
     const cookies = ensureCookies(req);
 
     // Only set the token if it doesn't exist or we want to rotate it
-    if (!cookies[CSRF_COOKIE_NAME]) {
+    if (!res.headersSent && !cookies[CSRF_COOKIE_NAME]) {
         const token = crypto.randomUUID();
         res.cookie(CSRF_COOKIE_NAME, token, {
             httpOnly: false, // Must be readable by client JS to header-ize it
