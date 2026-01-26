@@ -164,7 +164,7 @@ export default function LoginPage() {
 
           <div className="text-center mb-8 fade-in-up">
             <h1 className="text-3xl font-bold mb-3 text-white">
-              Bienvenido a <span className="text-gradient-premium">MICHAT</span>
+              Bienvenido a <span className="text-gradient-premium">ILIAGPT</span>
             </h1>
             <p className="text-zinc-400">
               Obtén respuestas más inteligentes, carga archivos e imágenes, y más.

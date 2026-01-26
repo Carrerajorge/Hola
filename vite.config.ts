@@ -16,8 +16,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'robots.txt', 'apple-touch-icon.png'],
       manifest: {
-        name: 'MICHAT PRO - AI Assistant',
-        short_name: 'MICHAT',
+        name: 'ILIAGPT - AI Assistant',
+        short_name: 'ILIAGPT',
         description: 'Advanced AI Assistant Platform with Enterprise Security',
         theme_color: '#0f172a',
         background_color: '#0f172a',

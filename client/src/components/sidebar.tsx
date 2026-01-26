@@ -548,7 +548,7 @@ export function Sidebar({
         <div className="flex items-center gap-2">
           <IliaGPTLogo size={32} />
           <div className="flex flex-col">
-            <span className="text-sm font-semibold leading-none liquid-text-gradient">MICHAT</span>
+            <span className="text-sm font-semibold leading-none liquid-text-gradient">ILIAGPT</span>
             <span className="text-[10px] text-muted-foreground">AI Platform</span>
           </div>
         </div>

@@ -1,6 +1,6 @@
 {
-  "name": "MICHAT",
-  "short_name": "MICHAT",
+  "name": "ILIAGPT",
+  "short_name": "ILIAGPT",
   "description": "Asistente de IA avanzado para productividad y documentos",
   "start_url": "/",
   "display": "standalone",
@@ -70,7 +70,7 @@
       "sizes": "1280x720",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Pantalla principal de MICHAT"
+      "label": "Pantalla principal de ILIAGPT"
     },
     {
       "src": "/screenshots/chat.png",
@@ -84,7 +84,7 @@
       "sizes": "390x844",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "MICHAT en móvil"
+      "label": "ILIAGPT en móvil"
     }
   ],
   "shortcuts": [
