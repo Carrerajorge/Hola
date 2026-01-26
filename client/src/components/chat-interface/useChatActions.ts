@@ -194,13 +194,18 @@ async function processAttachments(files: File[]): Promise<Attachment[]> {
     return Promise.all(
         files.map(async (file) => {
             const content = await readFileAsDataURL(file);
+            const isImage = file.type.startsWith('image/');
             return {
                 id: crypto.randomUUID(),
                 name: file.name,
-                type: file.type,
+                type: isImage ? 'image' : file.type,
                 size: file.size,
                 content,
-                thumbnail: file.type.startsWith('image/') ? content : undefined,
+                thumbnail: isImage ? content : undefined,
+                // Add imageUrl for image rendering in AttachmentList
+                imageUrl: isImage ? content : undefined,
+                mimeType: file.type,
+                url: content, // Fallback URL
             };
         })
     );

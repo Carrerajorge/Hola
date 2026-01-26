@@ -31,6 +31,20 @@ export interface Attachment {
     url?: string;
     content?: string;
     thumbnail?: string;
+    // Additional properties for file uploads
+    imageUrl?: string;
+    storagePath?: string;
+    mimeType?: string;
+    fileId?: string;
+    title?: string;
+    documentType?: 'word' | 'excel' | 'ppt';
+    spreadsheetData?: {
+        uploadId: string;
+        sheets: Array<{ name: string; rowCount: number; columnCount: number }>;
+        previewData?: { headers: string[]; data: any[][] };
+        analysisId?: string;
+        sessionId?: string;
+    };
 }
 
 export interface Artifact {
