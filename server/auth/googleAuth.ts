@@ -1,11 +1,18 @@
 /**
- * Google OAuth Authentication
+ * Google OAuth Authentication - CORREGIDO
  * Implements OAuth 2.0 for Google account login
+ * 
+ * CAMBIOS REALIZADOS:
+ * - Reemplazado stateStore (Map en memoria) por tabla en base de datos
+ * - Esto soluciona el problema cuando hay múltiples réplicas del servidor
  */
 import { Router, Request, Response } from "express";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
 import { env } from "../config/env";
+import { db } from "../db";
+import { oauthStates } from "../../shared/schema/auth";
+import { eq, lt } from "drizzle-orm";
 
 const router = Router();
 
@@ -39,17 +46,14 @@ const generateState = (): string => {
     return Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
-// Store states temporarily (in production, use Redis)
-const stateStore = new Map<string, { createdAt: number; returnUrl: string }>();
-
-// Cleanup old states every 5 minutes
-setInterval(() => {
-    const now = Date.now();
-    const maxAge = 10 * 60 * 1000; // 10 minutes
-    for (const [state, data] of stateStore.entries()) {
-        if (now - data.createdAt > maxAge) {
-            stateStore.delete(state);
-        }
+// Cleanup old states every 5 minutes (ahora limpia de la base de datos)
+setInterval(async () => {
+    try {
+        const now = new Date();
+        await db.delete(oauthStates).where(lt(oauthStates.expiresAt, now));
+        console.log("[Google Auth] Cleaned up expired OAuth states");
+    } catch (error) {
+        console.error("[Google Auth] Error cleaning up expired states:", error);
     }
 }, 5 * 60 * 1000);
 
@@ -57,7 +61,7 @@ setInterval(() => {
  * GET /api/auth/google
  * Initiates Google OAuth login flow
  */
-router.get("/google", (req: Request, res: Response) => {
+router.get("/google", async (req: Request, res: Response) => {
     const config = getGoogleConfig();
 
     if (!config) {
@@ -67,10 +71,33 @@ router.get("/google", (req: Request, res: Response) => {
 
     const state = generateState();
     const returnUrl = (req.query.returnUrl as string) || "/";
-    stateStore.set(state, { createdAt: Date.now(), returnUrl });
+    
+    // Guardar estado en la base de datos en lugar de memoria
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
+    
+    try {
+        await db.insert(oauthStates).values({
+            state,
+            returnUrl,
+            provider: "google",
+            expiresAt,
+        });
+    } catch (error) {
+        console.error("[Google Auth] Error saving state:", error);
+        return res.redirect("/login?error=internal_error");
+    }
 
+    // IMPORTANTE: Usar siempre HTTPS en producción
+    // Y usar el dominio correcto que está registrado en Google Cloud Console
     const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
-    const redirectUri = `${protocol}://${req.get("host")}/api/auth/google/callback`;
+    const host = req.get("host");
+    
+    // Si tienes un dominio específico configurado, úsalo
+    // const redirectUri = env.NODE_ENV === "production" 
+    //     ? "https://iliagpt.com/api/auth/google/callback"
+    //     : `${protocol}://${host}/api/auth/google/callback`;
+    
+    const redirectUri = `${protocol}://${host}/api/auth/google/callback`;
 
     const params = new URLSearchParams({
         client_id: config.clientId,
@@ -104,13 +131,35 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         return res.redirect("/login?error=google_invalid_response");
     }
 
-    // Verify state
-    const stateData = stateStore.get(state as string);
-    if (!stateData) {
-        console.error("[Google Auth] Invalid or expired state");
-        return res.redirect("/login?error=google_invalid_state");
+    // Verificar estado desde la base de datos
+    let stateData;
+    try {
+        const results = await db.select()
+            .from(oauthStates)
+            .where(eq(oauthStates.state, state as string))
+            .limit(1);
+        
+        stateData = results[0];
+        
+        if (!stateData) {
+            console.error("[Google Auth] Invalid or expired state - not found in database");
+            return res.redirect("/login?error=google_invalid_state");
+        }
+        
+        // Verificar si expiró
+        if (new Date() > new Date(stateData.expiresAt)) {
+            console.error("[Google Auth] State expired");
+            await db.delete(oauthStates).where(eq(oauthStates.state, state as string));
+            return res.redirect("/login?error=google_state_expired");
+        }
+        
+        // Eliminar el estado usado (one-time use)
+        await db.delete(oauthStates).where(eq(oauthStates.state, state as string));
+        
+    } catch (error) {
+        console.error("[Google Auth] Error verifying state:", error);
+        return res.redirect("/login?error=internal_error");
     }
-    stateStore.delete(state as string);
 
     const config = getGoogleConfig();
     if (!config) {
@@ -119,7 +168,8 @@ router.get("/google/callback", async (req: Request, res: Response) => {
 
     try {
         const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
-        const redirectUri = `${protocol}://${req.get("host")}/api/auth/google/callback`;
+        const host = req.get("host");
+        const redirectUri = `${protocol}://${host}/api/auth/google/callback`;
 
         // Exchange code for tokens
         const tokenResponse = await fetch(config.tokenUrl, {
@@ -131,8 +181,8 @@ router.get("/google/callback", async (req: Request, res: Response) => {
                 client_id: config.clientId,
                 client_secret: config.clientSecret,
                 code: code as string,
-                redirect_uri: redirectUri,
                 grant_type: "authorization_code",
+                redirect_uri: redirectUri,
             }),
         });
 
@@ -142,52 +192,87 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             return res.redirect("/login?error=google_token_failed");
         }
 
-        const tokens = await tokenResponse.json();
+        const tokens = await tokenResponse.json() as {
+            access_token: string;
+            refresh_token?: string;
+            expires_in?: number;
+            id_token?: string;
+        };
 
         // Get user info from Google
-        const userResponse = await fetch(config.userInfoUrl, {
+        const userInfoResponse = await fetch(config.userInfoUrl, {
             headers: {
                 Authorization: `Bearer ${tokens.access_token}`,
             },
         });
 
-        if (!userResponse.ok) {
+        if (!userInfoResponse.ok) {
             console.error("[Google Auth] Failed to get user info");
             return res.redirect("/login?error=google_userinfo_failed");
         }
 
-        const googleUser = await userResponse.json();
-        console.log("[Google Auth] User info received:", {
-            id: googleUser.id,
-            email: googleUser.email,
-            name: googleUser.name,
-        });
+        const googleUser = await userInfoResponse.json() as {
+            id: string;
+            email: string;
+            verified_email: boolean;
+            name: string;
+            given_name?: string;
+            family_name?: string;
+            picture?: string;
+        };
 
-        // Upsert user in database
         const email = googleUser.email;
-        const firstName = googleUser.given_name || googleUser.name?.split(" ")[0] || "";
-        const lastName = googleUser.family_name || googleUser.name?.split(" ").slice(1).join(" ") || "";
+        if (!email) {
+            console.error("[Google Auth] No email in Google response");
+            return res.redirect("/login?error=google_no_email");
+        }
 
-        await authStorage.upsertUser({
-            id: `google_${googleUser.id}`,
-            email,
-            firstName,
-            lastName,
-            profileImageUrl: googleUser.picture || null,
-        });
+        // Find or create user
+        let user = await authStorage.getUserByEmail(email);
+
+        if (!user) {
+            // Create new user
+            user = await authStorage.upsertUser({
+                id: `google_${googleUser.id}`,
+                email,
+                username: email.split("@")[0],
+                fullName: googleUser.name,
+                firstName: googleUser.given_name || null,
+                lastName: googleUser.family_name || null,
+                profileImageUrl: googleUser.picture || null,
+                authProvider: "google",
+                emailVerified: googleUser.verified_email ? "true" : "false",
+            });
+            console.log("[Google Auth] Created new user:", email);
+        } else {
+            // Update existing user
+            user = await authStorage.upsertUser({
+                id: user.id,
+                email,
+                fullName: googleUser.name,
+                firstName: googleUser.given_name || user.firstName,
+                lastName: googleUser.family_name || user.lastName,
+                profileImageUrl: googleUser.picture || user.profileImageUrl,
+                authProvider: "google",
+                emailVerified: googleUser.verified_email ? "true" : "false",
+            });
+            console.log("[Google Auth] Updated existing user:", email);
+        }
 
         // Create session
         const sessionUser = {
-            claims: {
-                sub: `google_${googleUser.id}`,
-                email,
-                first_name: firstName,
-                last_name: lastName,
-                name: googleUser.name,
-                picture: googleUser.picture,
-            },
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
+            id: user.id,
+            email: user.email,
+            username: user.username,
+            fullName: user.fullName,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            profileImageUrl: user.profileImageUrl,
+            role: user.role,
+            plan: user.plan,
+            authProvider: "google",
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token,
             expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 3600),
         };
 

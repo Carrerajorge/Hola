@@ -29,6 +29,22 @@ export const magicLinks = pgTable("magic_links", {
 
 export type MagicLink = typeof magicLinks.$inferSelect;
 
+// OAuth States table - para almacenar estados de autenticación OAuth de forma persistente
+// Esto soluciona el problema de múltiples réplicas del servidor
+export const oauthStates = pgTable("oauth_states", {
+    state: varchar("state", { length: 255 }).primaryKey(),
+    returnUrl: text("return_url").notNull().default("/"),
+    provider: varchar("provider", { length: 50 }).notNull().default("google"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+}, (table) => [
+    index("oauth_states_expires_idx").on(table.expiresAt),
+]);
+
+export type OAuthState = typeof oauthStates.$inferSelect;
+export type InsertOAuthState = typeof oauthStates.$inferInsert;
+
+
 // Users table (compatible with Replit Auth) - Enterprise-grade
 export const users = pgTable("users", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
