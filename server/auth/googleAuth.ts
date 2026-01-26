@@ -1,10 +1,10 @@
 /**
- * Google OAuth Authentication - CORREGIDO V2
- * Implements OAuth 2.0 for Google account login
+ * Google OAuth Authentication - FIX HOST para producción
  * 
- * CAMBIOS:
- * - Corregido error ERR_HTTP_HEADERS_SENT
- * - Mejor manejo del flujo de respuestas
+ * PROBLEMA: req.get("host") devuelve "localhost:5001" en lugar de "iliagpt.com"
+ * porque Express no confía en el proxy por defecto.
+ * 
+ * SOLUCIÓN: Usar X-Forwarded-Host o APP_URL configurado en producción
  */
 import { Router, Request, Response } from "express";
 import { authStorage } from "../replit_integrations/auth/storage";
@@ -44,6 +44,41 @@ const generateState = (): string => {
     const array = new Uint8Array(32);
     crypto.getRandomValues(array);
     return Array.from(array, (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+// Helper to get the correct host for redirects
+const getAppHost = (req: Request): string => {
+    // En producción, usar el dominio configurado o X-Forwarded-Host
+    if (env.NODE_ENV === "production") {
+        // Prioridad: APP_URL env var > X-Forwarded-Host > Host header
+        const appUrl = process.env.APP_URL;
+        if (appUrl) {
+            // Extraer solo el host de la URL
+            try {
+                const url = new URL(appUrl);
+                return url.host;
+            } catch {
+                return appUrl;
+            }
+        }
+        
+        const forwardedHost = req.get("x-forwarded-host");
+        if (forwardedHost) {
+            return forwardedHost;
+        }
+        
+        // Fallback al Host header (que nginx debería pasar correctamente)
+        const host = req.get("host");
+        if (host && !host.includes("localhost") && !host.includes("127.0.0.1")) {
+            return host;
+        }
+        
+        // Último fallback: dominio hardcodeado
+        return "iliagpt.com";
+    }
+    
+    // En desarrollo, usar el host del request
+    return req.get("host") || "localhost:5001";
 };
 
 // Cleanup old states every 5 minutes
@@ -86,9 +121,12 @@ router.get("/google", async (req: Request, res: Response) => {
         return res.redirect("/login?error=internal_error");
     }
 
+    // Usar el helper para obtener el host correcto
     const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
-    const host = req.get("host");
+    const host = getAppHost(req);
     const redirectUri = `${protocol}://${host}/api/auth/google/callback`;
+
+    console.log("[Google Auth] Building redirect with:", { protocol, host, redirectUri });
 
     const params = new URLSearchParams({
         client_id: config.clientId,
@@ -125,64 +163,61 @@ router.get("/google/callback", async (req: Request, res: Response) => {
     // Verificar estado desde la base de datos
     let stateData: { returnUrl: string } | null = null;
     try {
-        const results = await db.select()
+        const [stateRecord] = await db
+            .select()
             .from(oauthStates)
-            .where(eq(oauthStates.state, state as string))
-            .limit(1);
+            .where(eq(oauthStates.state, state as string));
         
-        if (!results[0]) {
-            console.error("[Google Auth] Invalid or expired state - not found in database");
-            return res.redirect("/login?error=google_invalid_state");
+        if (!stateRecord) {
+            console.error("[Google Auth] Invalid state - not found in database");
+            return res.redirect("/login?error=invalid_state");
         }
         
-        stateData = { returnUrl: results[0].returnUrl };
-        
-        // Verificar si expiró
-        if (new Date() > new Date(results[0].expiresAt)) {
+        // Verificar expiración
+        if (new Date() > stateRecord.expiresAt) {
             console.error("[Google Auth] State expired");
             await db.delete(oauthStates).where(eq(oauthStates.state, state as string));
-            return res.redirect("/login?error=google_state_expired");
+            return res.redirect("/login?error=state_expired");
         }
         
-        // Eliminar el estado usado (one-time use)
-        await db.delete(oauthStates).where(eq(oauthStates.state, state as string));
+        stateData = { returnUrl: stateRecord.returnUrl || "/" };
         
-    } catch (dbError) {
-        console.error("[Google Auth] Error verifying state:", dbError);
-        return res.redirect("/login?error=internal_error");
+        // Eliminar el estado usado
+        await db.delete(oauthStates).where(eq(oauthStates.state, state as string));
+    } catch (error) {
+        console.error("[Google Auth] Error verifying state:", error);
+        return res.redirect("/login?error=state_verification_failed");
     }
 
-    const config = getGoogleConfig();
-    if (!config) {
-        return res.redirect("/login?error=google_not_configured");
-    }
-
-    // Guardar returnUrl para usarla después
     const finalReturnUrl = stateData?.returnUrl || "/";
 
     try {
+        const config = getGoogleConfig();
+        if (!config) {
+            return res.redirect("/login?error=google_not_configured");
+        }
+
+        // Usar el mismo helper para el callback
         const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
-        const host = req.get("host");
+        const host = getAppHost(req);
         const redirectUri = `${protocol}://${host}/api/auth/google/callback`;
 
         // Exchange code for tokens
         const tokenResponse = await fetch(config.tokenUrl, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: new URLSearchParams({
+                code: code as string,
                 client_id: config.clientId,
                 client_secret: config.clientSecret,
-                code: code as string,
-                grant_type: "authorization_code",
                 redirect_uri: redirectUri,
+                grant_type: "authorization_code",
             }),
         });
 
         if (!tokenResponse.ok) {
-            const errorData = await tokenResponse.text();
-            console.error("[Google Auth] Token exchange failed:", errorData);
+            const errorText = await tokenResponse.text();
+            console.error("[Google Auth] Token exchange failed:", errorText);
             return res.redirect("/login?error=google_token_failed");
         }
 
@@ -190,14 +225,12 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             access_token: string;
             refresh_token?: string;
             expires_in?: number;
-            id_token?: string;
+            token_type: string;
         };
 
         // Get user info from Google
         const userInfoResponse = await fetch(config.userInfoUrl, {
-            headers: {
-                Authorization: `Bearer ${tokens.access_token}`,
-            },
+            headers: { Authorization: `Bearer ${tokens.access_token}` },
         });
 
         if (!userInfoResponse.ok) {
