@@ -58,27 +58,46 @@ const grokClient = new OpenAI({
 });
 
 const geminiAI = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY || ""
+    apiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || ""
 });
 
 // ============== Model Specs ==============
 
-const DEFAULT_MODELS: ModelSpec[] = [
-    {
-        id: "grok-3",
-        provider: "grok",
-        model: "grok-3",
-        weight: 0.6,
-        capabilities: ["reasoning", "code", "analysis"],
-    },
-    {
-        id: "gemini-2.5-flash",
-        provider: "gemini",
-        model: "gemini-2.5-flash",
-        weight: 0.4,
-        capabilities: ["multimodal", "long-context", "fast"],
-    },
-];
+const getAvailableModels = (): ModelSpec[] => {
+    const models: ModelSpec[] = [];
+
+    // Add Grok if key is present
+    if (process.env.XAI_API_KEY) {
+        models.push({
+            id: "grok-3",
+            provider: "grok",
+            model: "grok-3",
+            weight: 0.6,
+            capabilities: ["reasoning", "code", "analysis"],
+        });
+    }
+
+    // Add Gemini if key is present
+    if (process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY) {
+        models.push({
+            id: "gemini-2.5-flash",
+            provider: "gemini",
+            model: "gemini-2.5-flash",
+            weight: 0.4,
+            capabilities: ["multimodal", "long-context", "fast"],
+        });
+    }
+
+    // Fallback if no specific keys but validation passed (shouldn't happen ideally)
+    // or if we want to default to something even without keys (will fail later but preserves structure)
+    if (models.length === 0) {
+        console.warn("No LLM keys found for default models. Fusion engine may fail.");
+    }
+
+    return models;
+};
+
+const DEFAULT_MODELS: ModelSpec[] = getAvailableModels();
 
 const VISION_MODELS: ModelSpec[] = [
     {
