@@ -3,6 +3,8 @@
  * Prevents XSS attacks by sanitizing user-provided HTML content
  */
 
+import DOMPurify from 'dompurify';
+
 // Simple HTML sanitizer for when DOMPurify is not available
 // This is a fallback - in production, DOMPurify should be installed
 
@@ -104,8 +106,8 @@ export function sanitizeHtml(dirty: string): string {
   }
 
   // Try to use DOMPurify if available (should be installed in production)
-  if (typeof window !== 'undefined' && (window as any).DOMPurify) {
-    return (window as any).DOMPurify.sanitize(dirty, {
+  if (typeof window !== 'undefined') {
+    return DOMPurify.sanitize(dirty, {
       USE_PROFILES: { html: true, svg: true },
       ADD_TAGS: ['use'],
       ADD_ATTR: ['viewBox', 'xlink:href'],
