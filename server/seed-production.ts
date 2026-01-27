@@ -43,7 +43,7 @@ export async function seedProductionData(): Promise<SeedResult> {
   console.log(`[seed] Starting production seed...`);
 
   try {
-    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "202212.";
+    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "123456";
     const bcrypt = await import("bcrypt");
     const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
 
