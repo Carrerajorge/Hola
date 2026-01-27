@@ -151,7 +151,7 @@ async function fetchUser(): Promise<User | null> {
             isAnonymous: true,
             username: `Guest-${identity.userId.slice(0, 4)}`,
             role: 'user',
-          } as unknown as User;
+          } as User;
         }
       }
     } catch (e) {
@@ -243,7 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       hasUser: !!user,
       userId: user?.id ?? null,
-      userEmail: (user as any)?.email ?? null,
+      userEmail: user?.email ?? null,
     });
   }, [isLoading, user]);
 

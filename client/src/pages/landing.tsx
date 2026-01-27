@@ -40,8 +40,8 @@ export default function LandingPage() {
         </div>
 
         <nav className="hidden md:flex items-center gap-6 text-sm">
-          <a href="#" className="text-zinc-400 hover:text-white transition-colors duration-200">Sobre nosotros</a>
-          <a href="#" className="text-zinc-400 hover:text-white transition-colors duration-200">Aprender</a>
+          <span onClick={() => setLocation("/about")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
+          <span onClick={() => setLocation("/learn")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Aprender</span>
           <a href="#" className="text-zinc-400 hover:text-white transition-colors duration-200">Business</a>
           <a href="#" className="text-zinc-400 hover:text-white transition-colors duration-200">Precios</a>
           <a href="#" className="text-purple-400 hover:text-purple-300 transition-colors duration-200">Imágenes</a>

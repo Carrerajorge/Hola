@@ -54,6 +54,8 @@ const WorkspacePage = lazy(() => import("@/pages/workspace"));
 const SkillsPage = lazy(() => import("@/pages/skills"));
 const SpreadsheetAnalyzerPage = lazy(() => import("@/pages/SpreadsheetAnalyzer"));
 const MonitoringDashboard = lazy(() => import("@/pages/MonitoringDashboard"));
+const AboutPage = lazy(() => import("@/pages/about"));
+const LearnPage = lazy(() => import("@/pages/learn"));
 
 function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
@@ -153,6 +155,8 @@ function Router() {
             <Route path="/skills" component={SkillsPage} />
             <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
             <Route path="/monitoring" component={MonitoringDashboard} />
+            <Route path="/about" component={AboutPage} />
+            <Route path="/learn" component={LearnPage} />
             <Route component={NotFound} />
           </Switch>
         </main>
