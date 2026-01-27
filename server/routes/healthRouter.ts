@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { getRedisStatus, isRedisAvailable } from "../lib/redisConfig";
+import { getSystemStatus } from "../services/autonomy";
 
 const router = Router();
 
@@ -147,6 +148,24 @@ router.get("/", async (req, res) => {
     uptime: Math.floor(process.uptime()) + "s",
     timestamp: new Date().toISOString()
   });
+});
+
+// Autonomous systems status
+router.get("/autonomy", async (req, res) => {
+  try {
+    const status = await getSystemStatus();
+    res.json({
+      status: status.healthy ? "healthy" : "degraded",
+      ...status,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      status: "error",
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Prometheus-compatible metrics endpoint

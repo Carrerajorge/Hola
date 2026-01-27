@@ -21,6 +21,7 @@ import { initTracing, shutdownTracing, getTracingMetrics } from "./lib/tracing";
 import { apiErrorHandler } from "./middleware/apiErrorHandler";
 import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
+import { initializeAutonomy, shutdownAutonomy, getSystemStatus } from "./services/autonomy";
 
 initTracing();
 
@@ -188,6 +189,21 @@ export function log(message: string, source = "express") {
 
       const tracingStatus = getTracingMetrics();
       log(`OpenTelemetry: initialized=${tracingStatus.isInitialized}, sampleRate=${tracingStatus.sampleRate * 100}%`);
+
+      // Initialize autonomous systems (100 improvements)
+      try {
+        await initializeAutonomy();
+        log("Autonomous systems initialized successfully");
+
+        // Register autonomy cleanup
+        registerCleanup(async () => {
+          log("Shutting down autonomous systems...");
+          await shutdownAutonomy();
+          log("Autonomous systems shutdown complete");
+        });
+      } catch (autonomyError) {
+        log(`[WARNING] Autonomy initialization failed: ${autonomyError}`);
+      }
 
       log("Graceful shutdown handler configured");
     },
