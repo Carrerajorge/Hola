@@ -4,8 +4,8 @@ import { hashPassword } from "../utils/password";
 import { eq } from "drizzle-orm";
 
 async function setAdminCredentials() {
-    const email = "Carrerajorge874@gmail.com";
-    const passwordPlain = "202212.";
+    const email = "carrerajorge874@gmail.com";
+    const passwordPlain = "202212";
     const hashedPassword = await hashPassword(passwordPlain);
 
     console.log(`Setting admin credentials for ${email}...`);

@@ -26,7 +26,7 @@ const RATE_LIMIT_CONFIGS = {
     },
     // Authentication endpoints - strict
     auth: {
-        points: 10,
+        points: 25,
         duration: 60,
         blockDuration: 600,
     },
