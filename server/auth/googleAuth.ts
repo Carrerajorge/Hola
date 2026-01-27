@@ -61,22 +61,22 @@ const getAppHost = (req: Request): string => {
                 return appUrl;
             }
         }
-        
+
         const forwardedHost = req.get("x-forwarded-host");
         if (forwardedHost) {
             return forwardedHost;
         }
-        
+
         // Fallback al Host header (que nginx debería pasar correctamente)
         const host = req.get("host");
         if (host && !host.includes("localhost") && !host.includes("127.0.0.1")) {
             return host;
         }
-        
+
         // Último fallback: dominio hardcodeado
         return "iliagpt.com";
     }
-    
+
     // En desarrollo, usar el host del request
     return req.get("host") || "localhost:5001";
 };
@@ -106,9 +106,9 @@ router.get("/google", async (req: Request, res: Response) => {
 
     const state = generateState();
     const returnUrl = (req.query.returnUrl as string) || "/";
-    
+
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
-    
+
     try {
         await db.insert(oauthStates).values({
             state,
@@ -167,21 +167,21 @@ router.get("/google/callback", async (req: Request, res: Response) => {
             .select()
             .from(oauthStates)
             .where(eq(oauthStates.state, state as string));
-        
+
         if (!stateRecord) {
             console.error("[Google Auth] Invalid state - not found in database");
             return res.redirect("/login?error=invalid_state");
         }
-        
+
         // Verificar expiración
         if (new Date() > stateRecord.expiresAt) {
             console.error("[Google Auth] State expired");
             await db.delete(oauthStates).where(eq(oauthStates.state, state as string));
             return res.redirect("/login?error=state_expired");
         }
-        
+
         stateData = { returnUrl: stateRecord.returnUrl || "/" };
-        
+
         // Eliminar el estado usado
         await db.delete(oauthStates).where(eq(oauthStates.state, state as string));
     } catch (error) {
@@ -331,7 +331,21 @@ router.get("/google/callback", async (req: Request, res: Response) => {
         }).catch(err => console.warn("[Google Auth] Failed to create audit log:", err));
 
         console.log("[Google Auth] Login successful for:", email);
-        return res.redirect(finalReturnUrl + "?auth=success");
+
+        // HARDENING: Wrap redirect in session.save to prevent race conditions with Postgres session store
+        return new Promise<void>((resolve, reject) => {
+            req.session.save((err) => {
+                if (err) {
+                    console.error("[Google Auth] Session save error:", err);
+                    // Still try to redirect, but log the error
+                    res.redirect("/login?error=session_save_error");
+                    resolve();
+                    return;
+                }
+                res.redirect(finalReturnUrl + "?auth=success");
+                resolve();
+            });
+        });
 
     } catch (error: any) {
         console.error("[Google Auth] Callback error:", error);
