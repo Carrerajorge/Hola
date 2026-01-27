@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, customType, serial, boolean, bigint, real, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -83,7 +83,17 @@ export const users = pgTable("users", {
     stripeSubscriptionId: text("stripe_subscription_id"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
-});
+    deletedAt: timestamp("deleted_at"),
+}, (table) => [
+    index("users_role_idx").on(table.role),
+    index("users_plan_idx").on(table.plan),
+    index("users_status_idx").on(table.status),
+    index("users_last_login_at_idx").on(table.lastLoginAt),
+    index("users_referral_code_idx").on(table.referralCode),
+    index("users_stripe_subscription_id_idx").on(table.stripeSubscriptionId),
+    index("users_tags_idx").using("gin", table.tags),
+    check("users_credits_balance_check", sql`${table.creditsBalance} >= 0`),
+]);
 
 export const insertUserSchema = createInsertSchema(users).pick({
     username: true,
@@ -161,6 +171,7 @@ export const consentLogs = pgTable("consent_logs", {
     createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
     index("consent_logs_user_idx").on(table.userId),
+    index("consent_logs_consent_type_idx").on(table.consentType),
 ]);
 
 export type ConsentLog = typeof consentLogs.$inferSelect;

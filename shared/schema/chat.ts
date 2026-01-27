@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, customType } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, serial, boolean, customType, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { users } from "./auth";
@@ -30,6 +30,11 @@ export const chats = pgTable("chats", {
     index("chats_user_updated_idx").on(table.userId, table.updatedAt),
     index("chats_user_archived_deleted_idx").on(table.userId, table.archived, table.deletedAt),
     index("chats_updated_at_idx").on(table.updatedAt),
+    index("chats_gpt_id_idx").on(table.gptId),
+    index("chats_pinned_idx").on(table.pinned),
+    index("chats_active_inbox_idx").on(table.conversationStatus, table.archived),
+    check("chats_message_count_check", sql`${table.messageCount} >= 0`),
+    check("chats_tokens_used_check", sql`${table.tokensUsed} >= 0`),
 ]);
 
 export const insertChatSchema = createInsertSchema(chats);
@@ -64,6 +69,10 @@ export const chatMessages = pgTable("chat_messages", {
     index("chat_messages_chat_created_idx").on(table.chatId, table.createdAt),
     index("chat_messages_created_at_idx").on(table.createdAt),
     index("chat_messages_search_idx").using("gin", table.searchVector),
+    index("chat_messages_role_idx").on(table.role),
+    index("chat_messages_sequence_idx").on(table.sequence),
+    index("chat_messages_metadata_idx").using("gin", table.metadata),
+    check("chat_messages_content_check", sql`length(${table.content}) > 0`),
 ]);
 
 export const insertChatMessageSchema = createInsertSchema(chatMessages);
@@ -114,6 +123,7 @@ export const toolInvocations = pgTable("tool_invocations", {
     index("tool_invocations_run_idx").on(table.runId),
     uniqueIndex("tool_invocations_unique").on(table.runId, table.toolCallId),
     index("tool_invocations_run_created_idx").on(table.runId, table.createdAt),
+    index("tool_invocations_tool_name_idx").on(table.toolName),
 ]);
 
 export const insertToolInvocationSchema = createInsertSchema(toolInvocations);
@@ -174,6 +184,7 @@ export const responseQualityMetrics = pgTable("response_quality_metrics", {
     createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
     index("response_quality_metrics_run_idx").on(table.runId),
+    index("response_quality_metrics_category_idx").on(table.category),
 ]);
 
 export const insertResponseQualityMetricSchema = createInsertSchema(responseQualityMetrics);
@@ -193,6 +204,7 @@ export const offlineMessageQueue = pgTable("offline_message_queue", {
 }, (table) => [
     index("offline_message_queue_user_idx").on(table.userId),
     index("offline_message_queue_status_idx").on(table.status),
+    index("offline_message_queue_processed_at_idx").on(table.processedAt),
 ]);
 
 export const insertOfflineMessageQueueSchema = createInsertSchema(offlineMessageQueue);

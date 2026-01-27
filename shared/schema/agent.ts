@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, boolean, real } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, jsonb, index, uniqueIndex, boolean, real, check } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { vector } from "./common";
@@ -10,7 +10,7 @@ import { integrationAccounts } from "./integration";
 // Agent Web Navigation Tables
 export const agentRuns = pgTable("agent_runs", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    conversationId: varchar("conversation_id"),
+    conversationId: varchar("conversation_id").references(() => chats.id, { onDelete: "set null" }),
     status: text("status").notNull().default("pending"), // pending, running, completed, failed, cancelled
     routerDecision: text("router_decision"), // llm, agent, hybrid
     objective: text("objective"),
@@ -21,6 +21,7 @@ export const agentRuns = pgTable("agent_runs", {
     index("agent_runs_conversation_idx").on(table.conversationId),
     index("agent_runs_status_idx").on(table.status),
     index("agent_runs_conversation_started_idx").on(table.conversationId, table.startedAt),
+    index("agent_runs_router_decision_idx").on(table.routerDecision),
 ]);
 
 export const insertAgentRunSchema = createInsertSchema(agentRuns);
@@ -43,6 +44,7 @@ export const agentSteps = pgTable("agent_steps", {
 }, (table) => [
     index("agent_steps_run_idx").on(table.runId),
     index("agent_steps_run_step_idx").on(table.runId, table.stepIndex),
+    index("agent_steps_step_type_idx").on(table.stepType),
 ]);
 
 export const insertAgentStepSchema = createInsertSchema(agentSteps);
@@ -61,6 +63,7 @@ export const agentAssets = pgTable("agent_assets", {
     createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [
     index("agent_assets_run_idx").on(table.runId),
+    index("agent_assets_asset_type_idx").on(table.assetType),
 ]);
 
 export const insertAgentAssetSchema = createInsertSchema(agentAssets);
@@ -90,6 +93,7 @@ export const toolCallLogs = pgTable("tool_call_logs", {
     index("tool_call_logs_tool_id_idx").on(table.toolId),
     index("tool_call_logs_created_at_idx").on(table.createdAt),
     index("tool_call_logs_run_created_idx").on(table.runId, table.createdAt),
+    check("tool_call_logs_latency_ms_check", sql`${table.latencyMs} >= 0`),
 ]);
 
 export const insertToolCallLogSchema = createInsertSchema(toolCallLogs);
@@ -107,6 +111,8 @@ export const cachedPages = pgTable("cached_pages", {
     expiresAt: timestamp("expires_at"),
 }, (table) => [
     index("cached_pages_url_hash_idx").on(table.urlHash),
+    index("cached_pages_url_idx").on(table.url),
+    index("cached_pages_expires_at_idx").on(table.expiresAt),
 ]);
 
 export const insertCachedPageSchema = createInsertSchema(cachedPages);
@@ -122,7 +128,9 @@ export const domainPolicies = pgTable("domain_policies", {
     rateLimit: integer("rate_limit").default(10), // requests per minute
     customHeaders: jsonb("custom_headers"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => [
+    check("domain_policies_rate_limit_check", sql`${table.rateLimit} >= 0`),
+]);
 
 export const insertDomainPolicySchema = createInsertSchema(domainPolicies);
 
@@ -134,7 +142,8 @@ export const agentModeRuns = pgTable("agent_mode_runs", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
     messageId: varchar("message_id").references(() => chatMessages.id, { onDelete: "set null" }),
-    userId: varchar("user_id").references(() => users.id),
+    messageId: varchar("message_id").references(() => chatMessages.id, { onDelete: "set null" }),
+    userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
     status: text("status").notNull().default("queued"), // queued, planning, running, succeeded, failed, cancelled
     plan: jsonb("plan"), // array of planned steps
     artifacts: jsonb("artifacts"), // output artifacts
@@ -222,6 +231,7 @@ export const agentWorkspaces = pgTable("agent_workspaces", {
 }, (table) => [
     index("agent_workspaces_run_idx").on(table.runId),
     index("agent_workspaces_path_idx").on(table.runId, table.filePath),
+    index("agent_workspaces_file_type_idx").on(table.fileType),
 ]);
 
 export const insertAgentWorkspaceSchema = createInsertSchema(agentWorkspaces);
@@ -293,6 +303,7 @@ export const agentGapLogs = pgTable("agent_gap_logs", {
     index("agent_gap_logs_status_idx").on(table.status),
     index("agent_gap_logs_created_idx").on(table.createdAt),
     index("agent_gap_logs_signature_idx").on(table.gapSignature),
+    check("agent_gap_logs_frequency_count_check", sql`${table.frequencyCount} >= 0`),
 ]);
 
 export const insertAgentGapLogSchema = createInsertSchema(agentGapLogs);
@@ -329,6 +340,7 @@ export const agentContext = pgTable("agent_context", {
 }, (table) => [
     index("agent_context_thread_id_idx").on(table.threadId),
     uniqueIndex("agent_context_thread_unique").on(table.threadId),
+    check("agent_context_token_count_check", sql`${table.tokenCount} >= 0`),
 ]);
 
 export const insertAgentContextSchema = createInsertSchema(agentContext);
@@ -357,8 +369,8 @@ export type AgentSessionState = typeof agentSessionState.$inferSelect;
 // Code Interpreter Runs
 export const codeInterpreterRuns = pgTable("code_interpreter_runs", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-    conversationId: varchar("conversation_id"),
-    userId: varchar("user_id"),
+    conversationId: varchar("conversation_id").references(() => chats.id, { onDelete: "cascade" }),
+    userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
     code: text("code").notNull(),
     language: text("language").notNull().default("python"),
     status: text("status").notNull().default("pending"), // pending, running, success, error
@@ -369,6 +381,8 @@ export const codeInterpreterRuns = pgTable("code_interpreter_runs", {
 }, (table) => [
     index("code_runs_conversation_idx").on(table.conversationId),
     index("code_runs_user_idx").on(table.userId),
+    index("code_runs_status_idx").on(table.status),
+    check("code_runs_execution_time_ms_check", sql`${table.executionTimeMs} >= 0`),
 ]);
 
 export const insertCodeInterpreterRunSchema = createInsertSchema(codeInterpreterRuns);
