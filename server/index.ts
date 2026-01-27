@@ -23,6 +23,7 @@ import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
 import { initializeAutonomy, shutdownAutonomy, getSystemStatus } from "./services/autonomy";
 import { initializeRobustness, shutdownRobustness, getRobustnessStatus } from "./services/robustness";
+import { initializeEnhanced, shutdownEnhanced, getEnhancedStatus } from "./services/enhanced";
 
 initTracing();
 
@@ -219,6 +220,21 @@ export function log(message: string, source = "express") {
         });
       } catch (robustnessError) {
         log(`[WARNING] Robustness initialization failed: ${robustnessError}`);
+      }
+
+      // Initialize enhanced services (200 more improvements: 201-400)
+      try {
+        await initializeEnhanced();
+        log("Enhanced services initialized successfully");
+
+        // Register enhanced cleanup
+        registerCleanup(async () => {
+          log("Shutting down enhanced services...");
+          await shutdownEnhanced();
+          log("Enhanced services shutdown complete");
+        });
+      } catch (enhancedError) {
+        log(`[WARNING] Enhanced services initialization failed: ${enhancedError}`);
       }
 
       log("Graceful shutdown handler configured");

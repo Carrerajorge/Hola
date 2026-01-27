@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { getRedisStatus, isRedisAvailable } from "../lib/redisConfig";
 import { getSystemStatus } from "../services/autonomy";
 import { getRobustnessStatus } from "../services/robustness";
+import { getEnhancedStatus } from "../services/enhanced";
 
 const router = Router();
 
@@ -173,6 +174,24 @@ router.get("/autonomy", async (req, res) => {
 router.get("/robustness", async (req, res) => {
   try {
     const status = await getRobustnessStatus();
+    res.json({
+      status: status.healthy ? "healthy" : "degraded",
+      ...status,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      status: "error",
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Enhanced services status (201-400)
+router.get("/enhanced", async (req, res) => {
+  try {
+    const status = getEnhancedStatus();
     res.json({
       status: status.healthy ? "healthy" : "degraded",
       ...status,
