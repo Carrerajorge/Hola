@@ -142,7 +142,7 @@ export const agentModeRuns = pgTable("agent_mode_runs", {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     chatId: varchar("chat_id").notNull().references(() => chats.id, { onDelete: "cascade" }),
     messageId: varchar("message_id").references(() => chatMessages.id, { onDelete: "set null" }),
-    messageId: varchar("message_id").references(() => chatMessages.id, { onDelete: "set null" }),
+
     userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
     status: text("status").notNull().default("queued"), // queued, planning, running, succeeded, failed, cancelled
     plan: jsonb("plan"), // array of planned steps
