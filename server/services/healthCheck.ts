@@ -85,14 +85,32 @@ async function checkLLMService(): Promise<ComponentHealth> {
     const start = Date.now();
 
     try {
-        // Just verify API key is configured
-        const hasGrok = !!process.env.XAI_API_KEY;
-        const hasGemini = !!process.env.GOOGLE_API_KEY;
-        const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
+        // Check all LLM providers
+        const providers = {
+            openai: {
+                configured: !!process.env.OPENAI_API_KEY,
+                keyPrefix: process.env.OPENAI_API_KEY?.substring(0, 10) || null,
+            },
+            gemini: {
+                configured: !!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY),
+                keyPrefix: (process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY)?.substring(0, 10) || null,
+            },
+            anthropic: {
+                configured: !!process.env.ANTHROPIC_API_KEY,
+                keyPrefix: process.env.ANTHROPIC_API_KEY?.substring(0, 10) || null,
+            },
+            xai: {
+                configured: !!(process.env.XAI_API_KEY || process.env.GROK_API_KEY),
+                keyPrefix: (process.env.XAI_API_KEY || process.env.GROK_API_KEY)?.substring(0, 10) || null,
+            },
+        };
 
-        const configured = [hasGrok, hasGemini, hasAnthropic].filter(Boolean).length;
+        const configuredCount = Object.values(providers).filter(p => p.configured).length;
+        const configuredNames = Object.entries(providers)
+            .filter(([, p]) => p.configured)
+            .map(([name]) => name);
 
-        if (configured === 0) {
+        if (configuredCount === 0) {
             return {
                 status: 'unhealthy',
                 latency: Date.now() - start,
@@ -104,12 +122,9 @@ async function checkLLMService(): Promise<ComponentHealth> {
         return {
             status: 'healthy',
             latency: Date.now() - start,
+            message: `${configuredCount} providers configured: ${configuredNames.join(', ')}`,
             lastChecked: new Date(),
-            details: {
-                grok: hasGrok,
-                gemini: hasGemini,
-                anthropic: hasAnthropic,
-            },
+            details: providers,
         };
     } catch (error: any) {
         return {

@@ -4,11 +4,32 @@ import { sql, gte, and, desc, count, isNotNull } from "drizzle-orm";
 import { storage } from "../storage";
 
 const AGGREGATION_INTERVAL_MS = 60 * 1000;
+// Cost per 1K tokens (input + output averaged) in USD
+// Updated January 2026
 const COST_PER_1K_TOKENS: Record<string, number> = {
-  xai: 0.002,
-  gemini: 0.001,
-  openai: 0.003,
-  anthropic: 0.0025,
+  // OpenAI
+  "gpt-4o": 0.005,
+  "gpt-4o-mini": 0.00015,
+  "gpt-4-turbo": 0.01,
+  "gpt-5": 0.015,
+  openai: 0.003, // fallback
+  // Google
+  "gemini-2.0-flash": 0.0001,
+  "gemini-2.5-flash": 0.00015,
+  "gemini-2.5-pro": 0.00125,
+  "gemini-3-flash-preview": 0.0002,
+  gemini: 0.001, // fallback
+  // Anthropic
+  "claude-3-5-sonnet": 0.003,
+  "claude-3-opus": 0.015,
+  "claude-3-haiku": 0.00025,
+  anthropic: 0.0025, // fallback
+  // xAI
+  "grok-3": 0.005,
+  "grok-4": 0.008,
+  "grok-4.1": 0.01,
+  xai: 0.005, // fallback
+  // Default
   default: 0.002,
 };
 
@@ -34,9 +55,52 @@ function calculatePercentile(sortedValues: number[], percentile: number): number
   return sortedValues[Math.max(0, Math.min(index, sortedValues.length - 1))];
 }
 
-function estimateCost(provider: string, tokensIn: number, tokensOut: number): number {
-  const rate = COST_PER_1K_TOKENS[provider.toLowerCase()] || COST_PER_1K_TOKENS.default;
+function estimateCost(provider: string, tokensIn: number, tokensOut: number, modelId?: string): number {
+  // Try model-specific rate first, then provider, then default
+  const modelRate = modelId ? COST_PER_1K_TOKENS[modelId.toLowerCase()] : undefined;
+  const providerRate = COST_PER_1K_TOKENS[provider.toLowerCase()];
+  const rate = modelRate || providerRate || COST_PER_1K_TOKENS.default;
   return ((tokensIn + tokensOut) / 1000) * rate;
+}
+
+/**
+ * Get current cost summary for all providers
+ */
+export async function getCostSummary(): Promise<{
+  totalSpend: number;
+  byProvider: Record<string, { spend: number; requests: number; avgCost: number }>;
+  projectedMonthly: number;
+}> {
+  try {
+    const budgets = await db
+      .select()
+      .from(costBudgets);
+
+    const byProvider: Record<string, { spend: number; requests: number; avgCost: number }> = {};
+    let totalSpend = 0;
+    let totalProjected = 0;
+
+    for (const budget of budgets) {
+      const spend = parseFloat(budget.currentSpend || "0");
+      totalSpend += spend;
+      totalProjected += parseFloat(budget.projectedMonthly || "0");
+
+      byProvider[budget.provider] = {
+        spend,
+        requests: 0, // Would need to query metrics for this
+        avgCost: 0,
+      };
+    }
+
+    return {
+      totalSpend,
+      byProvider,
+      projectedMonthly: totalProjected,
+    };
+  } catch (error) {
+    console.error("[Analytics] Error getting cost summary:", error);
+    return { totalSpend: 0, byProvider: {}, projectedMonthly: 0 };
+  }
 }
 
 async function ensureCostBudgetExists(provider: string): Promise<void> {

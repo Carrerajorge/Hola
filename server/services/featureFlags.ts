@@ -106,6 +106,50 @@ class FeatureFlagStore extends EventEmitter {
                 enabled: false,
                 rolloutPercentage: 0,
             },
+            {
+                key: 'voice_input',
+                name: 'Voice Input',
+                description: 'Allow voice messages and transcription',
+                enabled: false,
+                rolloutPercentage: 0,
+            },
+            {
+                key: 'image_generation',
+                name: 'AI Image Generation',
+                description: 'Generate images with DALL-E or similar',
+                enabled: true,
+                rolloutPercentage: 100,
+                enabledForRoles: ['admin', 'premium'],
+            },
+            {
+                key: 'code_execution',
+                name: 'Code Execution Sandbox',
+                description: 'Execute code in sandboxed environment',
+                enabled: true,
+                rolloutPercentage: 100,
+            },
+            {
+                key: 'long_term_memory',
+                name: 'Long-Term Memory',
+                description: 'Remember user preferences across sessions',
+                enabled: true,
+                rolloutPercentage: 50,
+            },
+            {
+                key: 'smart_model_router',
+                name: 'Smart Model Router',
+                description: 'Auto-select best AI model for each task',
+                enabled: false,
+                rolloutPercentage: 0,
+            },
+            {
+                key: 'debug_mode',
+                name: 'Debug Mode',
+                description: 'Show debug information in responses',
+                enabled: false,
+                rolloutPercentage: 0,
+                enabledForRoles: ['admin'],
+            },
         ];
 
         for (const def of defaults) {

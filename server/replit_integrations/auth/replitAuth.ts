@@ -86,15 +86,40 @@ const getOidcConfig = memoize(
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   const pgStore = connectPg(session);
+
+  // Create session store with error handling
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
     createTableIfMissing: true, // Auto-create sessions table if missing
     ttl: sessionTtl,
     tableName: "sessions",
+    errorLog: (error: Error) => {
+      console.error("[Session Store Error]", error.message);
+    },
   });
+
+  // Log session store events
+  sessionStore.on("connect", () => {
+    console.log("[Session] PostgreSQL session store connected");
+  });
+
+  sessionStore.on("disconnect", () => {
+    console.warn("[Session] PostgreSQL session store disconnected");
+  });
+
+  sessionStore.on("error", (error: Error) => {
+    console.error("[Session] Store error:", error.message);
+  });
+
   const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
 
-  console.log(`[Session] Configuring session: production=${isProduction}, secure=${isProduction}, sameSite=lax`);
+  console.log(`[Session] Configuring session:`, {
+    production: isProduction,
+    secure: isProduction,
+    sameSite: "lax",
+    maxAge: `${sessionTtl / 1000 / 60 / 60 / 24} days`,
+    cookieName: "iliagpt.sid",
+  });
 
   return session({
     name: "iliagpt.sid",
@@ -102,15 +127,14 @@ export function getSession() {
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
-    rolling: true,
-    proxy: true,
+    rolling: true, // Reset expiry on each request
+    proxy: true, // Trust first proxy
     cookie: {
       httpOnly: true,
       secure: isProduction,
-      sameSite: "lax" as const, // Changed from "none" to "lax" for better compatibility
+      sameSite: "lax" as const,
       maxAge: sessionTtl,
       path: "/",
-      domain: isProduction ? undefined : undefined, // Let browser set domain automatically
     },
   });
 }
