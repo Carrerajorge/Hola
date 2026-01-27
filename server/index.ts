@@ -22,6 +22,7 @@ import { apiErrorHandler } from "./middleware/apiErrorHandler";
 import { corsMiddleware } from "./middleware/cors";
 import { csrfTokenMiddleware, csrfProtection } from "./middleware/csrf";
 import { initializeAutonomy, shutdownAutonomy, getSystemStatus } from "./services/autonomy";
+import { initializeRobustness, shutdownRobustness, getRobustnessStatus } from "./services/robustness";
 
 initTracing();
 
@@ -203,6 +204,21 @@ export function log(message: string, source = "express") {
         });
       } catch (autonomyError) {
         log(`[WARNING] Autonomy initialization failed: ${autonomyError}`);
+      }
+
+      // Initialize robustness services (100 more improvements)
+      try {
+        await initializeRobustness();
+        log("Robustness services initialized successfully");
+
+        // Register robustness cleanup
+        registerCleanup(async () => {
+          log("Shutting down robustness services...");
+          await shutdownRobustness();
+          log("Robustness services shutdown complete");
+        });
+      } catch (robustnessError) {
+        log(`[WARNING] Robustness initialization failed: ${robustnessError}`);
       }
 
       log("Graceful shutdown handler configured");

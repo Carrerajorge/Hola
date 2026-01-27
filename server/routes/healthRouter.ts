@@ -3,6 +3,7 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { getRedisStatus, isRedisAvailable } from "../lib/redisConfig";
 import { getSystemStatus } from "../services/autonomy";
+import { getRobustnessStatus } from "../services/robustness";
 
 const router = Router();
 
@@ -154,6 +155,24 @@ router.get("/", async (req, res) => {
 router.get("/autonomy", async (req, res) => {
   try {
     const status = await getSystemStatus();
+    res.json({
+      status: status.healthy ? "healthy" : "degraded",
+      ...status,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      status: "error",
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Robustness services status
+router.get("/robustness", async (req, res) => {
+  try {
+    const status = await getRobustnessStatus();
     res.json({
       status: status.healthy ? "healthy" : "degraded",
       ...status,
