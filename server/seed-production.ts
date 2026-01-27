@@ -49,23 +49,25 @@ export async function seedProductionData(): Promise<SeedResult> {
       .where(eq(users.email, ADMIN_EMAIL))
       .limit(1);
 
+    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin123!@#";
+    const bcrypt = await import("bcrypt");
+    const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
+
     if (existingUser.length > 0) {
-      if (existingUser[0].role !== "admin") {
-        await db
-          .update(users)
-          .set({ role: "admin" })
-          .where(eq(users.email, ADMIN_EMAIL));
-        result.userUpdated = true;
-        console.log(`[seed] User ${ADMIN_EMAIL} updated to admin`);
-      } else {
-        console.log(`[seed] User ${ADMIN_EMAIL} already admin (no change)`);
-      }
+      // Update existing user: role and password
+      await db
+        .update(users)
+        .set({
+          role: "admin",
+          password: hashedPassword,
+          status: "active",
+          emailVerified: "true"
+        })
+        .where(eq(users.email, ADMIN_EMAIL));
+      result.userUpdated = true;
+      console.log(`[seed] User ${ADMIN_EMAIL} updated (role=admin, password updated)`);
     } else {
       // CREATE the admin user if they don't exist
-      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin123!@#";
-      const bcrypt = await import("bcrypt");
-      const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
-
       await db.insert(users).values({
         email: ADMIN_EMAIL,
         password: hashedPassword,
