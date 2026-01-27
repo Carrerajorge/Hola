@@ -49,6 +49,8 @@ export function registerAuthRoutes(app: Express): void {
 
   // User login with email/password (for users created by admin)
   app.post("/api/auth/login", authRateLimiter, async (req: any, res) => {
+    console.log("[Auth Debug] Login attempt", { email: req.body.email, hasPassword: !!req.body.password });
+
     try {
       const { email, password } = req.body;
 
@@ -294,21 +296,37 @@ export function registerAuthRoutes(app: Express): void {
   // Get current authenticated user
   app.get("/api/auth/user", async (req: any, res) => {
     try {
+      // Debug logging for session issues
+      console.log("[Auth Debug] /api/auth/user called", {
+        isAuthenticated: req.isAuthenticated?.(),
+        hasUser: !!req.user,
+        sessionID: req.sessionID?.substring(0, 8) + "...",
+        hasCookies: !!req.cookies,
+        cookieNames: req.cookies ? Object.keys(req.cookies) : [],
+      });
+
       // Check if user is authenticated via passport session
       if (!req.isAuthenticated() || !req.user) {
+        console.log("[Auth Debug] User not authenticated", {
+          isAuthenticated: req.isAuthenticated?.(),
+          hasUser: !!req.user,
+        });
         return res.status(401).json({ message: "Unauthorized" });
       }
 
       const userId = req.user.claims?.sub;
       if (!userId) {
+        console.log("[Auth Debug] No userId in claims", { claims: req.user.claims });
         return res.status(401).json({ message: "Unauthorized" });
       }
 
       const user = await authStorage.getUser(userId);
       if (!user) {
+        console.log("[Auth Debug] User not found in DB", { userId });
         return res.status(401).json({ message: "User not found" });
       }
 
+      console.log("[Auth Debug] User authenticated successfully", { userId, email: user.email });
       res.json(user);
     } catch (error) {
       console.error("Error fetching user:", error);

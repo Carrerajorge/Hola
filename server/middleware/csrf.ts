@@ -30,7 +30,7 @@ export const csrfTokenMiddleware = (req: Request, res: Response, next: NextFunct
         res.cookie(CSRF_COOKIE_NAME, token, {
             httpOnly: false, // Must be readable by client JS to header-ize it
             secure: process.env.NODE_ENV === "production",
-            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+            sameSite: "lax", // Changed from "none" to "lax" for better compatibility
             path: "/",
         });
     }
