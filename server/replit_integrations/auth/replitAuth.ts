@@ -88,13 +88,16 @@ export function getSession() {
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
-    createTableIfMissing: false,
+    createTableIfMissing: true, // Auto-create sessions table if missing
     ttl: sessionTtl,
     tableName: "sessions",
   });
   const isProduction = process.env.NODE_ENV === "production" || !!process.env.REPL_SLUG;
+
+  console.log(`[Session] Configuring session: production=${isProduction}, secure=${isProduction}, sameSite=lax`);
+
   return session({
-    name: "siragpt.sid",
+    name: "iliagpt.sid",
     secret: process.env.SESSION_SECRET!,
     store: sessionStore,
     resave: false,
@@ -104,9 +107,10 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? "none" as const : "lax" as const,
+      sameSite: "lax" as const, // Changed from "none" to "lax" for better compatibility
       maxAge: sessionTtl,
       path: "/",
+      domain: isProduction ? undefined : undefined, // Let browser set domain automatically
     },
   });
 }
