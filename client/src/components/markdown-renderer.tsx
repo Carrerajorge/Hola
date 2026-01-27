@@ -160,6 +160,13 @@ const purifyConfig: DOMPurify.Config = {
   FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur']
 };
 
+// Prevent Reverse Tabnabbing
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if ('target' in node && node.getAttribute('target') === '_blank') {
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
+
 export function sanitizeContent(content: string): string {
   if (!content || typeof content !== 'string') return '';
   return DOMPurify.sanitize(content, purifyConfig) as unknown as string;

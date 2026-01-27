@@ -8,7 +8,7 @@ import type { Request, Response, NextFunction } from 'express';
 // Use the standard compression library with production-safe settings
 export const compression = compressionLib({
   // Compression level (1-9, higher = better compression but slower)
-  level: 6,
+  level: 9,
   // Minimum size to compress (don't compress tiny responses)
   threshold: 1024,
   // Filter function to determine which responses to compress

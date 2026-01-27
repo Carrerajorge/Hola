@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
+import { logger as baseLogger, LogLevel, Logger as BaseLogger } from "../utils/logger";
 
-// Tipos para el sistema de logging estructurado
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type { LogLevel };
 
 export interface LogEntry {
   id: string;
@@ -32,18 +32,19 @@ export interface LogStats {
   newestEntry?: Date;
 }
 
-export interface Logger {
-  debug: (message: string, metadata?: Record<string, any>) => void;
-  info: (message: string, metadata?: Record<string, any>) => void;
-  warn: (message: string, metadata?: Record<string, any>) => void;
-  error: (message: string, metadata?: Record<string, any>) => void;
-  withRequest: (requestId: string, userId?: string) => Logger;
-  withDuration: (duration: number) => Logger;
+// Extend BaseLogger to include chainable methods used by existing code
+export interface StructuredLogger extends BaseLogger {
+  withRequest: (requestId: string, userId?: string) => StructuredLogger;
+  withDuration: (duration: number) => StructuredLogger;
 }
 
 const MAX_LOG_ENTRIES = 5000;
 const logs: LogEntry[] = [];
 
+/**
+ * Adds a log entry to the in-memory buffer (for UI/Dashboard)
+ * AND emits it via the standardized Pino logger (for infrastructure)
+ */
 function addLog(entry: Omit<LogEntry, "id" | "timestamp">): void {
   const logEntry: LogEntry = {
     ...entry,
@@ -53,42 +54,39 @@ function addLog(entry: Omit<LogEntry, "id" | "timestamp">): void {
 
   logs.push(logEntry);
 
-  // Rotación: eliminar entradas antiguas si excedemos el límite
+  // Rotation: delete old entries if max exceeded
   if (logs.length > MAX_LOG_ENTRIES) {
     logs.splice(0, logs.length - MAX_LOG_ENTRIES);
   }
 
-  // Use standardized logger for output
+  // Use standardized Pino logger for output
+  // We recreate the context object expected by Pino
   const context = {
     component: logEntry.component,
     requestId: logEntry.requestId,
     userId: logEntry.userId,
     duration: logEntry.duration,
+    ...(logEntry.metadata || {}),
   };
 
-  // Metadata merge
-  const metadata = logEntry.metadata || {};
-
+  // Delegate to Pino
   switch (logEntry.level) {
     case "debug":
-      baseLogger.debug(logEntry.message, { ...context, ...metadata });
+      baseLogger.debug(logEntry.message, context);
       break;
     case "info":
-      baseLogger.info(logEntry.message, { ...context, ...metadata });
+      baseLogger.info(logEntry.message, context);
       break;
     case "warn":
-      baseLogger.warn(logEntry.message, { ...context, ...metadata });
+      baseLogger.warn(logEntry.message, context);
       break;
     case "error":
-      baseLogger.error(logEntry.message, { ...context, ...metadata });
+      baseLogger.error(logEntry.message, context);
       break;
   }
 }
 
-// Import base logger
-import { logger as baseLogger } from "../utils/logger";
-
-export function createLogger(component: string): Logger {
+export function createLogger(component: string): StructuredLogger {
   let contextRequestId: string | undefined;
   let contextUserId: string | undefined;
   let contextDuration: number | undefined;
@@ -107,32 +105,41 @@ export function createLogger(component: string): Logger {
     };
   };
 
-  const logger: Logger = {
+  // Implement the chainable interface
+  const logger = {
+    // Standard methods
     debug: createLogMethod("debug"),
     info: createLogMethod("info"),
     warn: createLogMethod("warn"),
     error: createLogMethod("error"),
 
-    withRequest(requestId: string, userId?: string): Logger {
-      const childLogger = createLogger(component);
-      (childLogger as any)._setContext(requestId, userId, contextDuration);
-      return childLogger;
+    // Pino-compatible child (maps to createLogger)
+    child(context: any): BaseLogger {
+      return baseLogger.child({ ...context, component });
     },
 
-    withDuration(duration: number): Logger {
-      const childLogger = createLogger(component);
-      (childLogger as any)._setContext(contextRequestId, contextUserId, duration);
-      return childLogger;
+    // Chainable context methods (specific to this implementation)
+    withRequest(requestId: string, userId?: string): StructuredLogger {
+      const child = createLogger(component);
+      (child as any)._setContext(requestId, userId, contextDuration);
+      return child;
+    },
+
+    withDuration(duration: number): StructuredLogger {
+      const child = createLogger(component);
+      (child as any)._setContext(contextRequestId, contextUserId, duration);
+      return child;
     },
   };
 
+  // Hidden context setter
   (logger as any)._setContext = (reqId?: string, userId?: string, duration?: number) => {
     contextRequestId = reqId;
     contextUserId = userId;
     contextDuration = duration;
   };
 
-  return logger;
+  return logger as StructuredLogger;
 }
 
 export function getLogs(filters?: LogFilters): LogEntry[] {
@@ -191,5 +198,5 @@ export function clearLogs(): void {
   logs.length = 0;
 }
 
-// Logger por defecto del sistema
+// Default system logger
 export const systemLogger = createLogger("system");

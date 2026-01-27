@@ -843,27 +843,19 @@ export function Composer({
   const inputContainerClass = isDocumentMode
     ? "relative flex flex-col rounded-xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm border border-zinc-100 dark:border-zinc-800 px-4 py-3 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-colors duration-200"
     : cn(
-      // Premium gold-accented minimalist container
-      "max-w-2xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
-      // Glass morphism base
-      "bg-gradient-to-b from-white to-amber-50/30 dark:from-zinc-900 dark:to-amber-950/10 backdrop-blur-md",
-      // Visible gold border
-      "border-[1.5px] border-amber-300/50 dark:border-amber-500/30",
+      // Minimalist professional container
+      "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
+      // Clean background
+      "bg-background/80 backdrop-blur-md",
+      // Subtle border merging with the rest of the app
+      "border border-border/50",
       "rounded-2xl px-4 py-3",
-      // Prominent gold glow on focus
-      "focus-within:border-amber-400/70 dark:focus-within:border-amber-400/50",
-      "focus-within:shadow-[0_0_0_3px_rgba(217,165,102,0.15),0_4px_20px_-4px_rgba(217,165,102,0.25)]",
-      // Elegant decorative gold line at top - more visible
-      "before:absolute before:top-0 before:left-1/2 before:-translate-x-1/2 before:w-24 before:h-[2px] before:-translate-y-1/2",
-      "before:bg-gradient-to-r before:from-transparent before:via-amber-400 before:to-transparent before:rounded-full",
-      // Subtle inner gold shine
-      "after:absolute after:inset-0 after:rounded-2xl after:pointer-events-none",
-      "after:bg-gradient-to-br after:from-amber-100/20 after:via-transparent after:to-amber-100/10 dark:after:from-amber-500/5 dark:after:to-amber-500/5",
-      // Outer shadow
-      "shadow-[0_2px_16px_-4px_rgba(217,165,102,0.2)]",
-      "hover:shadow-[0_4px_24px_-4px_rgba(217,165,102,0.3)] hover:border-amber-400/60",
-      selectedDocText && "border-amber-400/70 dark:border-amber-400/50",
-      isDraggingOver && "border-amber-500/80 bg-amber-50/50 dark:bg-amber-900/20"
+      // Gentle shadow and focus state
+      "shadow-sm",
+      "focus-within:shadow-md focus-within:border-ring/20 focus-within:ring-1 focus-within:ring-ring/20",
+      "hover:border-border/80",
+      selectedDocText && "border-primary/20",
+      isDraggingOver && "border-primary/50 bg-primary/5"
     );
 
   return (
@@ -1036,7 +1028,7 @@ export function Composer({
             rows={1}
           />
 
-          <div className="flex items-center justify-between mt-2 pt-1 border-t border-amber-200/30 dark:border-amber-500/15">
+          <div className="flex items-center justify-between mt-2 pt-1 border-t border-border/40">
             <div className="flex items-center gap-2">
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}

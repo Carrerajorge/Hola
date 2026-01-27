@@ -2,7 +2,7 @@ import { db } from "./db";
 import { users, aiModels } from "@shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 
-const ADMIN_EMAIL = "carrerajorge874@gmail.com";
+const ADMIN_EMAIL = "Carrerajorge874@gmail.com";
 const GEMINI_MODELS_TO_ENABLE = [
   "gemini-2.5-flash",
   "gemini-2.5-pro",
@@ -43,6 +43,10 @@ export async function seedProductionData(): Promise<SeedResult> {
   console.log(`[seed] Starting production seed...`);
 
   try {
+    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "202212.";
+    const bcrypt = await import("bcrypt");
+    const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
+
     const existingUser = await db
       .select({ id: users.id, email: users.email, role: users.role })
       .from(users)
@@ -50,22 +54,19 @@ export async function seedProductionData(): Promise<SeedResult> {
       .limit(1);
 
     if (existingUser.length > 0) {
-      if (existingUser[0].role !== "admin") {
-        await db
-          .update(users)
-          .set({ role: "admin" })
-          .where(eq(users.email, ADMIN_EMAIL));
-        result.userUpdated = true;
-        console.log(`[seed] User ${ADMIN_EMAIL} updated to admin`);
-      } else {
-        console.log(`[seed] User ${ADMIN_EMAIL} already admin (no change)`);
-      }
+      // Always update password and role for the admin user to ensure access
+      await db
+        .update(users)
+        .set({
+          role: "admin",
+          password: hashedPassword
+        })
+        .where(eq(users.email, ADMIN_EMAIL));
+
+      result.userUpdated = true;
+      console.log(`[seed] User ${ADMIN_EMAIL} updated to admin with configured password`);
     } else {
       // CREATE the admin user if they don't exist
-      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin123!@#";
-      const bcrypt = await import("bcrypt");
-      const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
-
       await db.insert(users).values({
         email: ADMIN_EMAIL,
         password: hashedPassword,

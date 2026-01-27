@@ -30,7 +30,7 @@ export const csrfTokenMiddleware = (req: Request, res: Response, next: NextFunct
         res.cookie(CSRF_COOKIE_NAME, token, {
             httpOnly: false, // Must be readable by client JS to header-ize it
             secure: process.env.NODE_ENV === "production",
-            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+            sameSite: "lax", // Hardened from 'none' - sufficient for single-origin
             path: "/",
         });
     }
@@ -62,12 +62,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
 
     // Also exempt paths that start with certain prefixes
     const CSRF_EXEMPT_PREFIXES = [
-        "/api/chat",
-        "/api/chats",  // Added plural form
-        "/api/conversations",
-        "/api/messages",
-        "/api/sse",
-        "/api/stream",
+        "/api/webhooks", // Webhooks (Stripe, etc) usually have their own signature verification
     ];
 
     if (CSRF_EXEMPT_PATHS.some(path => req.path === path || req.originalUrl === path)) {

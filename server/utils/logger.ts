@@ -1,46 +1,47 @@
+import pino from "pino";
 import { getContext } from "../middleware/correlationContext";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
-  debug: 0,
-  info: 1,
-  warn: 2,
-  error: 3,
-};
+const SENSITIVE_KEYS = [
+  "password",
+  "token",
+  "secret",
+  "key",
+  "authorization",
+  "cookie",
+  "stripe",
+  "access_token",
+  "refresh_token"
+];
 
-const SENSITIVE_KEYS = ['password', 'token', 'secret', 'key', 'authorization', 'cookie', 'stripe'];
+const isProduction = process.env.NODE_ENV === "production";
 
-const redact = (obj: any): any => {
-  if (!obj) return obj;
-  if (typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(redact);
-
-  const newObj: any = {};
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      if (SENSITIVE_KEYS.some(k => key.toLowerCase().includes(k))) {
-        newObj[key] = '***REDACTED***';
-      } else {
-        newObj[key] = redact(obj[key]);
-      }
+// Configure Pino instance
+const pinoLogger = pino({
+  level: process.env.LOG_LEVEL || (isProduction ? "info" : "debug"),
+  redact: {
+    paths: SENSITIVE_KEYS.flatMap(key => [key, `*.${key}`, `*.*.${key}`]),
+    remove: true,
+  },
+  // In development, use pino-pretty for readability
+  // In production, keep JSON for aggregators
+  transport: !isProduction
+    ? {
+      target: "pino-pretty",
+      options: {
+        colorize: true,
+        ignore: "pid,hostname",
+        translateTime: "HH:MM:ss",
+      },
     }
-  }
-  return newObj;
-};
+    : undefined,
+  base: {
+    env: process.env.NODE_ENV,
+  },
+});
 
-interface LogEntry {
-  timestamp: string;
-  level: LogLevel;
-  message: string;
-  traceId?: string;
-  userId?: string;
-  component?: string;
-  durationMs?: number;
-  [key: string]: unknown;
-}
-
-interface LoggerContext {
+export interface LoggerContext {
   component?: string;
   userId?: string;
   chatId?: string;
@@ -55,106 +56,59 @@ export interface Logger {
   child(context: LoggerContext): Logger;
 }
 
-function getConfiguredLogLevel(): LogLevel {
-  const envLevel = process.env.LOG_LEVEL?.toLowerCase();
-  if (envLevel && envLevel in LOG_LEVEL_PRIORITY) {
-    return envLevel as LogLevel;
-  }
-  return process.env.NODE_ENV === "production" ? "info" : "debug";
-}
+/**
+ * Creates a context-aware logger that automatically injects
+ * Trace IDs and User IDs from the current AsyncLocalStorage context.
+ */
+class PinoLoggerWrapper implements Logger {
+  private logger: pino.Logger;
+  private staticContext: LoggerContext;
 
-function shouldLog(level: LogLevel): boolean {
-  const configuredLevel = getConfiguredLogLevel();
-  return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[configuredLevel];
-}
-
-function formatLogEntry(
-  level: LogLevel,
-  message: string,
-  context: LoggerContext,
-  metadata?: Record<string, unknown>
-): LogEntry {
-  const correlationContext = getContext();
-
-  const entry: LogEntry = {
-    timestamp: new Date().toISOString(),
-    level,
-    message,
-  };
-
-  if (correlationContext?.traceId) {
-    entry.traceId = correlationContext.traceId;
+  constructor(baseLogger: pino.Logger, context: LoggerContext = {}) {
+    this.logger = baseLogger;
+    this.staticContext = context;
   }
 
-  if (correlationContext?.userId || context.userId) {
-    entry.userId = context.userId || correlationContext?.userId;
+  private getMergedContext(metadata?: Record<string, unknown>): Record<string, unknown> {
+    // Get dynamic context (traceId, userId) from AsyncLocalStorage
+    const correlationContext = getContext();
+
+    return {
+      ...this.staticContext,
+      ...metadata,
+      ...correlationContext, // Inject traceId/userId automatically if available
+    };
   }
 
-  if (context.component) {
-    entry.component = context.component;
+  debug(message: string, metadata?: Record<string, unknown>) {
+    this.logger.debug(this.getMergedContext(metadata), message);
   }
 
-  if (context.chatId) {
-    entry.chatId = context.chatId;
+  info(message: string, metadata?: Record<string, unknown>) {
+    this.logger.info(this.getMergedContext(metadata), message);
   }
 
-  const { component, userId, chatId, ...otherContext } = context;
-
-  if (Object.keys(otherContext).length > 0) {
-    Object.assign(entry, redact(otherContext));
+  warn(message: string, metadata?: Record<string, unknown>) {
+    this.logger.warn(this.getMergedContext(metadata), message);
   }
 
-  if (metadata) {
-    Object.assign(entry, redact(metadata));
+  error(message: string, metadata?: Record<string, unknown>) {
+    this.logger.error(this.getMergedContext(metadata), message);
   }
 
-  return entry;
-}
-
-function writeLog(entry: LogEntry): void {
-  const output = JSON.stringify(entry);
-
-  switch (entry.level) {
-    case "error":
-      console.error(output);
-      break;
-    case "warn":
-      console.warn(output);
-      break;
-    case "debug":
-      console.debug(output);
-      break;
-    default:
-      console.log(output);
+  child(context: LoggerContext): Logger {
+    // Pino's child logger merges bindings efficiently
+    return new PinoLoggerWrapper(
+      this.logger.child(context),
+      { ...this.staticContext, ...context }
+    );
   }
-}
-
-function createLogMethod(
-  level: LogLevel,
-  context: LoggerContext
-): (message: string, metadata?: Record<string, unknown>) => void {
-  return (message: string, metadata?: Record<string, unknown>) => {
-    if (!shouldLog(level)) return;
-
-    const entry = formatLogEntry(level, message, context, metadata);
-    writeLog(entry);
-  };
-}
-
-function createLoggerWithContext(context: LoggerContext): Logger {
-  return {
-    debug: createLogMethod("debug", context),
-    info: createLogMethod("info", context),
-    warn: createLogMethod("warn", context),
-    error: createLogMethod("error", context),
-    child(childContext: LoggerContext): Logger {
-      return createLoggerWithContext({ ...context, ...childContext });
-    },
-  };
 }
 
 export function createLogger(component?: string): Logger {
-  return createLoggerWithContext({ component });
+  const context = component ? { component } : {};
+  return new PinoLoggerWrapper(pinoLogger, context);
 }
 
+// Default singleton logger
 export const logger = createLogger();

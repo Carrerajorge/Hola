@@ -407,6 +407,13 @@ const SANITIZE_CONFIG = {
     ADD_ATTR: ['target'],
 };
 
+// Prevent Reverse Tabnabbing (Global Hook)
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if ('target' in node && node.getAttribute('target') === '_blank') {
+        node.setAttribute('rel', 'noopener noreferrer');
+    }
+});
+
 export function sanitizeHtml(html: string): string {
     if (typeof window === 'undefined') {
         return html;

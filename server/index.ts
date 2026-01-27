@@ -11,7 +11,9 @@ import { startAggregator } from "./services/analyticsAggregator";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { seedProductionData } from "./seed-production";
 import { verifyDatabaseConnection, startHealthChecks, stopHealthChecks, drainConnections } from "./db";
-import { securityHeaders, apiSecurityHeaders } from "./middleware/securityHeaders";
+import helmet from "helmet";
+import hpp from "hpp";
+import { apiSecurityHeaders } from "./middleware/securityHeaders";
 import { setupGracefulShutdown, registerCleanup } from "./lib/gracefulShutdown";
 import { pythonServiceManager } from "./lib/pythonServiceManager";
 import { idempotency } from "./middleware/idempotency";
@@ -43,8 +45,27 @@ app.use(compression());
 // CORS configuration - must be before other middleware
 app.use(corsMiddleware);
 
-// Security headers middleware - CSP, HSTS, X-Frame-Options, etc.
-app.use(securityHeaders());
+// Security Middleware (Helmet + HPP)
+app.use(hpp()); // Prevent HTTP Parameter Pollution
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: process.env.NODE_ENV === 'production'
+        ? ["'self'", "https://cdn.jsdelivr.net"]
+        : ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      imgSrc: ["'self'", "data:", "blob:", "https:"],
+      connectSrc: ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "wss:", "ws:"],
+      frameAncestors: ["'self'"],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin for static assets if needed
+  crossOriginEmbedderPolicy: false,
+}));
 
 // CSRF Token Generation (sets cookie)
 app.use(csrfTokenMiddleware);
@@ -64,16 +85,21 @@ app.use("/api", idempotency);
 // Legacy request tracer middleware for stats
 app.use(requestTracerMiddleware);
 
+// Defense in Depth
+app.disable("x-powered-by");
+
+// Global Body Limit: Reduced to 1MB to prevent DoS
+// For large file uploads, use specific routes with increased limits (e.g. Multer)
 app.use(
   express.json({
-    limit: '100mb',
+    limit: '1mb',
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false, limit: '100mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
 export function log(message: string, source = "express") {
   Logger.info(`[${source}] ${message}`);
@@ -141,7 +167,7 @@ export function log(message: string, source = "express") {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = env.PORT;
-  httpServer.listen(
+  const server = httpServer.listen(
     {
       port,
       host: "0.0.0.0",
@@ -192,4 +218,8 @@ export function log(message: string, source = "express") {
       log("Graceful shutdown handler configured");
     },
   );
+
+  // Hardened Server Timeouts (Slowloris Protection)
+  server.headersTimeout = 60000; // 60s
+  server.keepAliveTimeout = 65000; // 65s larger than headersTimeout
 })();
