@@ -11,6 +11,7 @@ import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
 import { globalAuditMiddleware } from "./middleware/audit";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
+import googleAuthRouter from "./auth/googleAuth";
 import { generateAnonToken } from "./lib/anonToken";
 import { pptExportRouter } from "./routes/pptExport";
 import swaggerUi from 'swagger-ui-express';
@@ -221,6 +222,8 @@ export async function registerRoutes(
 ): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
+  // Explicitly mount Google Auth for reliability (Standalone Mode)
+  app.use("/api/auth", googleAuthRouter);
 
   // Global Compression Middleware (Gzip)
   app.use(compression);
