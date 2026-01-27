@@ -21,6 +21,7 @@ export const aiModels = pgTable("ai_models", {
     inputCostPer1k: text("input_cost_per_1k").default("0.00"),
     outputCostPer1k: text("output_cost_per_1k").default("0.00"),
     lastSyncAt: timestamp("last_sync_at"),
+    lastSyncedAt: timestamp("last_synced_at"),
     isDeprecated: text("is_deprecated").default("false"),
     releaseDate: text("release_date"),
     isEnabled: text("is_enabled").default("false"),
