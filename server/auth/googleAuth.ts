@@ -9,6 +9,17 @@ import { env } from "../config/env";
 
 const router = Router();
 
+// Get the base URL for OAuth callbacks
+const getBaseUrl = (): string => {
+    // Use APP_URL from environment (e.g., https://iliagpt.com)
+    if (process.env.APP_URL) {
+        return process.env.APP_URL.replace(/\/$/, ''); // Remove trailing slash
+    }
+    // Fallback for development
+    const port = process.env.PORT || 5000;
+    return `http://localhost:${port}`;
+};
+
 // Google OAuth Configuration
 const getGoogleConfig = () => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -69,8 +80,9 @@ router.get("/google", (req: Request, res: Response) => {
     const returnUrl = (req.query.returnUrl as string) || "/";
     stateStore.set(state, { createdAt: Date.now(), returnUrl });
 
-    const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
-    const redirectUri = `${protocol}://${req.get("host")}/api/auth/google/callback`;
+    // Use APP_URL for production or GOOGLE_CALLBACK_URL if set
+    const redirectUri = process.env.GOOGLE_CALLBACK_URL || `${getBaseUrl()}/api/auth/google/callback`;
+    console.log("[Google Auth] Using redirect URI:", redirectUri);
 
     const params = new URLSearchParams({
         client_id: config.clientId,
@@ -118,8 +130,8 @@ router.get("/google/callback", async (req: Request, res: Response) => {
     }
 
     try {
-        const protocol = env.NODE_ENV === "production" ? "https" : req.protocol;
-        const redirectUri = `${protocol}://${req.get("host")}/api/auth/google/callback`;
+        // Use APP_URL for production or GOOGLE_CALLBACK_URL if set
+        const redirectUri = process.env.GOOGLE_CALLBACK_URL || `${getBaseUrl()}/api/auth/google/callback`;
 
         // Exchange code for tokens
         const tokenResponse = await fetch(config.tokenUrl, {
