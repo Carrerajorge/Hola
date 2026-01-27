@@ -5,7 +5,6 @@
 import { Router, Request, Response } from "express";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { storage } from "../storage";
-import { env } from "../config/env";
 
 const router = Router();
 
@@ -82,7 +81,10 @@ router.get("/google", (req: Request, res: Response) => {
 
     // Use APP_URL for production or GOOGLE_CALLBACK_URL if set
     const redirectUri = process.env.GOOGLE_CALLBACK_URL || `${getBaseUrl()}/api/auth/google/callback`;
+    console.log("[Google Auth] Starting OAuth flow");
     console.log("[Google Auth] Using redirect URI:", redirectUri);
+    console.log("[Google Auth] Generated state:", state.substring(0, 10) + "...");
+    console.log("[Google Auth] State store now has", stateStore.size, "entries");
 
     const params = new URLSearchParams({
         client_id: config.clientId,
@@ -104,6 +106,10 @@ router.get("/google", (req: Request, res: Response) => {
  * Handles the OAuth callback from Google
  */
 router.get("/google/callback", async (req: Request, res: Response) => {
+    // Log all query parameters for debugging
+    console.log("[Google Auth] Callback received with query:", JSON.stringify(req.query));
+    console.log("[Google Auth] Callback full URL:", req.originalUrl);
+
     const { code, state, error, error_description } = req.query;
 
     if (error) {
@@ -112,7 +118,8 @@ router.get("/google/callback", async (req: Request, res: Response) => {
     }
 
     if (!code || !state) {
-        console.error("[Google Auth] Missing code or state");
+        console.error("[Google Auth] Missing code or state. Query params:", req.query);
+        console.error("[Google Auth] State store has", stateStore.size, "entries");
         return res.redirect("/login?error=google_invalid_response");
     }
 
