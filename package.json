@@ -15,6 +15,9 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:agentic": "vitest run tests/agentic",
+    "test:client": "vitest run --config vitest.client.config.ts",
+    "test:client:watch": "vitest --config vitest.client.config.ts",
+    "test:client:coverage": "vitest run --config vitest.client.config.ts --coverage",
     "test:all": "bash ./scripts/test-all.sh",
     "test:smoke": "npx playwright test e2e/smoke.spec.ts --reporter=list"
   },
@@ -248,6 +251,7 @@
     "@tailwindcss/vite": "^4.1.14",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/compression": "^1.8.1",
     "@types/connect-pg-simple": "^7.0.3",
     "@types/cors": "^2.8.19",

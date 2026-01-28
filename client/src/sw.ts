@@ -20,10 +20,14 @@ const API_CACHE = "iliagpt-api-v1";
 const PRECACHE_ASSETS = [
     "/",
     "/index.html",
+    "/offline.html",
     "/manifest.json",
     "/icons/icon-192x192.png",
     "/icons/icon-512x512.png",
 ];
+
+// Offline fallback page
+const OFFLINE_PAGE = "/offline.html";
 
 // API routes to cache with network-first strategy
 const CACHEABLE_API_ROUTES = [
@@ -146,13 +150,19 @@ async function networkFirstStrategy(request: Request, cacheName: string): Promis
 
         // Return offline fallback for HTML requests
         if (request.headers.get("Accept")?.includes("text/html")) {
+            const offlinePage = await caches.match(OFFLINE_PAGE);
+            if (offlinePage) {
+                return offlinePage;
+            }
+            // Fallback to inline HTML if offline page not cached
             return new Response(
                 `<!DOCTYPE html>
-        <html>
-          <head><title>Offline</title></head>
-          <body>
-            <h1>You are offline</h1>
-            <p>Please check your internet connection and try again.</p>
+        <html lang="es">
+          <head><meta charset="UTF-8"><title>Sin conexión</title></head>
+          <body style="font-family:system-ui;text-align:center;padding:2rem;">
+            <h1>Sin conexión</h1>
+            <p>No hay conexión a internet. Intenta de nuevo más tarde.</p>
+            <button onclick="location.reload()">Reintentar</button>
           </body>
         </html>`,
                 {
