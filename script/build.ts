@@ -1,4 +1,4 @@
-import { build as esbuild } from "esbuild";
+import { build as esbuild, BuildResult } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile, writeFile } from "fs/promises";
 
@@ -20,12 +20,15 @@ async function buildAll() {
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
-  await esbuild({
-    entryPoints: ["server/index.ts"],
-    platform: "node",
+  // Common esbuild options for optimal bundle size
+  const commonOptions = {
+    platform: "node" as const,
     bundle: true,
-    format: "esm",
-    outfile: "dist/index.mjs",
+    format: "esm" as const,
+    treeShaking: true,
+    minify: true,
+    // Mark ALL node_modules as external - they're installed at runtime
+    external: [...externals, "./node_modules/*"],
     define: {
       "process.env.NODE_ENV": '"production"',
     },
@@ -39,34 +42,40 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
       `.trim(),
     },
-    minify: true,
-    external: externals,
-    logLevel: "info",
+    logLevel: "info" as const,
+  };
+
+  const serverResult: BuildResult = await esbuild({
+    ...commonOptions,
+    entryPoints: ["server/index.ts"],
+    outfile: "dist/index.mjs",
+    metafile: true,
   });
+
+  // Output bundle analysis
+  if (serverResult.metafile) {
+    const totalBytes = Object.values(serverResult.metafile.outputs)
+      .reduce((sum, output) => sum + output.bytes, 0);
+    console.log(`Server bundle: ${(totalBytes / 1024 / 1024).toFixed(2)}MB`);
+
+    // Find largest inputs
+    const serverOutput = serverResult.metafile.outputs["dist/index.mjs"];
+    if (serverOutput?.inputs) {
+      const sortedInputs = Object.entries(serverOutput.inputs)
+        .sort((a, b) => b[1].bytesInOutput - a[1].bytesInOutput)
+        .slice(0, 10);
+      console.log("Top 10 largest modules in server bundle:");
+      sortedInputs.forEach(([name, info]) => {
+        console.log(`  ${(info.bytesInOutput / 1024).toFixed(1)}KB - ${name}`);
+      });
+    }
+  }
 
   console.log("building worker...");
   await esbuild({
+    ...commonOptions,
     entryPoints: ["server/worker.ts"],
-    platform: "node",
-    bundle: true,
-    format: "esm",
     outfile: "dist/worker.mjs",
-    define: {
-      "process.env.NODE_ENV": '"production"',
-    },
-    banner: {
-      js: `
-import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-const require = createRequire(import.meta.url);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-      `.trim(),
-    },
-    minify: true,
-    external: externals,
-    logLevel: "info",
   });
 
   // Create a minimal CJS entry point that loads the ESM bundle
