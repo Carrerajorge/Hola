@@ -277,6 +277,8 @@
     "bufferutil": "^4.0.8"
   },
   "overrides": {
-    "xlsx": "npm:@e965/xlsx@^0.20.3"
+    "xlsx": "npm:@e965/xlsx@^0.20.3",
+    "pdfjs-dist": "4.10.38",
+    "esbuild": "^0.25.0"
   }
 }

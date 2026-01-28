@@ -27,6 +27,7 @@ async function buildAll() {
     format: "esm" as const,
     treeShaking: true,
     minify: true,
+    splitting: true, // Enable code splitting to share common chunks between server and worker
     // Mark ALL node_modules as external - they're installed at runtime
     external: [...externals, "./node_modules/*"],
     define: {
@@ -45,10 +46,13 @@ const __dirname = dirname(__filename);
     logLevel: "info" as const,
   };
 
+  // Build server and worker together to enable splitting
   const serverResult: BuildResult = await esbuild({
     ...commonOptions,
-    entryPoints: ["server/index.ts"],
-    outfile: "dist/index.mjs",
+    entryPoints: ["server/index.ts", "server/worker.ts"],
+    outdir: "dist",
+    outExtension: { ".js": ".mjs" },
+    splitting: true,
     metafile: true,
   });
 
@@ -56,9 +60,9 @@ const __dirname = dirname(__filename);
   if (serverResult.metafile) {
     const totalBytes = Object.values(serverResult.metafile.outputs)
       .reduce((sum, output) => sum + output.bytes, 0);
-    console.log(`Server bundle: ${(totalBytes / 1024 / 1024).toFixed(2)}MB`);
+    console.log(`Total server bundle size: ${(totalBytes / 1024 / 1024).toFixed(2)}MB`);
 
-    // Find largest inputs
+    // Find largest inputs for index.mjs
     const serverOutput = serverResult.metafile.outputs["dist/index.mjs"];
     if (serverOutput?.inputs) {
       const sortedInputs = Object.entries(serverOutput.inputs)
@@ -70,13 +74,6 @@ const __dirname = dirname(__filename);
       });
     }
   }
-
-  console.log("building worker...");
-  await esbuild({
-    ...commonOptions,
-    entryPoints: ["server/worker.ts"],
-    outfile: "dist/worker.mjs",
-  });
 
   // Create a minimal CJS entry point that loads the ESM bundle
   console.log("creating start wrapper...");
