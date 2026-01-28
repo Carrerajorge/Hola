@@ -1,6 +1,6 @@
 
 import { Router } from "express";
-import { dbRead } from "../storage/db"; // Use read replica for health check
+import { dbRead } from "../db"; // Use read replica for health check
 import { cache } from "../lib/cache";
 import { sql } from "drizzle-orm";
 import fs from "fs";
