@@ -221,6 +221,7 @@ export function useOfflineMode(config: OfflineConfig = {}) {
         synced: number;
         failed: number;
     }> => {
+        // Prevent concurrent sync operations
         if (syncInProgress.current || !navigator.onLine) {
             return { synced: 0, failed: 0 };
         }
@@ -231,32 +232,42 @@ export function useOfflineMode(config: OfflineConfig = {}) {
         let synced = 0;
         let failed = 0;
 
-        const actions = [...state.pendingActions].sort(
-            (a, b) => b.priority - a.priority || a.timestamp.getTime() - b.timestamp.getTime()
+        // Get fresh state to avoid stale closure issues
+        const currentState = getFromStorage<PendingAction[]>(STORAGE_KEYS.pendingActions, []);
+        const actions = [...currentState].sort(
+            (a, b) => b.priority - a.priority ||
+                      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         );
 
         for (const action of actions) {
+            // Check if we're still online before each action
+            if (!navigator.onLine) {
+                console.log('[Offline] Lost connection during sync, stopping');
+                break;
+            }
+
             try {
                 // Execute action (in production, call actual API)
                 await executeAction(action);
                 removeAction(action.id);
                 synced++;
             } catch (error) {
-                action.retryCount++;
+                const updatedRetryCount = action.retryCount + 1;
 
-                if (action.retryCount >= maxRetries) {
+                if (updatedRetryCount >= maxRetries) {
                     // Remove failed action after max retries
                     removeAction(action.id);
                     failed++;
                     console.error(`[Offline] Action ${action.id} failed after ${maxRetries} retries`);
                 } else {
-                    // Update retry count
-                    setState(s => ({
-                        ...s,
-                        pendingActions: s.pendingActions.map(a =>
-                            a.id === action.id ? { ...a, retryCount: action.retryCount } : a
-                        ),
-                    }));
+                    // Update retry count atomically
+                    setState(s => {
+                        const updatedActions = s.pendingActions.map(a =>
+                            a.id === action.id ? { ...a, retryCount: updatedRetryCount } : a
+                        );
+                        setToStorage(STORAGE_KEYS.pendingActions, updatedActions);
+                        return { ...s, pendingActions: updatedActions };
+                    });
                 }
 
                 // Delay before next action
@@ -266,6 +277,7 @@ export function useOfflineMode(config: OfflineConfig = {}) {
 
         syncInProgress.current = false;
 
+        // Get fresh pending count to determine final status
         setState(s => ({
             ...s,
             syncStatus: s.pendingActions.length === 0 ? "synced" : "pending",
@@ -276,7 +288,7 @@ export function useOfflineMode(config: OfflineConfig = {}) {
         }
 
         return { synced, failed };
-    }, [state.pendingActions, maxRetries, retryDelay, removeAction]);
+    }, [maxRetries, retryDelay, removeAction]);
 
     // ======== Cache ========
 

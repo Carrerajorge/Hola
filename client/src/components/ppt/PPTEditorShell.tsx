@@ -220,10 +220,17 @@ Usa el formato de marcado especificado para generar el contenido.`;
     setJsonContent(e.target.value);
     // Optional: Live update the deck store if valid JSON
     try {
-      // const parsed = JSON.parse(e.target.value);
-      // loadDeck(parsed);
-      // Careful with live updates during typing
-    } catch (e) { }
+      const parsed = JSON.parse(e.target.value);
+      if (parsed && parsed.slides && Array.isArray(parsed.slides)) {
+        loadDeck(parsed);
+      }
+    } catch (parseError) {
+      // JSON is incomplete or invalid during typing - this is expected
+      // Only log in development for debugging
+      if (process.env.NODE_ENV === 'development' && e.target.value.trim().endsWith('}')) {
+        console.debug('[PPTEditorShell] JSON parse error:', parseError);
+      }
+    }
   };
 
   return (
