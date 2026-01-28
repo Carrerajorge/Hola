@@ -842,28 +842,28 @@ export function Composer({
   const containerClass = isDocumentMode
     ? cn(
       "p-4 sm:p-6 w-full max-w-3xl mx-auto relative bg-background z-10",
-      isDraggingOver && "ring-2 ring-primary rounded-2xl"
+      isDraggingOver && "ring-1 ring-zinc-400 dark:ring-zinc-600 rounded-2xl"
     )
     : "shrink-0 w-full px-4 pb-4 pt-2 bg-background";
 
   const inputContainerClass = isDocumentMode
-    ? "relative flex flex-col rounded-xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm border border-zinc-100 dark:border-zinc-800 px-4 py-3 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-colors duration-200"
+    ? "relative flex flex-col rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-4 py-3 focus-within:border-zinc-400 dark:focus-within:border-zinc-600 transition-colors duration-200"
     : cn(
-      // Professional Premium Container
-      "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
-      // Glass Background & Blur
-      "bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl",
-      // Premium Border
-      "border border-black/5 dark:border-white/10",
-      // Shape & Spacing
-      "rounded-[26px] px-5 py-4",
-      // Elevated Shadow
-      "shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]",
-      // Focus State (Subtle Glow)
-      "focus-within:shadow-[0_0_0_2px_rgba(var(--primary),0.1),0_8px_40px_rgba(0,0,0,0.1)] focus-within:border-primary/30",
+      // Minimalist Container
+      "max-w-3xl mx-auto relative transition-all duration-200 ease-out overflow-visible",
+      // Clean Background - Pure white/black
+      "bg-white dark:bg-zinc-950",
+      // Minimalist Border - Thin black/white line
+      "border border-zinc-200 dark:border-zinc-800",
+      // Shape & Spacing - Less rounded for minimalist look
+      "rounded-2xl px-5 py-4",
+      // Subtle Shadow - Very minimal
+      "shadow-sm",
+      // Focus State - Clean thin border, no glow
+      "focus-within:border-zinc-400 dark:focus-within:border-zinc-600",
 
-      selectedDocText && "border-primary/20",
-      isDraggingOver && "border-primary/50 bg-primary/5 ring-4 ring-primary/10"
+      selectedDocText && "border-zinc-300 dark:border-zinc-700",
+      isDraggingOver && "border-zinc-500 dark:border-zinc-500 bg-zinc-50 dark:bg-zinc-900"
     );
 
   return (
@@ -876,8 +876,8 @@ export function Composer({
       onDrop={handleDrop}
     >
       {isDraggingOver && (
-        <div className="absolute inset-0 z-50 bg-primary/10 backdrop-blur-sm rounded-2xl flex items-center justify-center border-2 border-dashed border-primary pointer-events-none">
-          <div className="flex flex-col items-center gap-2 text-primary">
+        <div className="absolute inset-0 z-50 bg-zinc-100/80 dark:bg-zinc-900/80 backdrop-blur-sm rounded-2xl flex items-center justify-center border border-dashed border-zinc-400 dark:border-zinc-600 pointer-events-none">
+          <div className="flex flex-col items-center gap-2 text-zinc-600 dark:text-zinc-400">
             <Upload className="h-8 w-8" />
             <span className="text-sm font-medium">Suelta los archivos aquí</span>
           </div>
@@ -1036,7 +1036,7 @@ export function Composer({
             rows={1}
           />
 
-          <div className="flex items-center justify-between mt-2 pt-1 border-t border-border/40">
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800">
             <div className="flex items-center gap-2">
               {renderToolsPopover()}
               {!isDocumentMode && renderSelectedToolLogo()}
