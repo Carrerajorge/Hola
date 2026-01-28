@@ -1469,6 +1469,21 @@ class AgentManager {
     attachments?: any[],
     userPlan: "free" | "pro" | "admin" = "free"
   ): Promise<AgentOrchestrator> {
+    const orchestrator = await this.createRun(runId, chatId, userId, message, attachments, userPlan);
+    this.executeRun(runId).catch((error) => {
+      console.error(`[AgentManager] Run ${runId} failed:`, error.message);
+    });
+    return orchestrator;
+  }
+
+  async createRun(
+    runId: string,
+    chatId: string,
+    userId: string,
+    message: string,
+    attachments?: any[],
+    userPlan: "free" | "pro" | "admin" = "free"
+  ): Promise<AgentOrchestrator> {
     if (this.activeRuns.has(runId)) {
       throw new Error(`Run ${runId} already exists`);
     }
@@ -1476,13 +1491,25 @@ class AgentManager {
     const orchestrator = new AgentOrchestrator(runId, chatId, userId, userPlan);
     this.activeRuns.set(runId, orchestrator);
 
+    // Generate initial plan synchronously so UI has something to show
     await orchestrator.generatePlan(message, attachments);
 
-    orchestrator.run().catch((error) => {
-      console.error(`[AgentManager] Run ${runId} failed:`, error.message);
-    });
-
     return orchestrator;
+  }
+
+  async executeRun(runId: string, chatId?: string, userId?: string | null, message?: string, attachments?: any[]): Promise<void> {
+    const orchestrator = this.activeRuns.get(runId);
+    if (!orchestrator) {
+      // If not successfully created (e.g. worker restarted), we might need to recreate?
+      // For now, assume state is in memory (Phase 2 goal is Redis state, but we are just starting migration).
+      // Since we haven't fully moved Orchestrator State to Redis yet, if server restarts, we lose the orchestrator.
+      // The worker will fail. This is acceptable for this intermediate step.
+      // Once RedisCheckpointer is fully integrated into AgentOrchestrator (Phase 3), we can hydrate from Redis.
+      throw new Error(`AgentOrchestrator not found for run ${runId}`);
+    }
+
+    // In case logic was passed to executeRun but we already have it
+    await orchestrator.run();
   }
 
   getRunStatus(runId: string): AgentProgress | null {

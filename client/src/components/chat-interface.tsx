@@ -71,9 +71,7 @@ import { useAgent } from "@/hooks/use-agent";
 import { useBrowserSession } from "@/hooks/use-browser-session";
 import { AgentObserver } from "@/components/agent-observer";
 import { VirtualComputer } from "@/components/virtual-computer";
-import { EnhancedDocumentEditor } from "@/components/ribbon";
-import { SpreadsheetEditor } from "@/components/spreadsheet-editor";
-import { PPTEditorShellLazy } from "@/lib/lazyComponents";
+import { EnhancedDocumentEditorLazy, SpreadsheetEditorLazy, PPTEditorShellLazy } from "@/lib/lazyComponents";
 import { usePptStreaming } from "@/hooks/usePptStreaming";
 import { PPT_STREAMING_SYSTEM_PROMPT } from "@/lib/pptPrompts";
 import { ETLDialog } from "@/components/etl-dialog";
@@ -101,7 +99,10 @@ import { InlineGmailPreview } from "@/components/inline-gmail-preview";
 import { VoiceChatMode } from "@/components/voice-chat-mode";
 import { RecordingPanel } from "@/components/recording-panel";
 import { Composer } from "@/components/composer";
-import { MessageList, parseDocumentBlocks, type DocumentBlock } from "@/components/message-list";
+import { parseDocumentBlocks, type DocumentBlock } from "@/components/message-list";
+import { ChatMessageList, ChatMessageListProps } from "@/components/chat/ChatMessageList";
+import { ChatHeader } from "@/components/chat/ChatHeader";
+import { useChatStore } from "@/stores/chatStore";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
 import { PromptSuggestions } from "@/components/prompt-suggestions";
 import { MessageFeedback } from "@/components/message-feedback";
@@ -381,6 +382,15 @@ export function ChatInterface({
 
   const { user } = useAuth();
   const { toast } = useToast();
+
+  const userPlanInfo = useMemo(() => user ? {
+    plan: user.plan || 'free',
+    isAdmin: user.role === 'admin' || !!user.isAdmin,
+    isPaid: !!user.isPaid
+  } : null, [user]);
+
+  // Sync with chat store for future full migration
+  const { setInput: setStoreInput } = useChatStore();
 
   const {
     state: conversationState,
@@ -4779,340 +4789,50 @@ IMPORTANTE:
   return (
     <div className="flex h-full flex-col bg-transparent relative">
       {/* Header */}
-      <header className="flex h-14 items-center justify-between px-2 sm:px-4 border-b border-white/20 dark:border-white/10 glass-card-light dark:glass-card rounded-none z-10 sticky top-0 flex-shrink-0 safe-area-top">
-        <div ref={modelSelectorRef} className="flex items-center gap-1 sm:gap-2 relative min-w-0 ml-12 sm:ml-0">
-          {activeGpt ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <div
-                  className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
-                  data-testid="button-gpt-menu"
-                >
-                  <span className="font-semibold text-xs sm:text-sm truncate max-w-[150px] sm:max-w-[250px]">
-                    {activeGpt.name}
-                  </span>
-                  <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                </div>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger className="flex items-center gap-2">
-                    <span className="flex-1">Modelo</span>
-                    <span className="text-xs text-muted-foreground">{selectedModelData?.name?.split(" ")[0] || "Auto"}</span>
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuPortal>
-                    <DropdownMenuSubContent className="w-56">
-                      {Object.entries(modelsByProvider).map(([provider, models], providerIndex) => (
-                        <React.Fragment key={provider}>
-                          {providerIndex > 0 && <DropdownMenuSeparator />}
-                          <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-                            {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
-                          </div>
-                          {models.map((model) => (
-                            <DropdownMenuItem
-                              key={model.id}
-                              className={cn("flex items-center gap-2", selectedModelData?.id === model.id && "bg-muted")}
-                              onClick={() => setSelectedModelId(model.id)}
-                            >
-                              {selectedModelData?.id === model.id && <Check className="h-4 w-4" />}
-                              <span className={cn(selectedModelData?.id !== model.id && "pl-6")}>{model.name}</span>
-                            </DropdownMenuItem>
-                          ))}
-                        </React.Fragment>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuPortal>
-                </DropdownMenuSub>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleNewChat} className="flex items-center gap-2">
-                  <Pencil className="h-4 w-4" />
-                  <span>Nuevo chat</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onAboutGpt?.(activeGpt)} className="flex items-center gap-2">
-                  <Info className="h-4 w-4" />
-                  <span>Acerca de</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onEditGpt?.(activeGpt)} className="flex items-center gap-2">
-                  <Settings className="h-4 w-4" />
-                  <span>Editar GPT</span>
-                </DropdownMenuItem>
-                {isGptPinned?.(activeGpt.id) ? (
-                  <DropdownMenuItem onClick={() => onHideGptFromSidebar?.(activeGpt.id)} className="flex items-center gap-2">
-                    <EyeOff className="h-4 w-4" />
-                    <span>Ocultar de la barra lateral</span>
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onClick={() => onPinGptToSidebar?.(activeGpt.id)} className="flex items-center gap-2">
-                    <Pin className="h-4 w-4" />
-                    <span>Fijar en la barra lateral</span>
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/gpts/${activeGpt.id}`);
-                    toast({ title: "Enlace copiado", description: "El enlace del GPT se ha copiado al portapapeles" });
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  <Link className="h-4 w-4" />
-                  <span>Copiar enlace</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => toast({ title: "Valorar GPT", description: "Esta función estará disponible próximamente" })}
-                  className="flex items-center gap-2"
-                >
-                  <Star className="h-4 w-4" />
-                  <span>Valorar GPT</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => toast({ title: "Denunciar GPT", description: "Puedes reportar contenido inapropiado a soporte" })}
-                  className="flex items-center gap-2 text-destructive"
-                >
-                  <Flag className="h-4 w-4" />
-                  <span>Denunciar GPT</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : !isAnyModelAvailable ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div
-                  className="flex items-center gap-1 sm:gap-2 bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-1 rounded-md cursor-not-allowed opacity-60"
-                  data-testid="button-model-selector-disabled"
-                >
-                  <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none text-gray-500 dark:text-gray-400">
-                    Sin modelos activos
-                  </span>
-                  <ChevronDown className="h-3 w-3 text-gray-400 flex-shrink-0" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>No hay modelos disponibles. Un administrador debe activar al menos un modelo.</p>
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <>
-              <div
-                className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
-                onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
-                data-testid="button-model-selector"
-              >
-                <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
-                  {selectedModelData?.name || "Seleccionar modelo"}
-                </span>
-                <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-              </div>
-
-              {isModelSelectorOpen && (
-                <div className="absolute top-full left-0 mt-1 w-64 bg-popover border border-border rounded-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-                  <div className="p-2">
-                    {Object.entries(modelsByProvider).map(([provider, models], providerIndex) => (
-                      <div key={provider}>
-                        {providerIndex > 0 && <div className="border-t border-border my-2"></div>}
-                        <div className="text-xs font-medium text-muted-foreground mb-2 px-2 capitalize">
-                          {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
-                        </div>
-                        {models.map((model) => (
-                          <button
-                            key={model.id}
-                            className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted/50 text-sm ${selectedModelData?.id === model.id ? "bg-muted" : ""
-                              }`}
-                            onClick={() => {
-                              setSelectedModelId(model.id);
-                              setIsModelSelectorOpen(false);
-                            }}
-                            data-testid={`model-option-${model.modelId}`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{model.name}</span>
-                              {/* Capability badges */}
-                              <div className="flex items-center gap-1">
-                                {(model.modelId?.includes("vision") || model.name?.toLowerCase().includes("vision")) && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-                                    🖼 Vision
-                                  </span>
-                                )}
-                                {(model.modelId?.includes("fast") || model.name?.toLowerCase().includes("fast")) && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
-                                    ⚡ Fast
-                                  </span>
-                                )}
-                                {(model.modelId?.includes("pro") || model.name?.toLowerCase().includes("pro") || model.name?.toLowerCase().includes("reasoning")) && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
-                                    🧠 Pro
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            {model.description && (
-                              <div className="text-xs text-muted-foreground mt-0.5">{model.description}</div>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-0.5 sm:gap-1">
-          {(!userPlanInfo || (userPlanInfo.plan === "free" && !userPlanInfo.isAdmin && !userPlanInfo.isPaid)) && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="hidden sm:flex rounded-full text-xs gap-1.5 px-3 border-primary/30 bg-primary/5 hover:bg-primary/10"
-              onClick={() => setIsUpgradeDialogOpen(true)}
-              data-testid="button-upgrade-header"
-            >
-              <Sparkles className="h-3 w-3 text-primary" />
-              <span className="hidden md:inline">Mejorar el plan a Go</span>
-              <span className="md:hidden">Upgrade</span>
-            </Button>
-          )}
-          {chatId && !chatId.startsWith("pending-") ? (
-            <ShareChatDialog chatId={chatId} chatTitle={messages[0]?.content?.slice(0, 30) || "Chat"}>
-              <Button variant="ghost" size="icon" data-testid="button-share-chat">
-                <ShareIcon size={20} />
-              </Button>
-            </ShareChatDialog>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              data-testid="button-share-chat-disabled"
-              disabled
-              title="Envía un mensaje para poder compartir este chat"
-            >
-              <ShareIcon size={20} />
-            </Button>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" data-testid="button-chat-options">
-                <MoreHorizontal className="h-5 w-5 text-muted-foreground" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
-              <DropdownMenuItem
-                onClick={(e) => chatId && onPinChat?.(chatId, e as unknown as React.MouseEvent)}
-                disabled={!chatId || chatId.startsWith("pending-")}
-                data-testid="menu-pin-chat"
-              >
-                <Pin className="h-4 w-4 mr-2" />
-                {isPinned ? "Desfijar" : "Fijar chat"}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  if (chatId && onEditChatTitle) {
-                    const newTitle = prompt("Nuevo título del chat:", messages[0]?.content?.slice(0, 50) || "Chat");
-                    if (newTitle && newTitle.trim()) {
-                      onEditChatTitle(chatId, newTitle.trim());
-                    }
-                  }
-                }}
-                disabled={!chatId || chatId.startsWith("pending-")}
-                data-testid="menu-edit-chat"
-              >
-                <Pencil className="h-4 w-4 mr-2" />
-                Editar
-              </DropdownMenuItem>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger
-                  disabled={!chatId || chatId.startsWith("pending-")}
-                  data-testid="menu-move-folder"
-                >
-                  <Folder className="h-4 w-4 mr-2" />
-                  Mover a carpeta
-                </DropdownMenuSubTrigger>
-                <DropdownMenuPortal>
-                  <DropdownMenuSubContent>
-                    {folders.length > 0 ? (
-                      <>
-                        {folders.map((folder) => (
-                          <DropdownMenuItem
-                            key={folder.id}
-                            onClick={() => chatId && onMoveToFolder?.(chatId, folder.id)}
-                            data-testid={`menu-folder-${folder.id}`}
-                          >
-                            <span
-                              className="h-3 w-3 rounded-full mr-2 flex-shrink-0"
-                              style={{ backgroundColor: folder.color }}
-                            />
-                            {folder.name}
-                          </DropdownMenuItem>
-                        ))}
-                        {currentFolderId && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() => chatId && onMoveToFolder?.(chatId, null)}
-                              data-testid="menu-remove-folder"
-                            >
-                              <X className="h-4 w-4 mr-2" />
-                              Quitar de carpeta
-                            </DropdownMenuItem>
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <DropdownMenuItem
-                        onClick={() => {
-                          const folderName = prompt("Nombre de la carpeta:");
-                          if (folderName && folderName.trim()) {
-                            onCreateFolder?.(folderName.trim());
-                          }
-                        }}
-                        data-testid="menu-create-folder"
-                      >
-                        <FolderPlus className="h-4 w-4 mr-2" />
-                        Crear carpeta
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuSubContent>
-                </DropdownMenuPortal>
-              </DropdownMenuSub>
-              <DropdownMenuItem
-                onClick={(e) => chatId && onDownloadChat?.(chatId, e as unknown as React.MouseEvent)}
-                disabled={!chatId || chatId.startsWith("pending-")}
-                data-testid="menu-download-chat"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Descargar
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={(e) => chatId && onArchiveChat?.(chatId, e as unknown as React.MouseEvent)}
-                disabled={!chatId || chatId.startsWith("pending-")}
-                data-testid="menu-archive-chat"
-              >
-                <Archive className="h-4 w-4 mr-2" />
-                {isArchived ? "Desarchivar" : "Archivar"}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={(e) => chatId && onHideChat?.(chatId, e as unknown as React.MouseEvent)}
-                disabled={!chatId || chatId.startsWith("pending-")}
-                data-testid="menu-hide-chat"
-              >
-                <EyeOff className="h-4 w-4 mr-2" />
-                Ocultar
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={(e) => chatId && onDeleteChat?.(chatId, e as unknown as React.MouseEvent)}
-                disabled={!chatId || chatId.startsWith("pending-")}
-                className="text-red-500 focus:text-red-500"
-                data-testid="menu-delete-chat"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Eliminar
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </header>
+      <ChatHeader
+        chatId={chatId || null}
+        activeGpt={activeGpt || {
+          id: 'default',
+          name: 'ILIAGPT',
+          description: 'Asistente IA',
+          systemPrompt: '',
+          model: 'gpt-4o',
+          temperature: 0.7,
+          maxTokens: 4096,
+          topP: 1,
+          frequencyPenalty: 0,
+          presencePenalty: 0,
+          isPublic: false,
+          userId: 'system',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          welcomeMessage: '',
+          conversationStarters: [],
+          avatar: ''
+        }}
+        messages={displayMessages}
+        folders={folders}
+        currentFolderId={currentFolderId}
+        isPinned={isPinned}
+        isArchived={isArchived}
+        isSidebarOpen={isSidebarOpen}
+        onToggleSidebar={onToggleSidebar || (() => { })}
+        onNewChat={onNewChat}
+        onEditGpt={onEditGpt}
+        onHideGptFromSidebar={onHideGptFromSidebar}
+        onPinGptToSidebar={onPinGptToSidebar}
+        isGptPinned={isGptPinned}
+        onAboutGpt={onAboutGpt}
+        onPinChat={onPinChat}
+        onArchiveChat={onArchiveChat}
+        onHideChat={onHideChat}
+        onDeleteChat={onDeleteChat}
+        onDownloadChat={onDownloadChat}
+        onEditChatTitle={onEditChatTitle}
+        onMoveToFolder={onMoveToFolder}
+        onCreateFolder={onCreateFolder}
+        userPlanInfo={userPlanInfo}
+      />
       {/* Main Content Area with Side Panel */}
       {(previewDocument || activeDocEditor) ? (
         <PanelGroup direction="horizontal" className="flex-1">
@@ -5160,7 +4880,7 @@ IMPORTANTE:
                   )}
                   style={{ paddingBottom: 'var(--composer-height, 120px)' }}
                 >
-                  <MessageList
+                  <ChatMessageList
                     messages={displayMessages}
                     variant={activeDocEditor ? "compact" : "default"}
                     editingMessageId={editingMessageId}
@@ -5204,6 +4924,7 @@ IMPORTANTE:
                       setActiveRunId(null);
                     }}
                     uiPhase={uiPhase}
+                    aiProcessSteps={aiProcessSteps}
                   />
 
                   {/* Agent Observer - Show when agent is running */}
@@ -5394,7 +5115,7 @@ IMPORTANTE:
                   initialContent={activeDocEditor?.content}
                 />
               ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
-                <SpreadsheetEditor
+                <SpreadsheetEditorLazy
                   key="excel-editor-stable"
                   title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
                   content={editedDocumentContent}
@@ -5523,7 +5244,7 @@ IMPORTANTE:
                     </div>
                   )}
 
-                  <EnhancedDocumentEditor
+                  <EnhancedDocumentEditorLazy
                     key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
                     title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
                     content={editedDocumentContent}
@@ -5564,7 +5285,7 @@ IMPORTANTE:
                 onScroll={handleScroll}
                 className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
               >
-                <MessageList
+                <ChatMessageList
                   messages={displayMessages}
                   variant="default"
                   editingMessageId={editingMessageId}
@@ -5608,6 +5329,7 @@ IMPORTANTE:
                     setActiveRunId(null);
                   }}
                   uiPhase={uiPhase}
+                  aiProcessSteps={aiProcessSteps}
                 />
                 <div ref={messagesEndRef} />
               </div>

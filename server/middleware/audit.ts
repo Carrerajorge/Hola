@@ -4,6 +4,7 @@ import { db } from "../db";
 import { auditLogs } from "../../shared/schema";
 import { getSecureUserId } from "../lib/anonUserHelper";
 import { Logger } from "../lib/logger";
+import { redactSensitiveData } from "./redactionHelper";
 
 export const auditMiddleware = (action: string, resourceExtractor: (req: Request) => string) => {
     return async (req: Request, res: Response, next: NextFunction) => {
@@ -25,7 +26,7 @@ export const auditMiddleware = (action: string, resourceExtractor: (req: Request
                         details: {
                             method: req.method,
                             url: req.originalUrl,
-                            body: req.method !== "GET" ? req.body : undefined, // Be careful with sensitive data!
+                            body: req.method !== "GET" ? redactSensitiveData(req.body) : undefined,
                         },
                         ipAddress: Array.isArray(ipAddress) ? ipAddress[0] : ipAddress,
                         userAgent,

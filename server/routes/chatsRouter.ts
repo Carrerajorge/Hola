@@ -2,6 +2,7 @@ import { Router } from "express";
 import { storage } from "../storage";
 import { sendShareNotificationEmail } from "../services/emailService";
 import { getSecureUserId, getOrCreateSecureUserId } from "../lib/anonUserHelper";
+import { sanitizeMessageContent } from "../lib/markdownSanitizer";
 
 export function createChatsRouter() {
   const router = Router();
@@ -430,6 +431,9 @@ export function createChatsRouter() {
         return res.status(400).json({ error: "role and content are required" });
       }
 
+      // SAINITIZATION: Prevent XSS
+      const sanitizedContent = sanitizeMessageContent(content);
+
       // Run-based idempotency for user messages
       if (role === 'user' && clientRequestId) {
         // Check if a run with this clientRequestId already exists
@@ -452,7 +456,7 @@ export function createChatsRouter() {
           {
             chatId: req.params.id,
             role: 'user',
-            content,
+            content: sanitizedContent,
             status: 'done',
             requestId: requestId || null,
             userMessageId: null,
@@ -467,7 +471,7 @@ export function createChatsRouter() {
         );
 
         if (chat.title === "New Chat") {
-          const newTitle = content.slice(0, 30) + (content.length > 30 ? "..." : "");
+          const newTitle = sanitizedContent.slice(0, 30) + (sanitizedContent.length > 30 ? "..." : "");
           await storage.updateChat(req.params.id, { title: newTitle });
         }
 
@@ -486,7 +490,7 @@ export function createChatsRouter() {
       const message = await storage.createChatMessage({
         chatId: req.params.id,
         role,
-        content,
+        content: sanitizedContent,
         status: 'done',
         requestId: requestId || null,
         userMessageId: userMessageId || null,
@@ -499,7 +503,7 @@ export function createChatsRouter() {
       });
 
       if (chat.title === "New Chat" && role === "user") {
-        const newTitle = content.slice(0, 30) + (content.length > 30 ? "..." : "");
+        const newTitle = sanitizedContent.slice(0, 30) + (sanitizedContent.length > 30 ? "..." : "");
         await storage.updateChat(req.params.id, { title: newTitle });
       }
 

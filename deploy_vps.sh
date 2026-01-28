@@ -18,6 +18,8 @@ echo '🏗️  Compilando...' && \
 npm run build && \
 echo '🗄️  Sincronizando base de datos...' && \
 npm run db:push && \
+echo '🔑 Actualizando credenciales de admin...' && \
+npx tsx server/scripts/set_admin_credentials.ts && \
 echo '🚀 Reiniciando servidor...' && \
 pm2 restart michat --update-env"
 

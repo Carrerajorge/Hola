@@ -9,13 +9,13 @@ interface LoadingFallbackProps {
   className?: string;
 }
 
-export function LoadingFallback({ 
-  height = '400px', 
+export function LoadingFallback({
+  height = '400px',
   message = 'Loading...',
-  className 
+  className
 }: LoadingFallbackProps) {
   const h = typeof height === 'number' ? `${height}px` : height;
-  
+
   return (
     <div
       className={cn(
@@ -33,7 +33,7 @@ export function LoadingFallback({
 
 export function EditorLoadingFallback() {
   return (
-    <div 
+    <div
       className="h-full w-full flex items-center justify-center bg-white"
       data-testid="editor-loading-fallback"
     >
@@ -51,13 +51,13 @@ export function withLazyLoading<P extends object>(
   fallbackProps: Record<string, any> = {}
 ): React.LazyExoticComponent<ComponentType<P>> & { Wrapper: React.FC<P> } {
   const LazyComponent = React.lazy(importFn);
-  
+
   const Wrapper: React.FC<P> = (props) => (
     <Suspense fallback={<FallbackComponent {...fallbackProps} />}>
       <LazyComponent {...props} />
     </Suspense>
   );
-  
+
   return Object.assign(LazyComponent, { Wrapper });
 }
 
@@ -65,7 +65,7 @@ export const LazyPPTEditorShell = React.lazy(() => import('@/components/ppt/PPTE
 
 export function PPTEditorShellLazy(props: { onClose: () => void; onInsertContent?: (insertFn: (content: string) => void) => void; initialShowInstructions?: boolean; initialContent?: string }) {
   return (
-    <LazyLoadErrorBoundary 
+    <LazyLoadErrorBoundary
       componentName="Editor de Presentaciones"
       loadingComponent={<EditorLoadingFallback />}
     >
@@ -73,3 +73,13 @@ export function PPTEditorShellLazy(props: { onClose: () => void; onInsertContent
     </LazyLoadErrorBoundary>
   );
 }
+
+export const EnhancedDocumentEditorLazy = withLazyLoading(
+  () => import('@/components/ribbon').then(module => ({ default: module.EnhancedDocumentEditor })),
+  EditorLoadingFallback
+);
+
+export const SpreadsheetEditorLazy = withLazyLoading(
+  () => import('@/components/spreadsheet-editor').then(module => ({ default: module.SpreadsheetEditor })),
+  EditorLoadingFallback
+);

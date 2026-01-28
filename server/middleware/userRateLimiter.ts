@@ -42,6 +42,12 @@ const RATE_LIMIT_CONFIGS = {
         duration: 60,
         blockDuration: 60,
     },
+    // Trusted IPs / Admins - High limits
+    trusted: {
+        points: 2000,
+        duration: 60,
+        blockDuration: 10,
+    },
 };
 
 type RateLimitTier = keyof typeof RATE_LIMIT_CONFIGS;
@@ -233,7 +239,16 @@ export const rateLimiter = (req: Request, res: Response, next: NextFunction) => 
     // Determine which limiter to use based on path
     let tier: RateLimitTier = 'default';
 
-    if (path.includes('/chat') || path.includes('/message')) {
+    // Check for Trusted Role (Admin) or Trusted IP (Internal)
+    const user = (req as any).user;
+    const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1';
+
+    // Check if user is admin (claims.role or role property depending on object structure)
+    const isAdmin = user?.claims?.role === 'admin' || user?.role === 'admin';
+
+    if (isAdmin || isLocalhost) {
+        tier = 'trusted';
+    } else if (path.includes('/chat') || path.includes('/message')) {
         tier = 'chat';
     } else if (path.includes('/document') || path.includes('/export')) {
         tier = 'documents';

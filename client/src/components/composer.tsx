@@ -843,19 +843,21 @@ export function Composer({
   const inputContainerClass = isDocumentMode
     ? "relative flex flex-col rounded-xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm border border-zinc-100 dark:border-zinc-800 px-4 py-3 focus-within:border-zinc-300 dark:focus-within:border-zinc-600 transition-colors duration-200"
     : cn(
-      // Minimalist professional container
+      // Professional Premium Container
       "max-w-3xl mx-auto relative transition-all duration-300 ease-out overflow-visible",
-      // Clean background
-      "bg-background/80 backdrop-blur-md",
-      // Subtle border merging with the rest of the app
-      "border border-border/50",
-      "rounded-2xl px-4 py-3",
-      // Gentle shadow and focus state
-      "shadow-sm",
-      "focus-within:shadow-md focus-within:border-ring/20 focus-within:ring-1 focus-within:ring-ring/20",
-      "hover:border-border/80",
+      // Glass Background & Blur
+      "bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl",
+      // Premium Border
+      "border border-black/5 dark:border-white/10",
+      // Shape & Spacing
+      "rounded-[26px] px-5 py-4",
+      // Elevated Shadow
+      "shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]",
+      // Focus State (Subtle Glow)
+      "focus-within:shadow-[0_0_0_2px_rgba(var(--primary),0.1),0_8px_40px_rgba(0,0,0,0.1)] focus-within:border-primary/30",
+
       selectedDocText && "border-primary/20",
-      isDraggingOver && "border-primary/50 bg-primary/5"
+      isDraggingOver && "border-primary/50 bg-primary/5 ring-4 ring-primary/10"
     );
 
   return (

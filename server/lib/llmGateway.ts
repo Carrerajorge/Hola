@@ -9,14 +9,9 @@ import { recordConnectorUsage } from "./connectorMetrics";
 import { storage } from "../storage";
 import type { InsertApiLog } from "@shared/schema";
 
-// ===== Types =====
-interface CircuitBreakerState {
-  failures: number;
-  lastFailure: number;
-  state: "closed" | "open" | "half-open";
-  halfOpenAt: number;
-  halfOpenAttempts: number;
-}
+import { getCircuitBreaker, CircuitBreakerOpenError, CircuitState } from "./circuitBreaker";
+import type { ZodSchema } from "zod";
+import { type AgentEvent } from "./typedStreaming";
 
 interface RateLimitState {
   tokens: number;
@@ -90,8 +85,8 @@ interface TokenUsageRecord {
 // ===== Configuration =====
 const CIRCUIT_BREAKER_CONFIG = {
   failureThreshold: 5,
-  resetTimeoutMs: 30000,
-  halfOpenRequests: 3,
+  resetTimeout: 30000,
+  timeout: 30000,
 };
 
 const RATE_LIMIT_CONFIG = {
@@ -170,7 +165,7 @@ function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | 
 
 class LLMGateway {
   private xaiClient: OpenAI;
-  private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
+
   private rateLimitByUser: Map<string, RateLimitState> = new Map();
   private requestCache: Map<string, { response: LLMResponse; expiresAt: number }> = new Map();
   private inFlightRequests: Map<string, InFlightRequest> = new Map();
@@ -201,10 +196,6 @@ class LLMGateway {
       apiKey: process.env.XAI_API_KEY,
     });
 
-    // Initialize circuit breakers for each provider
-    this.circuitBreakers.set("xai", this.createCircuitBreaker());
-    this.circuitBreakers.set("gemini", this.createCircuitBreaker());
-
     this.metrics = {
       totalRequests: 0,
       successfulRequests: 0,
@@ -229,15 +220,7 @@ class LLMGateway {
     setInterval(() => this.cleanupStreamCheckpoints(), 60000);
   }
 
-  private createCircuitBreaker(): CircuitBreakerState {
-    return {
-      failures: 0,
-      lastFailure: 0,
-      state: "closed",
-      halfOpenAt: 0,
-      halfOpenAttempts: 0,
-    };
-  }
+
 
   // ===== API Log Persistence =====
   private persistApiLog(logData: {
@@ -374,67 +357,7 @@ class LLMGateway {
     return false;
   }
 
-  // ===== Circuit Breaker =====
-  private checkCircuitBreaker(provider: "xai" | "gemini"): boolean {
-    const now = Date.now();
-    const cb = this.circuitBreakers.get(provider)!;
 
-    if (cb.state === "open") {
-      if (now >= cb.halfOpenAt) {
-        cb.state = "half-open";
-        cb.halfOpenAttempts = 0;
-        cb.failures = 0;
-        console.log(`[LLMGateway] ${provider} circuit breaker transitioning to half-open`);
-      } else {
-        return false;
-      }
-    }
-
-    if (cb.state === "half-open") {
-      if (cb.halfOpenAttempts >= CIRCUIT_BREAKER_CONFIG.halfOpenRequests) {
-        return false;
-      }
-      cb.halfOpenAttempts++;
-    }
-
-    return true;
-  }
-
-  private recordSuccess(provider: "xai" | "gemini"): void {
-    const cb = this.circuitBreakers.get(provider)!;
-
-    if (cb.state === "half-open") {
-      if (cb.halfOpenAttempts >= CIRCUIT_BREAKER_CONFIG.halfOpenRequests) {
-        cb.state = "closed";
-        cb.halfOpenAttempts = 0;
-        console.log(`[LLMGateway] ${provider} circuit breaker closed after successful probes`);
-      }
-    }
-    cb.failures = 0;
-    this.metrics.successfulRequests++;
-    this.metrics.byProvider[provider].requests++;
-  }
-
-  private recordFailure(provider: "xai" | "gemini"): void {
-    const cb = this.circuitBreakers.get(provider)!;
-    cb.failures++;
-    cb.lastFailure = Date.now();
-    this.metrics.failedRequests++;
-    this.metrics.byProvider[provider].failures++;
-
-    if (cb.state === "half-open") {
-      cb.state = "open";
-      cb.halfOpenAt = Date.now() + CIRCUIT_BREAKER_CONFIG.resetTimeoutMs;
-      cb.halfOpenAttempts = 0;
-      this.metrics.circuitBreakerOpens++;
-      console.error(`[LLMGateway] ${provider} circuit breaker re-opened from half-open`);
-    } else if (cb.failures >= CIRCUIT_BREAKER_CONFIG.failureThreshold) {
-      cb.state = "open";
-      cb.halfOpenAt = Date.now() + CIRCUIT_BREAKER_CONFIG.resetTimeoutMs;
-      this.metrics.circuitBreakerOpens++;
-      console.error(`[LLMGateway] ${provider} circuit breaker opened`);
-    }
-  }
 
   // ===== Retry Logic =====
   private calculateRetryDelay(attempt: number): number {
@@ -517,8 +440,8 @@ class LLMGateway {
     }
 
     // Check circuit breaker states
-    const xaiAvailable = this.checkCircuitBreaker("xai");
-    const geminiAvailable = this.checkCircuitBreaker("gemini");
+    const xaiAvailable = getCircuitBreaker("system", "xai").getState() !== CircuitState.OPEN;
+    const geminiAvailable = getCircuitBreaker("system", "gemini").getState() !== CircuitState.OPEN;
 
     if (xaiAvailable && process.env.XAI_API_KEY) {
       return "xai";
@@ -649,7 +572,8 @@ class LLMGateway {
     let lastError: Error | null = null;
 
     for (const provider of providers) {
-      if (!this.checkCircuitBreaker(provider)) {
+      const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
+      if (breaker.getState() === CircuitState.OPEN) {
         console.log(`[LLMGateway] ${options.requestId} skipping ${provider} (circuit breaker open)`);
         continue;
       }
@@ -682,6 +606,21 @@ class LLMGateway {
     options: LLMRequestOptions & { requestId: string; timeout: number },
     startTime: number
   ): Promise<LLMResponse> {
+    const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
+
+    try {
+      return await breaker.execute(() => this.executeOnProviderNoBreaker(provider, messages, options, startTime));
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async executeOnProviderNoBreaker(
+    provider: "xai" | "gemini",
+    messages: ChatCompletionMessageParam[],
+    options: LLMRequestOptions & { requestId: string; timeout: number },
+    startTime: number
+  ): Promise<LLMResponse> {
     const modelProvider = detectProviderFromModel(options.model);
 
     let model: string;
@@ -708,7 +647,6 @@ class LLMGateway {
           error.code === "ETIMEDOUT";
 
         if (!isRetryable || attempt >= RETRY_CONFIG.maxRetries) {
-          this.recordFailure(provider);
           throw error;
         }
 
@@ -748,7 +686,7 @@ class LLMGateway {
       const content = response.choices[0]?.message?.content || "";
       const usage = response.usage;
 
-      this.recordSuccess("xai");
+
       this.metrics.totalLatencyMs += latencyMs;
 
       const usageRecord: TokenUsageRecord = {
@@ -878,7 +816,7 @@ class LLMGateway {
 
     const latencyMs = Date.now() - startTime;
 
-    this.recordSuccess("gemini");
+
     this.metrics.totalLatencyMs += latencyMs;
 
     // Estimate tokens for Gemini (Gemini doesn't return usage in simple API)
@@ -948,7 +886,7 @@ class LLMGateway {
   }
 
   // ===== Streaming with Checkpoints =====
-  async *streamChat(
+  async * streamChat(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions = {}
   ): AsyncGenerator<StreamChunk, void, unknown> {
@@ -979,7 +917,8 @@ class LLMGateway {
     const providers: ("xai" | "gemini")[] = enableFallback ? [currentProvider, currentProvider === "xai" ? "gemini" : "xai"] : [currentProvider];
 
     for (const provider of providers) {
-      if (!this.checkCircuitBreaker(provider)) {
+      const breaker = getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG);
+      if (breaker.getState() === CircuitState.OPEN) {
         continue;
       }
 
@@ -1014,7 +953,7 @@ class LLMGateway {
 
           if (chunk.done) {
             this.streamCheckpoints.delete(requestId);
-            this.recordSuccess(provider);
+            getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordSuccess();
             return;
           }
         }
@@ -1027,7 +966,7 @@ class LLMGateway {
           timestamp: Date.now(),
         });
 
-        this.recordFailure(provider);
+        getCircuitBreaker("system", provider, CIRCUIT_BREAKER_CONFIG).recordFailure();
         console.warn(`[LLMGateway] ${requestId} stream failed on ${provider}: ${error.message}`);
 
         if (!enableFallback || providers.indexOf(provider) === providers.length - 1) {
@@ -1041,7 +980,113 @@ class LLMGateway {
     throw new Error("All providers failed during streaming");
   }
 
-  private async *streamXai(
+  // ===== Typed Streaming (Schema Validation) =====
+  async * streamStructured(
+    messages: ChatCompletionMessageParam[],
+    schema: ZodSchema<any>,
+    options: LLMRequestOptions = {}
+  ): AsyncGenerator<AgentEvent, void, unknown> {
+    const requestId = options.requestId || this.generateRequestId();
+
+    // Inject system instruction for JSON enforcement
+    // We add this to the messages locally without mutating existing array
+    const systemPrompt: ChatCompletionMessageParam = {
+      role: "system",
+      content: `You must respond with valid JSON strictly conforming to the provided schema. Do not output markdown blocks or explanations.`
+    };
+
+    const augmentedMessages = [systemPrompt, ...messages];
+
+    // In a real implementation with "Instructor" pattern, we would:
+    // 1. Accumulate the full text stream
+    // 2. Parsed JSON incrementally (if possible) or at chunks
+    // 3. For now, we wrap the text stream and emit "content_delta" events
+    //    and then try to parse the final result to ensure validity?
+    //    Wait, "Typed Streaming" in the plan implies emitting events like "ThreadRunStep"
+
+    // Actually, for "Typed Streaming", we largely want to standardize the events THE AGENT emits.
+    // So this method might be consumed by the Agent Logic, which parses raw LLM text into these events.
+
+    // Let's implement a simpler version that wraps streamChat and emits typed events.
+    // If the schema is for the FINAL output, we validate at the end.
+
+    let currentMessages = [...augmentedMessages];
+    const maxRetries = 2; // 0 = initial, 1 = first retry, 2 = second retry
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      let fullContent = "";
+
+      try {
+        if (attempt > 0) {
+          yield { type: "status", status: "thinking", message: `Fixing output format (Attempt ${attempt + 1})...` };
+        } else {
+          yield { type: "status", status: "thinking", message: "Connecting to model..." };
+        }
+
+        const stream = this.streamChat(currentMessages, options);
+
+        let fullContent = "";
+
+        for await (const chunk of stream) {
+          fullContent += chunk.content;
+
+          yield {
+            type: "content_delta",
+            delta: chunk.content,
+            snapshot: fullContent // accumulation for recovery/UI
+          };
+        }
+
+        yield { type: "status", status: "parsing_document", message: "Validating output schema..." };
+
+        // Attempt to parse final content against schema
+        // Only if content is expected to be JSON. If it's chat, schema might be just "z.string()"
+        try {
+          // Heuristic: if schema looks like an object/array, try JSON parsing
+          // This is a naive check. Ideally we use structured output modes from providers.
+          const firstChar = fullContent.trim()[0];
+          if (firstChar === "{" || firstChar === "[") {
+            const json = JSON.parse(fullContent);
+            const result = schema.parse(json);
+            // We could emit a "final_result" event if we had one
+          }
+
+          yield { type: "status", status: "ready" };
+
+        } catch (validationError: any) {
+          console.warn(`[LLMGateway] Schema violation on ${requestId} (attempt ${attempt + 1}):`, validationError.message);
+
+          if (attempt === maxRetries) {
+            yield {
+              type: "status",
+              status: "error",
+              message: `Final Schema violation: ${validationError.message}`
+            };
+            return;
+          }
+
+          // Retry: Feed error back to LLM
+          currentMessages.push({ role: "assistant", content: fullContent });
+          currentMessages.push({
+            role: "user",
+            content: `Your response was not valid JSON or did not match the schema. Error: ${validationError.message}\n\nPlease correct your JSON.`
+          });
+
+          yield {
+            type: "status",
+            status: "error",
+            message: `Validation failed, retrying...`
+          };
+        }
+
+      } catch (error: any) {
+        yield { type: "status", status: "error", message: error.message };
+        return;
+      }
+    }
+  }
+
+  private async * streamXai(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions,
     requestId: string
@@ -1065,7 +1110,9 @@ class LLMGateway {
       buffer += content;
 
       if (buffer.length >= flushThreshold || content.includes("\n") || content.includes(".")) {
-        yield { content: buffer, done: false };
+        yield {
+          content: buffer, done: false
+        };
         buffer = "";
       }
     }
@@ -1077,7 +1124,7 @@ class LLMGateway {
     yield { content: "", done: true };
   }
 
-  private async *streamGemini(
+  private async * streamGemini(
     messages: ChatCompletionMessageParam[],
     options: LLMRequestOptions,
     requestId: string
@@ -1112,8 +1159,8 @@ class LLMGateway {
           ? Math.round((this.metrics.successfulRequests / this.metrics.totalRequests) * 100)
           : 100,
       circuitBreakerStatus: {
-        xai: this.circuitBreakers.get("xai")!.state,
-        gemini: this.circuitBreakers.get("gemini")!.state,
+        xai: getCircuitBreaker("system", "xai").getState(),
+        gemini: getCircuitBreaker("system", "gemini").getState(),
       },
       cacheSize: this.requestCache.size,
       inFlightRequests: this.inFlightRequests.size,

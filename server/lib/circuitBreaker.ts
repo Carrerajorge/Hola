@@ -103,7 +103,7 @@ export class TenantCircuitBreaker {
     public readonly tenantId: string,
     public readonly provider: string,
     private readonly config: CircuitBreakerConfig = DEFAULT_CONFIG
-  ) {}
+  ) { }
 
   async execute<T>(operation: () => Promise<T>): Promise<T> {
     this.lastActivityTime = Date.now();
@@ -139,15 +139,15 @@ export class TenantCircuitBreaker {
 
   private canExecute(): boolean {
     this.checkStateTransition();
-    
+
     if (this.state === CircuitState.CLOSED) {
       return true;
     }
-    
+
     if (this.state === CircuitState.OPEN) {
       return false;
     }
-    
+
     // HALF_OPEN: allow limited requests to test if service recovered
     return true;
   }
@@ -178,7 +178,7 @@ export class TenantCircuitBreaker {
     }
   }
 
-  private recordSuccess(): void {
+  public recordSuccess(): void {
     this.successes++;
     this.consecutiveSuccesses++;
     this.lastSuccessTime = Date.now();
@@ -194,7 +194,7 @@ export class TenantCircuitBreaker {
     }
   }
 
-  private recordFailure(): void {
+  public recordFailure(): void {
     this.failures++;
     this.consecutiveSuccesses = 0;
     this.lastFailureTime = Date.now();
@@ -290,7 +290,7 @@ export class TenantCircuitBreaker {
     this.openedAt = null;
     this.halfOpenAttempts = 0;
     this.lastActivityTime = Date.now();
-    
+
     if (this.state !== CircuitState.CLOSED) {
       this.transitionTo(CircuitState.CLOSED);
     }
@@ -617,7 +617,7 @@ function sleep(ms: number): Promise<void> {
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
   let timeoutId: NodeJS.Timeout;
-  
+
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
       reject(new Error(`Operation ${operationName} timed out after ${timeoutMs}ms`));
@@ -641,7 +641,7 @@ function calculateRetryDelay(attempt: number, baseDelay: number): number {
 
 export class ServiceCircuitBreaker<T = any> {
   private breaker: TenantCircuitBreaker;
-  private config: Required<Omit<ServiceCircuitConfig, "fallback" | "onSuccess" | "onFailure" | "onStateChange">> & 
+  private config: Required<Omit<ServiceCircuitConfig, "fallback" | "onSuccess" | "onFailure" | "onStateChange">> &
     Pick<ServiceCircuitConfig, "fallback" | "onSuccess" | "onFailure" | "onStateChange">;
   private metrics: {
     totalCalls: number;
@@ -678,17 +678,17 @@ export class ServiceCircuitBreaker<T = any> {
     // Register state change listener
     circuitBreakerEvents.on("circuit_opened", (data) => {
       if (data.provider === this.config.name && data.tenantId === "__legacy__") {
-        this.config.onStateChange?.("CLOSED", "OPEN");
+        this.config.onStateChange?.(CircuitState.CLOSED, CircuitState.OPEN);
       }
     });
     circuitBreakerEvents.on("circuit_closed", (data) => {
       if (data.provider === this.config.name && data.tenantId === "__legacy__") {
-        this.config.onStateChange?.("HALF_OPEN", "CLOSED");
+        this.config.onStateChange?.(CircuitState.HALF_OPEN, CircuitState.CLOSED);
       }
     });
     circuitBreakerEvents.on("circuit_half_open", (data) => {
       if (data.provider === this.config.name && data.tenantId === "__legacy__") {
-        this.config.onStateChange?.("OPEN", "HALF_OPEN");
+        this.config.onStateChange?.(CircuitState.OPEN, CircuitState.HALF_OPEN);
       }
     });
 
@@ -728,7 +728,7 @@ export class ServiceCircuitBreaker<T = any> {
             return data;
           } catch (error: any) {
             lastError = error;
-            
+
             if (error.message?.includes("timed out")) {
               this.metrics.timeouts++;
             }
@@ -785,7 +785,7 @@ export class ServiceCircuitBreaker<T = any> {
         try {
           const fallbackData = await this.config.fallback();
           this.metrics.fallbackCalls++;
-          
+
           return {
             success: true,
             data: fallbackData,
