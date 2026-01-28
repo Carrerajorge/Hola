@@ -59,6 +59,8 @@ import ragRouter from "./routes/ragRouter";
 import feedbackRouter from "./routes/feedbackRouter";
 import { createStripeRouter } from "./routes/stripeRouter";
 import { createRunController } from "./agent/superAgent/tracing/RunController";
+import { createAuditDashboardRouter } from "./routes/auditDashboardRouter";
+import { initializeAuditSystem, shutdownAuditSystem, auditMiddleware } from "./services/superIntelligence/audit";
 import { initializeEventStore, getEventStore } from "./agent/superAgent/tracing/EventStore";
 import type { ExecutionEvent, ExecutionEventType } from "@shared/executionProtocol";
 import type { TraceEvent } from "./agent/superAgent/tracing/types";
@@ -347,6 +349,10 @@ export async function registerRoutes(
   app.use("/api/feedback", feedbackRouter);
   app.use(createStripeRouter());
   app.use("/api", createRunController());
+
+  // SuperIntelligence Audit System
+  app.use("/api/audit", createAuditDashboardRouter());
+  app.use(auditMiddleware); // Capture metrics for all requests
 
   // ===== Run Detail Endpoints =====
 
@@ -736,6 +742,13 @@ export async function registerRoutes(
     console.log(`[AgentSystem] Initialized: ${result.toolCount} tools, ${result.agentCount} agents`);
   }).catch(err => {
     console.error("[AgentSystem] Initialization failed:", err.message);
+  });
+
+  // Initialize SuperIntelligence Audit System
+  initializeAuditSystem().then(() => {
+    console.log("[SuperIntelligence] Audit System initialized");
+  }).catch(err => {
+    console.error("[SuperIntelligence] Audit System initialization failed:", err.message);
   });
 
   // ===== Simple Tools & Agents Endpoints =====
