@@ -58,7 +58,7 @@ export const UserMessage = memo(function UserMessage({
                 <div className="w-full min-w-[300px] max-w-[500px]">
                     <Textarea
                         value={editContent}
-                        onChange={(e) => onEditContentChange(e.target.value)}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => onEditContentChange(e.target.value)}
                         className="w-full px-4 py-3 text-sm min-h-[80px] resize-y rounded-2xl border border-border bg-card focus:border-primary focus:ring-1 focus:ring-primary"
                         autoFocus
                     />
@@ -109,6 +109,8 @@ export const UserMessage = memo(function UserMessage({
                                 className="h-6 w-6 text-muted-foreground hover:text-foreground"
                                 onClick={() => onCopyMessage(message.content, message.id)}
                                 data-testid={`button-copy-user-${message.id}`}
+                                title="Copiar mensaje"
+                                aria-label="Copiar mensaje"
                             >
                                 {copiedMessageId === message.id ? (
                                     <CheckCircle2 className="h-4 w-4 text-green-500" />
@@ -122,6 +124,8 @@ export const UserMessage = memo(function UserMessage({
                                 className="h-6 w-6 text-muted-foreground hover:text-foreground"
                                 onClick={() => onStartEdit(message)}
                                 data-testid={`button-edit-user-${message.id}`}
+                                title="Editar mensaje"
+                                aria-label="Editar mensaje"
                             >
                                 <Pencil className="h-4 w-4" />
                             </Button>

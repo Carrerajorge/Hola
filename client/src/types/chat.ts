@@ -4,11 +4,19 @@ export interface ActiveGpt {
     name: string;
     description: string | null;
     systemPrompt: string;
-    temperature: string | null;
-    topP: string | null;
+    model: string;
+    temperature: number | null;
+    topP: number | null;
+    maxTokens?: number;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
     welcomeMessage: string | null;
     conversationStarters: string[] | null;
     avatar: string | null;
+    isPublic?: boolean;
+    userId?: string;
+    createdAt?: Date;
+    updatedAt?: Date;
     capabilities?: {
         webBrowsing?: boolean;
         codeInterpreter?: boolean;

@@ -261,7 +261,7 @@ export function Composer({
       }
     }, 0);
 
-    const newRecent = [templateId, ...recentTemplates.filter(id => id !== templateId)].slice(0, 4);
+    const newRecent = [templateId, ...recentTemplates.filter((id: string) => id !== templateId)].slice(0, 4);
     setRecentTemplates(newRecent);
     localStorage.setItem("recentQuickTemplates", JSON.stringify(newRecent));
   }, [setInput, textareaRef, recentTemplates]);
@@ -269,13 +269,13 @@ export function Composer({
   const { connectedSources, getSourceActive, setSourceActive } = useConnectedSources();
   const { addToHistory, navigateUp, navigateDown, resetNavigation } = useCommandHistory();
 
-  const mentionSources = connectedSources.map(source => ({
+  const mentionSources = connectedSources.map((source: any) => ({
     ...source,
     mention: source.id === 'gmail' ? '@Gmail' : source.id === 'googleForms' ? '@GoogleForms' : `@${source.name}`,
     action: source.id === 'googleForms' ? () => onOpenGoogleForms?.() : () => { }
   }));
 
-  const filteredSources = mentionSources.filter(source =>
+  const filteredSources = mentionSources.filter((source: any) =>
     source.name.toLowerCase().includes(mentionSearch.toLowerCase()) ||
     source.mention.toLowerCase().includes(mentionSearch.toLowerCase())
   );
@@ -358,10 +358,10 @@ export function Composer({
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setMentionIndex(prev => (prev + 1) % filteredSources.length);
+      setMentionIndex((prev: number) => (prev + 1) % filteredSources.length);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setMentionIndex(prev => (prev - 1 + filteredSources.length) % filteredSources.length);
+      setMentionIndex((prev: number) => (prev - 1 + filteredSources.length) % filteredSources.length);
     } else if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
       insertMention(filteredSources[mentionIndex]);
@@ -400,6 +400,7 @@ export function Composer({
                 className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 rounded-full p-0.5 text-white z-10 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/50"
                 onClick={() => removeFile(index)}
                 aria-label={`Remove file ${file.name}`}
+                title={`Remove file ${file.name}`}
                 data-testid={`button-remove-file-${index}`}
               >
                 <X className="h-3 w-3" />
@@ -490,8 +491,9 @@ export function Composer({
                 </div>
                 <button
                   className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shadow-md focus:outline-none focus:ring-2 focus:ring-destructive/50"
-                  onClick={(e) => { e.stopPropagation(); removeFile(index); }}
+                  onClick={(e: React.MouseEvent) => { e.stopPropagation(); removeFile(index); }}
                   aria-label={`Remove file ${file.name}`}
+                  title={`Remove file ${file.name}`}
                   data-testid={`button-remove-file-${index}`}
                 >
                   <X className="h-3 w-3" />
@@ -531,7 +533,8 @@ export function Composer({
                       variant="ghost"
                       size="icon"
                       className="h-5 w-5 shrink-0 text-muted-foreground hover:text-red-500 transition-colors"
-                      onClick={(e) => { e.stopPropagation(); removeFile(index); }}
+                      onClick={(e: React.MouseEvent) => { e.stopPropagation(); removeFile(index); }}
+                      aria-label={`Remove file ${file.name}`}
                       data-testid={`button-remove-file-${index}`}
                     >
                       <X className="h-3 w-3" />
@@ -556,6 +559,7 @@ export function Composer({
           variant="ghost"
           size="icon"
           aria-label="Open tools menu"
+          title="Open tools menu"
           className={cn(
             "liquid-plus-button h-10 w-10 flex-shrink-0 focus-visible:ring-2 focus-visible:ring-primary/50",
             isDocumentMode && "h-11 w-11"
@@ -762,6 +766,7 @@ export function Composer({
         </div>
         <button
           onClick={() => setSelectedTool(null)}
+          aria-label="Close tool"
           className={cn(
             "absolute -top-1 -right-1 w-4 h-4 rounded-full",
             "bg-red-500 hover:bg-red-600 text-white",
@@ -817,6 +822,7 @@ export function Composer({
         </div>
         <button
           onClick={isDocumentMode ? closeDocEditor : () => setSelectedDocTool(null)}
+          aria-label="Close document tool"
           className={cn(
             "absolute -top-1 -right-1 w-4 h-4 rounded-full",
             "bg-red-500 hover:bg-red-600 text-white",
@@ -1007,7 +1013,7 @@ export function Composer({
             value={input}
             onChange={handleInputChange}
             onFocus={onTextareaFocus}
-            onKeyDown={(e) => {
+            onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
               handleMentionKeyDown(e);
               if (showMentionPopover) return;
               handleHistoryNavigation(e);
@@ -1061,6 +1067,7 @@ export function Composer({
                     <PopoverTrigger asChild>
                       <button
                         className="flex items-center justify-center w-7 h-7 rounded-lg hover:bg-sky-100/60 dark:hover:bg-sky-900/30 text-sky-600 dark:text-sky-400 transition-colors"
+                        aria-label="Select sources"
                         data-testid="button-fuentes-dropdown"
                       >
                         <ChevronDown className="h-4 w-4" />

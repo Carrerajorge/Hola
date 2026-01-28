@@ -587,6 +587,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                             className="h-7 w-7 text-muted-foreground hover:text-foreground"
                             onClick={() => onCopy(content, messageId)}
                             data-testid={`button-copy-${testIdSuffix}`}
+                            aria-label="Copiar respuesta"
                         >
                             {copiedMessageId === messageId ? (
                                 <CheckCircle2 className="h-4 w-4 text-green-500" />
@@ -613,6 +614,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                             )}
                             onClick={() => onFeedback(messageId, "up")}
                             data-testid={`button-like-${testIdSuffix}`}
+                            aria-label="Me gusta"
                         >
                             <ThumbsUp className="h-4 w-4" />
                         </Button>
@@ -635,6 +637,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                             )}
                             onClick={() => onFeedback(messageId, "down")}
                             data-testid={`button-dislike-${testIdSuffix}`}
+                            aria-label="No me gusta"
                         >
                             <ThumbsDown className="h-4 w-4" />
                         </Button>
@@ -654,6 +657,7 @@ export const ActionToolbar = memo(function ActionToolbar({
                                     className="h-7 w-7 text-muted-foreground hover:text-foreground"
                                     disabled={aiState !== "idle"}
                                     data-testid={`button-regenerate-${testIdSuffix}`}
+                                    aria-label="Regenerar respuesta"
                                 >
                                     <RefreshCw
                                         className={cn("h-4 w-4", isRegenerating && "animate-spin")}
@@ -687,6 +691,8 @@ export const ActionToolbar = memo(function ActionToolbar({
                                     disabled={!customInstruction.trim()}
                                     className="h-6 w-6 flex items-center justify-center rounded-full bg-foreground/10 hover:bg-foreground/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                                     data-testid={`button-submit-custom-${testIdSuffix}`}
+                                    aria-label="Enviar instrucción"
+                                    title="Enviar instrucción"
                                 >
                                     <ArrowUp className="h-3.5 w-3.5" />
                                 </button>

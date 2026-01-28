@@ -65,6 +65,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Upload, Search, Image, Video, Bot, Plug } from "lucide-react";
 import { motion } from "framer-motion";
 
+import { ActiveGpt } from "@/types/chat";
 import { Message, FigmaDiagram, storeGeneratedImage, getGeneratedImage, getLastGeneratedImage, storeLastGeneratedImageInfo, generateRequestId, generateClientRequestId, getActiveRun, updateActiveRunStatus, clearActiveRun, hasActiveRun, resolveRealChatId, isPendingChat } from "@/hooks/use-chats";
 import { MarkdownRenderer, MarkdownErrorBoundary } from "@/components/markdown-renderer";
 import { useAgent } from "@/hooks/use-agent";
@@ -209,25 +210,7 @@ function detectUncertainty(content: string): { confidence: 'high' | 'medium' | '
 
 
 
-interface ActiveGpt {
-  id: string;
-  name: string;
-  description: string | null;
-  systemPrompt: string;
-  temperature: string | null;
-  topP: string | null;
-  welcomeMessage: string | null;
-  conversationStarters: string[] | null;
-  avatar: string | null;
-  capabilities?: {
-    webBrowsing?: boolean;
-    codeInterpreter?: boolean;
-    imageGeneration?: boolean;
-    wordCreation?: boolean;
-    excelCreation?: boolean;
-    pptCreation?: boolean;
-  };
-}
+
 
 type AiState = "idle" | "thinking" | "responding" | "agent_working";
 
@@ -377,7 +360,7 @@ export function ChatInterface({
 
   const selectedProject = useMemo(() => {
     if (!selectedProjectId) return null;
-    return getProject(selectedProjectId) || projects.find(p => p.id === selectedProjectId);
+    return getProject(selectedProjectId) || projects.find((p: any) => p.id === selectedProjectId);
   }, [selectedProjectId, projects, getProject]);
 
   const { user } = useAuth();
@@ -419,7 +402,7 @@ export function ChatInterface({
   const [input, setInputRaw] = useState(initialDraft);
 
   const setInput = useCallback((value: string | ((prev: string) => string)) => {
-    setInputRaw((prev) => {
+    setInputRaw((prev: string) => {
       const newValue = typeof value === "function" ? value(prev) : value;
       currentTextRef.current = newValue;
       if (chatId) {
@@ -465,7 +448,7 @@ export function ChatInterface({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isETLDialogOpen, setIsETLDialogOpen] = useState(false);
   const [figmaTokenInput, setFigmaTokenInput] = useState("");
   const [isFigmaConnecting, setIsFigmaConnecting] = useState(false);
@@ -475,7 +458,7 @@ export function ChatInterface({
   const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number; resetAt: string | null; plan: string } | null>(null);
-  const [userPlanInfo, setUserPlanInfo] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
+  const [userPlanState, setUserPlanState] = useState<{ plan: string; isAdmin?: boolean; isPaid?: boolean } | null>(null);
   // isAgentPanelOpen removed - agent progress is shown inline in chat
   const modelSelectorRef = useRef<HTMLDivElement>(null);
 
@@ -485,7 +468,7 @@ export function ChatInterface({
         const response = await fetch("/api/user/usage", { credentials: "include" });
         if (response.ok) {
           const data = await response.json();
-          setUserPlanInfo({
+          setUserPlanState({
             plan: data.plan,
             isAdmin: data.isAdmin,
             isPaid: data.plan !== "free"
@@ -520,7 +503,7 @@ export function ChatInterface({
   const uiPhase = uiPhaseProp !== undefined ? uiPhaseProp : uiPhaseLocal;
   const setUiPhase = setUiPhaseProp || setUiPhaseLocal;
 
-  const uiPhaseTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const uiPhaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Execution stream client for UniversalExecutionConsole - DISABLED
   // This was causing re-renders that interfered with LiveExecutionConsole in MessageList.
@@ -564,7 +547,7 @@ export function ChatInterface({
   useEffect(() => {
     if (optimisticMessages.length > 0 && messages.length > 0) {
       const propsMessageIds = new Set(messages.map(m => m.id));
-      setOptimisticMessages(prev => prev.filter(m => !propsMessageIds.has(m.id)));
+      setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !propsMessageIds.has(m.id)));
     }
   }, [messages, optimisticMessages.length]);
 
@@ -611,7 +594,7 @@ export function ChatInterface({
   useAgentPolling(currentAgentMessageId);
 
   // Get store runs reactively to trigger re-render when store updates
-  const allAgentRuns = useAgentStore(state => state.runs);
+  const allAgentRuns = useAgentStore((state: any) => state.runs);
 
   // Get the active run from the store for the current chat (use reactive allAgentRuns)
   const activeAgentRun = useMemo(() => {
@@ -620,18 +603,18 @@ export function ChatInterface({
     }
     // Also check if there's an active run for this chatId from the store
     const runs = Object.values(allAgentRuns);
-    return runs.find(r => r.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(r.status)) || null;
+    return runs.find((r: any) => r.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(r.status)) || null;
   }, [currentAgentMessageId, allAgentRuns, chatId]);
 
   // Combined messages: prop messages + optimistic messages + agent runs from store
   const displayMessages = useMemo(() => {
     // Start with optimistic messages, then merge prop messages (prop messages take priority)
-    const msgMap = new Map(optimisticMessages.map(m => [m.id, m]));
+    const msgMap = new Map(optimisticMessages.map((m: any) => [m.id, m]));
     // Override with prop messages (they are the source of truth once available)
-    messages.forEach(m => msgMap.set(m.id, m));
+    messages.forEach((m: any) => msgMap.set(m.id, m));
 
     // Merge agent runs from the store into messages (use reactive allAgentRuns)
-    Object.entries(allAgentRuns).forEach(([messageId, runState]) => {
+    Object.entries(allAgentRuns).forEach(([messageId, runState]: [string, any]) => {
       // Only include runs for the current chat
       if (runState.chatId === chatId || (!chatId && runState.chatId)) {
         const existingMsg = msgMap.get(messageId);
@@ -670,7 +653,7 @@ export function ChatInterface({
       }
     });
 
-    return Array.from(msgMap.values()).sort((a, b) =>
+    return Array.from(msgMap.values()).sort((a: any, b: any) =>
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
   }, [messages, optimisticMessages, allAgentRuns, chatId]);
@@ -679,7 +662,7 @@ export function ChatInterface({
   useEffect(() => {
     // Find if there's an active run for this chat
     const matchingRun = Object.entries(allAgentRuns).find(
-      ([_, run]) => run.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(run.status)
+      ([_, run]: [string, any]) => run.chatId === chatId && ['starting', 'queued', 'planning', 'running'].includes(run.status)
     );
 
     if (matchingRun) {
@@ -767,7 +750,7 @@ export function ChatInterface({
 
   const selectedModelData = useMemo(() => {
     if (!selectedModelId) return availableModels[0] || null;
-    return availableModels.find(m => m.id === selectedModelId || m.modelId === selectedModelId) || availableModels[0] || null;
+    return availableModels.find((m: any) => m.id === selectedModelId || m.modelId === selectedModelId) || availableModels[0] || null;
   }, [selectedModelId, availableModels]);
 
   const selectedProvider = selectedModelData?.provider || "gemini";
@@ -775,7 +758,7 @@ export function ChatInterface({
 
   const modelsByProvider = useMemo(() => {
     const grouped: Record<string, AvailableModel[]> = {};
-    availableModels.forEach(model => {
+    availableModels.forEach((model: any) => {
       if (!grouped[model.provider]) {
         grouped[model.provider] = [];
       }
@@ -1028,7 +1011,7 @@ export function ChatInterface({
   useEffect(() => {
     if (isRecording && !isPaused) {
       recordingTimerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
+        setRecordingTime((prev: number) => prev + 1);
       }, 1000);
     } else {
       if (recordingTimerRef.current) {
@@ -1307,7 +1290,7 @@ export function ChatInterface({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const analysisAbortControllerRef = useRef<AbortController | null>(null);
-  const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const streamIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamingContentRef = useRef<string>("");
   const aiStateRef = useRef<AiState>("idle");
   const composerRef = useRef<HTMLDivElement>(null);
@@ -1697,7 +1680,7 @@ export function ChatInterface({
         if (response.ok) {
           const data = await response.json();
           if (data.status === "ready" && data.content) {
-            setPreviewFileAttachment(prev => prev ? {
+            setPreviewFileAttachment((prev: any) => prev ? {
               ...prev,
               content: data.content,
               isLoading: false,
@@ -1705,7 +1688,7 @@ export function ChatInterface({
             } : null);
             return;
           } else if (data.status === "processing" || data.status === "queued") {
-            setPreviewFileAttachment(prev => prev ? {
+            setPreviewFileAttachment((prev: any) => prev ? {
               ...prev,
               isLoading: false,
               isProcessing: true,
@@ -1719,7 +1702,7 @@ export function ChatInterface({
       }
     }
 
-    setPreviewFileAttachment(prev => prev ? {
+    setPreviewFileAttachment((prev: any) => prev ? {
       ...prev,
       isLoading: false,
       isProcessing: false,
@@ -1754,7 +1737,7 @@ export function ChatInterface({
   };
 
   const handleFeedback = (msgId: string, value: "up" | "down") => {
-    setMessageFeedback(prev => ({
+    setMessageFeedback((prev: any) => ({
       ...prev,
       [msgId]: prev[msgId] === value ? null : value
     }));
@@ -1889,7 +1872,7 @@ export function ChatInterface({
                   description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
                 }]);
               } else if (currentEventType === "production_event") {
-                setAiProcessSteps(prev => {
+                setAiProcessSteps((prev: any[]) => {
                   const newSteps = [...prev];
                   const lastStep = newSteps[newSteps.length - 1];
                   if (lastStep && lastStep.status === "pending" && data.message) {
@@ -1905,7 +1888,7 @@ export function ChatInterface({
                   return newSteps;
                 });
               } else if (currentEventType === "production_complete") {
-                setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" })));
+                setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
               } else if (currentEventType === "done" || currentEventType === "finish") {
                 // Determine web sources if available
                 const finalMsg: Message = {
@@ -2141,8 +2124,8 @@ export function ChatInterface({
         const contentRes = await fetch(`/api/files/${fileId}/content`);
 
         if (!contentRes.ok && contentRes.status !== 202) {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
           );
           return;
         }
@@ -2150,23 +2133,23 @@ export function ChatInterface({
         const contentData = await contentRes.json();
 
         if (contentData.status === "ready") {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId
               ? { ...f, id: fileId, status: "ready", content: contentData.content }
               : f))
           );
           return;
         } else if (contentData.status === "error") {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          setUploadedFiles((prev: UploadedFile[]) =>
+            prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
           );
           return;
         }
 
         attempts++;
         if (attempts >= maxAttempts) {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+          setUploadedFiles((prev: UploadedFile[]) =>
+            prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
           );
           console.warn(`File ${fileId} processing timed out`);
           return;
@@ -2174,8 +2157,9 @@ export function ChatInterface({
         setTimeout(checkStatus, 2000);
       } catch (error) {
         console.error("Error polling file status:", error);
-        setUploadedFiles((prev) =>
-          prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
+        // Fix: add type to prev
+        setUploadedFiles((prev: UploadedFile[]) =>
+          prev.map((f: UploadedFile) => (f.id === fileId || f.id === trackingId ? { ...f, status: "error" } : f))
         );
       }
     };
@@ -2184,7 +2168,7 @@ export function ChatInterface({
   };
 
   const removeFile = (index: number) => {
-    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+    setUploadedFiles((prev: any[]) => prev.filter((_: any, i: number) => i !== index));
   };
 
   const ALLOWED_TYPES = [
@@ -2270,7 +2254,7 @@ export function ChatInterface({
         status: "uploading",
         dataUrl,
       };
-      setUploadedFiles((prev) => [...prev, tempFile]);
+      setUploadedFiles((prev: any) => [...prev, tempFile]);
 
       const doUpload = async (): Promise<void> => {
         try {
@@ -2320,8 +2304,8 @@ export function ChatInterface({
                 }
 
                 triggerDocumentAnalysis(uploadId, file.name, (analysisId) => {
-                  setUploadedFiles((prev) =>
-                    prev.map((f) => f.id === tempId ? { ...f, analysisId } : f)
+                  setUploadedFiles((prev: any[]) =>
+                    prev.map((f: any) => f.id === tempId ? { ...f, analysisId } : f)
                   );
                 });
               }
@@ -2339,12 +2323,12 @@ export function ChatInterface({
             const registeredFile = await registerRes.json();
             if (!registerRes.ok) throw new Error(registeredFile.error);
 
-            setUploadedFiles((prev) =>
-              prev.map((f) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
             );
           } else {
-            setUploadedFiles((prev) =>
-              prev.map((f) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
             );
 
             const registerRes = await fetch("/api/files", {
@@ -2355,24 +2339,24 @@ export function ChatInterface({
             const registeredFile = await registerRes.json();
             if (!registerRes.ok) throw new Error(registeredFile.error);
 
-            setUploadedFiles((prev) =>
-              prev.map((f) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
+            setUploadedFiles((prev: any[]) =>
+              prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, spreadsheetData } : f)
             );
 
             pollFileStatusFast(registeredFile.id, tempId);
 
             if (isAnalyzableFile(file.name) && !isExcel) {
               triggerDocumentAnalysis(registeredFile.id, file.name, (analysisId) => {
-                setUploadedFiles((prev) =>
-                  prev.map((f) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
+                setUploadedFiles((prev: any[]) =>
+                  prev.map((f: any) => f.id === registeredFile.id || f.id === tempId ? { ...f, analysisId } : f)
                 );
               });
             }
           }
         } catch (error) {
           console.error("File upload error:", error);
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === tempId ? { ...f, status: "error" } : f))
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === tempId ? { ...f, status: "error" } : f))
           );
         }
       };
@@ -2401,8 +2385,8 @@ export function ChatInterface({
 
     const checkStatus = async (): Promise<void> => {
       if (Date.now() - startTime > maxTime) {
-        setUploadedFiles((prev) =>
-          prev.map((f) => (f.id === fileId || f.id === trackingId
+        setUploadedFiles((prev: any[]) =>
+          prev.map((f: any) => (f.id === fileId || f.id === trackingId
             ? { ...f, id: fileId, status: "ready", content: "" }
             : f))
         );
@@ -2413,8 +2397,8 @@ export function ChatInterface({
         const contentRes = await fetch(`/api/files/${fileId}/content`);
 
         if (!contentRes.ok && contentRes.status !== 202) {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
           );
           return;
         }
@@ -2422,15 +2406,15 @@ export function ChatInterface({
         const contentData = await contentRes.json();
 
         if (contentData.status === "ready") {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId
               ? { ...f, id: fileId, status: "ready", content: contentData.content }
               : f))
           );
           return;
         } else if (contentData.status === "error") {
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
+          setUploadedFiles((prev: any[]) =>
+            prev.map((f: any) => (f.id === fileId || f.id === trackingId ? { ...f, id: fileId, status: "error" } : f))
           );
           return;
         }
@@ -2438,8 +2422,8 @@ export function ChatInterface({
         setTimeout(checkStatus, pollInterval);
       } catch (error) {
         console.error("Polling error:", error);
-        setUploadedFiles((prev) =>
-          prev.map((f) => (f.id === fileId || f.id === trackingId
+        setUploadedFiles((prev: any[]) =>
+          prev.map((f: any) => (f.id === fileId || f.id === trackingId
             ? { ...f, id: fileId, status: "ready", content: "" }
             : f))
         );
@@ -2455,7 +2439,7 @@ export function ChatInterface({
 
     const filesToUpload: File[] = [];
 
-    for (const item of Array.from(items)) {
+    for (const item of Array.from(items) as any[]) {
       if (item.kind === "file") {
         const file = item.getAsFile();
         if (file) {
@@ -2578,7 +2562,7 @@ export function ChatInterface({
     }
 
     // Don't submit if files are still uploading/processing (double-check state after waiting)
-    const filesStillLoading = uploadedFiles.some(f => f.status === "uploading" || f.status === "processing");
+    const filesStillLoading = uploadedFiles.some((f: any) => f.status === "uploading" || f.status === "processing");
     if (filesStillLoading) {
       console.log("[handleSubmit] files still loading after wait, returning");
       return;
@@ -2599,7 +2583,7 @@ export function ChatInterface({
     if (selectedTool === "agent") {
       try {
         const userMessageContent = input;
-        const attachments = uploadedFiles.map(f => ({
+        const attachments = uploadedFiles.map((f: any) => ({
           id: f.id,
           name: f.name,
           type: f.type,
@@ -2618,7 +2602,7 @@ export function ChatInterface({
           timestamp: new Date(),
         };
         // Show message immediately (optimistic update)
-        setOptimisticMessages(prev => [...prev, userMessage]);
+        setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
         onSendMessage(userMessage);
 
         // Clear input IMMEDIATELY after capturing the value to prevent duplicates
@@ -2652,7 +2636,7 @@ export function ChatInterface({
           // Show error when agent run fails to start
           console.error("[Agent Mode] Failed to start run, result is null");
           // Remove the optimistic message since the agent failed to start
-          setOptimisticMessages(prev => prev.filter(m => m.id !== userMessage.id));
+          setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => m.id !== userMessage.id));
           toast({
             title: "Error",
             description: "No se pudo iniciar el agente. Por favor, inicia sesión para usar esta función.",
@@ -2662,7 +2646,7 @@ export function ChatInterface({
       } catch (error) {
         console.error("Failed to start agent run:", error);
         // Remove the optimistic message since the agent failed to start
-        setOptimisticMessages(prev => prev.filter(m => !m.id.startsWith('user-')));
+        setOptimisticMessages((prev: Message[]) => prev.filter((m: Message) => !m.id.startsWith('user-')));
         toast({ title: "Error", description: "Error al iniciar el agente", variant: "destructive" });
       }
       return;
@@ -2787,7 +2771,7 @@ export function ChatInterface({
         requestId: generateRequestId(),
       };
       // Show message immediately (optimistic update)
-      setOptimisticMessages(prev => [...prev, userMsg]);
+      setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
       onSendMessage(userMsg);
 
       try {
@@ -2877,7 +2861,7 @@ export function ChatInterface({
 
         // Direct call to /api/chat/stream for generation - REAL-TIME SSE
         console.log("[handleSubmit] ⚡ Starting standard chat stream...");
-        setAiProcessSteps(prev => prev.map((s, i) =>
+        setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) =>
           i === 0 ? { ...s, status: "done" as const } : { ...s, status: "active" as const }
         ));
 
@@ -2968,7 +2952,7 @@ export function ChatInterface({
                       description: `Generando ${data.deliverables?.join(", ") || "archivos"}`
                     }]);
                   } else if (currentEventType === "production_event") {
-                    setAiProcessSteps(prev => {
+                    setAiProcessSteps((prev: any[]) => {
                       const newSteps = [...prev];
                       const lastStep = newSteps[newSteps.length - 1];
                       if (lastStep && lastStep.status === "pending" && data.message) {
@@ -2986,10 +2970,10 @@ export function ChatInterface({
                       return newSteps;
                     });
                   } else if (currentEventType === "production_complete") {
-                    setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" })));
+                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" })));
                   } else if (currentEventType === "done" || currentEventType === "finish") {
                     streamComplete = true;
-                    setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
+                    setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
 
                     const aiMsg: Message = {
                       id: (Date.now() + 1).toString(),
@@ -3063,7 +3047,7 @@ export function ChatInterface({
       };
 
       // Show user message immediately
-      setOptimisticMessages(prev => [...prev, userMessage]);
+      setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
       onSendMessage(userMessage);
 
       // Create assistant message placeholder for Super Agent display
@@ -3078,7 +3062,7 @@ export function ChatInterface({
       };
 
       // Add assistant message that will show SuperAgentDisplay
-      setOptimisticMessages(prev => [...prev, assistantMessage]);
+      setOptimisticMessages((prev: Message[]) => [...prev, assistantMessage]);
 
       // Start Super Agent run in store
       const { startRun, updateState, completeRun } = useSuperAgentStore.getState();
@@ -3228,7 +3212,7 @@ export function ChatInterface({
                           render: "Generando documento final..."
                         };
                         const progress = eventData.progress || 0;
-                        setDocGenerationState(prev => ({
+                        setDocGenerationState((prev: any) => ({
                           ...prev,
                           status: 'generating',
                           progress,
@@ -3237,7 +3221,7 @@ export function ChatInterface({
                       }
                       break;
                     case "source_signal":
-                      const existingIdx = currentState.sources.findIndex(s => s.id === eventData.id);
+                      const existingIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
                       if (existingIdx >= 0) {
                         const newSources = [...currentState.sources];
                         newSources[existingIdx] = eventData;
@@ -3247,7 +3231,7 @@ export function ChatInterface({
                       }
                       break;
                     case "source_deep":
-                      const deepIdx = currentState.sources.findIndex(s => s.id === eventData.id);
+                      const deepIdx = currentState.sources.findIndex((s: any) => s.id === eventData.id);
                       if (deepIdx >= 0) {
                         const newSources = [...currentState.sources];
                         newSources[deepIdx] = { ...newSources[deepIdx], ...eventData, fetched: true };
@@ -3344,8 +3328,8 @@ export function ChatInterface({
           };
 
           // Update optimistic message
-          setOptimisticMessages(prev =>
-            prev.map(m => m.id === superAgentMessageId ? finalAssistantMessage : m)
+          setOptimisticMessages((prev: Message[]) =>
+            prev.map((m: Message) => m.id === superAgentMessageId ? finalAssistantMessage : m)
           );
           onSendMessage(finalAssistantMessage);
 
@@ -3370,8 +3354,8 @@ export function ChatInterface({
           userMessageId: userMsgId,
         };
 
-        setOptimisticMessages(prev =>
-          prev.map(m => m.id === superAgentMessageId ? errorMessage : m)
+        setOptimisticMessages((prev: Message[]) =>
+          prev.map((m: Message) => m.id === superAgentMessageId ? errorMessage : m)
         );
         onSendMessage(errorMessage);
         setActiveRunId(null);
@@ -3390,8 +3374,8 @@ export function ChatInterface({
       console.log("[handleSubmit] Auto-activating Agent mode:", complexityCheck.agent_reason);
 
       const userMessageContent = input;
-      const readyFiles = uploadedFiles.filter(f => f.status === "ready");
-      const agentAttachments = readyFiles.map(f => ({
+      const readyFiles = uploadedFiles.filter((f: any) => f.status === "ready");
+      const agentAttachments = readyFiles.map((f: any) => ({
         id: f.id,
         name: f.name,
         type: f.type,
@@ -3429,7 +3413,7 @@ export function ChatInterface({
             timestamp: new Date(),
           };
           // Show message immediately (optimistic update)
-          setOptimisticMessages(prev => [...prev, userMessage]);
+          setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
           onSendMessage(userMessage);
 
           setSelectedTool(null);
@@ -3460,8 +3444,8 @@ export function ChatInterface({
     }
 
     const attachments = uploadedFiles
-      .filter(f => f.status === "ready" || f.status === "processing")
-      .map(f => ({
+      .filter((f: any) => f.status === "ready" || f.status === "processing")
+      .map((f: any) => ({
         type: f.type.startsWith("image/") ? "image" as const :
           f.type.includes("word") || f.type.includes("document") ? "word" as const :
             f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
@@ -3534,7 +3518,7 @@ export function ChatInterface({
     // This ensures the user sees their message with attachments right away,
     // before any async operations like document analysis begin
     console.log("[handleSubmit] Adding optimistic message, current count:", optimisticMessages.length);
-    setOptimisticMessages(prev => {
+    setOptimisticMessages((prev: Message[]) => {
       console.log("[handleSubmit] setOptimisticMessages: prev count:", prev.length, "adding:", userMsg.id);
       return [...prev, userMsg];
     });
@@ -3564,7 +3548,7 @@ export function ChatInterface({
       return false;
     };
 
-    const hasDocumentAttachmentsPrecheck = attachments.some(a => isDocumentFileLegacyPrecheck(a.mimeType || String(a.type), a.name, String(a.type)));
+    const hasDocumentAttachmentsPrecheck = attachments.some((a: any) => isDocumentFileLegacyPrecheck(a.mimeType || String(a.type), a.name, String(a.type)));
 
     // Store pre-fetched analysis result to use later (prevents race condition)
     let preFetchedAnalysisResult: {
@@ -3712,7 +3696,7 @@ export function ChatInterface({
           })
         });
 
-        setAiProcessSteps(prev => prev.map((s, i) =>
+        setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) =>
           i === 0 ? { ...s, status: "done" as const } :
             i === 1 ? { ...s, status: "active" as const } : s
         ));
@@ -3720,7 +3704,7 @@ export function ChatInterface({
         if (chatResponse.ok) {
           const data = await chatResponse.json();
 
-          setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
+          setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
 
           const gmailResponseMsg: Message = {
             id: (Date.now() + 1).toString(),
@@ -3774,7 +3758,7 @@ export function ChatInterface({
       try {
         await orchestratorRef.current.runOrchestrator(cleanPrompt);
 
-        setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
+        setAiProcessSteps((prev: any[]) => prev.map((s: any) => ({ ...s, status: "done" as const })));
 
         const orchestratorMsg: Message = {
           id: (Date.now() + 1).toString(),
@@ -3852,7 +3836,7 @@ export function ChatInterface({
           const imageData = await imageRes.json();
 
           if (imageRes.ok && imageData.success) {
-            setAiProcessSteps(prev => prev.map(s => ({ ...s, status: "done" as const })));
+            setAiProcessSteps((prev: AiProcessStep[]) => prev.map((s: AiProcessStep) => ({ ...s, status: "done" as const })));
 
             const msgId = (Date.now() + 1).toString();
 
@@ -4035,7 +4019,7 @@ IMPORTANTE:
         setAiState("responding");
 
         // Update steps: mark processing done, searching active
-        setAiProcessSteps(prev => prev.map((s, i) => {
+        setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
           // Guard against undefined step or s
           if (!s || !s.step) return s;
 
@@ -4184,7 +4168,7 @@ IMPORTANTE:
           }
 
           // Update steps: mark searching done, generating active
-          setAiProcessSteps(prev => prev.map(s => {
+          setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
             if (!s || !s.step) return s;
             if (s.step.includes("Buscando")) return { ...s, status: "done" };
             if (s.step.includes("Generando")) return { ...s, status: "active" };
@@ -4417,7 +4401,7 @@ IMPORTANTE:
           return false;
         };
 
-        const hasDocumentAttachments = attachments.some(a => isDocumentFileLegacy(a.mimeType || a.type, a.name, a.type));
+        const hasDocumentAttachments = attachments.some((a: any) => isDocumentFileLegacy(a.mimeType || a.type, a.name, a.type));
 
         // Use pre-fetched result if available (prevents race condition)
         // Note: We send the analysis result and then continue with normal flow (no early return)
@@ -4536,7 +4520,7 @@ IMPORTANTE:
         });
 
         // Update steps: mark processing done, searching active
-        setAiProcessSteps(prev => prev.map((s, i) => {
+        setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
           if (!s || !s.step) return s;
           if (s.step.includes("Analizando")) return { ...s, status: "done" };
           if (s.step.includes("Procesando")) return { ...s, status: "done" };
@@ -4562,7 +4546,7 @@ IMPORTANTE:
         }
 
         // Update steps: mark searching done, generating active
-        setAiProcessSteps(prev => prev.map(s => {
+        setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
           if (!s || !s.step) return s;
           if (s.step.includes("Buscando")) return { ...s, status: "done" };
           if (s.step.includes("Generando")) return { ...s, status: "active" };
@@ -4865,20 +4849,18 @@ IMPORTANTE:
               {isConversationStateLoading ? (
                 <div
                   className={cn(
-                    "flex-1 overflow-y-auto space-y-3 overscroll-contain",
+                    "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
                     activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
                   )}
-                  style={{ paddingBottom: 'var(--composer-height, 120px)' }}
                 >
                   <SkeletonChatMessages count={3} />
                 </div>
               ) : hasMessages && (
                 <div
                   className={cn(
-                    "flex-1 overflow-y-auto space-y-3 overscroll-contain",
+                    "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
                     activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
                   )}
-                  style={{ paddingBottom: 'var(--composer-height, 120px)' }}
                 >
                   <ChatMessageList
                     messages={displayMessages}
@@ -4978,7 +4960,7 @@ IMPORTANTE:
 
                       {/* Streaming content with fade-in animation */}
                       {aiState === "responding" && streamingContent && (
-                        <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0" style={{ fontFamily: "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", fontSize: "16px", lineHeight: "1.6", fontWeight: 400 }}>
+                        <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0 font-sans text-base leading-relaxed font-normal">
                           <MarkdownErrorBoundary fallbackContent={streamingContent}>
                             <MarkdownRenderer
                               content={streamingContent}
@@ -5094,7 +5076,7 @@ IMPORTANTE:
                 selectedDocText={selectedDocText}
                 handleDocTextDeselect={handleDocTextDeselect}
                 onTextareaFocus={handleCloseModelSelector}
-                isFilesLoading={uploadedFiles.some(f => f.status === "uploading" || f.status === "processing")}
+                isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
               />
             </div>
           </Panel>
@@ -5132,8 +5114,8 @@ IMPORTANTE:
                       handleDownloadDocument(previewDocument);
                     }
                   }}
-                  onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
-                  onOrchestratorReady={(orch) => { orchestratorRef.current = orch; }}
+                  onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
+                  onOrchestratorReady={(orch: { runOrchestrator: (prompt: string) => Promise<void> }) => { orchestratorRef.current = orch; }}
                 />
               ) : (
                 <div className="relative h-full">
@@ -5263,7 +5245,7 @@ IMPORTANTE:
                     }}
                     onTextSelect={handleDocTextSelect}
                     onTextDeselect={handleDocTextDeselect}
-                    onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                    onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
                   />
                 </div>
               )}
@@ -5515,7 +5497,7 @@ IMPORTANTE:
             isGoogleFormsActive={isGoogleFormsActive}
             setIsGoogleFormsActive={setIsGoogleFormsActive}
             onTextareaFocus={handleCloseModelSelector}
-            isFilesLoading={uploadedFiles.some(f => f.status === "uploading" || f.status === "processing")}
+            isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
           />
         </div>
       )}
@@ -5576,7 +5558,7 @@ IMPORTANTE:
               src={lightboxImage}
               alt="Imagen ampliada"
               className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
             />
             <Button
               variant="secondary"
@@ -5592,7 +5574,7 @@ IMPORTANTE:
               variant="secondary"
               size="icon"
               className="absolute top-4 right-16 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
-              onClick={(e) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
+              onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
               data-testid="button-download-lightbox"
               aria-label="Descargar imagen"
             >
@@ -5618,7 +5600,7 @@ IMPORTANTE:
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
             className="relative bg-card rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border">
@@ -5804,7 +5786,7 @@ IMPORTANTE:
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.9, opacity: 0 }}
             className="relative max-w-4xl max-h-[90vh] rounded-lg overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
             <img
               src={previewUploadedImage.dataUrl}
@@ -5853,7 +5835,7 @@ IMPORTANTE:
         isOpen={!!documentPreviewArtifact}
         onClose={() => setDocumentPreviewArtifact(null)}
         artifact={documentPreviewArtifact}
-        onDownload={(artifact) => {
+        onDownload={(artifact: any) => {
           if (artifact.data?.base64) {
             const byteCharacters = atob(artifact.data.base64);
             const byteNumbers = new Array(byteCharacters.length);

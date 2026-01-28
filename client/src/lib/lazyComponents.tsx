@@ -19,10 +19,10 @@ export function LoadingFallback({
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center bg-muted/20 rounded-lg border border-border',
+        'flex flex-col items-center justify-center bg-muted/20 rounded-lg border border-border min-h-[100px]',
         className
       )}
-      style={{ height: h, minHeight: '100px' }}
+      style={{ height: h }}
       data-testid="lazy-loading-fallback"
     >
       <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />

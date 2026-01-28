@@ -161,7 +161,7 @@ const purifyConfig: DOMPurify.Config = {
 };
 
 // Prevent Reverse Tabnabbing
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+DOMPurify.addHook('afterSanitizeAttributes', (node: Element) => {
   if ('target' in node && node.getAttribute('target') === '_blank') {
     node.setAttribute('rel', 'noopener noreferrer');
   }
@@ -467,14 +467,7 @@ const LazyImage = memo(function LazyImage({
         title={title || "Ver en Gmail"}
         loading="eager"
         decoding="async"
-        className="inline-block align-middle"
-        style={{
-          width: '1.4em',
-          height: '1.4em',
-          marginLeft: '6px',
-          verticalAlign: 'text-bottom',
-          display: 'inline'
-        }}
+        className="inline-block align-text-bottom ml-1.5 w-[1.4em] h-[1.4em]"
         data-testid="img-gmail-logo"
       />
     );
