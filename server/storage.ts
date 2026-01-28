@@ -98,6 +98,7 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   createFile(file: InsertFile): Promise<File>;
   getFile(id: string): Promise<File | undefined>;
+  getFileByStoragePath(storagePath: string): Promise<File | undefined>;
   getFiles(userId?: string): Promise<File[]>;
   updateFileStatus(id: string, status: string): Promise<File | undefined>;
   deleteFile(id: string): Promise<void>;
@@ -429,6 +430,11 @@ export class MemStorage implements IStorage {
 
   async getFile(id: string): Promise<File | undefined> {
     const [file] = await dbRead.select().from(files).where(eq(files.id, id));
+    return file;
+  }
+
+  async getFileByStoragePath(storagePath: string): Promise<File | undefined> {
+    const [file] = await dbRead.select().from(files).where(eq(files.storagePath, storagePath));
     return file;
   }
 

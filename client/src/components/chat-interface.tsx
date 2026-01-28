@@ -2327,8 +2327,9 @@ export function ChatInterface({
               prev.map((f: any) => f.id === tempId ? { ...f, id: registeredFile.id, storagePath, status: "ready" } : f)
             );
           } else {
+            // Include storagePath when transitioning to processing state
             setUploadedFiles((prev: any[]) =>
-              prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", spreadsheetData } : f)
+              prev.map((f: any) => f.id === tempId ? { ...f, status: "processing", storagePath, spreadsheetData } : f)
             );
 
             const registerRes = await fetch("/api/files", {

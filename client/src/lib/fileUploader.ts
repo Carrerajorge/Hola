@@ -266,9 +266,9 @@ export class ChunkedFileUploader {
     file: File,
     config: FileConfig,
     onProgress: (percent: number) => void
-  ): Promise<string> {
+  ): Promise<{ storagePath: string; fileId?: string }> {
     const totalChunks = Math.ceil(file.size / config.chunkSize);
-    
+
     const createResponse = await fetch('/api/objects/multipart/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -308,16 +308,16 @@ export class ChunkedFileUploader {
       }
 
       const { signedUrl } = await signResponse.json();
-      
+
       await this.uploadWithProgress(signedUrl, chunk, () => {});
-      
+
       uploadedParts.push({ partNumber });
       completedChunks++;
       onProgress(Math.round((completedChunks / totalChunks) * 100));
     };
 
     const chunkNumbers = Array.from({ length: totalChunks }, (_, i) => i + 1);
-    
+
     for (let i = 0; i < chunkNumbers.length; i += config.maxParallelChunks) {
       const batch = chunkNumbers.slice(i, i + config.maxParallelChunks);
       await Promise.all(batch.map(uploadChunk));
