@@ -1,6 +1,3 @@
-cd /var/www/michat
-
-cat > vite.config.ts <<'EOF'
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -17,9 +14,9 @@ export default defineConfig(async () => {
   const replitPlugins =
     !isProd && isReplit
       ? [
-          (await import("@replit/vite-plugin-cartographer")).cartographer(),
-          (await import("@replit/vite-plugin-dev-banner")).devBanner(),
-        ]
+        (await import("@replit/vite-plugin-cartographer")).cartographer(),
+        (await import("@replit/vite-plugin-dev-banner")).devBanner(),
+      ]
       : [];
 
   return {
@@ -109,4 +106,3 @@ export default defineConfig(async () => {
     },
   };
 });
-EOF
