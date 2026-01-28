@@ -251,22 +251,67 @@ export class AIModelService {
     }
 
     private async callModelProvider(model: ModelConfig, request: PromptRequest): Promise<ModelResponse> {
-        // Placeholder: Integration with actual API clients would go here
-        // In a real implementation, this switches based on model.provider
-
         const startTime = Date.now();
+        Logger.info(`[AI] Calling ${model.provider}:${model.id} for task ${request.taskId}`);
 
-        // Simulate API Call
-        await new Promise(resolve => setTimeout(resolve, model.latencyScore * 10));
+        try {
+            // Import dynamically to avoid circular deps
+            const { openai } = await import('../openai');
 
-        return {
-            content: `Simulated response from ${model.id} for task ${request.taskId}`,
-            modelUsed: model.id,
-            tokenUsage: { prompt: 100, completion: 50, total: 150 },
-            cost: (100 * model.costPerInputToken) + (50 * model.costPerOutputToken),
-            durationMs: Date.now() - startTime,
-            cached: false
-        };
+            // Map request messages to OpenAI format
+            const messages = request.messages.map(m => ({
+                role: m.role as 'system' | 'user' | 'assistant',
+                content: m.content
+            }));
+
+            // Force JSON mode if requested
+            const response_format = request.requirements.jsonMode ? { type: "json_object" } : undefined;
+
+            const completion = await openai.chat.completions.create({
+                model: model.id, // e.g., 'gpt-4o' or 'grok-3-fast'
+                messages,
+                response_format: response_format as any,
+                // stream: request.requirements.streaming // Handle streaming later
+            });
+
+            const choice = completion.choices[0];
+            const content = choice.message.content || '';
+            const usage = completion.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+            Logger.info(`[AI] Success: ${usage.total_tokens} tokens used`);
+
+            return {
+                content,
+                modelUsed: completion.model,
+                tokenUsage: {
+                    prompt: usage.prompt_tokens,
+                    completion: usage.completion_tokens,
+                    total: usage.total_tokens
+                },
+                cost: (usage.prompt_tokens * model.costPerInputToken) + (usage.completion_tokens * model.costPerOutputToken),
+                durationMs: Date.now() - startTime,
+                cached: false
+            };
+
+        } catch (error: any) {
+            Logger.error(`[AI] Provider Call Failed: ${error.message}`);
+
+            // If strictly local or API key missing, fall back to simulation
+            if (error.message.includes('API key') || process.env.NODE_ENV === 'development') {
+                Logger.warn('[AI] Falling back to simulation due to error/config');
+                await new Promise(resolve => setTimeout(resolve, model.latencyScore * 10));
+                return {
+                    content: `[SIMULATION] Response to: ${request.messages[request.messages.length - 1].content.substring(0, 50)}...`,
+                    modelUsed: 'simulation-' + model.id,
+                    tokenUsage: { prompt: 50, completion: 20, total: 70 },
+                    cost: 0,
+                    durationMs: Date.now() - startTime,
+                    cached: false
+                };
+            }
+
+            throw error;
+        }
     }
 }
 
