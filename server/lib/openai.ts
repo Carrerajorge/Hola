@@ -1,13 +1,14 @@
 import OpenAI from "openai";
 
-export const openai = new OpenAI({ 
-  baseURL: "https://api.x.ai/v1", 
-  apiKey: process.env.XAI_API_KEY 
+export const openai = new OpenAI({
+  baseURL: "https://api.x.ai/v1",
+  apiKey: process.env.XAI_API_KEY
 });
 
 export const MODELS = {
-  TEXT: "grok-3-fast",
-  VISION: "grok-2-vision-1212"
+  TEXT: "grok-2-latest",
+  VISION: "grok-2-vision-1212",
+  GROK_REASONING: "grok-4-1-fast-reasoning"
 } as const;
 
 export type ModelType = typeof MODELS[keyof typeof MODELS];

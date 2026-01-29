@@ -139,6 +139,7 @@ const KNOWN_XAI_MODELS = new Set([
   "grok-4-fast-non-reasoning",
   "grok-4-0709",
   "grok-3-fast",
+  "grok-4-1-fast-reasoning"
 ]);
 
 function detectProviderFromModel(model: string | undefined): "xai" | "gemini" | null {

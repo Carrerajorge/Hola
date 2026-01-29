@@ -19,8 +19,9 @@ npm run build && \
 echo '🗄️  Sincronizando base de datos...' && \
 npm run db:push && \
 echo '🔑 Actualizando credenciales de admin...' && \
-npx tsx server/scripts/set_admin_credentials.ts && \
-echo '🚀 Reiniciando servidor...' && \
-pm2 restart michat --update-env"
+npx tsx server/scripts/set_admin_credentials.ts &&  echo '🌱 Sembrando modelos AI...' && \
+  npx tsx server/scripts/seed_models.ts && \
+  echo '🚀 Reiniciando servidor...' && \
+  pm2 restart michat --update-env"
 
 echo "✅ Despliegue completado con éxito."
