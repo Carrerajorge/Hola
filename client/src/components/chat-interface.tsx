@@ -4026,265 +4026,251 @@ IMPORTANTE:
             let fullContent = "";
             let sseError: Error | null = null;
 
-            try {
-              // Helper function to robustly detect if a file is a document (not an image)
-              // Uses mimeType AND file extension for reliable detection
-              const isDocumentFile = (mimeType: string, fileName: string): boolean => {
-                const lowerMime = (mimeType || "").toLowerCase();
-                const lowerName = (fileName || "").toLowerCase();
+            // try {
+            // Helper function to robustly detect if a file is a document (not an image)
+            // Uses mimeType AND file extension for reliable detection
+            const isDocumentFile = (mimeType: string, fileName: string): boolean => {
+              const lowerMime = (mimeType || "").toLowerCase();
+              const lowerName = (fileName || "").toLowerCase();
 
-                // Check for explicit image MIME types first
-                if (lowerMime.startsWith("image/")) return false;
+              // Check for explicit image MIME types first
+              if (lowerMime.startsWith("image/")) return false;
 
-                // Document MIME types
-                const docMimePatterns = [
-                  "pdf", "word", "document", "sheet", "excel",
-                  "spreadsheet", "presentation", "powerpoint", "csv",
-                  "text/plain", "text/csv", "application/json"
-                ];
-                if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
+              // Document MIME types
+              const docMimePatterns = [
+                "pdf", "word", "document", "sheet", "excel",
+                "spreadsheet", "presentation", "powerpoint", "csv",
+                "text/plain", "text/csv", "application/json"
+              ];
+              if (docMimePatterns.some(p => lowerMime.includes(p))) return true;
 
-                // Document file extensions
-                const docExtensions = [
-                  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-                  ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"
-                ];
-                if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
+              // Document file extensions
+              const docExtensions = [
+                ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+                ".csv", ".txt", ".json", ".rtf", ".odt", ".ods", ".odp"
+              ];
+              if (docExtensions.some(ext => lowerName.endsWith(ext))) return true;
 
-                // If mimeType is empty/unknown and has no extension, treat as document (safer)
-                if (!lowerMime || lowerMime === "application/octet-stream") return true;
+              // If mimeType is empty/unknown and has no extension, treat as document (safer)
+              if (!lowerMime || lowerMime === "application/octet-stream") return true;
 
-                return false;
-              };
+              return false;
+            };
 
-              // Build attachments array for streaming endpoint
-              const streamAttachments = uploadedFiles
-                .filter(f => f.status === "ready" || f.status === "processing")
-                .map(f => ({
-                  type: f.type.startsWith("image/") ? "image" as const :
-                    f.type.includes("pdf") ? "pdf" as const :
-                      f.type.includes("word") || f.type.includes("document") ? "word" as const :
-                        f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
-                          f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
-                            "document" as const,
-                  name: f.name,
-                  mimeType: f.type,
-                  storagePath: f.storagePath,
-                  fileId: f.id,
-                  content: f.content,
-                }));
+            // Build attachments array for streaming endpoint
+            const streamAttachments = uploadedFiles
+              .filter(f => f.status === "ready" || f.status === "processing")
+              .map(f => ({
+                type: f.type.startsWith("image/") ? "image" as const :
+                  f.type.includes("pdf") ? "pdf" as const :
+                    f.type.includes("word") || f.type.includes("document") ? "word" as const :
+                      f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
+                        f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
+                          "document" as const,
+                name: f.name,
+                mimeType: f.type,
+                storagePath: f.storagePath,
+                fileId: f.id,
+                content: f.content,
+              }));
 
-              // Robust document detection using both mimeType AND file extension
-              const hasDocumentAttachments = uploadedFiles
-                .filter(f => f.status === "ready" || f.status === "processing")
-                .some(f => isDocumentFile(f.type, f.name));
+            // Robust document detection using both mimeType AND file extension
+            const hasDocumentAttachments = uploadedFiles
+              .filter(f => f.status === "ready" || f.status === "processing")
+              .some(f => isDocumentFile(f.type, f.name));
 
-              // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
-              if (hasDocumentAttachments) {
-                console.log("[handleSubmit] DATA_MODE: Using /analyze endpoint for document analysis");
-                const analyzeResponse = await fetch("/api/analyze", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    messages: finalChatHistory,
-                    attachments: streamAttachments,
-                    conversationId: chatId
-                  }),
-                  signal: abortControllerRef.current?.signal
-                });
-
-                if (!analyzeResponse.ok) {
-                  const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
-                  throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
-                }
-
-                const analyzeResult = await analyzeResponse.json();
-
-                // Create assistant message with analysis results
-                const analysisMsg: Message = {
-                  id: (Date.now() + 1).toString(),
-                  role: "assistant",
-                  content: analyzeResult.answer_text || "No se pudo analizar el documento.",
-                  timestamp: new Date(),
-                  requestId: generateRequestId(),
-                  userMessageId: userMsgId,
-                  ui_components: analyzeResult.ui_components || [],
-                  documentAnalysis: analyzeResult.documentModel ? {
-                    documentModel: analyzeResult.documentModel,
-                    insights: analyzeResult.insights || [],
-                    suggestedQuestions: analyzeResult.suggestedQuestions || [],
-                  } : undefined,
-                };
-                onSendMessage(analysisMsg);
-
-                setAiState("idle");
-                setAiProcessSteps([]);
-                abortControllerRef.current = null;
-                return;
-              }
-
-              // DEBUG: Log selectedDocTool value before making request
-              console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
-
-              const response = await fetch("/api/chat/stream", {
+            // Use /analyze endpoint for document analysis (DATA_MODE) to prevent image generation
+            if (hasDocumentAttachments) {
+              console.log("[handleSubmit] DATA_MODE: Using /analyze endpoint for document analysis");
+              const analyzeResponse = await fetch("/api/analyze", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   messages: finalChatHistory,
-                  conversationId: chatId,
-                  runId: runInfo.id,
-                  chatId: chatId,
-                  attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
-                  // Send selected doc tool for production mode activation
-                  docTool: selectedDocTool || null
+                  attachments: streamAttachments,
+                  conversationId: chatId
                 }),
                 signal: abortControllerRef.current?.signal
               });
 
-              if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-                throw new Error(errorData.error || `SSE streaming failed: ${response.status}`);
+              if (!analyzeResponse.ok) {
+                const errorData = await analyzeResponse.json().catch(() => ({ error: "Unknown error" }));
+                throw new Error(errorData.message || errorData.error || `Analysis failed: ${analyzeResponse.status}`);
               }
 
-              // Check if response indicates already processed (not SSE)
-              const contentType = response.headers.get("Content-Type") || "";
-              if (contentType.includes("application/json")) {
-                const jsonData = await response.json();
-                if (jsonData.status === "already_done" || jsonData.status === "already_processing") {
-                  // Run was already processed, skip streaming
-                  console.log("[SSE] Run already processed, skipping streaming");
-                  setAiState("idle");
-                  setAiProcessSteps([]);
-                  agent.complete();
-                  abortControllerRef.current = null;
-                  return;
-                }
-              }
+              const analyzeResult = await analyzeResponse.json();
 
-              // Update steps: mark searching done, generating active
-              setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
-                if (!s || !s.step) return s;
-                if (s.step.includes("Buscando")) return { ...s, status: "done" };
-                if (s.step.includes("Generando")) return { ...s, status: "active" };
-                return { ...s, status: s.status === "pending" ? "pending" : "done" };
-              }));
+              // Create assistant message with analysis results
+              const analysisMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: analyzeResult.answer_text || "No se pudo analizar el documento.",
+                timestamp: new Date(),
+                requestId: generateRequestId(),
+                userMessageId: userMsgId,
+                ui_components: analyzeResult.ui_components || [],
+                documentAnalysis: analyzeResult.documentModel ? {
+                  documentModel: analyzeResult.documentModel,
+                  insights: analyzeResult.insights || [],
+                  suggestedQuestions: analyzeResult.suggestedQuestions || [],
+                } : undefined,
+              };
+              onSendMessage(analysisMsg);
 
-              // Start PPT streaming if in PPT mode
-              if (isPptMode && shouldWriteToDoc) {
-                pptStreaming.startStreaming();
-                streamingContentRef.current = "";
-                setStreamingContent("");
-              }
+              setAiState("idle");
+              setAiProcessSteps([]);
+              abortControllerRef.current = null;
+              return;
+            }
 
-              // Process SSE stream
-              const reader = response.body?.getReader();
-              const decoder = new TextDecoder();
-              let buffer = "";
-              let lastSeq = -1; // Track last processed sequence for ordering
-              let currentEventType = "chunk"; // Track current event type
-              let streamComplete = false;
+            // DEBUG: Log selectedDocTool value before making request
+            console.log(`[handleSubmit] 📤 SENDING docTool=${JSON.stringify(selectedDocTool)} isWordMode=${isWordMode}`);
 
-              if (!reader) {
-                throw new Error("No response body for SSE streaming");
-              }
+            const response = await fetch("/api/chat/stream", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messages: finalChatHistory,
+                conversationId: chatId,
+                runId: runInfo.id,
+                chatId: chatId,
+                attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+                // Send selected doc tool for production mode activation
+                docTool: selectedDocTool || null
+              }),
+              signal: abortControllerRef.current?.signal
+            });
 
-              while (!streamComplete) {
-                const { done, value } = await reader.read();
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
+              throw new Error(errorData.error || `SSE streaming failed: ${response.status}`);
+            }
 
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-
-                // Parse SSE events from buffer
-                const lines = buffer.split("\n");
-                buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-                for (const line of lines) {
-                  // Track event type for the next data line
-                  if (line.startsWith("event: ")) {
-                    currentEventType = line.slice(7).trim();
-                    continue;
-                  }
-
-                  if (line.startsWith("data: ")) {
-                    let data: any;
-                    try {
-                      data = JSON.parse(line.slice(6));
-                    } catch (parseErr) {
-                      // Ignore parse errors for heartbeat or malformed data
-                      console.debug('[SSE] Parse error, skipping line:', line);
-                      continue;
-                    }
-
-                    // Skip out-of-order sequences for deduplication
-                    if (typeof data.sequenceId === 'number') {
-                      if (data.sequenceId <= lastSeq) {
-                        console.debug(`[SSE] Skipping out-of-order seq ${data.sequenceId} (lastSeq: ${lastSeq})`);
-                        continue;
-                      }
-                      lastSeq = data.sequenceId;
-                    }
-
-                    // Handle completion events (done or complete)
-                    if (currentEventType === 'complete' || currentEventType === 'done' || data.done === true) {
-                      console.debug('[SSE] Stream complete event received');
-                      streamComplete = true;
-                      break;
-                    }
-
-                    // Handle error events
-                    if (currentEventType === 'error') {
-                      throw new Error(data.error || 'SSE stream error');
-                    }
-
-                    // Handle chunk events with content
-                    if (currentEventType === 'chunk' && data.content) {
-                      fullContent += data.content;
-
-                      // Update UI based on mode
-                      if (isPptMode && shouldWriteToDoc) {
-                        pptStreaming.processChunk(data.content);
-                      } else if (isExcelMode && shouldWriteToDoc) {
-                        // Excel mode: show streaming indicator in chat, data goes to Excel at end
-                        streamingContentRef.current = fullContent;
-                        setStreamingContent(fullContent);
-                      } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
-                        try {
-                          // Word mode: Cumulative HTML mode
-                          const newContentHTML = markdownToTipTap(fullContent);
-                          const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                          docInsertContentRef.current(cumulativeHTML, 'html');
-                          setEditedDocumentContent(cumulativeHTML);
-                        } catch (err) {
-                          console.error('[ChatInterface] Error streaming to document:', err);
-                        }
-                      } else {
-                        // Normal chat mode - update streaming content
-                        streamingContentRef.current = fullContent;
-                        setStreamingContent(fullContent);
-                      }
-                    }
-
-                    // Reset event type after processing data
-                    currentEventType = "chunk";
-                  }
-                }
-              }
-            } catch (err: any) {
-              if (err.name === "AbortError") {
-                // User cancelled - clean up and return
-                if (isPptMode && pptStreaming.isStreaming) {
-                  pptStreaming.stopStreaming();
-                }
-                streamingContentRef.current = "";
-                setStreamingContent("");
+            // Check if response indicates already processed (not SSE)
+            const contentType = response.headers.get("Content-Type") || "";
+            if (contentType.includes("application/json")) {
+              const jsonData = await response.json();
+              if (jsonData.status === "already_done" || jsonData.status === "already_processing") {
+                // Run was already processed, skip streaming
+                console.log("[SSE] Run already processed, skipping streaming");
                 setAiState("idle");
                 setAiProcessSteps([]);
+                agent.complete();
                 abortControllerRef.current = null;
                 return;
               }
-              sseError = err;
             }
+
+            // Update steps: mark searching done, generating active
+            setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
+              if (!s || !s.step) return s;
+              if (s.step.includes("Buscando")) return { ...s, status: "done" };
+              if (s.step.includes("Generando")) return { ...s, status: "active" };
+              return { ...s, status: s.status === "pending" ? "pending" : "done" };
+            }));
+
+            // Start PPT streaming if in PPT mode
+            if (isPptMode && shouldWriteToDoc) {
+              pptStreaming.startStreaming();
+              streamingContentRef.current = "";
+              setStreamingContent("");
+            }
+
+            // Process SSE stream
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let lastSeq = -1; // Track last processed sequence for ordering
+            let currentEventType = "chunk"; // Track current event type
+            let streamComplete = false;
+
+            if (!reader) {
+              throw new Error("No response body for SSE streaming");
+            }
+
+            while (!streamComplete) {
+              const { done, value } = await reader.read();
+
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+
+              // Parse SSE events from buffer
+              const lines = buffer.split("\n");
+              buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+              for (const line of lines) {
+                // Track event type for the next data line
+                if (line.startsWith("event: ")) {
+                  currentEventType = line.slice(7).trim();
+                  continue;
+                }
+
+                if (line.startsWith("data: ")) {
+                  let data: any;
+                  try {
+                    data = JSON.parse(line.slice(6));
+                  } catch (parseErr) {
+                    // Ignore parse errors for heartbeat or malformed data
+                    console.debug('[SSE] Parse error, skipping line:', line);
+                    continue;
+                  }
+
+                  // Skip out-of-order sequences for deduplication
+                  if (typeof data.sequenceId === 'number') {
+                    if (data.sequenceId <= lastSeq) {
+                      console.debug(`[SSE] Skipping out-of-order seq ${data.sequenceId} (lastSeq: ${lastSeq})`);
+                      continue;
+                    }
+                    lastSeq = data.sequenceId;
+                  }
+
+                  // Handle completion events (done or complete)
+                  if (currentEventType === 'complete' || currentEventType === 'done' || data.done === true) {
+                    console.debug('[SSE] Stream complete event received');
+                    streamComplete = true;
+                    break;
+                  }
+
+                  // Handle error events
+                  if (currentEventType === 'error') {
+                    throw new Error(data.error || 'SSE stream error');
+                  }
+
+                  // Handle chunk events with content
+                  if (currentEventType === 'chunk' && data.content) {
+                    fullContent += data.content;
+
+                    // Update UI based on mode
+                    if (isPptMode && shouldWriteToDoc) {
+                      pptStreaming.processChunk(data.content);
+                    } else if (isExcelMode && shouldWriteToDoc) {
+                      // Excel mode: show streaming indicator in chat, data goes to Excel at end
+                      streamingContentRef.current = fullContent;
+                      setStreamingContent(fullContent);
+                    } else if (isWordMode && shouldWriteToDoc && docInsertContentRef.current) {
+                      try {
+                        // Word mode: Cumulative HTML mode
+                        const newContentHTML = markdownToTipTap(fullContent);
+                        const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                        docInsertContentRef.current(cumulativeHTML, 'html');
+                        setEditedDocumentContent(cumulativeHTML);
+                      } catch (err) {
+                        console.error('[ChatInterface] Error streaming to document:', err);
+                      }
+                    } else {
+                      // Normal chat mode - update streaming content
+                      streamingContentRef.current = fullContent;
+                      setStreamingContent(fullContent);
+                    }
+                  }
+
+                  // Reset event type after processing data
+                  currentEventType = "chunk";
+                }
+              }
+            }
+
 
             // Handle completion
             if (sseError) {
