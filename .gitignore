@@ -20,6 +20,8 @@ sandbox_workspace/.state/
 # Environment files
 .env
 .env.*
+!.env.example
+!.env.production.example
 .env.local
 .env.*.local
 

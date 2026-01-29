@@ -64,8 +64,14 @@ nano .env.production
 
 - `DATABASE_URL`: Tu conexión a PostgreSQL.
 - `REDIS_URL`: Tu conexión a Redis (o usa el servicio dockerizado).
-- `SESSION_SECRET`: Una cadena larga y aleatoria.
+- `SESSION_SECRET`: Una cadena larga y aleatoria (mínimo 32 caracteres).
 - `OPENAI_API_KEY`, etc.: Tus llaves de API.
+
+**Opcionales (solo si habilitas login de Microsoft):**
+
+- `MICROSOFT_CLIENT_ID`
+- `MICROSOFT_CLIENT_SECRET`
+- `MICROSOFT_TENANT_ID`
 
 ## Paso 4: Levantar los Servicios
 
