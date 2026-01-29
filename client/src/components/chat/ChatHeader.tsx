@@ -32,6 +32,8 @@ import { ActiveGpt } from "@/types/chat";
 import { useToast } from "@/hooks/use-toast";
 import { useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { StandardModelSelector } from './StandardModelSelector';
+import { GptActionMenu } from './GptActionMenu';
 
 interface ChatHeaderProps {
     chatId: string | null;
@@ -88,7 +90,6 @@ export function ChatHeader({
     userPlanInfo
 }: ChatHeaderProps) {
     const { toast } = useToast();
-    const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
     const [isUpgradeDialogOpen, setIsUpgradeDialogOpen] = useState(false);
     const { availableModels, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
 
@@ -104,15 +105,10 @@ export function ChatHeader({
         return grouped;
     }, [availableModels]);
 
-    const selectedModelData = useMemo(() => {
-        if (!selectedModelId) return availableModels[0] || null;
-        return availableModels.find(m => m.id === selectedModelId || m.modelId === selectedModelId) || availableModels[0] || null;
-    }, [selectedModelId, availableModels]);
-
     const isCustomGpt = useMemo(() => {
-        // If it has a userId, it's a Custom GPT (created by a user/admin)
-        // If it lacks userId, it's likely a System Model wrapper or simple chat
-        return activeGpt && !!activeGpt.userId;
+        // Strict Check: Valid context requires explicit userId presence.
+        // System models / Standard chat usually lack userId or have specific system IDs.
+        return activeGpt && !!activeGpt.userId && !!activeGpt.id;
     }, [activeGpt]);
 
     return (
@@ -133,162 +129,28 @@ export function ChatHeader({
                     </TooltipProvider>
                 )}
 
-                {/* Conditional Rendering: Custom GPT (Menu) vs Standard Model (List) */}
+                {/* STRICT Separation: Custom GPT Actions vs Standard Model Selector */}
                 {isCustomGpt ? (
-                    /* CASE 1: Custom GPT (Show Full Context Menu) */
-                    <DropdownMenu open={isModelSelectorOpen} onOpenChange={setIsModelSelectorOpen}>
-                        <DropdownMenuTrigger asChild>
-                            <div
-                                className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
-                                data-testid="button-gpt-context-menu"
-                            >
-                                <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
-                                    {activeGpt.name}
-                                </span>
-                                <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                            </div>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-64 max-h-96 overflow-y-auto">
-                            {/* GPT-specific options */}
-                            <DropdownMenuSub>
-                                <DropdownMenuSubTrigger>
-                                    <span>Modelos</span>
-                                </DropdownMenuSubTrigger>
-                                <DropdownMenuPortal>
-                                    <DropdownMenuSubContent className="w-56">
-                                        {Object.entries(modelsByProvider).map(([provider, models], providerIndex) => (
-                                            <React.Fragment key={provider}>
-                                                {providerIndex > 0 && <DropdownMenuSeparator />}
-                                                <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-                                                    {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
-                                                </div>
-                                                {models.map((model) => (
-                                                    <DropdownMenuItem
-                                                        key={model.id}
-                                                        className={cn("flex items-center gap-2", selectedModelData?.id === model.id ? "bg-muted" : "")}
-                                                        onClick={() => {
-                                                            setSelectedModelId(model.id);
-                                                            setIsModelSelectorOpen(false);
-                                                        }}
-                                                    >
-                                                        {selectedModelData?.id === model.id && <Check className="h-4 w-4" />}
-                                                        <span className={cn(selectedModelData?.id !== model.id ? "pl-6" : "")}>{model.name}</span>
-                                                    </DropdownMenuItem>
-                                                ))}
-                                            </React.Fragment>
-                                        ))}
-                                    </DropdownMenuSubContent>
-                                </DropdownMenuPortal>
-                            </DropdownMenuSub>
-
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={onNewChat} className="flex items-center gap-2">
-                                <Pencil className="h-4 w-4" />
-                                <span>Nuevo chat</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => onAboutGpt?.(activeGpt)} className="flex items-center gap-2">
-                                <Info className="h-4 w-4" />
-                                <span>Acerca de</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => onEditGpt?.(activeGpt)} className="flex items-center gap-2">
-                                <Settings className="h-4 w-4" />
-                                <span>Editar GPT</span>
-                            </DropdownMenuItem>
-                            {isGptPinned?.(activeGpt.id) ? (
-                                <DropdownMenuItem onClick={() => onHideGptFromSidebar?.(activeGpt.id)} className="flex items-center gap-2">
-                                    <EyeOff className="h-4 w-4" />
-                                    <span>Ocultar de la barra lateral</span>
-                                </DropdownMenuItem>
-                            ) : (
-                                <DropdownMenuItem onClick={() => onPinGptToSidebar?.(activeGpt.id)} className="flex items-center gap-2">
-                                    <Pin className="h-4 w-4" />
-                                    <span>Fijar en la barra lateral</span>
-                                </DropdownMenuItem>
-                            )}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                                onClick={() => {
-                                    navigator.clipboard.writeText(`${window.location.origin}/gpts/${activeGpt.id}`);
-                                    toast({ title: "Enlace copiado", description: "El enlace del GPT se ha copiado al portapapeles" });
-                                }}
-                                className="flex items-center gap-2"
-                            >
-                                <Link className="h-4 w-4" />
-                                <span>Copiar enlace</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onClick={() => toast({ title: "Valorar GPT", description: "Esta función estará disponible próximamente" })}
-                                className="flex items-center gap-2"
-                            >
-                                <Star className="h-4 w-4" />
-                                <span>Valorar GPT</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onClick={() => toast({ title: "Denunciar GPT", description: "Puedes reportar contenido inapropiado a soporte" })}
-                                className="flex items-center gap-2 text-destructive"
-                            >
-                                <Flag className="h-4 w-4" />
-                                <span>Denunciar GPT</span>
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                    <GptActionMenu
+                        activeGpt={activeGpt}
+                        modelsByProvider={modelsByProvider}
+                        selectedModelId={selectedModelId}
+                        setSelectedModelId={setSelectedModelId}
+                        onNewChat={onNewChat}
+                        onAboutGpt={onAboutGpt}
+                        onEditGpt={onEditGpt}
+                        onHideGptFromSidebar={onHideGptFromSidebar}
+                        onPinGptToSidebar={onPinGptToSidebar}
+                        isGptPinned={isGptPinned}
+                    />
                 ) : (
-                    /* CASE 2: Standard Model / No Custom GPT - Show ONLY Model List */
-                    !isAnyModelAvailable ? (
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <div
-                                        className="flex items-center gap-1 sm:gap-2 bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-1 rounded-md cursor-not-allowed opacity-60"
-                                        data-testid="button-model-selector-disabled"
-                                    >
-                                        <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none text-gray-500 dark:text-gray-400">
-                                            Sin modelos activos
-                                        </span>
-                                        <ChevronDown className="h-3 w-3 text-gray-400 flex-shrink-0" />
-                                    </div>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                    <p>No hay modelos disponibles. Un administrador debe activar al menos un modelo.</p>
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    ) : (
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <div
-                                    className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
-                                    data-testid="button-model-selector"
-                                >
-                                    <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
-                                        {/* Show Active GPT Name (if it's a Standard Model wrapper) or Selected Model Name */}
-                                        {activeGpt?.name || selectedModelData?.name || "Seleccionar modelo"}
-                                    </span>
-                                    <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                                </div>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start" className="w-56 max-h-96 overflow-y-auto">
-                                {Object.entries(modelsByProvider).map(([provider, models], providerIndex) => (
-                                    <React.Fragment key={provider}>
-                                        {providerIndex > 0 && <DropdownMenuSeparator />}
-                                        <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-                                            {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
-                                        </div>
-                                        {models.map((model) => (
-                                            <DropdownMenuItem
-                                                key={model.id}
-                                                className={cn("flex items-center gap-2", selectedModelData?.id === model.id && "bg-muted")}
-                                                onClick={() => setSelectedModelId(model.id)}
-                                            >
-                                                {selectedModelData?.id === model.id && <Check className="h-4 w-4" />}
-                                                <span className={cn(selectedModelData?.id !== model.id && "pl-6")}>{model.name}</span>
-                                            </DropdownMenuItem>
-                                        ))}
-                                    </React.Fragment>
-                                ))}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    )
+                    <StandardModelSelector
+                        availableModels={availableModels}
+                        selectedModelId={selectedModelId}
+                        setSelectedModelId={setSelectedModelId}
+                        modelsByProvider={modelsByProvider}
+                        activeGptName={activeGpt?.name} // Pass name wrapper if needed (e.g. system wrapper)
+                    />
                 )}
             </div>
 
