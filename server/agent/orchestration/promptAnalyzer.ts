@@ -297,11 +297,17 @@ export class PromptAnalyzer extends EventEmitter {
         hasExtractedContent: attachmentSummary.hasExtractedContent,
         isMultiIntent: multiIntent.isMultiIntent
       });
-      const suggestedAgents = this.determineSuggestedAgents(enhancedIntent, dedupedDeliverables, complexity);
+      const suggestedAgents = this.determineSuggestedAgents(
+        enhancedIntent,
+        dedupedDeliverables,
+        complexity,
+        clarificationsNeeded.length > 0
+      );
       const executionHints = this.buildExecutionHints({
         complexity,
         deliverables: dedupedDeliverables,
         hasAttachments: attachmentSummary.count > 0,
+        clarificationsCount: clarificationsNeeded.length,
         multiIntent,
         memoryContext
       });
@@ -324,6 +330,7 @@ export class PromptAnalyzer extends EventEmitter {
           attachmentSummary,
           multiIntent,
           clarificationsNeeded,
+          requiresClarification: clarificationsNeeded.length > 0,
           executionHints,
           deliverablesRawCount: deliverables.length,
           deliverablesDedupedCount: dedupedDeliverables.length,
@@ -883,6 +890,7 @@ export class PromptAnalyzer extends EventEmitter {
     complexity: ComplexityLevel;
     deliverables: DeliverableSpec[];
     hasAttachments: boolean;
+    clarificationsCount: number;
     multiIntent: { isMultiIntent: boolean; segments: string[] };
     memoryContext: MemoryContext;
   }): Record<string, any> {
@@ -890,12 +898,14 @@ export class PromptAnalyzer extends EventEmitter {
     const requiresVerification = ["moderate", "complex", "expert"].includes(input.complexity);
     const requiresTools = input.hasAttachments || input.deliverables.some(d => ["research", "data_analysis", "code"].includes(d.type));
     const requiresMemory = input.memoryContext.facts.length > 0 || input.memoryContext.previousActions.length > 0;
+    const shouldClarify = input.clarificationsCount > 0;
 
     return {
       requiresDecomposition,
       requiresVerification,
       requiresTools,
       requiresMemory,
+      shouldClarify,
       deliverableTypes: input.deliverables.map(d => d.type)
     };
   }
@@ -903,7 +913,8 @@ export class PromptAnalyzer extends EventEmitter {
   private determineSuggestedAgents(
     intent: IntentType,
     deliverables: DeliverableSpec[],
-    complexity: ComplexityLevel
+    complexity: ComplexityLevel,
+    needsClarification: boolean
   ): SpecializedAgent[] {
     const baseAgents = [...INTENT_TO_AGENTS[intent]];
     
@@ -930,6 +941,10 @@ export class PromptAnalyzer extends EventEmitter {
 
     if (!baseAgents.includes("qa") && complexity !== "trivial" && complexity !== "simple") {
       baseAgents.push("qa");
+    }
+
+    if (needsClarification && !baseAgents.includes("communication")) {
+      baseAgents.push("communication");
     }
 
     return baseAgents.slice(0, 5) as SpecializedAgent[];
