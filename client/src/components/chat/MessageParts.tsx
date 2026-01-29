@@ -115,7 +115,7 @@ export const LazyImage = memo(function LazyImage({
                 alt={alt}
                 loading="lazy"
                 className={cn(className, !isLoaded && "opacity-0")}
-                style={style as React.CSSProperties}
+                ref={(el) => { if (el && style) Object.entries(style).forEach(([k, v]) => el.style[k as any] = v as string); }}
                 onClick={onClick}
                 onLoad={() => setIsLoaded(true)}
                 onError={() => setHasError(true)}

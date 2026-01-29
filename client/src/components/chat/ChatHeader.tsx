@@ -243,9 +243,9 @@ export function ChatHeader({
                                                     onClick={() => chatId && onMoveToFolder?.(chatId, folder.id)}
                                                     data-testid={`menu-folder-${folder.id}`}
                                                 >
-                                                    <span
-                                                        className="h-3 w-3 rounded-full mr-2 flex-shrink-0 bg-[var(--folder-color)]"
-                                                        style={{ '--folder-color': folder.color } as React.CSSProperties}
+                                                    <div
+                                                        className="w-4 h-4 rounded-full mr-2"
+                                                        ref={(el) => { if (el) el.style.backgroundColor = folder.color; }}
                                                     />
                                                     {folder.name}
                                                 </DropdownMenuItem>

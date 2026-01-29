@@ -364,6 +364,7 @@ export function Sidebar({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
+                aria-label="Chat options"
                 className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md opacity-100 hover:bg-muted transition-colors mr-1"
                 onClick={(e) => e.stopPropagation()}
                 data-testid={`button - chat - menu - ${chat.id} `}
@@ -426,9 +427,9 @@ export function Sidebar({
                             >
                               <span
                                 className="h-3 w-3 rounded-full mr-2 flex-shrink-0"
-                                style={{ backgroundColor: project.color }}
+                                ref={(el) => { if (el) el.style.backgroundColor = project.color; }}
                               />
-                              <span className="flex-1 truncate">{project.name}</span>
+                              <div className="flex-1 overflow-hidden" dir="rtl">{project.name}</div>
                               {isInThisProject && <Check className="h-4 w-4 ml-2 text-green-500" />}
                             </DropdownMenuItem>
                           );
@@ -449,7 +450,7 @@ export function Sidebar({
                           >
                             <span
                               className="h-3 w-3 rounded-full mr-2 flex-shrink-0"
-                              style={{ backgroundColor: folder.color }}
+                              ref={(el) => { if (el) el.style.backgroundColor = folder.color; }}
                             />
                             {folder.name}
                           </DropdownMenuItem>
@@ -649,7 +650,7 @@ export function Sidebar({
                         )}
                         <span
                           className="h-2.5 w-2.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: folder.color }}
+                          ref={(el) => { if (el) el.style.backgroundColor = folder.color; }}
                         />
                         <span className="text-sm font-medium flex-1">{folder.name}</span>
                         <span className="text-xs text-muted-foreground">{folderChats.length}</span>
@@ -741,7 +742,9 @@ export function Sidebar({
                       <Collapsible key={project.id} open={isExpanded} onOpenChange={() => toggleFolder(project.id)}>
                         <div className="group flex items-center gap-1 px-2 py-2 rounded-xl hover:bg-accent transition-all duration-300">
                           <CollapsibleTrigger asChild>
-                            <button className="p-1 hover:bg-muted rounded cursor-pointer shrink-0">
+                            <button
+                              aria-label="Expand project"
+                              className="p-1 hover:bg-muted rounded cursor-pointer shrink-0">
                               <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", isExpanded && "rotate-90")} />
                             </button>
                           </CollapsibleTrigger>
@@ -751,6 +754,7 @@ export function Sidebar({
                             <DropdownMenuTrigger asChild>
                               <button
                                 type="button"
+                                aria-label="Project options"
                                 className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md opacity-100 hover:bg-muted transition-colors"
                                 onClick={(e) => e.stopPropagation()}
                                 data-testid={`project - menu - ${project.id} `}
@@ -845,7 +849,7 @@ export function Sidebar({
                             {project.backgroundImage ? (
                               <div
                                 className="h-5 w-5 rounded flex-shrink-0 bg-cover bg-center"
-                                style={{ backgroundImage: `url(${project.backgroundImage})` }}
+                                ref={(el) => { if (el) el.style.backgroundImage = `url(${project.backgroundImage})`; }}
                               />
                             ) : isExpanded ? (
                               <FolderOpen className="h-4 w-4 text-muted-foreground" />
@@ -854,7 +858,7 @@ export function Sidebar({
                             )}
                             <span
                               className="h-2.5 w-2.5 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: project.color }}
+                              ref={(el) => { if (el) el.style.backgroundColor = project.color; }}
                             />
                             <span className="text-sm font-medium flex-1 truncate">{project.name}</span>
                             {project.systemPrompt && (
@@ -996,7 +1000,9 @@ export function Sidebar({
                     onClick={() => onSelectChat(chat.id)}
                     data-testid={`hidden - chat - item - ${chat.id} `}
                   >
-                    <span className="truncate text-sm">{chat.title}</span>
+                    <span className="truncate" dir="ltr">
+                      {chat.title}
+                    </span>
                     <Button
                       variant="ghost"
                       size="icon"

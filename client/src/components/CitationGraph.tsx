@@ -127,17 +127,17 @@ export const CitationGraph: React.FC<CitationGraphProps> = ({
             .data(nodes)
             .join("g")
             .attr("cursor", "pointer")
-            .call(d3.drag<SVGGElement, CitationNode>()
-                .on("start", (event, d: any) => {
+            .call((d3.drag<SVGGElement, CitationNode>() as any)
+                .on("start", (event: any, d: any) => {
                     if (!event.active) simulation.alphaTarget(0.3).restart();
                     d.fx = d.x;
                     d.fy = d.y;
                 })
-                .on("drag", (event, d: any) => {
+                .on("drag", (event: any, d: any) => {
                     d.fx = event.x;
                     d.fy = event.y;
                 })
-                .on("end", (event, d: any) => {
+                .on("end", (event: any, d: any) => {
                     if (!event.active) simulation.alphaTarget(0);
                     d.fx = null;
                     d.fy = null;
@@ -289,9 +289,11 @@ export const CitationGraph: React.FC<CitationGraphProps> = ({
             {tooltip && (
                 <div
                     className="absolute z-20 bg-gray-900 text-white text-xs p-2 rounded shadow-lg max-w-xs pointer-events-none"
-                    style={{
-                        left: tooltip.x + 10,
-                        top: tooltip.y + 10,
+                    ref={(el) => {
+                        if (el) {
+                            el.style.left = `${tooltip.x + 10}px`;
+                            el.style.top = `${tooltip.y + 10}px`;
+                        }
                     }}
                 >
                     <div className="font-semibold">{tooltip.node.title}</div>

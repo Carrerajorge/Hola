@@ -282,7 +282,7 @@ export const AgentRunContent = memo(function AgentRunContent({ agentRun, onCance
                             <div className="flex-1 h-1.5 bg-purple-500/20 rounded-full overflow-hidden">
                                 <div
                                     className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500 w-[var(--step-width)]"
-                                    style={{ '--step-width': `${Math.min(100, (stepProgress.completed / stepProgress.total) * 100)}%` } as any}
+                                    ref={(el) => { if (el) el.style.setProperty('--step-width', `${Math.min(100, (stepProgress.completed / stepProgress.total) * 100)}%`); }}
                                 />
                             </div>
                             <span className="text-xs text-muted-foreground shrink-0">
@@ -393,6 +393,7 @@ export const AgentRunContent = memo(function AgentRunContent({ agentRun, onCance
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2 flex-wrap">
+
                                                     <span className={cn("text-xs font-semibold uppercase tracking-wide", event.ui.labelColor)}>
                                                         {event.ui.label}
                                                     </span>

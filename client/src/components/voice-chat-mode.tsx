@@ -369,6 +369,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
           className="hidden"
           accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
           onChange={handleFileChange}
+          aria-label="File upload"
         />
 
         {/* Close button */}

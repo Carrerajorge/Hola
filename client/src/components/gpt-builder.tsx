@@ -646,7 +646,7 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
+              <div className="flex-1 overflow-y-auto max-h-[calc(100vh-140px)]">
                 <div className="p-6 max-w-2xl mx-auto space-y-6 pb-10">
                   {activeTab === "crear" ? (
                     <div className="space-y-4">
@@ -953,9 +953,9 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
                                     setActionForm({
                                       name: action.name,
                                       description: action.description || "",
-                                      httpMethod: action.httpMethod,
-                                      endpoint: action.endpoint,
-                                      authType: action.authType
+                                      httpMethod: action.httpMethod || "GET",
+                                      endpoint: action.endpoint ?? "",
+                                      authType: action.authType ?? ""
                                     });
                                     setShowActionEditor(true);
                                   }}

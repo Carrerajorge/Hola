@@ -222,7 +222,9 @@ export class MarkdownErrorBoundary extends Component<MarkdownErrorBoundaryProps,
       const content = this.props.fallbackContent || '';
       return (
         <div className="whitespace-pre-wrap break-words">
-          {content}
+          <span className="bg-yellow-100 text-yellow-800 px-1 rounded">
+            {content}
+          </span>
         </div>
       );
     }
@@ -329,7 +331,7 @@ const DocumentGenerationLoader = memo(function DocumentGenerationLoader({
         <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
           <div
             className="h-full bg-gradient-to-r from-sky-500 to-blue-500 rounded-full transition-all duration-500 ease-out w-[var(--prog-width)]"
-            style={{ '--prog-width': `${currentState.progress}%` } as React.CSSProperties}
+            ref={(el) => { if (el) el.style.setProperty('--prog-width', `${currentState.progress}%`); }}
           />
         </div>
         <span className="text-[11px] text-gray-400 dark:text-gray-500 tabular-nums min-w-[32px] text-right">
@@ -504,7 +506,7 @@ const LazyImage = memo(function LazyImage({
           loaded ? "opacity-100" : "opacity-0",
           className
         )}
-        style={{ '--img-max-h': typeof maxHeight === 'number' ? `${maxHeight}px` : maxHeight } as React.CSSProperties}
+        ref={(el) => { if (el) el.style.setProperty('--img-max-h', typeof maxHeight === 'number' ? `${maxHeight}px` : maxHeight); }}
         data-testid="img-markdown"
       />
     </div>

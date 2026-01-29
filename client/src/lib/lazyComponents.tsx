@@ -22,7 +22,7 @@ export function LoadingFallback({
         'flex flex-col items-center justify-center bg-muted/20 rounded-lg border border-border min-h-[100px] h-[var(--fallback-height)]',
         className
       )}
-      style={{ '--fallback-height': h } as React.CSSProperties}
+      ref={(el) => { if (el) el.style.setProperty('--fallback-height', h); }}
       data-testid="lazy-loading-fallback"
     >
       <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
@@ -37,7 +37,7 @@ export function EditorLoadingFallback() {
       className="h-full w-full flex items-center justify-center bg-white"
       data-testid="editor-loading-fallback"
     >
-      <div className="flex flex-col items-center gap-3">
+      <div className="flex items-center justify-center p-4">
         <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
         <p className="text-sm text-gray-500">Loading editor...</p>
       </div>
