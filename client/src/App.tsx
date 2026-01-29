@@ -105,6 +105,7 @@ const SystemHealthPage = lazy(() => import("@/pages/admin/SystemHealth"));
 const WorkspaceSettingsPage = lazy(() => import("@/pages/workspace-settings"));
 const WorkspacePage = lazy(() => import("@/pages/workspace"));
 const SkillsPage = lazy(() => import("@/pages/skills"));
+const CodexPage = lazy(() => import("@/pages/codex"));
 const SpreadsheetAnalyzerPage = lazy(() => import("@/pages/SpreadsheetAnalyzer"));
 const MonitoringDashboard = lazy(() => import("@/pages/MonitoringDashboard"));
 const AboutPage = lazy(() => import("@/pages/about"));
@@ -124,6 +125,7 @@ const ProtectedSystemHealthPage = requireAuth(SystemHealthPage);
 const ProtectedWorkspaceSettingsPage = requireAuth(WorkspaceSettingsPage);
 const ProtectedWorkspacePage = requireAuth(WorkspacePage);
 const ProtectedSkillsPage = requireAuth(SkillsPage);
+const ProtectedCodexPage = requireAuth(CodexPage);
 const ProtectedMemoryPage = requireAuth(MemoryPage);
 const ProtectedSpreadsheetAnalyzerPage = requireAuth(SpreadsheetAnalyzerPage);
 const ProtectedMonitoringDashboard = requireAuth(MonitoringDashboard);
@@ -264,6 +266,7 @@ function Router() {
             <Route path="/workspace-settings" component={ProtectedWorkspaceSettingsPage} />
             <Route path="/workspace" component={ProtectedWorkspacePage} />
             <Route path="/skills" component={ProtectedSkillsPage} />
+            <Route path="/codex" component={ProtectedCodexPage} />
             <Route path="/memory" component={ProtectedMemoryPage} />
             <Route path="/spreadsheet-analyzer" component={ProtectedSpreadsheetAnalyzerPage} />
             <Route path="/monitoring" component={ProtectedMonitoringDashboard} />
