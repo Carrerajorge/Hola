@@ -11,10 +11,9 @@ import { browserSessionManager, SessionEvent } from "./agent/browser";
 import { fileProcessingQueue, FileStatusUpdate } from "./lib/fileProcessingQueue";
 import { globalAuditMiddleware } from "./middleware/audit";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
-import googleAuthRouter from "./auth/googleAuth";
-import { generateAnonToken } from "./lib/anonToken";
 import { pptExportRouter } from "./routes/pptExport";
 import swaggerUi from 'swagger-ui-express';
+import { passport } from "./lib/auth/passport";
 import { swaggerSpec } from "./lib/swagger";
 import { createChatsRouter } from "./routes/chatsRouter";
 import { createFilesRouter } from "./routes/filesRouter";
@@ -221,10 +220,41 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Initialize Passport
+  app.use(passport.initialize());
+  app.use(passport.session());
+
+  // Passport Auth Routes
+  // Google
+  app.get("/api/auth/google", passport.authenticate("google", { scope: ["openid", "email", "profile"] }));
+  app.get("/api/auth/google/callback",
+    passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
+    (req, res) => {
+      res.redirect("/?auth=success");
+    }
+  );
+
+  // Microsoft
+  app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
+  app.get("/api/auth/microsoft/callback",
+    passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }),
+    (req, res) => {
+      res.redirect("/?auth=success");
+    }
+  );
+
+  // Auth0
+  app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
+  app.get("/api/auth/auth0/callback",
+    passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }),
+    (req, res) => {
+      res.redirect("/?auth=success");
+    }
+  );
+
+  // Legacy Replit Auth (Keep if needed, or remove if fully replacing)
   await setupAuth(app);
   registerAuthRoutes(app);
-  // Explicitly mount Google Auth for reliability (Standalone Mode)
-  app.use("/api/auth", googleAuthRouter);
 
   // Global Compression Middleware (Gzip)
   app.use(compression);

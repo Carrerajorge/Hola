@@ -14,6 +14,9 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   magic_link_expired: "El enlace mágico ha expirado. Solicita uno nuevo.",
   session_error: "Error al crear la sesión. Por favor intenta de nuevo.",
   verification_failed: "Error al verificar el enlace. Por favor intenta de nuevo.",
+  google_failed: "Error al iniciar sesión con Google. Por favor intenta de nuevo.",
+  microsoft_failed: "Error al iniciar sesión con Microsoft. Por favor intenta de nuevo.",
+  auth0_failed: "Error al iniciar sesión con Auth0. Por favor intenta de nuevo.",
 };
 
 export default function LoginPage() {

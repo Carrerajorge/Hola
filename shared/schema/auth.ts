@@ -44,6 +44,25 @@ export const oauthStates = pgTable("oauth_states", {
 export type OAuthState = typeof oauthStates.$inferSelect;
 export type InsertOAuthState = typeof oauthStates.$inferInsert;
 
+// Auth Tokens table - Secure storage for encryption tokens (replacing in-memory)
+export const authTokens = pgTable("auth_tokens", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 50 }).notNull(), // google, microsoft, auth0
+    accessToken: text("access_token").notNull(), // Encrypted
+    refreshToken: text("refresh_token"), // Encrypted
+    expiresAt: bigint("expires_at", { mode: "number" }),
+    scope: text("scope"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+    index("auth_tokens_user_provider_idx").on(table.userId, table.provider),
+    uniqueIndex("auth_tokens_unique_user_provider").on(table.userId, table.provider),
+]);
+
+export type AuthToken = typeof authTokens.$inferSelect;
+export type InsertAuthToken = typeof authTokens.$inferInsert;
+
 
 // Users table (compatible with Replit Auth) - Enterprise-grade
 export const users = pgTable("users", {

@@ -1,12 +1,9 @@
 import type { Express } from "express";
 import { authStorage } from "./storage";
-import { isAuthenticated, getAuthMetrics, getSessionStats } from "./replitAuth";
+import { isAuthenticated, getSessionStats } from "./replitAuth";
 import { storage } from "../../storage";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
 import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/userRateLimiter";
-import microsoftAuthRouter from "../../auth/microsoftAuth";
-import googleAuthRouter from "../../auth/googleAuth";
-
 
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
@@ -19,11 +16,7 @@ function isAdminConfigured(): boolean {
 
 // Register auth-specific routes
 export function registerAuthRoutes(app: Express): void {
-  // Microsoft OAuth routes
-  app.use("/api/auth", microsoftAuthRouter);
-
-  // Google OAuth routes
-  app.use("/api/auth", googleAuthRouter);
+  // Legacy routes removed in favor of Passport.js in server/routes.ts
 
   // Auth metrics endpoint (admin only)
 
