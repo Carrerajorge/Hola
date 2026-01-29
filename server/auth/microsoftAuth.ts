@@ -16,6 +16,10 @@ const getMicrosoftConfig = () => {
     const clientSecret = env.MICROSOFT_CLIENT_SECRET;
     const tenantId = env.MICROSOFT_TENANT_ID;
 
+    if (!clientId || !clientSecret || !tenantId) {
+        return null;
+    }
+
     return {
         clientId,
         clientSecret,

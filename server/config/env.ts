@@ -11,9 +11,10 @@ const envSchema = z.object({
     SESSION_SECRET: z.string().min(1, "SESSION_SECRET is required"),
 
     // Microsoft OAuth
-    MICROSOFT_CLIENT_ID: z.string().min(1, "MICROSOFT_CLIENT_ID is required for Azure AD Auth"),
-    MICROSOFT_CLIENT_SECRET: z.string().min(1, "MICROSOFT_CLIENT_SECRET is required for Azure AD Auth"),
-    MICROSOFT_TENANT_ID: z.string().min(1, "MICROSOFT_TENANT_ID is required for Azure AD Auth"),
+    // Microsoft OAuth
+    MICROSOFT_CLIENT_ID: z.string().optional(),
+    MICROSOFT_CLIENT_SECRET: z.string().optional(),
+    MICROSOFT_TENANT_ID: z.string().optional(),
 
     // Pool settings
     DB_POOL_MAX: z.string().transform(Number).default("20"),
