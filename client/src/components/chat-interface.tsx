@@ -5141,8 +5141,8 @@ IMPORTANTE:
                             {/* Progress Bar */}
                             <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
                               <div
-                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all duration-300 ease-out"
-                                style={{ width: `${docGenerationState.progress}%` }}
+                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all duration-300 ease-out w-[var(--gen-prog)]"
+                                style={{ '--gen-prog': `${docGenerationState.progress}%` } as React.CSSProperties}
                               />
                             </div>
                             <p className="text-xs text-gray-500">{docGenerationState.progress}% completado</p>

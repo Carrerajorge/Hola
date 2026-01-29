@@ -281,8 +281,8 @@ export const AgentRunContent = memo(function AgentRunContent({ agentRun, onCance
                         <div className="mt-2 flex items-center gap-2">
                             <div className="flex-1 h-1.5 bg-purple-500/20 rounded-full overflow-hidden">
                                 <div
-                                    className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500"
-                                    style={{ width: `${Math.min(100, (stepProgress.completed / stepProgress.total) * 100)}%` }}
+                                    className="h-full bg-gradient-to-r from-purple-500 to-blue-500 transition-all duration-500 w-[var(--step-width)]"
+                                    style={{ '--step-width': `${Math.min(100, (stepProgress.completed / stepProgress.total) * 100)}%` } as any}
                                 />
                             </div>
                             <span className="text-xs text-muted-foreground shrink-0">

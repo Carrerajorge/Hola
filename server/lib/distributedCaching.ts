@@ -149,11 +149,11 @@ interface FeatureFlag {
     rolloutPercentage: number;
     targetUsers?: string[];
     targetGroups?: string[];
-    conditions?: Array<{
+    conditions?: {
         attribute: string;
         operator: 'eq' | 'neq' | 'gt' | 'lt' | 'contains' | 'in';
         value: any;
-    }>;
+    }[];
     metadata?: Record<string, any>;
 }
 
@@ -222,7 +222,7 @@ class FeatureFlagManager extends EventEmitter {
     }
 
     private evaluateCondition(
-        condition: FeatureFlag['conditions'][0],
+        condition: NonNullable<FeatureFlag['conditions']>[number],
         attributes: Record<string, any>
     ): boolean {
         const value = attributes[condition.attribute];

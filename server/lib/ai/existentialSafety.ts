@@ -39,7 +39,7 @@ export class KillSwitch {
 
     activate(reason: string) {
         this.active = true;
-        Logger.critical(`[SAFETY] KILL SWITCH ACTIVATED: ${reason}`);
+        Logger.error(`[SAFETY] KILL SWITCH ACTIVATED: ${reason}`, { category: 'critical' });
         this.haltSystem();
     }
 

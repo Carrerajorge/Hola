@@ -19,10 +19,10 @@ export function LoadingFallback({
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center bg-muted/20 rounded-lg border border-border min-h-[100px]',
+        'flex flex-col items-center justify-center bg-muted/20 rounded-lg border border-border min-h-[100px] h-[var(--fallback-height)]',
         className
       )}
-      style={{ height: h }}
+      style={{ '--fallback-height': h } as React.CSSProperties}
       data-testid="lazy-loading-fallback"
     >
       <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
@@ -66,8 +66,8 @@ export const LazyPPTEditorShell = React.lazy(() => import('@/components/ppt/PPTE
 export function PPTEditorShellLazy(props: { onClose: () => void; onInsertContent?: (insertFn: (content: string) => void) => void; initialShowInstructions?: boolean; initialContent?: string }) {
   return (
     <LazyLoadErrorBoundary
-      componentName="Editor de Presentaciones"
-      loadingComponent={<EditorLoadingFallback />}
+    // componentName removed
+    // loadingComponent removed
     >
       <LazyPPTEditorShell {...props} />
     </LazyLoadErrorBoundary>
@@ -75,11 +75,11 @@ export function PPTEditorShellLazy(props: { onClose: () => void; onInsertContent
 }
 
 export const EnhancedDocumentEditorLazy = withLazyLoading(
-  () => import('@/components/ribbon').then(module => ({ default: module.EnhancedDocumentEditor })),
+  () => import('@/components/ribbon').then<{ default: ComponentType<any> }>(module => ({ default: module.EnhancedDocumentEditor as any })),
   EditorLoadingFallback
 );
 
 export const SpreadsheetEditorLazy = withLazyLoading(
-  () => import('@/components/spreadsheet-editor').then(module => ({ default: module.SpreadsheetEditor })),
+  () => import('@/components/spreadsheet-editor').then<{ default: ComponentType<any> }>(module => ({ default: module.SpreadsheetEditor as any })),
   EditorLoadingFallback
 );

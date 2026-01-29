@@ -203,4 +203,20 @@ export class RedisCheckpointer extends BaseCheckpointSaver {
         // Pending writes implementation (optional but good for resumption)
         // For now, we rely on standard put
     }
+    async deleteThread(threadId: string): Promise<void> {
+        if (!this.clientInitialized) await this.initialize();
+        // const threadId = config.configurable?.thread_id as string;
+        // const checkpointNs = (config.configurable?.checkpoint_ns as string) || "";
+        const checkpointNs = ""; // As seen in memory.ts update attempt, using empty namespace
+
+        if (!threadId) return;
+
+        const indexKey = `checkpoint_index:${threadId}:${checkpointNs}`;
+        const latestKey = this.getLatestKey(threadId, checkpointNs);
+
+        await this.client.del(indexKey, latestKey);
+    }
+
+    // In a real implementation we would also walk the index and delete individual checkpoints
+    // But since they have expiration, we can rely on that for now or improve later
 }

@@ -40,6 +40,7 @@ export interface PromptRequest {
         maxLatency?: number;
         features?: ('vision' | 'functionCalling' | 'jsonMode')[];
         tier?: ModelTier;
+        jsonMode?: boolean;
     };
     metadata?: Record<string, any>;
 }

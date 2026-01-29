@@ -102,5 +102,5 @@ export default defineConfig(async () => {
         },
       },
     },
-  };
+  } as import("vite").UserConfig;
 });

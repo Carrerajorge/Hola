@@ -60,7 +60,7 @@ export const extractTextFromChildren = (children: React.ReactNode): string => {
         return children.map(extractTextFromChildren).join("");
     }
     if (React.isValidElement(children)) {
-        return extractTextFromChildren((children.props as any)?.children);
+        return extractTextFromChildren((children.props as { children?: React.ReactNode })?.children);
     }
     const childArray = React.Children.toArray(children);
     return childArray.map(extractTextFromChildren).join("");
@@ -115,7 +115,7 @@ export const LazyImage = memo(function LazyImage({
                 alt={alt}
                 loading="lazy"
                 className={cn(className, !isLoaded && "opacity-0")}
-                style={style}
+                style={style as React.CSSProperties}
                 onClick={onClick}
                 onLoad={() => setIsLoaded(true)}
                 onError={() => setHasError(true)}
@@ -294,7 +294,7 @@ export const parseDocumentBlocks = (
 
             jsonStr = jsonStr.replace(
                 /"content"\s*:\s*"([\s\S]*?)"\s*\}/,
-                (m, contentValue) => {
+                (m: string, contentValue: string) => {
                     const fixedContent = contentValue
                         .replace(/\n/g, "\\n")
                         .replace(/\r/g, "\\r")

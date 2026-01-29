@@ -63,13 +63,17 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       );
 
       // Enqueue for async execution
-      await agentQueue.add("agent-execution", {
-        runId,
-        chatId,
-        userId,
-        message,
-        attachments
-      });
+      if (agentQueue) {
+        await agentQueue.add("agent-execution", {
+          runId,
+          chatId,
+          userId,
+          message,
+          attachments
+        });
+      } else {
+        console.warn("[AgentRouter] AgentQueue not available, execution might be delayed");
+      }
 
       const progress = orchestrator.getProgress();
       const eventStream = orchestrator.getEventStream ? orchestrator.getEventStream() : [];
@@ -158,7 +162,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
 
       res.json({
         id: latestRun.id,
-        chatId: latestRun.chatId,
+        chatId: (latestRun as any).conversationId || (latestRun as any).chatId || chatId,
         status: latestRun.status,
         plan: null,
         steps: steps.map((s: any) => ({
@@ -172,10 +176,10 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         eventStream: [],
         todoList: [],
         workspaceFiles: {},
-        summary: latestRun.summary,
+        summary: (latestRun as any).summary || null,
         error: latestRun.error,
-        createdAt: latestRun.createdAt,
-        updatedAt: latestRun.updatedAt
+        createdAt: (latestRun as any).createdAt,
+        updatedAt: (latestRun as any).updatedAt
       });
     } catch (error: any) {
       console.error("Error fetching runs for chat:", error);
@@ -265,7 +269,7 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
       const assets = await storage.getAgentAssets(req.params.id);
       res.json({
         id: run.id,
-        chatId: run.chatId,
+        chatId: (run as any).conversationId || (run as any).chatId || "",
         status: run.status,
         plan: null,
         steps: steps.map((s: any) => ({
@@ -281,8 +285,8 @@ export function createAgentRouter(broadcastBrowserEvent: (sessionId: string, eve
         workspaceFiles: {},
         summary: null,
         error: run.error,
-        createdAt: run.createdAt,
-        updatedAt: run.updatedAt
+        createdAt: (run as any).createdAt,
+        updatedAt: (run as any).updatedAt
       });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to get agent run" });

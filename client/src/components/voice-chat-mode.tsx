@@ -23,7 +23,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
   const [response, setResponse] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  
+
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -67,16 +67,16 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
-      
+
       audioContextRef.current = new AudioContext();
       analyserRef.current = audioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
-      
+
       const source = audioContextRef.current.createMediaStreamSource(stream);
       source.connect(analyserRef.current);
-      
+
       const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-      
+
       const updateLevel = () => {
         if (!analyserRef.current) return;
         analyserRef.current.getByteFrequencyData(dataArray);
@@ -84,7 +84,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
         setAudioLevel(average / 255);
         animationFrameRef.current = requestAnimationFrame(updateLevel);
       };
-      
+
       updateLevel();
     } catch (err) {
       console.error("Error accessing microphone:", err);
@@ -94,7 +94,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
 
   const startListening = useCallback(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
+
     if (!SpeechRecognition) {
       setError("Tu navegador no soporta reconocimiento de voz");
       return;
@@ -103,7 +103,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     setError(null);
     setTranscript("");
     setInputMode("mic");
-    
+
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
@@ -117,7 +117,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     recognition.onresult = (event: any) => {
       let finalTranscript = '';
       let interimTranscript = '';
-      
+
       for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
@@ -126,7 +126,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
           interimTranscript = transcript;
         }
       }
-      
+
       setTranscript(finalTranscript || interimTranscript);
     };
 
@@ -134,7 +134,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       setIsListening(false);
       cleanupAudio();
       setAudioLevel(0);
-      
+
       if (transcript.trim()) {
         await sendToGrok(transcript);
       }
@@ -177,13 +177,13 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
     try {
       setCameraError(null);
       setInputMode("camera");
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: true 
+        audio: true
       });
       videoStreamRef.current = stream;
       setIsCameraActive(true);
-      
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
@@ -211,10 +211,10 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    
+
     setInputMode("uploading");
     const file = files[0];
-    
+
     // Validate file
     const maxSize = 50 * 1024 * 1024; // 50MB
     if (file.size > maxSize) {
@@ -222,31 +222,31 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
       setInputMode("idle");
       return;
     }
-    
+
     try {
       // Get signed upload URL from server
       const uploadRes = await fetch("/api/objects/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      
+
       if (!uploadRes.ok) {
         throw new Error("No se pudo obtener la URL de subida");
       }
-      
+
       const { uploadURL, storagePath } = await uploadRes.json();
-      
+
       // Upload file directly to storage
       const putRes = await fetch(uploadURL, {
         method: "PUT",
         headers: { "Content-Type": file.type || "application/octet-stream" },
         body: file,
       });
-      
+
       if (!putRes.ok) {
         throw new Error("Error al subir el archivo al almacenamiento");
       }
-      
+
       // Register file in database
       const registerRes = await fetch("/api/files/quick", {
         method: "POST",
@@ -258,13 +258,13 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
           storagePath,
         }),
       });
-      
+
       if (!registerRes.ok) {
         throw new Error("Archivo subido pero no se pudo registrar");
       }
-      
+
       setResponse(`Archivo subido: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
-      
+
     } catch (err: any) {
       setError(err.message || "Error al subir el archivo");
     } finally {
@@ -278,21 +278,21 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
   const sendToGrok = async (text: string) => {
     setIsProcessing(true);
     setResponse("");
-    
+
     try {
       const res = await fetch("/api/voice-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text }),
       });
-      
+
       if (!res.ok) {
         throw new Error("Error al comunicarse con el servidor");
       }
-      
+
       const data = await res.json();
       setResponse(data.response);
-      
+
       // Speak the response
       speakResponse(data.response);
     } catch (err: any) {
@@ -305,26 +305,26 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
 
   const speakResponse = (text: string) => {
     if (!text) return;
-    
+
     // Cancel any ongoing speech
     window.speechSynthesis.cancel();
-    
+
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'es-ES';
     utterance.rate = 1;
     utterance.pitch = 1;
-    
+
     // Try to get a Spanish voice
     const voices = window.speechSynthesis.getVoices();
     const spanishVoice = voices.find(v => v.lang.startsWith('es'));
     if (spanishVoice) {
       utterance.voice = spanishVoice;
     }
-    
+
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
-    
+
     speechSynthesisRef.current = utterance;
     window.speechSynthesis.speak(utterance);
   };
@@ -414,11 +414,13 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
 
         {/* Main animated bubble */}
         <motion.div
-          className="relative flex items-center justify-center"
+          className={cn(
+            "relative flex items-center justify-center transition-[margin] duration-300",
+            isCameraActive ? "mt-[160px]" : "mt-0"
+          )}
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
-          style={{ marginTop: isCameraActive ? "160px" : "0" }}
         >
           {/* Outer glow ring */}
           <motion.div
@@ -436,7 +438,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
               ease: "easeInOut",
             }}
           />
-          
+
           {/* Middle ring */}
           <motion.div
             className={cn(
@@ -455,14 +457,14 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
               transform: `scale(${isListening ? bubbleScale : 1})`,
             }}
           />
-          
+
           {/* Main bubble - displays current state */}
           <motion.div
             className={cn(
               "relative w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300",
-              isListening 
-                ? "bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg shadow-blue-500/50" 
-                : isSpeaking 
+              isListening
+                ? "bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg shadow-blue-500/50"
+                : isSpeaking
                   ? "bg-gradient-to-br from-green-500 to-green-600 shadow-lg shadow-green-500/50"
                   : isProcessing
                     ? "bg-gradient-to-br from-amber-500 to-amber-600 shadow-lg shadow-amber-500/50"
@@ -471,9 +473,9 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
                       : "bg-gradient-to-br from-gray-700 to-gray-800 shadow-lg shadow-black/50"
             )}
             style={{
-              boxShadow: isListening 
-                ? `0 0 ${bubbleGlow}px rgba(59, 130, 246, 0.6)` 
-                : isSpeaking 
+              boxShadow: isListening
+                ? `0 0 ${bubbleGlow}px rgba(59, 130, 246, 0.6)`
+                : isSpeaking
                   ? `0 0 60px rgba(34, 197, 94, 0.5)`
                   : isCameraActive
                     ? `0 0 60px rgba(239, 68, 68, 0.5)`
@@ -510,7 +512,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
               </div>
             )}
           </motion.div>
-          
+
           {/* Audio level visualization rings */}
           {isListening && (
             <>
@@ -573,7 +575,7 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
         </motion.div>
 
         {/* Multimodal input buttons */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
@@ -590,8 +592,8 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
                 className={cn(
                   "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
                   "focus:outline-none focus:ring-4 focus:ring-white/20",
-                  isCameraActive 
-                    ? "bg-red-500 text-white shadow-lg shadow-red-500/40" 
+                  isCameraActive
+                    ? "bg-red-500 text-white shadow-lg shadow-red-500/40"
                     : "bg-gray-800/80 text-white/80 hover:bg-gray-700 hover:text-white"
                 )}
                 data-testid="button-camera-input"
@@ -644,8 +646,8 @@ export function VoiceChatMode({ open, onClose }: VoiceChatModeProps) {
                 className={cn(
                   "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
                   "focus:outline-none focus:ring-4 focus:ring-white/20",
-                  isListening 
-                    ? "bg-blue-500 text-white shadow-lg shadow-blue-500/40 animate-pulse" 
+                  isListening
+                    ? "bg-blue-500 text-white shadow-lg shadow-blue-500/40 animate-pulse"
                     : isSpeaking
                       ? "bg-green-500 text-white shadow-lg shadow-green-500/40"
                       : "bg-gray-800/80 text-white/80 hover:bg-gray-700 hover:text-white"

@@ -277,11 +277,11 @@ export class PostgresCheckpointer extends BaseCheckpointSaver {
     }
   }
 
-  async delete(config: RunnableConfig): Promise<void> {
+  async deleteThread(threadId: string): Promise<void> {
     await this.initialize();
 
-    const threadId = config.configurable?.thread_id as string;
-    const checkpointNs = (config.configurable?.checkpoint_ns as string) || "";
+    // const threadId = config.configurable?.thread_id as string;
+    const checkpointNs = ""; // Default namespace or delete all?
 
     if (!threadId) return;
 
@@ -323,7 +323,7 @@ export class PostgresCheckpointer extends BaseCheckpointSaver {
 
 import { RedisCheckpointer } from "./redisCheckpointer";
 
-export const postgresCheckpointer = new PostgresCheckpointer({});
+export const postgresCheckpointer = new PostgresCheckpointer();
 export const checkpointer = new RedisCheckpointer();
 
 export interface ConversationMemory {

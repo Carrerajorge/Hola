@@ -36,8 +36,8 @@ import { useChatStore } from '@/stores/chatStore';
 interface ChatHeaderProps {
     chatId: string | null;
     activeGpt: ActiveGpt;
-    messages: any[]; // Use specific message type
-    folders?: any[]; // Use specific folder type
+    messages: { content: string }[];
+    folders?: { id: string; name: string; color: string }[];
     currentFolderId?: string | null;
     isPinned?: boolean;
     isArchived?: boolean;
@@ -109,6 +109,11 @@ export function ChatHeader({
         return availableModels.find(m => m.id === selectedModelId || m.modelId === selectedModelId) || availableModels[0] || null;
     }, [selectedModelId, availableModels]);
 
+    const isCustomGpt = useMemo(() => {
+        // If it has a userId, it's a Custom GPT (created by a user/admin)
+        // If it lacks userId, it's likely a System Model wrapper or simple chat
+        return activeGpt && !!activeGpt.userId;
+    }, [activeGpt]);
 
     return (
         <header className="sticky top-0 z-20 flex items-center justify-between px-3 md:px-4 py-2 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 h-14">
@@ -128,20 +133,23 @@ export function ChatHeader({
                     </TooltipProvider>
                 )}
 
-                {activeGpt ? (
+                {/* Conditional Rendering: Custom GPT (Menu) vs Standard Model (List) */}
+                {isCustomGpt ? (
+                    /* CASE 1: Custom GPT (Show Full Context Menu) */
                     <DropdownMenu open={isModelSelectorOpen} onOpenChange={setIsModelSelectorOpen}>
                         <DropdownMenuTrigger asChild>
                             <div
                                 className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
-                                data-testid="button-model-selector"
+                                data-testid="button-gpt-context-menu"
                             >
                                 <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
-                                    {selectedModelData?.name || activeGpt.name || "Seleccionar modelo"}
+                                    {activeGpt.name}
                                 </span>
                                 <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                             </div>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" className="w-64 max-h-96 overflow-y-auto">
+                            {/* GPT-specific options */}
                             <DropdownMenuSub>
                                 <DropdownMenuSubTrigger>
                                     <span>Modelos</span>
@@ -157,14 +165,14 @@ export function ChatHeader({
                                                 {models.map((model) => (
                                                     <DropdownMenuItem
                                                         key={model.id}
-                                                        className={cn("flex items-center gap-2", selectedModelData?.id === model.id && "bg-muted")}
+                                                        className={cn("flex items-center gap-2", selectedModelData?.id === model.id ? "bg-muted" : "")}
                                                         onClick={() => {
                                                             setSelectedModelId(model.id);
                                                             setIsModelSelectorOpen(false);
                                                         }}
                                                     >
                                                         {selectedModelData?.id === model.id && <Check className="h-4 w-4" />}
-                                                        <span className={cn(selectedModelData?.id !== model.id && "pl-6")}>{model.name}</span>
+                                                        <span className={cn(selectedModelData?.id !== model.id ? "pl-6" : "")}>{model.name}</span>
                                                     </DropdownMenuItem>
                                                 ))}
                                             </React.Fragment>
@@ -208,7 +216,6 @@ export function ChatHeader({
                                 <Link className="h-4 w-4" />
                                 <span>Copiar enlace</span>
                             </DropdownMenuItem>
-                            {/* Rating and Reporting placeholders */}
                             <DropdownMenuItem
                                 onClick={() => toast({ title: "Valorar GPT", description: "Esta función estará disponible próximamente" })}
                                 className="flex items-center gap-2"
@@ -225,36 +232,63 @@ export function ChatHeader({
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
-                ) : !isAnyModelAvailable ? (
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <div
-                                    className="flex items-center gap-1 sm:gap-2 bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-1 rounded-md cursor-not-allowed opacity-60"
-                                    data-testid="button-model-selector-disabled"
-                                >
-                                    <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none text-gray-500 dark:text-gray-400">
-                                        Sin modelos activos
-                                    </span>
-                                    <ChevronDown className="h-3 w-3 text-gray-400 flex-shrink-0" />
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p>No hay modelos disponibles. Un administrador debe activar al menos un modelo.</p>
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
                 ) : (
-                    <div
-                        className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
-                        onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
-                        data-testid="button-model-selector"
-                    >
-                        <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
-                            {selectedModelData?.name || "Seleccionar modelo"}
-                        </span>
-                        <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                    </div>
+                    /* CASE 2: Standard Model / No Custom GPT - Show ONLY Model List */
+                    !isAnyModelAvailable ? (
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <div
+                                        className="flex items-center gap-1 sm:gap-2 bg-gray-200 dark:bg-gray-700 px-1.5 sm:px-2 py-1 rounded-md cursor-not-allowed opacity-60"
+                                        data-testid="button-model-selector-disabled"
+                                    >
+                                        <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none text-gray-500 dark:text-gray-400">
+                                            Sin modelos activos
+                                        </span>
+                                        <ChevronDown className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                                    </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p>No hay modelos disponibles. Un administrador debe activar al menos un modelo.</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                    ) : (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <div
+                                    className="flex items-center gap-1 sm:gap-2 cursor-pointer hover:bg-muted/50 px-1.5 sm:px-2 py-1 rounded-md transition-colors mt-[-5px] mb-[-5px] pt-[8px] pb-[8px] pl-[7px] pr-[7px]"
+                                    data-testid="button-model-selector"
+                                >
+                                    <span className="font-semibold text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
+                                        {/* Show Active GPT Name (if it's a Standard Model wrapper) or Selected Model Name */}
+                                        {activeGpt?.name || selectedModelData?.name || "Seleccionar modelo"}
+                                    </span>
+                                    <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                </div>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-56 max-h-96 overflow-y-auto">
+                                {Object.entries(modelsByProvider).map(([provider, models], providerIndex) => (
+                                    <React.Fragment key={provider}>
+                                        {providerIndex > 0 && <DropdownMenuSeparator />}
+                                        <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
+                                            {provider === "xai" ? "xAI" : provider === "gemini" ? "Google Gemini" : provider}
+                                        </div>
+                                        {models.map((model) => (
+                                            <DropdownMenuItem
+                                                key={model.id}
+                                                className={cn("flex items-center gap-2", selectedModelData?.id === model.id && "bg-muted")}
+                                                onClick={() => setSelectedModelId(model.id)}
+                                            >
+                                                {selectedModelData?.id === model.id && <Check className="h-4 w-4" />}
+                                                <span className={cn(selectedModelData?.id !== model.id && "pl-6")}>{model.name}</span>
+                                            </DropdownMenuItem>
+                                        ))}
+                                    </React.Fragment>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )
                 )}
             </div>
 
@@ -299,7 +333,7 @@ export function ChatHeader({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
                         <DropdownMenuItem
-                            onClick={(e) => chatId && onPinChat?.(chatId, e as unknown as React.MouseEvent)}
+                            onClick={(e) => chatId && onPinChat?.(chatId, e)}
                             disabled={!chatId || chatId.startsWith("pending-")}
                             data-testid="menu-pin-chat"
                         >
@@ -340,8 +374,8 @@ export function ChatHeader({
                                                     data-testid={`menu-folder-${folder.id}`}
                                                 >
                                                     <span
-                                                        className="h-3 w-3 rounded-full mr-2 flex-shrink-0"
-                                                        style={{ backgroundColor: folder.color }}
+                                                        className="h-3 w-3 rounded-full mr-2 flex-shrink-0 bg-[var(--folder-color)]"
+                                                        style={{ '--folder-color': folder.color } as React.CSSProperties}
                                                     />
                                                     {folder.name}
                                                 </DropdownMenuItem>
@@ -377,7 +411,7 @@ export function ChatHeader({
                             </DropdownMenuPortal>
                         </DropdownMenuSub>
                         <DropdownMenuItem
-                            onClick={(e) => chatId && onDownloadChat?.(chatId, e as unknown as React.MouseEvent)}
+                            onClick={(e) => chatId && onDownloadChat?.(chatId, e)}
                             disabled={!chatId || chatId.startsWith("pending-")}
                             data-testid="menu-download-chat"
                         >
@@ -386,7 +420,7 @@ export function ChatHeader({
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                            onClick={(e) => chatId && onArchiveChat?.(chatId, e as unknown as React.MouseEvent)}
+                            onClick={(e) => chatId && onArchiveChat?.(chatId, e)}
                             disabled={!chatId || chatId.startsWith("pending-")}
                             data-testid="menu-archive-chat"
                         >
@@ -394,7 +428,7 @@ export function ChatHeader({
                             {isArchived ? "Desarchivar" : "Archivar"}
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                            onClick={(e) => chatId && onHideChat?.(chatId, e as unknown as React.MouseEvent)}
+                            onClick={(e) => chatId && onHideChat?.(chatId, e)}
                             disabled={!chatId || chatId.startsWith("pending-")}
                             data-testid="menu-hide-chat"
                         >
@@ -403,7 +437,7 @@ export function ChatHeader({
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                            onClick={(e) => chatId && onDeleteChat?.(chatId, e as unknown as React.MouseEvent)}
+                            onClick={(e) => chatId && onDeleteChat?.(chatId, e)}
                             disabled={!chatId || chatId.startsWith("pending-")}
                             className="text-red-500 focus:text-red-500"
                             data-testid="menu-delete-chat"

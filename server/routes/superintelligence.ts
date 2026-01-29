@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { aiService } from '../lib/ai/modelOrchestrator';
-import { scientificDiscovery } from '../lib/ai/scientificDiscovery'; // Assuming we export an instance
-import { automatedResearcher } from '../lib/ai/scientificDiscovery'; // Need to check exports
-import { autonomousCoder } from '../lib/ai/autonomousCoding'; // Need to check exports
+import { researcher as scientificDiscovery, hypothesis } from '../lib/ai/scientificDiscovery';
+// Note: importing instances directly
+import { autoCoder } from '../lib/ai/autonomousCoding';
 import { Logger } from '../lib/logger';
 
 // Create a router instance
@@ -71,9 +71,13 @@ router.post('/coding/generate', async (req, res) => {
         const { autoCoder } = await import('../lib/ai/autonomousCoding');
 
         // Assuming autoCoder has a generate method compatible with this
-        // We might need to adjust based on the actual file content
-        // For now, using a generic interface assumption
-        const result = await autoCoder.generateCode(prompt, language);
+        const result = await autoCoder.generateCode({
+            id: 'code-gen-' + Date.now(),
+            description: prompt,
+            files: [], // determined by agent or empty
+            context: 'Language: ' + language,
+            requirements: []
+        });
         res.json(result);
     } catch (error: any) {
         res.status(500).json({ error: error.message });

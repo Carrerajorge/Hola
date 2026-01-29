@@ -3,7 +3,7 @@
  * Securely handles access/refresh tokens for external integrations (Google, MS Graph)
  */
 
-import { Logger } from '../../logger';
+import { Logger } from '../logger';
 import * as crypto from 'crypto';
 
 interface TokenRecord {

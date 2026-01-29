@@ -138,7 +138,7 @@ function preprocessSourceBadges(content: string, webSources?: Array<{ url: strin
   return processed;
 }
 
-const purifyConfig: DOMPurify.Config = {
+const purifyConfig = {
   ALLOWED_TAGS: [
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr',
     'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
@@ -310,7 +310,7 @@ const DocumentGenerationLoader = memo(function DocumentGenerationLoader({
     <div className="bg-gradient-to-br from-slate-50 to-gray-100 dark:from-slate-900 dark:to-gray-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 max-w-[340px] shadow-sm" data-testid="document-generation-loader">
       <div className="flex items-center gap-3.5 mb-4">
         <div className="relative flex-shrink-0">
-          <div className="absolute inset-0 w-11 h-11 rounded-full bg-sky-400/20 dark:bg-sky-500/20 animate-ping" style={{ animationDuration: '2s' }} />
+          <div className="absolute inset-0 w-11 h-11 rounded-full bg-sky-400/20 dark:bg-sky-500/20 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]" />
           <div className={cn("relative w-11 h-11 rounded-xl flex items-center justify-center", iconBgColor)}>
             <DocIcon className="w-5 h-5 text-white" />
           </div>
@@ -328,8 +328,8 @@ const DocumentGenerationLoader = memo(function DocumentGenerationLoader({
       <div className="flex items-center gap-2.5">
         <div className="flex-1 h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
           <div
-            className="h-full bg-gradient-to-r from-sky-500 to-blue-500 rounded-full transition-all duration-500 ease-out"
-            style={{ width: `${currentState.progress}%` }}
+            className="h-full bg-gradient-to-r from-sky-500 to-blue-500 rounded-full transition-all duration-500 ease-out w-[var(--prog-width)]"
+            style={{ '--prog-width': `${currentState.progress}%` } as React.CSSProperties}
           />
         </div>
         <span className="text-[11px] text-gray-400 dark:text-gray-500 tabular-nums min-w-[32px] text-right">
@@ -341,8 +341,12 @@ const DocumentGenerationLoader = memo(function DocumentGenerationLoader({
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className="w-1.5 h-1.5 bg-slate-300 dark:bg-slate-600 rounded-full animate-bounce"
-            style={{ animationDelay: `${i * 0.15}s`, animationDuration: '1s' }}
+            className={cn(
+              "w-1.5 h-1.5 bg-slate-300 dark:bg-slate-600 rounded-full animate-bounce duration-1000",
+              i === 0 && "delay-0",
+              i === 1 && "delay-[150ms]",
+              i === 2 && "delay-[300ms]"
+            )}
           />
         ))}
       </div>
@@ -496,11 +500,11 @@ const LazyImage = memo(function LazyImage({
         onLoad={handleLoad}
         onError={handleError}
         className={cn(
-          "max-w-full h-auto rounded-lg transition-opacity duration-300",
+          "max-w-full h-auto rounded-lg transition-opacity duration-300 max-h-[var(--img-max-h)]",
           loaded ? "opacity-100" : "opacity-0",
           className
         )}
-        style={{ maxHeight }}
+        style={{ '--img-max-h': typeof maxHeight === 'number' ? `${maxHeight}px` : maxHeight } as React.CSSProperties}
         data-testid="img-markdown"
       />
     </div>

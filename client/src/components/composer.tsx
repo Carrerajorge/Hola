@@ -751,9 +751,9 @@ export function Composer({
             "hover:after:opacity-100 after:animate-pulse",
             selectedTool === "web" && "bg-gradient-to-br from-cyan-500 to-cyan-700 after:bg-cyan-400/20",
             selectedTool === "agent" && "bg-gradient-to-br from-purple-500 to-purple-700 after:bg-purple-400/20",
-            selectedTool === "image" && "bg-gradient-to-br from-pink-500 to-rose-600 after:bg-pink-400/20"
+            selectedTool === "image" && "bg-gradient-to-br from-pink-500 to-rose-600 after:bg-pink-400/20",
+            "animate-[liquid-float_3s_ease-in-out_infinite]"
           )}
-          style={{ animation: "liquid-float 3s ease-in-out infinite" }}
           data-testid="button-selected-tool"
         >
           {selectedTool === "web" ? (
@@ -800,10 +800,9 @@ export function Composer({
             selectedDocTool === "figma" && "bg-gradient-to-br from-purple-500 to-pink-500",
             !isDocumentMode && selectedDocTool === "word" && "after:bg-blue-400/20",
             !isDocumentMode && selectedDocTool === "excel" && "after:bg-green-400/20",
-            !isDocumentMode && selectedDocTool === "ppt" && "after:bg-orange-400/20",
-            !isDocumentMode && selectedDocTool === "figma" && "after:bg-purple-400/20"
+            !isDocumentMode && selectedDocTool === "figma" && "after:bg-purple-400/20",
+            "animate-[liquid-float_3s_ease-in-out_infinite]"
           )}
-          style={{ animation: "liquid-float 3s ease-in-out infinite" }}
           data-testid="button-selected-doc-tool"
         >
           {selectedDocTool === "figma" ? (
@@ -982,6 +981,7 @@ export function Composer({
         multiple
         accept="*/*"
         data-testid="input-file-upload"
+        aria-label="Subir archivos"
       />
 
       <div className={inputContainerClass}>
