@@ -4493,213 +4493,138 @@ IMPORTANTE:
               }
             }
 
-            const response = await fetch("/api/chat", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                messages: finalChatHistory,
-                images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
-                documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
-                figmaMode: isFigmaMode,
-                pptMode: isPptMode,
-                provider: selectedProvider,
-                model: selectedModel,
-                attachments: attachments.length > 0 ? attachments : undefined,
-                gptId: activeGpt?.id,
-                session_id: gptSessionId
-              }),
-              signal: abortControllerRef.current?.signal
-            });
+            try {
 
-            // Update steps: mark processing done, searching active
-            setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
-              if (!s || !s.step) return s;
-              if (s.step.includes("Analizando")) return { ...s, status: "done" };
-              if (s.step.includes("Procesando")) return { ...s, status: "done" };
-              if (s.step.includes("Buscando")) return { ...s, status: "active" };
-              return s;
-            }));
-
-            const data = await response.json();
-
-            if (!response.ok) {
-              throw new Error(data.error || "Failed to get response");
-            }
-
-            // Save and log GPT session metadata from server
-            if (data.session_id) {
-              setGptSessionId(data.session_id);
-              console.log('[Chat] Using GPT session:', {
-                sessionId: data.session_id,
-                gptId: data.gpt_id,
-                configVersion: data.config_version,
-                toolPermissions: data.tool_permissions
+              const response = await fetch("/api/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  messages: finalChatHistory,
+                  images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
+                  documentMode: isDocumentMode && !isPptMode ? { type: documentType } : undefined,
+                  figmaMode: isFigmaMode,
+                  pptMode: isPptMode,
+                  provider: selectedProvider,
+                  model: selectedModel,
+                  attachments: attachments.length > 0 ? attachments : undefined,
+                  gptId: activeGpt?.id,
+                  session_id: gptSessionId
+                }),
+                signal: abortControllerRef.current?.signal
               });
-            }
 
-            // Update steps: mark searching done, generating active
-            setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
-              if (!s || !s.step) return s;
-              if (s.step.includes("Buscando")) return { ...s, status: "done" };
-              if (s.step.includes("Generando")) return { ...s, status: "active" };
-              return { ...s, status: s.status === "pending" ? "pending" : "done" };
-            }));
+              // Update steps: mark processing done, searching active
+              setAiProcessSteps((prev: any[]) => prev.map((s: any, i: number) => {
+                if (!s || !s.step) return s;
+                if (s.step.includes("Analizando")) return { ...s, status: "done" };
+                if (s.step.includes("Procesando")) return { ...s, status: "done" };
+                if (s.step.includes("Buscando")) return { ...s, status: "active" };
+                return s;
+              }));
 
-            const fullContent = data.content;
-            const responseSources = data.sources || [];
-            const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
-            const responseArtifact = data.artifact;
-            const responseWebSources = data.webSources;
+              const data = await response.json();
 
-            // If Figma diagram was generated, add it to chat with simulated streaming
-            if (figmaDiagram) {
+              if (!response.ok) {
+                throw new Error(data.error || "Failed to get response");
+              }
+
+              // Save and log GPT session metadata from server
+              if (data.session_id) {
+                setGptSessionId(data.session_id);
+                console.log('[Chat] Using GPT session:', {
+                  sessionId: data.session_id,
+                  gptId: data.gpt_id,
+                  configVersion: data.config_version,
+                  toolPermissions: data.tool_permissions
+                });
+              }
+
+              // Update steps: mark searching done, generating active
+              setAiProcessSteps((prev: any[]) => prev.map((s: any) => {
+                if (!s || !s.step) return s;
+                if (s.step.includes("Buscando")) return { ...s, status: "done" };
+                if (s.step.includes("Generando")) return { ...s, status: "active" };
+                return { ...s, status: s.status === "pending" ? "pending" : "done" };
+              }));
+
+              const fullContent = data.content;
+              const responseSources = data.sources || [];
+              const figmaDiagram = data.figmaDiagram as FigmaDiagram | undefined;
+              const responseArtifact = data.artifact;
+              const responseWebSources = data.webSources;
+
+              // If Figma diagram was generated, add it to chat with simulated streaming
+              if (figmaDiagram) {
+                setAiState("responding");
+
+                let currentIndex = 0;
+                streamIntervalRef.current = setInterval(() => {
+                  if (currentIndex < fullContent.length) {
+                    const chunkSize = Math.floor(Math.random() * 5) + 3;
+                    currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
+                    streamingContentRef.current = fullContent.slice(0, currentIndex);
+                    setStreamingContent(fullContent.slice(0, currentIndex));
+                  } else {
+                    if (streamIntervalRef.current) {
+                      clearInterval(streamIntervalRef.current);
+                      streamIntervalRef.current = null;
+                    }
+
+                    const aiMsg: Message = {
+                      id: (Date.now() + 1).toString(),
+                      role: "assistant",
+                      content: fullContent,
+                      timestamp: new Date(),
+                      requestId: generateRequestId(),
+                      userMessageId: userMsgId,
+                      figmaDiagram,
+                      webSources: responseWebSources,
+                      confidence: detectUncertainty(fullContent).confidence,
+                      uncertaintyReason: detectUncertainty(fullContent).reason,
+                    };
+                    onSendMessage(aiMsg);
+
+                    streamingContentRef.current = "";
+                    setStreamingContent("");
+                    setAiState("idle");
+                    setAiProcessSteps([]);
+                    // Only reset doc tool if there's no active document editor
+                    if (!activeDocEditorRef.current) {
+                      setSelectedDocTool(null);
+                    }
+                    agent.complete();
+                    abortControllerRef.current = null;
+                  }
+                }, 10);
+                return;
+              }
+
+              // Legacy simulated streaming for other cases
               setAiState("responding");
 
-              let currentIndex = 0;
-              streamIntervalRef.current = setInterval(() => {
-                if (currentIndex < fullContent.length) {
-                  const chunkSize = Math.floor(Math.random() * 5) + 3;
-                  currentIndex = Math.min(currentIndex + chunkSize, fullContent.length);
-                  streamingContentRef.current = fullContent.slice(0, currentIndex);
-                  setStreamingContent(fullContent.slice(0, currentIndex));
-                } else {
-                  if (streamIntervalRef.current) {
-                    clearInterval(streamIntervalRef.current);
-                    streamIntervalRef.current = null;
-                  }
+              // Check document modes
+              const isExcelModeLegacy = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
+              const isWordModeLegacy = activeDocEditorRef.current?.type === "word";
+              const shouldWriteToDocLegacy = !!activeDocEditorRef.current && isWordModeLegacy;
 
-                  const aiMsg: Message = {
-                    id: (Date.now() + 1).toString(),
-                    role: "assistant",
-                    content: fullContent,
-                    timestamp: new Date(),
-                    requestId: generateRequestId(),
-                    userMessageId: userMsgId,
-                    figmaDiagram,
-                    webSources: responseWebSources,
-                    confidence: detectUncertainty(fullContent).confidence,
-                    uncertaintyReason: detectUncertainty(fullContent).reason,
-                  };
-                  onSendMessage(aiMsg);
+              console.log('[ChatInterface] Legacy mode:', { isExcelModeLegacy, isWordModeLegacy, hasInsertFn: !!docInsertContentRef.current });
 
-                  streamingContentRef.current = "";
-                  setStreamingContent("");
-                  setAiState("idle");
-                  setAiProcessSteps([]);
-                  // Only reset doc tool if there's no active document editor
-                  if (!activeDocEditorRef.current) {
-                    setSelectedDocTool(null);
-                  }
-                  agent.complete();
-                  abortControllerRef.current = null;
-                }
-              }, 10);
-              return;
-            }
-
-            // Legacy simulated streaming for other cases
-            setAiState("responding");
-
-            // Check document modes
-            const isExcelModeLegacy = (activeDocEditorRef.current?.type === "excel") || (previewDocumentRef.current?.type === "excel");
-            const isWordModeLegacy = activeDocEditorRef.current?.type === "word";
-            const shouldWriteToDocLegacy = !!activeDocEditorRef.current && isWordModeLegacy;
-
-            console.log('[ChatInterface] Legacy mode:', { isExcelModeLegacy, isWordModeLegacy, hasInsertFn: !!docInsertContentRef.current });
-
-            // Excel mode: send data directly to Excel at the end (no progressive streaming in chat)
-            if (isExcelModeLegacy && docInsertContentRef.current) {
-              console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
-              try {
-                await docInsertContentRef.current(fullContent);
-                const confirmMsg: Message = {
-                  id: (Date.now() + 1).toString(),
-                  role: "assistant",
-                  content: "✓ Datos generados en la hoja de cálculo",
-                  timestamp: new Date(),
-                  requestId: generateRequestId(),
-                  userMessageId: userMsgId,
-                };
-                onSendMessage(confirmMsg);
-              } catch (err) {
-                console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
-                const aiMsg: Message = {
-                  id: (Date.now() + 1).toString(),
-                  role: "assistant",
-                  content: fullContent,
-                  timestamp: new Date(),
-                  requestId: generateRequestId(),
-                  userMessageId: userMsgId,
-                };
-                onSendMessage(aiMsg);
-              }
-              streamingContentRef.current = "";
-              setStreamingContent("");
-              setAiState("idle");
-              setAiProcessSteps([]);
-              agent.complete();
-              abortControllerRef.current = null;
-              return;
-            }
-
-            // Word mode or normal chat: use progressive streaming
-            let currentIndex = 0;
-
-            streamIntervalRef.current = setInterval(() => {
-              if (currentIndex < fullContent.length) {
-                const chunkSize = Math.floor(Math.random() * 3) + 1;
-                const newContent = fullContent.slice(0, currentIndex + chunkSize);
-
-                // Write to document if in document mode (cumulative)
-                if (shouldWriteToDocLegacy && docInsertContentRef.current) {
-                  try {
-                    const newContentHTML = markdownToTipTap(newContent);
-                    const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                    docInsertContentRef.current(cumulativeHTML, 'html');
-                    // Update state so subsequent instructions have the current content
-                    setEditedDocumentContent(cumulativeHTML);
-                  } catch (err) {
-                    console.error('[ChatInterface] Error streaming to document (legacy):', err);
-                  }
-                } else {
-                  // Store content in streaming store for conversation affinity
-                  const originalChatId = streamingChatIdRef.current;
-                  if (originalChatId) {
-                    appendContent(originalChatId, fullContent.slice(currentIndex, currentIndex + chunkSize), currentIndex);
-                  }
-                  streamingContentRef.current = newContent;
-                  setStreamingContent(newContent);
-                }
-                currentIndex += chunkSize;
-              } else {
-                if (streamIntervalRef.current) {
-                  clearInterval(streamIntervalRef.current);
-                  streamIntervalRef.current = null;
-                }
-
-                // Finalize document or create message (cumulative)
-                if (shouldWriteToDocLegacy && docInsertContentRef.current) {
-                  try {
-                    const newContentHTML = markdownToTipTap(fullContent);
-                    const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
-                    docInsertContentRef.current(cumulativeHTML, 'html');
-                    // Update state so subsequent instructions have the current content
-                    setEditedDocumentContent(cumulativeHTML);
-                  } catch (err) {
-                    console.error('[ChatInterface] Error finalizing document (legacy):', err);
-                  }
-
+              // Excel mode: send data directly to Excel at the end (no progressive streaming in chat)
+              if (isExcelModeLegacy && docInsertContentRef.current) {
+                console.log('[ChatInterface] Excel mode (legacy): sending', fullContent.length, 'chars to Excel');
+                try {
+                  await docInsertContentRef.current(fullContent);
                   const confirmMsg: Message = {
                     id: (Date.now() + 1).toString(),
                     role: "assistant",
-                    content: "✓ Documento generado correctamente",
+                    content: "✓ Datos generados en la hoja de cálculo",
                     timestamp: new Date(),
                     requestId: generateRequestId(),
                     userMessageId: userMsgId,
                   };
                   onSendMessage(confirmMsg);
-                } else {
-                  const uncertainty = detectUncertainty(fullContent);
+                } catch (err) {
+                  console.error('[ChatInterface] Error streaming to Excel (legacy):', err);
                   const aiMsg: Message = {
                     id: (Date.now() + 1).toString(),
                     role: "assistant",
@@ -4707,156 +4632,638 @@ IMPORTANTE:
                     timestamp: new Date(),
                     requestId: generateRequestId(),
                     userMessageId: userMsgId,
-                    sources: responseSources.length > 0 ? responseSources : undefined,
-                    artifact: responseArtifact,
-                    webSources: responseWebSources,
-                    confidence: uncertainty.confidence,
-                    uncertaintyReason: uncertainty.reason,
                   };
                   onSendMessage(aiMsg);
                 }
-
                 streamingContentRef.current = "";
                 setStreamingContent("");
                 setAiState("idle");
                 setAiProcessSteps([]);
                 agent.complete();
                 abortControllerRef.current = null;
+                return;
               }
-            }, 15);
-          }
+
+              // Word mode or normal chat: use progressive streaming
+              let currentIndex = 0;
+
+              streamIntervalRef.current = setInterval(() => {
+                if (currentIndex < fullContent.length) {
+                  const chunkSize = Math.floor(Math.random() * 3) + 1;
+                  const newContent = fullContent.slice(0, currentIndex + chunkSize);
+
+                  // Write to document if in document mode (cumulative)
+                  if (shouldWriteToDocLegacy && docInsertContentRef.current) {
+                    try {
+                      const newContentHTML = markdownToTipTap(newContent);
+                      const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                      docInsertContentRef.current(cumulativeHTML, 'html');
+                      // Update state so subsequent instructions have the current content
+                      setEditedDocumentContent(cumulativeHTML);
+                    } catch (err) {
+                      console.error('[ChatInterface] Error streaming to document (legacy):', err);
+                    }
+                  } else {
+                    // Store content in streaming store for conversation affinity
+                    const originalChatId = streamingChatIdRef.current;
+                    if (originalChatId) {
+                      appendContent(originalChatId, fullContent.slice(currentIndex, currentIndex + chunkSize), currentIndex);
+                    }
+                    streamingContentRef.current = newContent;
+                    setStreamingContent(newContent);
+                  }
+                  currentIndex += chunkSize;
+                } else {
+                  if (streamIntervalRef.current) {
+                    clearInterval(streamIntervalRef.current);
+                    streamIntervalRef.current = null;
+                  }
+
+                  // Finalize document or create message (cumulative)
+                  if (shouldWriteToDocLegacy && docInsertContentRef.current) {
+                    try {
+                      const newContentHTML = markdownToTipTap(fullContent);
+                      const cumulativeHTML = existingDocHTML + separatorHTML + newContentHTML;
+                      docInsertContentRef.current(cumulativeHTML, 'html');
+                      // Update state so subsequent instructions have the current content
+                      setEditedDocumentContent(cumulativeHTML);
+                    } catch (err) {
+                      console.error('[ChatInterface] Error finalizing document (legacy):', err);
+                    }
+
+                    const confirmMsg: Message = {
+                      id: (Date.now() + 1).toString(),
+                      role: "assistant",
+                      content: "✓ Documento generado correctamente",
+                      timestamp: new Date(),
+                      requestId: generateRequestId(),
+                      userMessageId: userMsgId,
+                    };
+                    onSendMessage(confirmMsg);
+                  } else {
+                    const uncertainty = detectUncertainty(fullContent);
+                    const aiMsg: Message = {
+                      id: (Date.now() + 1).toString(),
+                      role: "assistant",
+                      content: fullContent,
+                      timestamp: new Date(),
+                      requestId: generateRequestId(),
+                      userMessageId: userMsgId,
+                      sources: responseSources.length > 0 ? responseSources : undefined,
+                      artifact: responseArtifact,
+                      webSources: responseWebSources,
+                      confidence: uncertainty.confidence,
+                      uncertaintyReason: uncertainty.reason,
+                    };
+                    onSendMessage(aiMsg);
+                  }
+
+                  streamingContentRef.current = "";
+                  setStreamingContent("");
+                  setAiState("idle");
+                  setAiProcessSteps([]);
+                  agent.complete();
+                  abortControllerRef.current = null;
+                }
+              }, 15);
+            }
 
         } catch (error: any) {
-          // Clean up PPT streaming on any error
-          if (pptStreaming.isStreaming) {
-            pptStreaming.stopStreaming();
+            // Clean up PPT streaming on any error
+            if (pptStreaming.isStreaming) {
+              pptStreaming.stopStreaming();
+            }
+
+            if (error.name === "AbortError") {
+              return;
+            }
+
+            // Enhanced error logging for debugging - ensure errorMessage is always a string
+            const rawErrorMessage = error?.message || error?.toString?.() || error;
+            const errorMessage = typeof rawErrorMessage === 'string'
+              ? rawErrorMessage
+              : (typeof rawErrorMessage === 'object' && rawErrorMessage !== null
+                ? (rawErrorMessage.message || rawErrorMessage.error || JSON.stringify(rawErrorMessage))
+                : 'Error desconocido');
+            console.error("Chat error:", error, "Message:", errorMessage, "Stack:", error?.stack);
+
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              role: "assistant",
+              content: `Lo siento, hubo un error al procesar tu mensaje: ${errorMessage}. Por favor intenta de nuevo.`,
+              timestamp: new Date(),
+              requestId: generateRequestId(),
+              userMessageId: userMsgId,
+            };
+            onSendMessage(errorMsg);
+            setAiState("idle");
+            setAiProcessSteps([]);
+            abortControllerRef.current = null;
           }
+        };
 
-          if (error.name === "AbortError") {
-            return;
-          }
+        const hasMessages = displayMessages.length > 0;
 
-          // Enhanced error logging for debugging - ensure errorMessage is always a string
-          const rawErrorMessage = error?.message || error?.toString?.() || error;
-          const errorMessage = typeof rawErrorMessage === 'string'
-            ? rawErrorMessage
-            : (typeof rawErrorMessage === 'object' && rawErrorMessage !== null
-              ? (rawErrorMessage.message || rawErrorMessage.error || JSON.stringify(rawErrorMessage))
-              : 'Error desconocido');
-          console.error("Chat error:", error, "Message:", errorMessage, "Stack:", error?.stack);
-
-          const errorMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            content: `Lo siento, hubo un error al procesar tu mensaje: ${errorMessage}. Por favor intenta de nuevo.`,
-            timestamp: new Date(),
-            requestId: generateRequestId(),
-            userMessageId: userMsgId,
-          };
-          onSendMessage(errorMsg);
-          setAiState("idle");
-          setAiProcessSteps([]);
-          abortControllerRef.current = null;
-        }
-      };
-
-      const hasMessages = displayMessages.length > 0;
-
-      return (
-        <div className="flex h-full flex-col bg-transparent relative">
-          {/* Header */}
-          <ChatHeader
-            chatId={chatId || null}
-            activeGpt={activeGpt || {
-              id: 'default',
-              name: 'ILIAGPT',
-              description: 'Asistente IA',
-              systemPrompt: '',
-              model: 'gpt-4o',
-              temperature: 0.7,
-              maxTokens: 4096,
-              topP: 1,
-              frequencyPenalty: 0,
-              presencePenalty: 0,
-              isPublic: false,
-              userId: 'system',
-              createdAt: new Date(),
-              updatedAt: new Date(),
-              welcomeMessage: '',
-              conversationStarters: [],
-              avatar: ''
-            }}
-            messages={displayMessages}
-            folders={folders}
-            currentFolderId={currentFolderId}
-            isPinned={isPinned}
-            isArchived={isArchived}
-            isSidebarOpen={isSidebarOpen}
-            onToggleSidebar={onToggleSidebar || (() => { })}
-            onNewChat={onNewChat}
-            onEditGpt={onEditGpt}
-            onHideGptFromSidebar={onHideGptFromSidebar}
-            onPinGptToSidebar={onPinGptToSidebar}
-            isGptPinned={isGptPinned}
-            onAboutGpt={onAboutGpt}
-            onPinChat={onPinChat}
-            onArchiveChat={onArchiveChat}
-            onHideChat={onHideChat}
-            onDeleteChat={onDeleteChat}
-            onDownloadChat={onDownloadChat}
-            onEditChatTitle={onEditChatTitle}
-            onMoveToFolder={onMoveToFolder}
-            onCreateFolder={onCreateFolder}
-            userPlanInfo={userPlanInfo}
-          />
-          {/* Main Content Area with Side Panel */}
-          {(previewDocument || activeDocEditor) ? (
-            <PanelGroup direction="horizontal" className="flex-1">
-              {/* Left Panel: Minimized Chat for Document Mode */}
-              <Panel defaultSize={activeDocEditor ? 25 : 50} minSize={20} maxSize={activeDocEditor ? 35 : 70}>
-                <div className="flex flex-col min-w-0 h-full bg-background/50">
-                  {/* Compact Header for Document Mode */}
-                  {activeDocEditor && (
-                    <div className="p-3 border-b border-border/50 bg-muted/30">
-                      <div className="flex items-center gap-2">
-                        <div className={cn(
-                          "w-8 h-8 rounded-lg flex items-center justify-center",
-                          activeDocEditor.type === "word" && "bg-blue-600",
-                          activeDocEditor.type === "excel" && "bg-green-600",
-                          activeDocEditor.type === "ppt" && "bg-orange-500"
-                        )}>
-                          <span className="text-white text-sm font-bold">
-                            {activeDocEditor.type === "word" ? "W" : activeDocEditor.type === "excel" ? "E" : "P"}
-                          </span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">Instrucciones</p>
-                          <p className="text-xs text-muted-foreground">El AI escribe directo al documento</p>
+        return (
+          <div className="flex h-full flex-col bg-transparent relative">
+            {/* Header */}
+            <ChatHeader
+              chatId={chatId || null}
+              activeGpt={activeGpt || {
+                id: 'default',
+                name: 'ILIAGPT',
+                description: 'Asistente IA',
+                systemPrompt: '',
+                model: 'gpt-4o',
+                temperature: 0.7,
+                maxTokens: 4096,
+                topP: 1,
+                frequencyPenalty: 0,
+                presencePenalty: 0,
+                isPublic: false,
+                userId: 'system',
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                welcomeMessage: '',
+                conversationStarters: [],
+                avatar: ''
+              }}
+              messages={displayMessages}
+              folders={folders}
+              currentFolderId={currentFolderId}
+              isPinned={isPinned}
+              isArchived={isArchived}
+              isSidebarOpen={isSidebarOpen}
+              onToggleSidebar={onToggleSidebar || (() => { })}
+              onNewChat={onNewChat}
+              onEditGpt={onEditGpt}
+              onHideGptFromSidebar={onHideGptFromSidebar}
+              onPinGptToSidebar={onPinGptToSidebar}
+              isGptPinned={isGptPinned}
+              onAboutGpt={onAboutGpt}
+              onPinChat={onPinChat}
+              onArchiveChat={onArchiveChat}
+              onHideChat={onHideChat}
+              onDeleteChat={onDeleteChat}
+              onDownloadChat={onDownloadChat}
+              onEditChatTitle={onEditChatTitle}
+              onMoveToFolder={onMoveToFolder}
+              onCreateFolder={onCreateFolder}
+              userPlanInfo={userPlanInfo}
+            />
+            {/* Main Content Area with Side Panel */}
+            {(previewDocument || activeDocEditor) ? (
+              <PanelGroup direction="horizontal" className="flex-1">
+                {/* Left Panel: Minimized Chat for Document Mode */}
+                <Panel defaultSize={activeDocEditor ? 25 : 50} minSize={20} maxSize={activeDocEditor ? 35 : 70}>
+                  <div className="flex flex-col min-w-0 h-full bg-background/50">
+                    {/* Compact Header for Document Mode */}
+                    {activeDocEditor && (
+                      <div className="p-3 border-b border-border/50 bg-muted/30">
+                        <div className="flex items-center gap-2">
+                          <div className={cn(
+                            "w-8 h-8 rounded-lg flex items-center justify-center",
+                            activeDocEditor.type === "word" && "bg-blue-600",
+                            activeDocEditor.type === "excel" && "bg-green-600",
+                            activeDocEditor.type === "ppt" && "bg-orange-500"
+                          )}>
+                            <span className="text-white text-sm font-bold">
+                              {activeDocEditor.type === "word" ? "W" : activeDocEditor.type === "excel" ? "E" : "P"}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">Instrucciones</p>
+                            <p className="text-xs text-muted-foreground">El AI escribe directo al documento</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Messages Area - Compact for document mode */}
-                  {isConversationStateLoading ? (
+                    {/* Messages Area - Compact for document mode */}
+                    {isConversationStateLoading ? (
+                      <div
+                        className={cn(
+                          "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
+                          activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                        )}
+                      >
+                        <SkeletonChatMessages count={3} />
+                      </div>
+                    ) : hasMessages && (
+                      <div
+                        className={cn(
+                          "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
+                          activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
+                        )}
+                      >
+                        <ChatMessageList
+                          messages={displayMessages}
+                          variant={activeDocEditor ? "compact" : "default"}
+                          editingMessageId={editingMessageId}
+                          editContent={editContent}
+                          setEditContent={setEditContent}
+                          copiedMessageId={copiedMessageId}
+                          messageFeedback={messageFeedback}
+                          speakingMessageId={speakingMessageId}
+                          isGeneratingImage={isGeneratingImage}
+                          pendingGeneratedImage={pendingGeneratedImage}
+                          latestGeneratedImageRef={latestGeneratedImageRef}
+                          streamingContent={streamingContent}
+                          aiState={aiState}
+                          regeneratingMsgIndex={regeneratingMsgIndex}
+                          handleCopyMessage={handleCopyMessage}
+                          handleStartEdit={handleStartEdit}
+                          handleCancelEdit={handleCancelEdit}
+                          handleSendEdit={handleSendEdit}
+                          handleFeedback={handleFeedback}
+                          handleRegenerate={handleRegenerate}
+                          handleShare={handleShare}
+                          handleReadAloud={handleReadAloud}
+                          handleOpenDocumentPreview={handleOpenDocumentPreview}
+                          handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
+                          handleDownloadImage={handleDownloadImage}
+                          setLightboxImage={setLightboxImage}
+                          handleReopenDocument={handleReopenDocument}
+                          minimizedDocument={minimizedDocument}
+                          onRestoreDocument={restoreDocEditor}
+                          onSelectSuggestedReply={(text) => setInput(text)}
+                          onAgentCancel={handleAgentCancel}
+                          onAgentRetry={handleAgentRetry}
+                          onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
+                          onSuperAgentCancel={handleSuperAgentCancel}
+                          onSuperAgentRetry={handleSuperAgentRetry}
+                          onQuestionClick={(text) => setInput(text)}
+                          activeRunId={activeRunId}
+                          onRunComplete={() => {
+                            console.log('[uiPhase] Run completed, uiPhase=done');
+                            setUiPhase('done');
+                            setActiveRunId(null);
+                          }}
+                          uiPhase={uiPhase}
+                          aiProcessSteps={aiProcessSteps}
+                        />
+
+                        {/* Agent Observer - Show when agent is running */}
+                        {agent.state.status !== "idle" && (
+                          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                            <AgentObserver
+                              steps={agent.state.steps}
+                              objective={agent.state.objective}
+                              status={agent.state.status}
+                              onCancel={agent.cancel}
+                            />
+                          </div>
+                        )}
+
+                        {/* Production Mode Progress */}
+                        {aiState === "agent_working" && aiProcessSteps.length > 0 && (
+                          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
+                            <ProductionProgress steps={aiProcessSteps} />
+                          </div>
+                        )}
+
+                        {/* Image Generation Loading Skeleton */}
+                        {isGeneratingImage && (
+                          <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
+                            <div className="flex flex-col gap-2 items-start">
+                              <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
+                                <div className="flex items-center gap-2">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span>Generando imagen...</span>
+                                </div>
+                              </div>
+                              <div className="px-4">
+                                <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                                  <Image className="h-8 w-8 text-muted-foreground" />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
+                        {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' && (
+                          <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                            {/* Streaming Indicator with cancel button */}
+                            <StreamingIndicator
+                              aiState={aiState}
+                              streamingContent={streamingContent}
+                              onCancel={handleStopChat}
+                              uiPhase={uiPhase}
+                            />
+
+                            {/* Streaming content with fade-in animation */}
+                            {aiState === "responding" && streamingContent && (
+                              <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0 font-sans text-base leading-relaxed font-normal">
+                                <MarkdownErrorBoundary fallbackContent={streamingContent}>
+                                  <MarkdownRenderer
+                                    content={streamingContent}
+                                    customComponents={{ ...CleanDataTableComponents }}
+                                  />
+                                </MarkdownErrorBoundary>
+                                <span className="typing-cursor">|</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
+                        {uiPhase === 'console' && activeRunId && (
+                          <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
+                            {executionRunState ? (
+                              <UniversalExecutionConsole
+                                runState={executionRunState as any}
+                                className="mb-4"
+                              />
+                            ) : (
+                              <LiveExecutionConsole
+                                runId={activeRunId}
+                                forceShow={true}
+                              />
+                            )}
+                          </div>
+                        )}
+
+                        <div ref={bottomRef} />
+                      </div>
+                    )}
+
+                    {/* Centered content when no messages */}
+                    {!hasMessages && (
+                      <div className="flex-1 flex flex-col items-center justify-center">
+                        <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
+                          {activeGpt ? (
+                            <>
+                              <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
+                                {activeGpt.avatar ? (
+                                  <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
+                                ) : (
+                                  <Bot className="h-8 w-8 text-muted-foreground" />
+                                )}
+                              </div>
+                              <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
+                              <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
+                              {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
+                                  {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
+                                    <button
+                                      key={idx}
+                                      onClick={() => setInput(starter)}
+                                      className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                                    >
+                                      {starter}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-muted-foreground">¿En qué puedo ayudarte?</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <Composer
+                      input={input}
+                      setInput={setInput}
+                      textareaRef={textareaRef}
+                      composerRef={composerRef}
+                      fileInputRef={fileInputRef}
+                      uploadedFiles={uploadedFiles}
+                      removeFile={removeFile}
+                      handleSubmit={handleSubmit}
+                      handleFileUpload={handleFileUpload}
+                      handlePaste={handlePaste}
+                      handleDragOver={handleDragOver}
+                      handleDragEnter={handleDragEnter}
+                      handleDragLeave={handleDragLeave}
+                      handleDrop={handleDrop}
+                      isDraggingOver={isDraggingOver}
+                      selectedTool={selectedTool}
+                      setSelectedTool={setSelectedTool}
+                      selectedDocTool={selectedDocTool}
+                      setSelectedDocTool={setSelectedDocTool}
+                      closeDocEditor={closeDocEditor}
+                      openBlankDocEditor={openBlankDocEditor}
+                      aiState={aiState}
+                      isRecording={isRecording}
+                      isPaused={isPaused}
+                      recordingTime={recordingTime}
+                      toggleVoiceRecording={toggleVoiceRecording}
+                      discardVoiceRecording={discardVoiceRecording}
+                      pauseVoiceRecording={pauseVoiceRecording}
+                      resumeVoiceRecording={resumeVoiceRecording}
+                      sendVoiceRecording={sendVoiceRecording}
+                      handleStopChat={handleStopChat}
+                      isAgentRunning={isAgentRunning}
+                      handleAgentStop={handleAgentStop}
+                      setIsVoiceChatOpen={setIsVoiceChatOpen}
+                      browserSession={browserSession}
+                      isBrowserOpen={isBrowserOpen}
+                      setIsBrowserOpen={setIsBrowserOpen}
+                      isBrowserMaximized={isBrowserMaximized}
+                      setIsBrowserMaximized={setIsBrowserMaximized}
+                      browserUrl={browserUrl}
+                      variant="document"
+                      placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
+                      selectedDocText={selectedDocText}
+                      handleDocTextDeselect={handleDocTextDeselect}
+                      onTextareaFocus={handleCloseModelSelector}
+                      isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+                    />
+                  </div>
+                </Panel>
+
+                {/* Resize Handle */}
+                <PanelResizeHandle className="w-2 bg-border/50 hover:bg-primary/30 transition-colors cursor-col-resize flex items-center justify-center group">
+                  <GripVertical className="h-6 w-6 text-muted-foreground/50 group-hover:text-primary transition-colors" />
+                </PanelResizeHandle>
+
+                {/* Right: Document Editor Panel */}
+                <Panel defaultSize={activeDocEditor ? 75 : 50} minSize={25}>
+                  <div className="h-full animate-in slide-in-from-right duration-300">
+                    {(activeDocEditor?.type === "ppt") ? (
+                      <PPTEditorShellLazy
+                        onClose={closeDocEditor}
+                        onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
+                        initialShowInstructions={activeDocEditor?.showInstructions}
+                        initialContent={activeDocEditor?.content}
+                      />
+                    ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
+                      <SpreadsheetEditorLazy
+                        key="excel-editor-stable"
+                        title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                        content={editedDocumentContent}
+                        onChange={setEditedDocumentContent}
+                        onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
+                        onDownload={() => {
+                          if (activeDocEditor) {
+                            handleDownloadDocument({
+                              type: activeDocEditor.type,
+                              title: activeDocEditor.title,
+                              content: editedDocumentContent
+                            });
+                          } else if (previewDocument) {
+                            handleDownloadDocument(previewDocument);
+                          }
+                        }}
+                        onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
+                        onOrchestratorReady={(orch: { runOrchestrator: (prompt: string) => Promise<void> }) => { orchestratorRef.current = orch; }}
+                      />
+                    ) : (
+                      <div className="relative h-full">
+                        {/* Document Generation Overlay - shows on top of blank editor */}
+                        {selectedDocTool === "word" && docGenerationState.status !== 'idle' && (
+                          <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm">
+                            <div className="max-w-md w-full mx-8 text-center">
+                              {docGenerationState.status === 'generating' && (
+                                <div className="space-y-6">
+                                  {/* Spinner */}
+                                  <div className="w-16 h-16 mx-auto border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+
+                                  {/* Stage */}
+                                  <div>
+                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                                      🚀 Generando Documento
+                                    </h3>
+                                    <p className="text-gray-600 dark:text-gray-300 text-sm">
+                                      {docGenerationState.stage}
+                                    </p>
+                                  </div>
+
+                                  {/* Progress Bar */}
+                                  <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                                    <div
+                                      className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all duration-300 ease-out w-[var(--gen-prog)]"
+                                      style={{ '--gen-prog': `${docGenerationState.progress}%` } as React.CSSProperties}
+                                    />
+                                  </div>
+                                  <p className="text-xs text-gray-500">{docGenerationState.progress}% completado</p>
+
+                                  {/* Code Preview */}
+                                  <div className="bg-slate-900 rounded-lg p-4 text-left font-mono text-xs text-slate-300">
+                                    <div className="text-green-400 mb-1">// Generando código docx...</div>
+                                    <span className="text-blue-300">const</span> doc = <span className="text-yellow-300">new</span> Document({"{"}<br />
+                                    <span className="text-gray-500">  {"  "}sections: [{"{ children: [...] }"}]</span><br />
+                                    {"}"});
+                                  </div>
+                                </div>
+                              )}
+
+                              {docGenerationState.status === 'ready' && (
+                                <div className="space-y-6">
+                                  {/* Success Icon */}
+                                  <div className="text-6xl">✅</div>
+
+                                  <div>
+                                    <h3 className="text-xl font-bold text-green-600 dark:text-green-400 mb-2">
+                                      ¡Documento Generado!
+                                    </h3>
+                                    <p className="text-gray-600 dark:text-gray-300 text-sm">
+                                      Tu documento está listo para descargar
+                                    </p>
+                                  </div>
+
+                                  {/* File Info Card */}
+                                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 border border-green-200 dark:border-green-700 rounded-xl p-5">
+                                    <div className="flex items-center gap-4">
+                                      <div className="bg-white dark:bg-slate-800 rounded-lg p-3 shadow-sm">
+                                        <span className="text-3xl">📄</span>
+                                      </div>
+                                      <div className="flex-1 text-left">
+                                        <div className="font-semibold text-gray-900 dark:text-white">
+                                          {docGenerationState.fileName}
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                          {docGenerationState.fileSize ? `${(docGenerationState.fileSize / 1024).toFixed(1)} KB` : 'Listo'}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Download Button */}
+                                    {docGenerationState.downloadUrl && (
+                                      <a
+                                        href={docGenerationState.downloadUrl}
+                                        download={docGenerationState.fileName || 'documento.docx'}
+                                        className="mt-4 w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+                                      >
+                                        <span>⬇️</span> Descargar Documento
+                                      </a>
+                                    )}
+                                  </div>
+
+                                  {/* Reset Button */}
+                                  <button
+                                    onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
+                                    className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
+                                  >
+                                    Generar otro documento
+                                  </button>
+                                </div>
+                              )}
+
+                              {docGenerationState.status === 'error' && (
+                                <div className="space-y-4">
+                                  <div className="text-5xl">❌</div>
+                                  <h3 className="text-lg font-semibold text-red-600">Error en generación</h3>
+                                  <p className="text-sm text-gray-600">{docGenerationState.error || 'Ocurrió un error al generar el documento'}</p>
+                                  <button
+                                    onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
+                                    className="bg-red-100 text-red-700 px-4 py-2 rounded hover:bg-red-200"
+                                  >
+                                    Reintentar
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        <EnhancedDocumentEditorLazy
+                          key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
+                          title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
+                          content={editedDocumentContent}
+                          onChange={setEditedDocumentContent}
+                          onClose={activeDocEditor ? minimizeDocEditor : handleCloseDocumentPreview}
+                          onDownload={() => {
+                            if (activeDocEditor) {
+                              handleDownloadDocument({
+                                type: activeDocEditor.type,
+                                title: activeDocEditor.title,
+                                content: editedDocumentContent
+                              });
+                            } else if (previewDocument) {
+                              handleDownloadDocument(previewDocument);
+                            }
+                          }}
+                          onTextSelect={handleDocTextSelect}
+                          onTextDeselect={handleDocTextDeselect}
+                          onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </Panel>
+              </PanelGroup>
+            ) : (
+              <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
+                {/* Content Area - conditional based on whether we have messages */}
+                {isConversationStateLoading ? (
+                  <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
+                    <SkeletonChatMessages count={3} />
+                  </div>
+                ) : hasMessages ? (
+                  <>
+                    {/* Scrollable messages container */}
                     <div
-                      className={cn(
-                        "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
-                        activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
-                      )}
-                    >
-                      <SkeletonChatMessages count={3} />
-                    </div>
-                  ) : hasMessages && (
-                    <div
-                      className={cn(
-                        "flex-1 overflow-y-auto space-y-3 overscroll-contain pb-[var(--composer-height,120px)]",
-                        activeDocEditor ? "p-3" : "p-4 sm:p-6 md:p-10 space-y-6"
-                      )}
+                      ref={messagesContainerRef}
+                      onScroll={handleScroll}
+                      className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
                     >
                       <ChatMessageList
                         messages={displayMessages}
-                        variant={activeDocEditor ? "compact" : "default"}
+                        variant="default"
                         editingMessageId={editingMessageId}
                         editContent={editContent}
                         setEditContent={setEditContent}
@@ -4900,59 +5307,42 @@ IMPORTANTE:
                         uiPhase={uiPhase}
                         aiProcessSteps={aiProcessSteps}
                       />
+                      <div ref={messagesEndRef} />
+                    </div>
 
-                      {/* Agent Observer - Show when agent is running */}
-                      {agent.state.status !== "idle" && (
-                        <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-                          <AgentObserver
-                            steps={agent.state.steps}
-                            objective={agent.state.objective}
-                            status={agent.state.status}
-                            onCancel={agent.cancel}
-                          />
-                        </div>
-                      )}
-
-                      {/* Production Mode Progress */}
-                      {aiState === "agent_working" && aiProcessSteps.length > 0 && (
-                        <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start mb-4">
-                          <ProductionProgress steps={aiProcessSteps} />
-                        </div>
-                      )}
-
-                      {/* Image Generation Loading Skeleton */}
-                      {isGeneratingImage && (
-                        <div className="flex w-full max-w-3xl mx-auto gap-4 justify-start">
-                          <div className="flex flex-col gap-2 items-start">
-                            <div className="liquid-message-ai-light px-4 py-3 text-sm mb-2">
-                              <div className="flex items-center gap-2">
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                <span>Generando imagen...</span>
-                              </div>
-                            </div>
-                            <div className="px-4">
-                              <div className="w-64 h-64 bg-muted rounded-lg animate-pulse flex items-center justify-center">
-                                <Image className="h-8 w-8 text-muted-foreground" />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Thinking/Responding State - only show if aiState belongs to current chat and uiPhase is not 'console' */}
-                      {aiState !== "idle" && !isGeneratingImage && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' && (
-                        <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
-                          {/* Streaming Indicator with cancel button */}
-                          <StreamingIndicator
-                            aiState={aiState}
-                            streamingContent={streamingContent}
-                            onCancel={handleStopChat}
-                            uiPhase={uiPhase}
-                          />
-
-                          {/* Streaming content with fade-in animation */}
-                          {aiState === "responding" && streamingContent && (
-                            <div className="animate-content-fade-in px-4 py-3 text-foreground min-w-0 font-sans text-base leading-relaxed font-normal">
+                    {/* Scroll to bottom button */}
+                    {showScrollButton && (
+                      <motion.button
+                        initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                        onClick={() => {
+                          setUserHasScrolledUp(false);
+                          scrollToBottom();
+                        }}
+                        className="fixed bottom-32 right-8 z-40 flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105"
+                        data-testid="button-scroll-to-bottom"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                        <span className="text-sm font-medium">Ir al final</span>
+                      </motion.button>
+                    )}
+                  </>
+                ) : (
+                  /* No messages - center content vertically */
+                  <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
+                    {aiState !== "idle" && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' ? (
+                      /* Processing indicators when AI is working */
+                      <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
+                        <StreamingIndicator
+                          aiState={aiState}
+                          streamingContent={streamingContent}
+                          onCancel={handleStopChat}
+                          uiPhase={uiPhase}
+                        />
+                        {streamingContent && (
+                          <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">
+                            <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
                               <MarkdownErrorBoundary fallbackContent={streamingContent}>
                                 <MarkdownRenderer
                                   content={streamingContent}
@@ -4961,917 +5351,529 @@ IMPORTANTE:
                               </MarkdownErrorBoundary>
                               <span className="typing-cursor">|</span>
                             </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Execution Console - Show UniversalExecutionConsole when state is available, fallback to LiveExecutionConsole */}
-                      {uiPhase === 'console' && activeRunId && (
-                        <div className="flex w-full max-w-3xl mx-auto flex-col gap-3 justify-start">
-                          {executionRunState ? (
-                            <UniversalExecutionConsole
-                              runState={executionRunState as any}
-                              className="mb-4"
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* Welcome Screen */
+                      <>
+                        <motion.div
+                          initial={{ scale: 0.8, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          transition={{ duration: 0.5, ease: "easeOut" }}
+                          className="mb-8"
+                        >
+                          {activeGpt?.avatar ? (
+                            <AvatarWithFallback
+                              src={activeGpt.avatar}
+                              alt={activeGpt.name}
+                              fallback={<Bot className="h-10 w-10 text-white" />}
                             />
                           ) : (
-                            <LiveExecutionConsole
-                              runId={activeRunId}
-                              forceShow={true}
-                            />
+                            <IliaGPTLogo size={80} />
                           )}
-                        </div>
-                      )}
-
-                      <div ref={bottomRef} />
-                    </div>
-                  )}
-
-                  {/* Centered content when no messages */}
-                  {!hasMessages && (
-                    <div className="flex-1 flex flex-col items-center justify-center">
-                      <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
-                        {activeGpt ? (
-                          <>
-                            <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
-                              {activeGpt.avatar ? (
-                                <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
-                              ) : (
-                                <Bot className="h-8 w-8 text-muted-foreground" />
-                              )}
-                            </div>
-                            <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
-                            <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
-                            {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
-                              <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
-                                {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
-                                  <button
-                                    key={idx}
-                                    onClick={() => setInput(starter)}
-                                    className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
-                                  >
-                                    {starter}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <p className="text-muted-foreground">¿En qué puedo ayudarte?</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <Composer
-                    input={input}
-                    setInput={setInput}
-                    textareaRef={textareaRef}
-                    composerRef={composerRef}
-                    fileInputRef={fileInputRef}
-                    uploadedFiles={uploadedFiles}
-                    removeFile={removeFile}
-                    handleSubmit={handleSubmit}
-                    handleFileUpload={handleFileUpload}
-                    handlePaste={handlePaste}
-                    handleDragOver={handleDragOver}
-                    handleDragEnter={handleDragEnter}
-                    handleDragLeave={handleDragLeave}
-                    handleDrop={handleDrop}
-                    isDraggingOver={isDraggingOver}
-                    selectedTool={selectedTool}
-                    setSelectedTool={setSelectedTool}
-                    selectedDocTool={selectedDocTool}
-                    setSelectedDocTool={setSelectedDocTool}
-                    closeDocEditor={closeDocEditor}
-                    openBlankDocEditor={openBlankDocEditor}
-                    aiState={aiState}
-                    isRecording={isRecording}
-                    isPaused={isPaused}
-                    recordingTime={recordingTime}
-                    toggleVoiceRecording={toggleVoiceRecording}
-                    discardVoiceRecording={discardVoiceRecording}
-                    pauseVoiceRecording={pauseVoiceRecording}
-                    resumeVoiceRecording={resumeVoiceRecording}
-                    sendVoiceRecording={sendVoiceRecording}
-                    handleStopChat={handleStopChat}
-                    isAgentRunning={isAgentRunning}
-                    handleAgentStop={handleAgentStop}
-                    setIsVoiceChatOpen={setIsVoiceChatOpen}
-                    browserSession={browserSession}
-                    isBrowserOpen={isBrowserOpen}
-                    setIsBrowserOpen={setIsBrowserOpen}
-                    isBrowserMaximized={isBrowserMaximized}
-                    setIsBrowserMaximized={setIsBrowserMaximized}
-                    browserUrl={browserUrl}
-                    variant="document"
-                    placeholder={selectedDocText ? "Escribe cómo mejorar el texto..." : "Type your message here..."}
-                    selectedDocText={selectedDocText}
-                    handleDocTextDeselect={handleDocTextDeselect}
-                    onTextareaFocus={handleCloseModelSelector}
-                    isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
-                  />
-                </div>
-              </Panel>
-
-              {/* Resize Handle */}
-              <PanelResizeHandle className="w-2 bg-border/50 hover:bg-primary/30 transition-colors cursor-col-resize flex items-center justify-center group">
-                <GripVertical className="h-6 w-6 text-muted-foreground/50 group-hover:text-primary transition-colors" />
-              </PanelResizeHandle>
-
-              {/* Right: Document Editor Panel */}
-              <Panel defaultSize={activeDocEditor ? 75 : 50} minSize={25}>
-                <div className="h-full animate-in slide-in-from-right duration-300">
-                  {(activeDocEditor?.type === "ppt") ? (
-                    <PPTEditorShellLazy
-                      onClose={closeDocEditor}
-                      onInsertContent={(insertFn) => { docInsertContentRef.current = insertFn; }}
-                      initialShowInstructions={activeDocEditor?.showInstructions}
-                      initialContent={activeDocEditor?.content}
-                    />
-                  ) : (activeDocEditor?.type === "excel" || previewDocument?.type === "excel") ? (
-                    <SpreadsheetEditorLazy
-                      key="excel-editor-stable"
-                      title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
-                      content={editedDocumentContent}
-                      onChange={setEditedDocumentContent}
-                      onClose={activeDocEditor ? closeDocEditor : handleCloseDocumentPreview}
-                      onDownload={() => {
-                        if (activeDocEditor) {
-                          handleDownloadDocument({
-                            type: activeDocEditor.type,
-                            title: activeDocEditor.title,
-                            content: editedDocumentContent
-                          });
-                        } else if (previewDocument) {
-                          handleDownloadDocument(previewDocument);
-                        }
-                      }}
-                      onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
-                      onOrchestratorReady={(orch: { runOrchestrator: (prompt: string) => Promise<void> }) => { orchestratorRef.current = orch; }}
-                    />
-                  ) : (
-                    <div className="relative h-full">
-                      {/* Document Generation Overlay - shows on top of blank editor */}
-                      {selectedDocTool === "word" && docGenerationState.status !== 'idle' && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm">
-                          <div className="max-w-md w-full mx-8 text-center">
-                            {docGenerationState.status === 'generating' && (
-                              <div className="space-y-6">
-                                {/* Spinner */}
-                                <div className="w-16 h-16 mx-auto border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
-
-                                {/* Stage */}
-                                <div>
-                                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                                    🚀 Generando Documento
-                                  </h3>
-                                  <p className="text-gray-600 dark:text-gray-300 text-sm">
-                                    {docGenerationState.stage}
-                                  </p>
-                                </div>
-
-                                {/* Progress Bar */}
-                                <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
-                                  <div
-                                    className="bg-gradient-to-r from-blue-500 to-purple-500 h-full transition-all duration-300 ease-out w-[var(--gen-prog)]"
-                                    style={{ '--gen-prog': `${docGenerationState.progress}%` } as React.CSSProperties}
-                                  />
-                                </div>
-                                <p className="text-xs text-gray-500">{docGenerationState.progress}% completado</p>
-
-                                {/* Code Preview */}
-                                <div className="bg-slate-900 rounded-lg p-4 text-left font-mono text-xs text-slate-300">
-                                  <div className="text-green-400 mb-1">// Generando código docx...</div>
-                                  <span className="text-blue-300">const</span> doc = <span className="text-yellow-300">new</span> Document({"{"}<br />
-                                  <span className="text-gray-500">  {"  "}sections: [{"{ children: [...] }"}]</span><br />
-                                  {"}"});
-                                </div>
-                              </div>
-                            )}
-
-                            {docGenerationState.status === 'ready' && (
-                              <div className="space-y-6">
-                                {/* Success Icon */}
-                                <div className="text-6xl">✅</div>
-
-                                <div>
-                                  <h3 className="text-xl font-bold text-green-600 dark:text-green-400 mb-2">
-                                    ¡Documento Generado!
-                                  </h3>
-                                  <p className="text-gray-600 dark:text-gray-300 text-sm">
-                                    Tu documento está listo para descargar
-                                  </p>
-                                </div>
-
-                                {/* File Info Card */}
-                                <div className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 border border-green-200 dark:border-green-700 rounded-xl p-5">
-                                  <div className="flex items-center gap-4">
-                                    <div className="bg-white dark:bg-slate-800 rounded-lg p-3 shadow-sm">
-                                      <span className="text-3xl">📄</span>
-                                    </div>
-                                    <div className="flex-1 text-left">
-                                      <div className="font-semibold text-gray-900 dark:text-white">
-                                        {docGenerationState.fileName}
-                                      </div>
-                                      <div className="text-xs text-gray-500">
-                                        {docGenerationState.fileSize ? `${(docGenerationState.fileSize / 1024).toFixed(1)} KB` : 'Listo'}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Download Button */}
-                                  {docGenerationState.downloadUrl && (
-                                    <a
-                                      href={docGenerationState.downloadUrl}
-                                      download={docGenerationState.fileName || 'documento.docx'}
-                                      className="mt-4 w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
-                                    >
-                                      <span>⬇️</span> Descargar Documento
-                                    </a>
-                                  )}
-                                </div>
-
-                                {/* Reset Button */}
-                                <button
-                                  onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
-                                  className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline"
-                                >
-                                  Generar otro documento
-                                </button>
-                              </div>
-                            )}
-
-                            {docGenerationState.status === 'error' && (
-                              <div className="space-y-4">
-                                <div className="text-5xl">❌</div>
-                                <h3 className="text-lg font-semibold text-red-600">Error en generación</h3>
-                                <p className="text-sm text-gray-600">{docGenerationState.error || 'Ocurrió un error al generar el documento'}</p>
-                                <button
-                                  onClick={() => setDocGenerationState({ status: 'idle', progress: 0, stage: '', downloadUrl: null, fileName: null, fileSize: null })}
-                                  className="bg-red-100 text-red-700 px-4 py-2 rounded hover:bg-red-200"
-                                >
-                                  Reintentar
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      <EnhancedDocumentEditorLazy
-                        key={activeDocEditor ? `new-${activeDocEditor.type}` : previewDocument?.title}
-                        title={activeDocEditor ? activeDocEditor.title : (previewDocument?.title || "")}
-                        content={editedDocumentContent}
-                        onChange={setEditedDocumentContent}
-                        onClose={activeDocEditor ? minimizeDocEditor : handleCloseDocumentPreview}
-                        onDownload={() => {
-                          if (activeDocEditor) {
-                            handleDownloadDocument({
-                              type: activeDocEditor.type,
-                              title: activeDocEditor.title,
-                              content: editedDocumentContent
-                            });
-                          } else if (previewDocument) {
-                            handleDownloadDocument(previewDocument);
-                          }
-                        }}
-                        onTextSelect={handleDocTextSelect}
-                        onTextDeselect={handleDocTextDeselect}
-                        onInsertContent={(insertFn: (content: string) => void) => { docInsertContentRef.current = insertFn; }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </Panel>
-            </PanelGroup>
-          ) : (
-            <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
-              {/* Content Area - conditional based on whether we have messages */}
-              {isConversationStateLoading ? (
-                <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6">
-                  <SkeletonChatMessages count={3} />
-                </div>
-              ) : hasMessages ? (
-                <>
-                  {/* Scrollable messages container */}
-                  <div
-                    ref={messagesContainerRef}
-                    onScroll={handleScroll}
-                    className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 md:p-10 space-y-6"
-                  >
-                    <ChatMessageList
-                      messages={displayMessages}
-                      variant="default"
-                      editingMessageId={editingMessageId}
-                      editContent={editContent}
-                      setEditContent={setEditContent}
-                      copiedMessageId={copiedMessageId}
-                      messageFeedback={messageFeedback}
-                      speakingMessageId={speakingMessageId}
-                      isGeneratingImage={isGeneratingImage}
-                      pendingGeneratedImage={pendingGeneratedImage}
-                      latestGeneratedImageRef={latestGeneratedImageRef}
-                      streamingContent={streamingContent}
-                      aiState={aiState}
-                      regeneratingMsgIndex={regeneratingMsgIndex}
-                      handleCopyMessage={handleCopyMessage}
-                      handleStartEdit={handleStartEdit}
-                      handleCancelEdit={handleCancelEdit}
-                      handleSendEdit={handleSendEdit}
-                      handleFeedback={handleFeedback}
-                      handleRegenerate={handleRegenerate}
-                      handleShare={handleShare}
-                      handleReadAloud={handleReadAloud}
-                      handleOpenDocumentPreview={handleOpenDocumentPreview}
-                      handleOpenFileAttachmentPreview={handleOpenFileAttachmentPreview}
-                      handleDownloadImage={handleDownloadImage}
-                      setLightboxImage={setLightboxImage}
-                      handleReopenDocument={handleReopenDocument}
-                      minimizedDocument={minimizedDocument}
-                      onRestoreDocument={restoreDocEditor}
-                      onSelectSuggestedReply={(text) => setInput(text)}
-                      onAgentCancel={handleAgentCancel}
-                      onAgentRetry={handleAgentRetry}
-                      onAgentArtifactPreview={(artifact) => setDocumentPreviewArtifact(artifact as DocumentPreviewArtifact)}
-                      onSuperAgentCancel={handleSuperAgentCancel}
-                      onSuperAgentRetry={handleSuperAgentRetry}
-                      onQuestionClick={(text) => setInput(text)}
-                      activeRunId={activeRunId}
-                      onRunComplete={() => {
-                        console.log('[uiPhase] Run completed, uiPhase=done');
-                        setUiPhase('done');
-                        setActiveRunId(null);
-                      }}
-                      uiPhase={uiPhase}
-                      aiProcessSteps={aiProcessSteps}
-                    />
-                    <div ref={messagesEndRef} />
-                  </div>
-
-                  {/* Scroll to bottom button */}
-                  {showScrollButton && (
-                    <motion.button
-                      initial={{ opacity: 0, scale: 0.8, y: 10 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.8, y: 10 }}
-                      onClick={() => {
-                        setUserHasScrolledUp(false);
-                        scrollToBottom();
-                      }}
-                      className="fixed bottom-32 right-8 z-40 flex items-center gap-2 px-3 py-2 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105"
-                      data-testid="button-scroll-to-bottom"
-                    >
-                      <ChevronDown className="h-4 w-4" />
-                      <span className="text-sm font-medium">Ir al final</span>
-                    </motion.button>
-                  )}
-                </>
-              ) : (
-                /* No messages - center content vertically */
-                <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-4">
-                  {aiState !== "idle" && (!aiStateChatId || chatId === aiStateChatId) && uiPhase !== 'console' ? (
-                    /* Processing indicators when AI is working */
-                    <div className="w-full max-w-3xl mx-auto flex flex-col gap-4">
-                      <StreamingIndicator
-                        aiState={aiState}
-                        streamingContent={streamingContent}
-                        onCancel={handleStopChat}
-                        uiPhase={uiPhase}
-                      />
-                      {streamingContent && (
-                        <div className="animate-content-fade-in flex flex-col gap-2 max-w-[85%] items-start min-w-0">
-                          <div className="text-sm prose prose-sm dark:prose-invert max-w-none leading-relaxed min-w-0">
-                            <MarkdownErrorBoundary fallbackContent={streamingContent}>
-                              <MarkdownRenderer
-                                content={streamingContent}
-                                customComponents={{ ...CleanDataTableComponents }}
-                              />
-                            </MarkdownErrorBoundary>
-                            <span className="typing-cursor">|</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    /* Welcome Screen */
-                    <>
-                      <motion.div
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        transition={{ duration: 0.5, ease: "easeOut" }}
-                        className="mb-8"
-                      >
-                        {activeGpt?.avatar ? (
-                          <AvatarWithFallback
-                            src={activeGpt.avatar}
-                            alt={activeGpt.name}
-                            fallback={<Bot className="h-10 w-10 text-white" />}
-                          />
-                        ) : (
-                          <IliaGPTLogo size={80} />
-                        )}
-                      </motion.div>
-                      <motion.h1
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ duration: 0.5, delay: 0.2 }}
-                        className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
-                      >
-                        {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
-                      </motion.h1>
-                      <motion.p
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ duration: 0.5, delay: 0.3 }}
-                        className="text-muted-foreground text-center max-w-md text-base"
-                      >
-                        {activeGpt
-                          ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
-                          : selectedProject
-                            ? (
-                              <span>
-                                <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
-                              </span>
-                            )
-                            : "Soy ILIAGPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
-                        }
-                      </motion.p>
-                      {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
-                        <motion.div
+                        </motion.div>
+                        <motion.h1
                           initial={{ y: 20, opacity: 0 }}
                           animate={{ y: 0, opacity: 1 }}
-                          transition={{ duration: 0.5, delay: 0.4 }}
-                          className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
+                          transition={{ duration: 0.5, delay: 0.2 }}
+                          className="text-4xl font-bold text-center mb-3 bg-gradient-to-r from-foreground via-foreground/90 to-foreground/70 bg-clip-text"
                         >
-                          {activeGpt.conversationStarters
-                            .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-                            .map((starter, idx) => (
-                              <button
-                                key={idx}
-                                onClick={() => setInput(starter)}
-                                className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
-                                data-testid={`button-starter-${idx}`}
-                              >
-                                {starter}
-                              </button>
-                            ))}
-                        </motion.div>
-                      )}
-                      {/* Show PromptSuggestions when no conversation starters available */}
-                      {(!activeGpt?.conversationStarters || activeGpt.conversationStarters.length === 0) && (
-                        <PromptSuggestions
-                          onSelect={(action) => setInput(action)}
-                          hasAttachment={uploadedFiles.length > 0}
-                          className="mt-6 justify-center max-w-xl"
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* Input Bar - flex shrink-0, stays at bottom */}
-              {/* Sync Status Indicator */}
-              <div className="flex justify-end px-4 py-1">
-                <SyncStatusIndicator />
-              </div>
-              <Composer
-                input={input}
-                setInput={setInput}
-                textareaRef={textareaRef}
-                composerRef={composerRef}
-                fileInputRef={fileInputRef}
-                uploadedFiles={uploadedFiles}
-                removeFile={removeFile}
-                handleSubmit={handleSubmit}
-                handleFileUpload={handleFileUpload}
-                handlePaste={handlePaste}
-                handleDragOver={handleDragOver}
-                handleDragEnter={handleDragEnter}
-                handleDragLeave={handleDragLeave}
-                handleDrop={handleDrop}
-                isDraggingOver={isDraggingOver}
-                selectedTool={selectedTool}
-                setSelectedTool={setSelectedTool}
-                selectedDocTool={selectedDocTool}
-                setSelectedDocTool={setSelectedDocTool}
-                closeDocEditor={closeDocEditor}
-                openBlankDocEditor={openBlankDocEditor}
-                aiState={aiState}
-                isRecording={isRecording}
-                isPaused={isPaused}
-                recordingTime={recordingTime}
-                toggleVoiceRecording={toggleVoiceRecording}
-                discardVoiceRecording={discardVoiceRecording}
-                pauseVoiceRecording={pauseVoiceRecording}
-                resumeVoiceRecording={resumeVoiceRecording}
-                sendVoiceRecording={sendVoiceRecording}
-                handleStopChat={handleStopChat}
-                isAgentRunning={isAgentRunning}
-                handleAgentStop={handleAgentStop}
-                setIsVoiceChatOpen={setIsVoiceChatOpen}
-                browserSession={browserSession}
-                isBrowserOpen={isBrowserOpen}
-                setIsBrowserOpen={setIsBrowserOpen}
-                isBrowserMaximized={isBrowserMaximized}
-                setIsBrowserMaximized={setIsBrowserMaximized}
-                browserUrl={browserUrl}
-                variant="default"
-                placeholder="Escribe tu mensaje aquí..."
-                onCloseSidebar={onCloseSidebar}
-                setPreviewUploadedImage={setPreviewUploadedImage}
-                isFigmaConnected={isFigmaConnected}
-                isFigmaConnecting={isFigmaConnecting}
-                handleFigmaConnect={handleFigmaConnect}
-                handleFigmaDisconnect={handleFigmaDisconnect}
-                onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
-                onOpenApps={onOpenApps}
-                isGoogleFormsActive={isGoogleFormsActive}
-                setIsGoogleFormsActive={setIsGoogleFormsActive}
-                onTextareaFocus={handleCloseModelSelector}
-                isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
-              />
-            </div>
-          )}
-          <ETLDialog
-            open={isETLDialogOpen}
-            onClose={() => setIsETLDialogOpen(false)}
-            onComplete={(summary) => {
-              onSendMessage({
-                id: `etl-${Date.now()}`,
-                role: "assistant",
-                content: `ETL Agent completed. ${summary}`,
-                timestamp: new Date()
-              });
-            }}
-          />
-          <DocumentGeneratorDialog
-            open={isDocGeneratorOpen}
-            onClose={() => setIsDocGeneratorOpen(false)}
-            documentType={docGeneratorType}
-            onComplete={(message) => {
-              onSendMessage({
-                id: `doc-gen-${Date.now()}`,
-                role: "assistant",
-                content: message,
-                timestamp: new Date()
-              });
-            }}
-          />
-          <GoogleFormsDialog
-            open={isGoogleFormsOpen}
-            onClose={() => {
-              setIsGoogleFormsOpen(false);
-              setGoogleFormsPrompt("");
-            }}
-            initialPrompt={googleFormsPrompt}
-            onComplete={(message, formUrl) => {
-              onSendMessage({
-                id: `forms-gen-${Date.now()}`,
-                role: "assistant",
-                content: message + (formUrl ? `\n\n[Abrir en Google Forms](${formUrl})` : ""),
-                timestamp: new Date()
-              });
-            }}
-          />
-          {/* Voice Chat Mode - Fullscreen conversation with Grok */}
-          <VoiceChatMode
-            open={isVoiceChatOpen}
-            onClose={() => setIsVoiceChatOpen(false)}
-          />
-          {/* Image Lightbox Modal */}
-          {lightboxImage && (
-            <div
-              className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-              onClick={() => setLightboxImage(null)}
-            >
-              <div className="relative max-w-[90vw] max-h-[90vh]">
-                <img
-                  src={lightboxImage}
-                  alt="Imagen ampliada"
-                  className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
-                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                />
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="absolute top-4 right-4 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
-                  onClick={() => setLightboxImage(null)}
-                  data-testid="button-close-lightbox"
-                  aria-label="Cerrar imagen"
-                >
-                  <X className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  className="absolute top-4 right-16 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
-                  onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
-                  data-testid="button-download-lightbox"
-                  aria-label="Descargar imagen"
-                >
-                  <Download className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
-          )}
-          {/* File Attachment Preview Modal */}
-          {previewFileAttachment && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-              onClick={() => setPreviewFileAttachment(null)}
-              data-testid="file-attachment-preview-overlay"
-            >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                transition={{ duration: 0.25, ease: "easeOut" }}
-                className="relative bg-card rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
-                onClick={(e: React.MouseEvent) => e.stopPropagation()}
-              >
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-                  <div className="flex items-center gap-3">
-                    {(() => {
-                      const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
-                      return (
-                        <motion.div
-                          initial={{ scale: 0.8 }}
-                          animate={{ scale: 1 }}
-                          transition={{ delay: 0.1, duration: 0.2 }}
-                          className={cn(
-                            "flex items-center justify-center w-10 h-10 rounded-lg",
-                            attTheme.bgColor
-                          )}
-                        >
-                          <span className="text-white text-sm font-bold">
-                            {attTheme.icon}
-                          </span>
-                        </motion.div>
-                      );
-                    })()}
-                    <div>
-                      <h3 className="font-semibold text-lg text-foreground truncate max-w-md" data-testid="preview-file-name">
-                        {previewFileAttachment.name}
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        {previewFileAttachment.mimeType || "Archivo"}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {previewFileAttachment.content && !previewFileAttachment.isLoading && !previewFileAttachment.isProcessing && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleCopyAttachmentContent}
-                            data-testid="button-copy-attachment-content"
-                          >
-                            {copiedAttachmentContent ? (
-                              <>
-                                <Check className="h-4 w-4 mr-2 text-green-500" />
-                                Copiado
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-4 w-4 mr-2" />
-                                Copiar
-                              </>
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Copiar contenido al portapapeles</TooltipContent>
-                      </Tooltip>
-                    )}
-                    {previewFileAttachment.storagePath && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleDownloadFileAttachment}
-                        data-testid="button-download-attachment"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Descargar
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setPreviewFileAttachment(null)}
-                      data-testid="button-close-attachment-preview"
-                      aria-label="Cerrar vista previa"
-                    >
-                      <X className="h-5 w-5" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 overflow-auto p-6">
-                  {previewFileAttachment.isLoading ? (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="flex items-center justify-center h-64"
-                    >
-                      <div className="flex flex-col items-center gap-3">
-                        <motion.div
-                          animate={{ rotate: 360 }}
-                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        >
-                          <Loader2 className="h-8 w-8 text-primary" />
-                        </motion.div>
+                          {activeGpt ? activeGpt.name : "¿En qué puedo ayudarte?"}
+                        </motion.h1>
                         <motion.p
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: 0.2 }}
-                          className="text-muted-foreground"
+                          initial={{ y: 20, opacity: 0 }}
+                          animate={{ y: 0, opacity: 1 }}
+                          transition={{ duration: 0.5, delay: 0.3 }}
+                          className="text-muted-foreground text-center max-w-md text-base"
                         >
-                          Cargando contenido...
+                          {activeGpt
+                            ? (activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?")
+                            : selectedProject
+                              ? (
+                                <span>
+                                  <span className="font-semibold text-foreground">{selectedProject.name}</span> lista para empezar a chartear con esa carpeta y sirven para organizar conversaciones y proyectos por tema, mantener contexto, usar archivos e instrucciones específicas, y trabajar de forma ordenada sin mezclar información entre distintos objetivos.
+                                </span>
+                              )
+                              : "Soy ILIAGPT, tu asistente de IA. Puedo responder preguntas, generar documentos, analizar archivos y mucho más."
+                          }
                         </motion.p>
+                        {activeGpt?.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                          <motion.div
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ duration: 0.5, delay: 0.4 }}
+                            className="flex flex-wrap gap-2 mt-6 justify-center max-w-xl"
+                          >
+                            {activeGpt.conversationStarters
+                              .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+                              .map((starter, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => setInput(starter)}
+                                  className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                                  data-testid={`button-starter-${idx}`}
+                                >
+                                  {starter}
+                                </button>
+                              ))}
+                          </motion.div>
+                        )}
+                        {/* Show PromptSuggestions when no conversation starters available */}
+                        {(!activeGpt?.conversationStarters || activeGpt.conversationStarters.length === 0) && (
+                          <PromptSuggestions
+                            onSelect={(action) => setInput(action)}
+                            hasAttachment={uploadedFiles.length > 0}
+                            className="mt-6 justify-center max-w-xl"
+                          />
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Input Bar - flex shrink-0, stays at bottom */}
+                {/* Sync Status Indicator */}
+                <div className="flex justify-end px-4 py-1">
+                  <SyncStatusIndicator />
+                </div>
+                <Composer
+                  input={input}
+                  setInput={setInput}
+                  textareaRef={textareaRef}
+                  composerRef={composerRef}
+                  fileInputRef={fileInputRef}
+                  uploadedFiles={uploadedFiles}
+                  removeFile={removeFile}
+                  handleSubmit={handleSubmit}
+                  handleFileUpload={handleFileUpload}
+                  handlePaste={handlePaste}
+                  handleDragOver={handleDragOver}
+                  handleDragEnter={handleDragEnter}
+                  handleDragLeave={handleDragLeave}
+                  handleDrop={handleDrop}
+                  isDraggingOver={isDraggingOver}
+                  selectedTool={selectedTool}
+                  setSelectedTool={setSelectedTool}
+                  selectedDocTool={selectedDocTool}
+                  setSelectedDocTool={setSelectedDocTool}
+                  closeDocEditor={closeDocEditor}
+                  openBlankDocEditor={openBlankDocEditor}
+                  aiState={aiState}
+                  isRecording={isRecording}
+                  isPaused={isPaused}
+                  recordingTime={recordingTime}
+                  toggleVoiceRecording={toggleVoiceRecording}
+                  discardVoiceRecording={discardVoiceRecording}
+                  pauseVoiceRecording={pauseVoiceRecording}
+                  resumeVoiceRecording={resumeVoiceRecording}
+                  sendVoiceRecording={sendVoiceRecording}
+                  handleStopChat={handleStopChat}
+                  isAgentRunning={isAgentRunning}
+                  handleAgentStop={handleAgentStop}
+                  setIsVoiceChatOpen={setIsVoiceChatOpen}
+                  browserSession={browserSession}
+                  isBrowserOpen={isBrowserOpen}
+                  setIsBrowserOpen={setIsBrowserOpen}
+                  isBrowserMaximized={isBrowserMaximized}
+                  setIsBrowserMaximized={setIsBrowserMaximized}
+                  browserUrl={browserUrl}
+                  variant="default"
+                  placeholder="Escribe tu mensaje aquí..."
+                  onCloseSidebar={onCloseSidebar}
+                  setPreviewUploadedImage={setPreviewUploadedImage}
+                  isFigmaConnected={isFigmaConnected}
+                  isFigmaConnecting={isFigmaConnecting}
+                  handleFigmaConnect={handleFigmaConnect}
+                  handleFigmaDisconnect={handleFigmaDisconnect}
+                  onOpenGoogleForms={() => setIsGoogleFormsOpen(true)}
+                  onOpenApps={onOpenApps}
+                  isGoogleFormsActive={isGoogleFormsActive}
+                  setIsGoogleFormsActive={setIsGoogleFormsActive}
+                  onTextareaFocus={handleCloseModelSelector}
+                  isFilesLoading={uploadedFiles.some((f: UploadedFile) => f.status === "uploading" || f.status === "processing")}
+                />
+              </div>
+            )}
+            <ETLDialog
+              open={isETLDialogOpen}
+              onClose={() => setIsETLDialogOpen(false)}
+              onComplete={(summary) => {
+                onSendMessage({
+                  id: `etl-${Date.now()}`,
+                  role: "assistant",
+                  content: `ETL Agent completed. ${summary}`,
+                  timestamp: new Date()
+                });
+              }}
+            />
+            <DocumentGeneratorDialog
+              open={isDocGeneratorOpen}
+              onClose={() => setIsDocGeneratorOpen(false)}
+              documentType={docGeneratorType}
+              onComplete={(message) => {
+                onSendMessage({
+                  id: `doc-gen-${Date.now()}`,
+                  role: "assistant",
+                  content: message,
+                  timestamp: new Date()
+                });
+              }}
+            />
+            <GoogleFormsDialog
+              open={isGoogleFormsOpen}
+              onClose={() => {
+                setIsGoogleFormsOpen(false);
+                setGoogleFormsPrompt("");
+              }}
+              initialPrompt={googleFormsPrompt}
+              onComplete={(message, formUrl) => {
+                onSendMessage({
+                  id: `forms-gen-${Date.now()}`,
+                  role: "assistant",
+                  content: message + (formUrl ? `\n\n[Abrir en Google Forms](${formUrl})` : ""),
+                  timestamp: new Date()
+                });
+              }}
+            />
+            {/* Voice Chat Mode - Fullscreen conversation with Grok */}
+            <VoiceChatMode
+              open={isVoiceChatOpen}
+              onClose={() => setIsVoiceChatOpen(false)}
+            />
+            {/* Image Lightbox Modal */}
+            {lightboxImage && (
+              <div
+                className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+                onClick={() => setLightboxImage(null)}
+              >
+                <div className="relative max-w-[90vw] max-h-[90vh]">
+                  <img
+                    src={lightboxImage}
+                    alt="Imagen ampliada"
+                    className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="absolute top-4 right-4 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
+                    onClick={() => setLightboxImage(null)}
+                    data-testid="button-close-lightbox"
+                    aria-label="Cerrar imagen"
+                  >
+                    <X className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    className="absolute top-4 right-16 h-10 w-10 bg-black/60 hover:bg-black/80 text-white"
+                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleDownloadImage(lightboxImage); }}
+                    data-testid="button-download-lightbox"
+                    aria-label="Descargar imagen"
+                  >
+                    <Download className="h-5 w-5" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            {/* File Attachment Preview Modal */}
+            {previewFileAttachment && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+                onClick={() => setPreviewFileAttachment(null)}
+                data-testid="file-attachment-preview-overlay"
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                  className="relative bg-card rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                >
+                  {/* Header */}
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+                    <div className="flex items-center gap-3">
+                      {(() => {
+                        const attTheme = getFileTheme(previewFileAttachment.name, previewFileAttachment.mimeType);
+                        return (
+                          <motion.div
+                            initial={{ scale: 0.8 }}
+                            animate={{ scale: 1 }}
+                            transition={{ delay: 0.1, duration: 0.2 }}
+                            className={cn(
+                              "flex items-center justify-center w-10 h-10 rounded-lg",
+                              attTheme.bgColor
+                            )}
+                          >
+                            <span className="text-white text-sm font-bold">
+                              {attTheme.icon}
+                            </span>
+                          </motion.div>
+                        );
+                      })()}
+                      <div>
+                        <h3 className="font-semibold text-lg text-foreground truncate max-w-md" data-testid="preview-file-name">
+                          {previewFileAttachment.name}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          {previewFileAttachment.mimeType || "Archivo"}
+                        </p>
                       </div>
-                    </motion.div>
-                  ) : previewFileAttachment.isProcessing ? (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="flex items-center justify-center h-64"
-                    >
-                      <div className="flex flex-col items-center gap-4 p-6 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
-                        <motion.div
-                          animate={{
-                            scale: [1, 1.1, 1],
-                            rotate: [0, 5, -5, 0]
-                          }}
-                          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                        >
-                          <RefreshCw className="h-10 w-10 text-amber-600 dark:text-amber-400" />
-                        </motion.div>
-                        <div className="text-center">
-                          <p className="font-medium text-amber-800 dark:text-amber-200">
-                            Procesando archivo...
-                          </p>
-                          <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">
-                            El contenido estará disponible en breve
-                          </p>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ) : previewFileAttachment.content ? (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3 }}
-                      className="prose prose-sm dark:prose-invert max-w-none"
-                    >
-                      <div className="bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
-                        <MarkdownErrorBoundary fallbackContent={previewFileAttachment.content}>
-                          <MarkdownRenderer content={previewFileAttachment.content} />
-                        </MarkdownErrorBoundary>
-                      </div>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ duration: 0.3 }}
-                      className="flex flex-col items-center justify-center h-64 text-center"
-                    >
-                      <FileText className="h-16 w-16 text-muted-foreground/50 mb-4" />
-                      <p className="text-muted-foreground">
-                        La vista previa no está disponible para este tipo de archivo.
-                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {previewFileAttachment.content && !previewFileAttachment.isLoading && !previewFileAttachment.isProcessing && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleCopyAttachmentContent}
+                              data-testid="button-copy-attachment-content"
+                            >
+                              {copiedAttachmentContent ? (
+                                <>
+                                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                                  Copiado
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-4 w-4 mr-2" />
+                                  Copiar
+                                </>
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Copiar contenido al portapapeles</TooltipContent>
+                        </Tooltip>
+                      )}
                       {previewFileAttachment.storagePath && (
                         <Button
                           variant="outline"
-                          className="mt-4"
+                          size="sm"
                           onClick={handleDownloadFileAttachment}
+                          data-testid="button-download-attachment"
                         >
                           <Download className="h-4 w-4 mr-2" />
-                          Descargar archivo
+                          Descargar
                         </Button>
                       )}
-                    </motion.div>
-                  )}
-                </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setPreviewFileAttachment(null)}
+                        data-testid="button-close-attachment-preview"
+                        aria-label="Cerrar vista previa"
+                      >
+                        <X className="h-5 w-5" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 overflow-auto p-6">
+                    {previewFileAttachment.isLoading ? (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="flex items-center justify-center h-64"
+                      >
+                        <div className="flex flex-col items-center gap-3">
+                          <motion.div
+                            animate={{ rotate: 360 }}
+                            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                          >
+                            <Loader2 className="h-8 w-8 text-primary" />
+                          </motion.div>
+                          <motion.p
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.2 }}
+                            className="text-muted-foreground"
+                          >
+                            Cargando contenido...
+                          </motion.p>
+                        </div>
+                      </motion.div>
+                    ) : previewFileAttachment.isProcessing ? (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="flex items-center justify-center h-64"
+                      >
+                        <div className="flex flex-col items-center gap-4 p-6 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
+                          <motion.div
+                            animate={{
+                              scale: [1, 1.1, 1],
+                              rotate: [0, 5, -5, 0]
+                            }}
+                            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                          >
+                            <RefreshCw className="h-10 w-10 text-amber-600 dark:text-amber-400" />
+                          </motion.div>
+                          <div className="text-center">
+                            <p className="font-medium text-amber-800 dark:text-amber-200">
+                              Procesando archivo...
+                            </p>
+                            <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                              El contenido estará disponible en breve
+                            </p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ) : previewFileAttachment.content ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="prose prose-sm dark:prose-invert max-w-none"
+                      >
+                        <div className="bg-muted/30 p-4 rounded-lg overflow-auto max-h-[60vh]">
+                          <MarkdownErrorBoundary fallbackContent={previewFileAttachment.content}>
+                            <MarkdownRenderer content={previewFileAttachment.content} />
+                          </MarkdownErrorBoundary>
+                        </div>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.3 }}
+                        className="flex flex-col items-center justify-center h-64 text-center"
+                      >
+                        <FileText className="h-16 w-16 text-muted-foreground/50 mb-4" />
+                        <p className="text-muted-foreground">
+                          La vista previa no está disponible para este tipo de archivo.
+                        </p>
+                        {previewFileAttachment.storagePath && (
+                          <Button
+                            variant="outline"
+                            className="mt-4"
+                            onClick={handleDownloadFileAttachment}
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Descargar archivo
+                          </Button>
+                        )}
+                      </motion.div>
+                    )}
+                  </div>
+                </motion.div>
               </motion.div>
-            </motion.div>
-          )}
-          {/* Uploaded Image Preview Modal */}
-          {previewUploadedImage && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
-              onClick={() => setPreviewUploadedImage(null)}
-            >
+            )}
+            {/* Uploaded Image Preview Modal */}
+            {previewUploadedImage && (
               <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                className="relative max-w-4xl max-h-[90vh] rounded-lg overflow-hidden"
-                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
+                onClick={() => setPreviewUploadedImage(null)}
               >
-                <img
-                  src={previewUploadedImage.dataUrl}
-                  alt={previewUploadedImage.name}
-                  className="max-w-full max-h-[90vh] object-contain"
-                />
-                <button
-                  onClick={() => setPreviewUploadedImage(null)}
-                  className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors"
-                  data-testid="button-close-image-preview"
-                  aria-label="Cerrar vista previa de imagen"
+                <motion.div
+                  initial={{ scale: 0.9, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.9, opacity: 0 }}
+                  className="relative max-w-4xl max-h-[90vh] rounded-lg overflow-hidden"
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
                 >
-                  <X className="h-5 w-5" />
-                </button>
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
-                  <p className="text-white text-sm truncate">{previewUploadedImage.name}</p>
-                </div>
+                  <img
+                    src={previewUploadedImage.dataUrl}
+                    alt={previewUploadedImage.name}
+                    className="max-w-full max-h-[90vh] object-contain"
+                  />
+                  <button
+                    onClick={() => setPreviewUploadedImage(null)}
+                    className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center transition-colors"
+                    data-testid="button-close-image-preview"
+                    aria-label="Cerrar vista previa de imagen"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4">
+                    <p className="text-white text-sm truncate">{previewUploadedImage.name}</p>
+                  </div>
+                </motion.div>
               </motion.div>
-            </motion.div>
-          )}
+            )}
 
-          {/* Screen reader announcements */}
-          <div
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-            className="sr-only"
-          >
-            {screenReaderAnnouncement}
-          </div>
+            {/* Screen reader announcements */}
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {screenReaderAnnouncement}
+            </div>
 
-          {/* Keyboard shortcuts dialog */}
-          <KeyboardShortcutsDialog
-            open={isKeyboardShortcutsOpen}
-            onOpenChange={setIsKeyboardShortcutsOpen}
-          />
+            {/* Keyboard shortcuts dialog */}
+            <KeyboardShortcutsDialog
+              open={isKeyboardShortcutsOpen}
+              onOpenChange={setIsKeyboardShortcutsOpen}
+            />
 
-          {/* Upgrade Plan Dialog */}
-          <UpgradePlanDialog
-            open={isUpgradeDialogOpen}
-            onOpenChange={setIsUpgradeDialogOpen}
-          />
+            {/* Upgrade Plan Dialog */}
+            <UpgradePlanDialog
+              open={isUpgradeDialogOpen}
+              onOpenChange={setIsUpgradeDialogOpen}
+            />
 
-          {/* Document Preview Panel for agent-generated documents */}
-          <DocumentPreviewPanel
-            isOpen={!!documentPreviewArtifact}
-            onClose={() => setDocumentPreviewArtifact(null)}
-            artifact={documentPreviewArtifact}
-            onDownload={(artifact: any) => {
-              if (artifact.data?.base64) {
-                const byteCharacters = atob(artifact.data.base64);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                  byteNumbers[i] = byteCharacters.charCodeAt(i);
+            {/* Document Preview Panel for agent-generated documents */}
+            <DocumentPreviewPanel
+              isOpen={!!documentPreviewArtifact}
+              onClose={() => setDocumentPreviewArtifact(null)}
+              artifact={documentPreviewArtifact}
+              onDownload={(artifact: any) => {
+                if (artifact.data?.base64) {
+                  const byteCharacters = atob(artifact.data.base64);
+                  const byteNumbers = new Array(byteCharacters.length);
+                  for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                  }
+                  const byteArray = new Uint8Array(byteNumbers);
+                  const blob = new Blob([byteArray], { type: artifact.mimeType || 'application/octet-stream' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = artifact.name;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
                 }
-                const byteArray = new Uint8Array(byteNumbers);
-                const blob = new Blob([byteArray], { type: artifact.mimeType || 'application/octet-stream' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = artifact.name;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-              }
-            }}
-          />
+              }}
+            />
 
-          {/* Pricing Modal for quota exceeded */}
-          <PricingModal
-            open={showPricingModal}
-            onClose={() => setShowPricingModal(false)}
-            quota={quotaInfo || { remaining: 0, limit: 3, resetAt: null, plan: "free" }}
-          />
+            {/* Pricing Modal for quota exceeded */}
+            <PricingModal
+              open={showPricingModal}
+              onClose={() => setShowPricingModal(false)}
+              quota={quotaInfo || { remaining: 0, limit: 3, resetAt: null, plan: "free" }}
+            />
 
-          {/* Agent Panel removed - progress is shown inline in chat messages */}
-        </div>
-      );
-    }
+            {/* Agent Panel removed - progress is shown inline in chat messages */}
+          </div>
+        );
+      }
 
   function BotIcon({ className }: { className?: string }) {
-      return (
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className={className}
-        >
-          <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
-        </svg>
-      );
-    }
+        return (
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+          >
+            <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z" />
+          </svg>
+        );
+      }
