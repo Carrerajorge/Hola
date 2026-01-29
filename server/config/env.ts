@@ -8,17 +8,33 @@ const envSchema = z.object({
     GEMINI_API_KEY: z.string().min(1, "GEMINI_API_KEY is required for AI features").optional(),
 
     // Authentication Secrets
-    SESSION_SECRET: z.string().min(1, "SESSION_SECRET is required"),
+    SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
 
-    // Microsoft OAuth
-    MICROSOFT_CLIENT_ID: z.string().min(1, "MICROSOFT_CLIENT_ID is required for Azure AD Auth"),
-    MICROSOFT_CLIENT_SECRET: z.string().min(1, "MICROSOFT_CLIENT_SECRET is required for Azure AD Auth"),
-    MICROSOFT_TENANT_ID: z.string().min(1, "MICROSOFT_TENANT_ID is required for Azure AD Auth"),
+    // Microsoft OAuth (optional unless you enable Microsoft login)
+    MICROSOFT_CLIENT_ID: z.string().min(1, "MICROSOFT_CLIENT_ID is required for Azure AD Auth").optional(),
+    MICROSOFT_CLIENT_SECRET: z.string().min(1, "MICROSOFT_CLIENT_SECRET is required for Azure AD Auth").optional(),
+    MICROSOFT_TENANT_ID: z.string().min(1, "MICROSOFT_TENANT_ID is required for Azure AD Auth").optional(),
 
     // Pool settings
     DB_POOL_MAX: z.string().transform(Number).default("20"),
     DB_POOL_MIN: z.string().transform(Number).default("2"),
-});
+}).refine(
+    (data) => {
+        const hasAllMicrosoft =
+            data.MICROSOFT_CLIENT_ID &&
+            data.MICROSOFT_CLIENT_SECRET &&
+            data.MICROSOFT_TENANT_ID;
+        const hasNoneMicrosoft =
+            !data.MICROSOFT_CLIENT_ID &&
+            !data.MICROSOFT_CLIENT_SECRET &&
+            !data.MICROSOFT_TENANT_ID;
+        return hasAllMicrosoft || hasNoneMicrosoft;
+    },
+    {
+        message: "Provide all MICROSOFT_* variables or none (Microsoft login is optional).",
+        path: ["MICROSOFT_CLIENT_ID"],
+    }
+);
 
 function validateEnv() {
     const result = envSchema.safeParse(process.env);
