@@ -108,8 +108,16 @@ export function ChatHeader({
     const isCustomGpt = useMemo(() => {
         // Strict Check: Valid context requires explicit userId presence.
         // System models / Standard chat usually lack userId or have specific system IDs.
-        return activeGpt && !!activeGpt.userId && !!activeGpt.id;
+
+        // SPECIAL CASE: 'ILIAGPT' is the default system app wrapper, treat as Standard Chat.
+        // This prevents the GPT Actions menu from appearing in the main chat interface.
+        if (activeGpt?.name === 'ILIAGPT') return false;
+
+        const isCustom = activeGpt && !!activeGpt.userId && !!activeGpt.id;
+
+        return isCustom;
     }, [activeGpt]);
+
 
     return (
         <header className="sticky top-0 z-20 flex items-center justify-between px-3 md:px-4 py-2 border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 h-14">

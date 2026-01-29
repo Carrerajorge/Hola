@@ -44,6 +44,8 @@ export function GptActionMenu({
     const { toast } = useToast();
     const [open, setOpen] = useState(false);
 
+    console.log("[GptActionMenu] Rendering");
+
     // Helper to find selected model data to facilitate UI logic
     // We infer the selected model object from available lists if needed, 
     // but primarily we just need the ID to check equality.
