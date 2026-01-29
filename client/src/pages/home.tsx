@@ -12,6 +12,7 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
 import { ExportChatDialog } from "@/components/export-chat-dialog";
 import { FavoritesDialog } from "@/components/favorites-dialog";
+import { CodexDialog } from "@/components/codex-dialog";
 import { PromptTemplatesDialog } from "@/components/prompt-templates-dialog";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
 import { MediaLibraryModal } from "@/components/media-library-modal";
@@ -61,6 +62,7 @@ export default function Home() {
   const [isGptBuilderOpen, setIsGptBuilderOpen] = useState(false);
   const [aboutGptId, setAboutGptId] = useState<string | null>(null);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [isCodexOpen, setIsCodexOpen] = useState(false);
   const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
   const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -419,6 +421,10 @@ export default function Home() {
     setIsMediaLibraryOpen(true);
   };
 
+  const handleOpenCodex = () => {
+    setIsCodexOpen(true);
+  };
+
   const handleSelectGpt = (gpt: Gpt) => {
     setActiveGpt(gpt);
     handleNewChat({ preserveGpt: true });
@@ -565,6 +571,7 @@ export default function Home() {
           onOpenGpts={handleOpenGpts}
           onOpenApps={handleOpenApps}
           onOpenSkills={handleOpenSkills}
+          onOpenCodex={handleOpenCodex}
           onOpenLibrary={handleOpenLibrary}
           processingChatIds={processingChatIds}
           pendingResponseCounts={pendingResponseCounts}
@@ -743,6 +750,12 @@ export default function Home() {
       <MediaLibraryModal
         open={isMediaLibraryOpen}
         onOpenChange={setIsMediaLibraryOpen}
+      />
+
+      {/* Codex Dialog */}
+      <CodexDialog
+        isOpen={isCodexOpen}
+        onClose={() => setIsCodexOpen(false)}
       />
 
       {/* Search Modal */}

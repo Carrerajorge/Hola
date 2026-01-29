@@ -1,13 +1,14 @@
+
 import { useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { usePinnedGpts } from "@/hooks/use-pinned-gpts";
 import {
-  Menu,
   Search,
   Library,
   Bot,
   Plus,
+  Code,
   MessageSquare,
   MoreHorizontal,
   Settings,
@@ -81,6 +82,7 @@ interface SidebarProps {
   onOpenGpts?: () => void;
   onOpenApps?: () => void;
   onOpenSkills?: () => void;
+  onOpenCodex?: () => void;
   onOpenLibrary?: () => void;
   processingChatIds?: string[];
   pendingResponseCounts?: Record<string, number>;
@@ -215,6 +217,7 @@ export function Sidebar({
   onOpenGpts,
   onOpenApps,
   onOpenSkills,
+  onOpenCodex,
   onOpenLibrary,
   processingChatIds = [],
   pendingResponseCounts = {},
@@ -320,7 +323,7 @@ export function Sidebar({
         indented && "ml-4"
       )}
       onClick={() => !editingChatId && onSelectChat(chat.id)}
-      data-testid={`chat-item-${chat.id}`}
+      data-testid={`chat - item - ${chat.id} `}
     >
       {editingChatId === chat.id ? (
         <div className="flex w-full items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -333,14 +336,14 @@ export function Sidebar({
               if (e.key === "Enter") handleSaveEdit(chat.id);
               if (e.key === "Escape") handleCancelEdit();
             }}
-            data-testid={`input-edit-chat-${chat.id}`}
+            data-testid={`input - edit - chat - ${chat.id} `}
           />
           <Button
             variant="ghost"
             size="icon"
             className="h-6 w-6"
             onClick={() => handleSaveEdit(chat.id)}
-            data-testid={`button-save-edit-${chat.id}`}
+            data-testid={`button - save - edit - ${chat.id} `}
           >
             <Check className="h-3 w-3 text-green-500" />
           </Button>
@@ -349,7 +352,7 @@ export function Sidebar({
             size="icon"
             className="h-6 w-6"
             onClick={handleCancelEdit}
-            data-testid={`button-cancel-edit-${chat.id}`}
+            data-testid={`button - cancel - edit - ${chat.id} `}
           >
             <X className="h-3 w-3 text-red-500" />
           </Button>
@@ -363,7 +366,7 @@ export function Sidebar({
                 type="button"
                 className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md opacity-100 hover:bg-muted transition-colors mr-1"
                 onClick={(e) => e.stopPropagation()}
-                data-testid={`button-chat-menu-${chat.id}`}
+                data-testid={`button - chat - menu - ${chat.id} `}
               >
                 <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
               </button>
@@ -371,20 +374,20 @@ export function Sidebar({
             <DropdownMenuContent align="end" className="w-52" sideOffset={5}>
               <DropdownMenuItem
                 onClick={(e) => onPinChat?.(chat.id, e as unknown as React.MouseEvent)}
-                data-testid={`menu-pin-${chat.id}`}
+                data-testid={`menu - pin - ${chat.id} `}
               >
                 <Pin className="h-4 w-4 mr-2" />
                 {chat.pinned ? "Desfijar" : "Fijar chat"}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => handleStartEdit(chat, e as unknown as React.MouseEvent)}
-                data-testid={`menu-edit-${chat.id}`}
+                data-testid={`menu - edit - ${chat.id} `}
               >
                 <Pencil className="h-4 w-4 mr-2" />
                 Editar
               </DropdownMenuItem>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger data-testid={`menu-move-folder-${chat.id}`}>
+                <DropdownMenuSubTrigger data-testid={`menu - move - folder - ${chat.id} `}>
                   <Folder className="h-4 w-4 mr-2" />
                   Mover a carpeta
                 </DropdownMenuSubTrigger>
@@ -393,7 +396,7 @@ export function Sidebar({
                     {/* Create new folder option */}
                     <DropdownMenuItem
                       onClick={() => setIsCreatingFolder(true)}
-                      data-testid={`menu-create-folder-${chat.id}`}
+                      data-testid={`menu - create - folder - ${chat.id} `}
                     >
                       <FolderPlus className="h-4 w-4 mr-2" />
                       Crear carpeta
@@ -419,7 +422,7 @@ export function Sidebar({
                                   addChatToProject(chat.id, project.id);
                                 }
                               }}
-                              data-testid={`menu-project-${project.id}-${chat.id}`}
+                              data-testid={`menu - project - ${project.id} -${chat.id} `}
                             >
                               <span
                                 className="h-3 w-3 rounded-full mr-2 flex-shrink-0"
@@ -442,7 +445,7 @@ export function Sidebar({
                           <DropdownMenuItem
                             key={folder.id}
                             onClick={() => onMoveToFolder?.(chat.id, folder.id)}
-                            data-testid={`menu-folder-${folder.id}-${chat.id}`}
+                            data-testid={`menu - folder - ${folder.id} -${chat.id} `}
                           >
                             <span
                               className="h-3 w-3 rounded-full mr-2 flex-shrink-0"
@@ -454,7 +457,7 @@ export function Sidebar({
                         {allFolderChatIds.has(chat.id) && (
                           <DropdownMenuItem
                             onClick={() => onMoveToFolder?.(chat.id, null)}
-                            data-testid={`menu-remove-folder-${chat.id}`}
+                            data-testid={`menu - remove - folder - ${chat.id} `}
                           >
                             <X className="h-4 w-4 mr-2" />
                             Quitar de carpeta
@@ -467,7 +470,7 @@ export function Sidebar({
               </DropdownMenuSub>
               <DropdownMenuItem
                 onClick={(e) => onDownloadChat?.(chat.id, e as unknown as React.MouseEvent)}
-                data-testid={`menu-download-${chat.id}`}
+                data-testid={`menu - download - ${chat.id} `}
               >
                 <Download className="h-4 w-4 mr-2" />
                 Descargar
@@ -475,14 +478,14 @@ export function Sidebar({
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={(e) => onArchiveChat?.(chat.id, e as unknown as React.MouseEvent)}
-                data-testid={`menu-archive-${chat.id}`}
+                data-testid={`menu - archive - ${chat.id} `}
               >
                 <Archive className="h-4 w-4 mr-2" />
                 {chat.archived ? "Desarchivar" : "Archivar"}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => onHideChat?.(chat.id, e as unknown as React.MouseEvent)}
-                data-testid={`menu-hide-${chat.id}`}
+                data-testid={`menu - hide - ${chat.id} `}
               >
                 {chat.hidden ? <Eye className="h-4 w-4 mr-2" /> : <EyeOff className="h-4 w-4 mr-2" />}
                 {chat.hidden ? "Mostrar" : "Ocultar"}
@@ -494,7 +497,7 @@ export function Sidebar({
                   setDeletingChatId(chat.id);
                 }}
                 className="text-red-500 focus:text-red-500"
-                data-testid={`menu-delete-${chat.id}`}
+                data-testid={`menu - delete -${chat.id} `}
               >
                 <Trash2 className="h-4 w-4 mr-2" />
                 Eliminar
@@ -520,7 +523,7 @@ export function Sidebar({
             {!processingChatIds.includes(chat.id) && pendingResponseCounts[chat.id] > 0 && (
               <span
                 className="flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-blue-600 text-white text-xs font-medium flex-shrink-0"
-                data-testid={`badge-pending-${chat.id}`}
+                data-testid={`badge - pending - ${chat.id} `}
               >
                 {pendingResponseCounts[chat.id]}
               </span>
@@ -609,6 +612,15 @@ export function Sidebar({
           <LayoutGrid className="h-4 w-4" />
           Aplicaciones
         </Button>
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button text-blue-500 hover:text-blue-600 hover:bg-blue-50/50"
+          onClick={onOpenCodex}
+          data-testid="button-codex"
+        >
+          <Code className="h-4 w-4" />
+          Codex
+        </Button>
       </div>
 
       <Separator className="mx-4 my-2 w-auto" />
@@ -628,7 +640,7 @@ export function Sidebar({
                     <CollapsibleTrigger asChild>
                       <div
                         className="flex items-center gap-2 px-2 py-2 rounded-xl cursor-pointer hover:bg-accent transition-all duration-300"
-                        data-testid={`folder-${folder.id}`}
+                        data-testid={`folder - ${folder.id} `}
                       >
                         {isExpanded ? (
                           <FolderOpen className="h-4 w-4 text-muted-foreground" />
@@ -741,7 +753,7 @@ export function Sidebar({
                                 type="button"
                                 className="flex-shrink-0 h-7 w-7 flex items-center justify-center rounded-md opacity-100 hover:bg-muted transition-colors"
                                 onClick={(e) => e.stopPropagation()}
-                                data-testid={`project-menu-${project.id}`}
+                                data-testid={`project - menu - ${project.id} `}
                               >
                                 <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                               </button>
@@ -752,7 +764,7 @@ export function Sidebar({
                                   e.stopPropagation();
                                   setEditingProject(project);
                                 }}
-                                data-testid={`project-edit-${project.id}`}
+                                data-testid={`project - edit - ${project.id} `}
                               >
                                 <Pencil className="h-4 w-4 mr-2" />
                                 Edit
@@ -762,7 +774,7 @@ export function Sidebar({
                                   e.stopPropagation();
                                   setMemoriesProject(project);
                                 }}
-                                data-testid={`project-memories-${project.id}`}
+                                data-testid={`project - memories - ${project.id} `}
                               >
                                 <Library className="h-4 w-4 mr-2" />
                                 Memories
@@ -773,7 +785,7 @@ export function Sidebar({
                                   e.stopPropagation();
                                   setShareProject(project);
                                 }}
-                                data-testid={`project-share-${project.id}`}
+                                data-testid={`project - share - ${project.id} `}
                               >
                                 <MoveRight className="h-4 w-4 mr-2" />
                                 Share
@@ -791,13 +803,13 @@ export function Sidebar({
                                   const url = URL.createObjectURL(blob);
                                   const a = document.createElement("a");
                                   a.href = url;
-                                  a.download = `${project.name.replace(/[^a-z0-9]/gi, "_")}_project.json`;
+                                  a.download = `${project.name.replace(/[^a-z0-9]/gi, "_")} _project.json`;
                                   document.body.appendChild(a);
                                   a.click();
                                   document.body.removeChild(a);
                                   URL.revokeObjectURL(url);
                                 }}
-                                data-testid={`project-export-${project.id}`}
+                                data-testid={`project -export -${project.id} `}
                               >
                                 <Download className="h-4 w-4 mr-2" />
                                 Export
@@ -809,7 +821,7 @@ export function Sidebar({
                                   setDeletingProject(project);
                                 }}
                                 className="text-red-500 focus:text-red-500"
-                                data-testid={`project-delete-${project.id}`}
+                                data-testid={`project - delete -${project.id} `}
                               >
                                 <Trash2 className="h-4 w-4 mr-2" />
                                 Delete
@@ -828,7 +840,7 @@ export function Sidebar({
                               e.stopPropagation();
                               onSelectProject?.(project.id);
                             }}
-                            data-testid={`project-${project.id}`}
+                            data-testid={`project - ${project.id} `}
                           >
                             {project.backgroundImage ? (
                               <div
@@ -896,8 +908,8 @@ export function Sidebar({
                 <div
                   key={pinned.gptId}
                   className="group flex w-full items-center justify-between px-2 py-2 rounded-xl cursor-pointer hover:bg-accent transition-all duration-300"
-                  onClick={() => setLocation(`/gpts/${pinned.gpt.slug || pinned.gptId}`)}
-                  data-testid={`pinned-gpt-${pinned.gptId}`}
+                  onClick={() => setLocation(`/ gpts / ${pinned.gpt.slug || pinned.gptId} `)}
+                  data-testid={`pinned - gpt - ${pinned.gptId} `}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     {pinned.gpt.avatar ? (
@@ -919,7 +931,7 @@ export function Sidebar({
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 flex-shrink-0"
-                        data-testid={`button-pinned-gpt-menu-${pinned.gptId}`}
+                        data-testid={`button - pinned - gpt - menu - ${pinned.gptId} `}
                       >
                         <MoreHorizontal className="h-4 w-4" />
                       </Button>
@@ -931,7 +943,7 @@ export function Sidebar({
                           unpinGpt(pinned.gptId);
                         }}
                         className="flex items-center gap-2"
-                        data-testid={`button-unpin-gpt-${pinned.gptId}`}
+                        data-testid={`button - unpin - gpt - ${pinned.gptId} `}
                       >
                         <Pin className="h-4 w-4" />
                         <span>Desfijar</span>
@@ -982,7 +994,7 @@ export function Sidebar({
                     key={chat.id}
                     className="group flex w-full items-center justify-between px-2 py-2 rounded-md cursor-pointer hover:bg-accent transition-colors opacity-70"
                     onClick={() => onSelectChat(chat.id)}
-                    data-testid={`hidden-chat-item-${chat.id}`}
+                    data-testid={`hidden - chat - item - ${chat.id} `}
                   >
                     <span className="truncate text-sm">{chat.title}</span>
                     <Button
@@ -993,7 +1005,7 @@ export function Sidebar({
                         e.stopPropagation();
                         onHideChat?.(chat.id, e);
                       }}
-                      data-testid={`button-unhide-${chat.id}`}
+                      data-testid={`button - unhide - ${chat.id} `}
                     >
                       <Eye className="h-3 w-3" />
                     </Button>
@@ -1128,7 +1140,7 @@ export function Sidebar({
       <DeleteConfirmDialog
         open={deletingProject !== null}
         onOpenChange={(open) => !open && setDeletingProject(null)}
-        title={`¿Eliminar "${deletingProject?.name}"?`}
+        title={`¿Eliminar "${deletingProject?.name}" ? `}
         description="Esta acción no se puede deshacer. Se eliminarán todos los datos del proyecto incluyendo el prompt y los archivos adjuntos."
         onConfirm={() => {
           if (deletingProject) {
