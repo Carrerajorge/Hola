@@ -4726,7 +4726,8 @@ IMPORTANTE:
                 setAiProcessSteps([]);
                 agent.complete();
                 abortControllerRef.current = null;
-              }, 15);
+              }
+            }, 15);
 
           }
         }
