@@ -3446,12 +3446,15 @@ export function ChatInterface({
     const attachments = uploadedFiles
       .filter((f: any) => f.status === "ready" || f.status === "processing")
       .map((f: any) => ({
-        type: f.type.startsWith("image/") ? "image" as const :
-          f.type.includes("word") || f.type.includes("document") ? "word" as const :
-            f.type.includes("sheet") || f.type.includes("excel") ? "excel" as const :
-              f.type.includes("presentation") || f.type.includes("powerpoint") ? "ppt" as const :
-                "word" as const,
+        type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
         name: f.name,
+        documentType: (() => {
+          if (f.type.startsWith("image/")) return undefined;
+          if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+          if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+          if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+          return "word"; // default to word for text/docs
+        })() as "word" | "excel" | "ppt" | "pdf", // Cast to allow pdf
         mimeType: f.type,
         imageUrl: f.dataUrl,
         storagePath: f.storagePath,

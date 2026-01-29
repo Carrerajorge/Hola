@@ -429,11 +429,12 @@ export const AttachmentList = memo(function AttachmentList({
                                 "flex items-center justify-center w-8 h-8 rounded-lg",
                                 att.documentType === "word" && "bg-blue-600",
                                 att.documentType === "excel" && "bg-green-600",
-                                att.documentType === "ppt" && "bg-orange-500"
+                                att.documentType === "ppt" && "bg-orange-500",
+                                att.documentType === "pdf" && "bg-red-600"
                             )}
                         >
                             <span className="text-white text-xs font-bold">
-                                {att.documentType === "word" ? "W" : att.documentType === "excel" ? "E" : "P"}
+                                {att.documentType === "word" ? "W" : att.documentType === "excel" ? "E" : att.documentType === "ppt" ? "P" : "PDF"}
                             </span>
                         </div>
                         <div className="flex flex-col min-w-0">

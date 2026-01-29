@@ -157,7 +157,7 @@ export function ChatHeader({
                         selectedModelId={selectedModelId}
                         setSelectedModelId={setSelectedModelId}
                         modelsByProvider={modelsByProvider}
-                        activeGptName={activeGpt?.name} // Pass name wrapper if needed (e.g. system wrapper)
+                        activeGptName={activeGpt?.name === 'ILIAGPT' ? undefined : activeGpt?.name}
                     />
                 )}
             </div>
