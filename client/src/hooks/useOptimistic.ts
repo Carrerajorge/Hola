@@ -29,7 +29,7 @@ export function useDebouncedCallback<T extends (...args: any[]) => any>(
     callback: T,
     delay: number
 ): (...args: Parameters<T>) => void {
-    const timeoutRef = useRef<NodeJS.Timeout>();
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         return () => {
@@ -61,17 +61,17 @@ export function useDebouncedFunction<T extends (...args: any[]) => any>(
     flush: () => void;
 } {
     const { leading = false, trailing = true } = options;
-    const timeoutRef = useRef<NodeJS.Timeout>();
-    const lastArgsRef = useRef<Parameters<T>>();
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const lastArgsRef = useRef<Parameters<T> | null>(null);
     const hasLeadingRef = useRef(false);
 
     const cancel = useCallback(() => {
         if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
-            timeoutRef.current = undefined;
+            timeoutRef.current = null;
         }
         hasLeadingRef.current = false;
-        lastArgsRef.current = undefined;
+        lastArgsRef.current = null;
     }, []);
 
     const flush = useCallback(() => {
@@ -135,7 +135,7 @@ export function useThrottledCallback<T extends (...args: any[]) => any>(
     limit: number
 ): (...args: Parameters<T>) => void {
     const lastRan = useRef(0);
-    const timeoutRef = useRef<NodeJS.Timeout>();
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         return () => {
@@ -155,7 +155,7 @@ export function useThrottledCallback<T extends (...args: any[]) => any>(
         } else if (!timeoutRef.current) {
             timeoutRef.current = setTimeout(() => {
                 lastRan.current = Date.now();
-                timeoutRef.current = undefined;
+                timeoutRef.current = null;
                 callback(...args);
             }, remaining);
         }

@@ -8,7 +8,16 @@
  * - Deferred values
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue } from 'react';
+import {
+    useState,
+    useEffect,
+    useCallback,
+    useRef,
+    useMemo,
+    useDeferredValue,
+    type DependencyList,
+    type RefCallback,
+} from 'react';
 
 // ============================================================================
 // Debounce
@@ -40,7 +49,7 @@ export function useDebouncedCallback<T extends (...args: any[]) => any>(
     callback: T,
     delay: number = 300
 ): T {
-    const timeoutRef = useRef<NodeJS.Timeout>();
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
     const callbackRef = useRef(callback);
 
     // Update ref when callback changes
@@ -82,7 +91,7 @@ export function useThrottledCallback<T extends (...args: any[]) => any>(
     delay: number = 300
 ): T {
     const lastRunRef = useRef<number>(0);
-    const timeoutRef = useRef<NodeJS.Timeout>();
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
     const callbackRef = useRef(callback);
 
     useEffect(() => {
@@ -102,7 +111,7 @@ export function useThrottledCallback<T extends (...args: any[]) => any>(
                 timeoutRef.current = setTimeout(() => {
                     lastRunRef.current = Date.now();
                     callbackRef.current(...args);
-                    timeoutRef.current = undefined;
+                    timeoutRef.current = null;
                 }, delay - timeSinceLastRun);
             }
         }
@@ -149,7 +158,7 @@ export function useDeferredSearch(searchTerm: string): {
  * Track previous value of a variable
  */
 export function usePrevious<T>(value: T): T | undefined {
-    const ref = useRef<T>();
+    const ref = useRef<T | undefined>(undefined);
 
     useEffect(() => {
         ref.current = value;
@@ -186,7 +195,7 @@ export function useStableCallback<T extends (...args: any[]) => any>(callback: T
  */
 export function useMemoizedList<T extends { id: string }>(
     items: T[],
-    deps: React.DependencyList = []
+    deps: DependencyList = []
 ): T[] {
     const prevItemsRef = useRef<Map<string, T>>(new Map());
 
@@ -221,7 +230,7 @@ export function useMemoizedList<T extends { id: string }>(
  */
 export function useIntersectionObserver(
     options: IntersectionObserverInit = {}
-): [React.RefCallback<Element>, boolean] {
+): [RefCallback<Element>, boolean] {
     const [isVisible, setIsVisible] = useState(false);
     const [element, setElement] = useState<Element | null>(null);
 
