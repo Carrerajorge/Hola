@@ -59,7 +59,7 @@ export function createGptRouter() {
     try {
       const currentUserId = getOrCreateSecureUserId(req);
       const allGpts = await storage.getGpts();
-      
+
       const accessibleGpts = allGpts.filter(gpt => {
         if (gpt.visibility === 'public') return true;
         if (gpt.creatorId === currentUserId) return true;
@@ -68,7 +68,7 @@ export function createGptRouter() {
         }
         return false;
       });
-      
+
       res.json(accessibleGpts);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -83,16 +83,16 @@ export function createGptRouter() {
       if (visibility) filters.visibility = visibility as string;
       if (categoryId) filters.categoryId = categoryId as string;
       if (creatorId) filters.creatorId = creatorId as string;
-      
+
       let gptList = await storage.getGpts(Object.keys(filters).length > 0 ? filters : undefined);
-      
+
       gptList = gptList.filter(gpt => {
         if (gpt.visibility === 'public') return true;
         if (gpt.creatorId === currentUserId) return true;
         if (gpt.visibility === 'team' && gpt.creatorId === currentUserId) return true;
         return false;
       });
-      
+
       res.json(gptList);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -111,21 +111,21 @@ export function createGptRouter() {
 
   router.post("/gpts", async (req, res) => {
     try {
-      const { 
+      const {
         name, slug, description, avatar, categoryId, creatorId,
         visibility, systemPrompt, temperature, topP, maxTokens,
         welcomeMessage, capabilities, conversationStarters, isPublished
       } = req.body;
-      
+
       if (!name || !slug || !systemPrompt) {
         return res.status(400).json({ error: "name, slug, and systemPrompt are required" });
       }
-      
+
       const existing = await storage.getGptBySlug(slug);
       if (existing) {
         return res.status(409).json({ error: "A GPT with this slug already exists" });
       }
-      
+
       const gpt = await storage.createGpt({
         name,
         slug,
@@ -144,7 +144,7 @@ export function createGptRouter() {
         isPublished: isPublished || "false",
         version: 1
       });
-      
+
       await storage.createGptVersion({
         gptId: gpt.id,
         versionNumber: 1,
@@ -155,7 +155,7 @@ export function createGptRouter() {
         changeNotes: "Initial version",
         createdBy: creatorId || null
       });
-      
+
       res.json(gpt);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -184,8 +184,17 @@ export function createGptRouter() {
       if (!allowed) {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
-      
+
       const updates = req.body;
+
+      // Check for slug collision if slug is being updated
+      if (updates.slug) {
+        const existing = await storage.getGptBySlug(updates.slug);
+        if (existing && existing.id !== req.params.id) {
+          return res.status(409).json({ error: "Ya existe un GPT con este nombre/slug. Por favor elige otro nombre." });
+        }
+      }
+
       const updatedGpt = await storage.updateGpt(req.params.id, updates);
       res.json(updatedGpt);
     } catch (error: any) {
@@ -199,7 +208,7 @@ export function createGptRouter() {
       if (!allowed) {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
-      
+
       await storage.deleteGpt(req.params.id);
       res.json({ success: true });
     } catch (error: any) {
@@ -228,14 +237,14 @@ export function createGptRouter() {
   router.post("/gpts/:id/versions", async (req, res) => {
     try {
       const { systemPrompt, temperature, topP, maxTokens, changeNotes, createdBy } = req.body;
-      
+
       if (!systemPrompt) {
         return res.status(400).json({ error: "systemPrompt is required" });
       }
-      
+
       const latestVersion = await storage.getLatestGptVersion(req.params.id);
       const newVersionNumber = latestVersion ? latestVersion.versionNumber + 1 : 1;
-      
+
       const version = await storage.createGptVersion({
         gptId: req.params.id,
         versionNumber: newVersionNumber,
@@ -246,7 +255,7 @@ export function createGptRouter() {
         changeNotes: changeNotes || null,
         createdBy: createdBy || null
       });
-      
+
       await storage.updateGpt(req.params.id, {
         version: newVersionNumber,
         systemPrompt,
@@ -254,7 +263,7 @@ export function createGptRouter() {
         topP: topP || "1",
         maxTokens: maxTokens || 4096
       });
-      
+
       res.json(version);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -277,13 +286,13 @@ export function createGptRouter() {
       if (!allowed) {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
-      
+
       const { fileName, fileType, fileSize, storageUrl, contentHash, extractedText, embeddingStatus, metadata } = req.body;
-      
+
       if (!fileName || !fileType || !fileSize || !storageUrl) {
         return res.status(400).json({ error: "fileName, fileType, fileSize, and storageUrl are required" });
       }
-      
+
       const knowledge = await storage.createGptKnowledge({
         gptId: req.params.id,
         fileName,
@@ -308,7 +317,7 @@ export function createGptRouter() {
       if (!allowed) {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
-      
+
       const updates = req.body;
       const knowledge = await storage.updateGptKnowledge(req.params.knowledgeId, updates);
       if (!knowledge) {
@@ -326,7 +335,7 @@ export function createGptRouter() {
       if (!allowed) {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
-      
+
       await storage.deleteGptKnowledge(req.params.knowledgeId);
       res.json({ success: true });
     } catch (error: any) {
@@ -350,17 +359,17 @@ export function createGptRouter() {
       if (!allowed) {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
-      
-      const { 
-        name, description, actionType, httpMethod, endpoint, 
-        headers, bodyTemplate, responseMapping, authType, authConfig, 
-        parameters, rateLimit, timeout 
+
+      const {
+        name, description, actionType, httpMethod, endpoint,
+        headers, bodyTemplate, responseMapping, authType, authConfig,
+        parameters, rateLimit, timeout
       } = req.body;
-      
+
       if (!name || !endpoint) {
         return res.status(400).json({ error: "name and endpoint are required" });
       }
-      
+
       const action = await storage.createGptAction({
         gptId: req.params.id,
         name,
@@ -390,7 +399,7 @@ export function createGptRouter() {
       if (!allowed) {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
-      
+
       const updates = req.body;
       const action = await storage.updateGptAction(req.params.actionId, updates);
       if (!action) {
@@ -408,7 +417,7 @@ export function createGptRouter() {
       if (!allowed) {
         return res.status(error === "GPT not found" ? 404 : 403).json({ error });
       }
-      
+
       await storage.deleteGptAction(req.params.actionId);
       res.json({ success: true });
     } catch (error: any) {
@@ -431,20 +440,20 @@ export function createGptRouter() {
       if (!gpt) {
         return res.status(404).json({ error: "GPT not found" });
       }
-      
+
       let creator = null;
       if (gpt.creatorId) {
         creator = await storage.getUser(gpt.creatorId);
       }
-      
+
       const conversationCount = await storage.getGptConversationCount(req.params.id);
-      
+
       let relatedGpts: any[] = [];
       if (gpt.creatorId) {
         const allCreatorGpts = await storage.getGpts({ creatorId: gpt.creatorId });
         relatedGpts = allCreatorGpts.filter(g => g.id !== gpt.id).slice(0, 10);
       }
-      
+
       res.json({
         gpt,
         creator: creator ? {

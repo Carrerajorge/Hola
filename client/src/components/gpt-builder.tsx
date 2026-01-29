@@ -265,12 +265,13 @@ export function GptBuilder({ open, onOpenChange, editingGpt, onSave }: GptBuilde
         // onSave is called when modal closes to prevent parent from closing builder
         setShowUpdateModal(true);
       } else {
-        throw new Error("Error al guardar");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Error al guardar");
       }
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Error",
-        description: "No se pudo guardar el GPT",
+        description: error.message || "No se pudo guardar el GPT",
         variant: "destructive"
       });
     } finally {

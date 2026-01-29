@@ -3,14 +3,14 @@ import { GoogleGenAI } from "@google/genai";
 const apiKey = process.env.GEMINI_API_KEY || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "";
 const baseURL = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
 
-const ai = new GoogleGenAI({ 
+const ai = new GoogleGenAI({
   apiKey,
   ...(baseURL ? { baseURL } : {})
 });
 
 const IMAGE_MODELS = [
-  "models/gemini-2.5-flash-image",
-  "gemini-2.0-flash-exp-image-generation",
+  "gemini-2.0-flash-exp",
+  "gemini-2.0-pro-exp-02-05",
 ];
 
 export interface ImageGenerationResult {
@@ -23,18 +23,18 @@ export interface ImageGenerationResult {
 export async function generateImage(prompt: string): Promise<ImageGenerationResult> {
   const startTime = Date.now();
   console.log(`[ImageGeneration] Starting generation for prompt: "${prompt.slice(0, 100)}..."`);
-  
+
   if (!apiKey) {
     console.error("[ImageGeneration] No API key configured (GEMINI_API_KEY or AI_INTEGRATIONS_GEMINI_API_KEY)");
     throw new Error("Image generation not configured - missing API key");
   }
 
   let lastError: Error | null = null;
-  
+
   for (const model of IMAGE_MODELS) {
     try {
       console.log(`[ImageGeneration] Trying model: ${model}`);
-      
+
       const response = await ai.models.generateContent({
         model,
         contents: [
@@ -49,7 +49,7 @@ export async function generateImage(prompt: string): Promise<ImageGenerationResu
       });
 
       const parts = response.candidates?.[0]?.content?.parts;
-      
+
       if (!parts || parts.length === 0) {
         console.log(`[ImageGeneration] Model ${model} returned no parts, trying next...`);
         continue;
@@ -67,7 +67,7 @@ export async function generateImage(prompt: string): Promise<ImageGenerationResu
           };
         }
       }
-      
+
       console.log(`[ImageGeneration] Model ${model} returned parts but no image data, trying next...`);
     } catch (error: any) {
       console.error(`[ImageGeneration] Model ${model} failed:`, error.message);
@@ -92,7 +92,7 @@ export async function editImage(
 ): Promise<ImageEditResult> {
   const startTime = Date.now();
   console.log(`[ImageGeneration] Starting edit for prompt: "${editPrompt.slice(0, 100)}..."`);
-  
+
   if (!apiKey) {
     console.error("[ImageGeneration] No API key configured");
     throw new Error("Image generation not configured - missing API key");
@@ -104,11 +104,11 @@ export async function editImage(
   ];
 
   let lastError: Error | null = null;
-  
+
   for (const model of EDIT_MODELS) {
     try {
       console.log(`[ImageGeneration] Trying edit with model: ${model}`);
-      
+
       const response = await ai.models.generateContent({
         model,
         contents: [
@@ -131,7 +131,7 @@ export async function editImage(
       });
 
       const parts = response.candidates?.[0]?.content?.parts;
-      
+
       if (!parts || parts.length === 0) {
         console.log(`[ImageGeneration] Edit model ${model} returned no parts, trying next...`);
         continue;
@@ -149,7 +149,7 @@ export async function editImage(
           };
         }
       }
-      
+
       console.log(`[ImageGeneration] Edit model ${model} returned parts but no image data, trying next...`);
     } catch (error: any) {
       console.error(`[ImageGeneration] Edit model ${model} failed:`, error.message);
@@ -174,7 +174,7 @@ export interface ImageIntentResult {
 
 export function classifyImageIntent(message: string, hasLastImage: boolean): ImageIntentResult {
   const lowerMessage = message.toLowerCase();
-  
+
   // Patterns that indicate editing the last image (implicit or explicit)
   const editLastPatterns = [
     // Spanish - explicit image reference
@@ -183,7 +183,7 @@ export function classifyImageIntent(message: string, hasLastImage: boolean): Ima
     /\bpon(le|er)?\s+/i,
     /\bagrega(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
     /\bcambia(r|le)?\s+(a\s+)?(la\s+)?imagen/i,
-    
+
     // Spanish - IMPLICIT edit commands (when hasLastImage is true, these imply editing the last image)
     /\bagrega\s+(a\s+)?[A-Z]/i,                   // "agrega a Cristiano", "agrega un árbol"
     /\bañade\s+(a\s+)?[A-Z]/i,                    // "añade a Messi"
@@ -193,10 +193,10 @@ export function classifyImageIntent(message: string, hasLastImage: boolean): Ima
     /\b(en\s+el\s+)?(costado|lado|fondo|frente)\b/i,
     /\bcámbia(le|r)?\s+(el|la|los|las)\s+\w+/i,   // "cámbiale el color", "cambiar el fondo"
     /\bhaz(le|lo)?\s+más\s+\w+/i,                 // "hazlo más grande", "hazle más brillante"
-    
+
     // English - explicit
     /\b(edit|modify|change|adjust|fix)\s+(the\s+)?(last|previous|that|this)\s*(image|photo)?/i,
-    
+
     // English - implicit edit commands
     /\badd\s+[A-Z]/i,                             // "add Ronaldo", "add a tree"
     /\bput\s+[A-Z]/i,                             // "put Messi"
@@ -204,13 +204,13 @@ export function classifyImageIntent(message: string, hasLastImage: boolean): Ima
     /\b(on\s+the\s+)?(side|left|right|background|front)\b/i,
     /\bmake\s+(it|the\s+\w+)\s+more\s+\w+/i,      // "make it more colorful"
   ];
-  
+
   const editSpecificPatterns = [
     /\bedita(r)?\s+(la\s+)?imagen\s+(número|#|id:?\s*)\d+/i,
     /\bedit\s+(image|photo)\s+(number|#|id:?\s*)\d+/i,
     /\bmodifica(r)?\s+(la\s+)?imagen\s+\d+/i,
   ];
-  
+
   for (const pattern of editSpecificPatterns) {
     if (pattern.test(message)) {
       const idMatch = message.match(/\d+/);
@@ -222,7 +222,7 @@ export function classifyImageIntent(message: string, hasLastImage: boolean): Ima
       };
     }
   }
-  
+
   for (const pattern of editLastPatterns) {
     if (pattern.test(message) && hasLastImage) {
       return {
@@ -233,7 +233,7 @@ export function classifyImageIntent(message: string, hasLastImage: boolean): Ima
       };
     }
   }
-  
+
   return {
     mode: 'generate',
     prompt: message,
@@ -244,7 +244,7 @@ export function classifyImageIntent(message: string, hasLastImage: boolean): Ima
 
 export function detectImageRequest(message: string): boolean {
   const lowerMessage = message.toLowerCase();
-  
+
   // Negative indicators: structured content that should NOT trigger image generation
   const structuredContentKeywords = [
     'tabla', 'table', 'tablas', 'tables',
@@ -269,12 +269,12 @@ export function detectImageRequest(message: string): boolean {
     'celdas', 'cells',
     '10x10', '5x5', '3x3', // Table dimensions
   ];
-  
+
   // Check for structured content keywords first (negative indicators)
-  const hasStructuredContent = structuredContentKeywords.some(keyword => 
+  const hasStructuredContent = structuredContentKeywords.some(keyword =>
     lowerMessage.includes(keyword)
   );
-  
+
   if (hasStructuredContent) {
     // Only generate image if there's explicit image-specific noun
     const explicitImageNouns = [
@@ -288,7 +288,7 @@ export function detectImageRequest(message: string): boolean {
     ];
     return explicitImageNouns.some(pattern => pattern.test(message));
   }
-  
+
   // Positive indicators: image-specific patterns
   const imagePatterns = [
     /\b(genera|crea|dibuja|haz|hazme|dame|quiero|necesito|podr[ií]as)\b.{0,20}\b(imagen|foto|ilustraci[oó]n|dibujo|arte|retrato|paisaje)\b/i,
@@ -308,10 +308,10 @@ export function extractImagePrompt(message: string): string {
     .replace(/^(genera|crea|dibuja|haz|hazme|dame|quiero|necesito|podrías|generate|create|make|draw|give me|i want|i need|can you)\s*/i, "")
     .replace(/\b(una?\s+)?(imagen|image|picture|photo|ilustración|illustration|dibujo|drawing)\s*(de|of|with)?\s*/gi, "")
     .trim();
-  
+
   if (prompt.length < 5) {
     prompt = message;
   }
-  
+
   return prompt;
 }

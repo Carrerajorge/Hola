@@ -1400,13 +1400,13 @@ export function ChatInterface({
     handleStopChatRef.current = handleStopChat;
   });
 
-  const handleCopyMessage = (content: string, msgId?: string) => {
+  const handleCopyMessage = useCallback((content: string, msgId?: string) => {
     navigator.clipboard.writeText(content);
     if (msgId) {
       setCopiedMessageId(msgId);
       setTimeout(() => setCopiedMessageId(null), 2000);
     }
-  };
+  }, []);
 
   const startVoiceRecording = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -1550,18 +1550,18 @@ export function ChatInterface({
     }
   };
 
-  const handleOpenDocumentPreview = (doc: DocumentBlock) => {
+  const handleOpenDocumentPreview = useCallback((doc: DocumentBlock) => {
     setPreviewDocument(doc);
     setEditedDocumentContent(doc.content);
-  };
+  }, []);
 
-  const handleCloseDocumentPreview = () => {
+  const handleCloseDocumentPreview = useCallback(() => {
     setPreviewDocument(null);
     setEditedDocumentContent("");
     setTextSelection(null);
     setEditingSelectionText("");
     setOriginalSelectionText("");
-  };
+  }, []);
 
   const handleSelectionChange = (selection: TextSelection | null) => {
     if (selection && selection.text.trim()) {
@@ -1607,7 +1607,7 @@ export function ChatInterface({
     applyRewriteRef.current = null;
   };
 
-  const handleDownloadDocument = async (doc: DocumentBlock) => {
+  const handleDownloadDocument = useCallback(async (doc: DocumentBlock) => {
     try {
       const documentToDownload = {
         ...doc,
@@ -1638,18 +1638,18 @@ export function ChatInterface({
     } catch (error) {
       console.error("Document download error:", error);
     }
-  };
+  }, [editedDocumentContent]);
 
-  const handleDownloadImage = (imageData: string) => {
+  const handleDownloadImage = useCallback((imageData: string) => {
     const link = document.createElement("a");
     link.href = imageData;
     link.download = `imagen-generada-${Date.now()}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
+  }, []);
 
-  const handleOpenFileAttachmentPreview = async (att: {
+  const handleOpenFileAttachmentPreview = useCallback(async (att: {
     type: string;
     name: string;
     mimeType?: string;
@@ -1708,7 +1708,7 @@ export function ChatInterface({
       isProcessing: false,
       content: "No se pudo cargar el contenido del archivo.",
     } : null);
-  };
+  }, []);
 
   const handleCopyAttachmentContent = async () => {
     if (previewFileAttachment?.content) {
@@ -1736,14 +1736,14 @@ export function ChatInterface({
     }
   };
 
-  const handleFeedback = (msgId: string, value: "up" | "down") => {
+  const handleFeedback = useCallback((msgId: string, value: "up" | "down") => {
     setMessageFeedback((prev: any) => ({
       ...prev,
       [msgId]: prev[msgId] === value ? null : value
     }));
-  };
+  }, []);
 
-  const handleShare = async (content: string) => {
+  const handleShare = useCallback(async (content: string) => {
     if (navigator.share) {
       try {
         await navigator.share({
@@ -1756,9 +1756,9 @@ export function ChatInterface({
     } else {
       navigator.clipboard.writeText(content);
     }
-  };
+  }, []);
 
-  const handleReadAloud = (msgId: string, content: string) => {
+  const handleReadAloud = useCallback((msgId: string, content: string) => {
     if (speakingMessageId === msgId) {
       speechSynthesis.cancel();
       setSpeakingMessageId(null);
@@ -1770,9 +1770,9 @@ export function ChatInterface({
       speechSynthesis.speak(utterance);
       setSpeakingMessageId(msgId);
     }
-  };
+  }, [speakingMessageId]);
 
-  const handleRegenerate = async (msgIndex: number, instruction?: string) => {
+  const handleRegenerate = useCallback(async (msgIndex: number, instruction?: string) => {
     const prevMessages = messages.slice(0, msgIndex);
     const lastUserMsgIndex = [...prevMessages].reverse().findIndex(m => m.role === "user");
     if (lastUserMsgIndex === -1) return;
@@ -1936,7 +1936,7 @@ export function ChatInterface({
       setAiState("idle");
       abortControllerRef.current = null;
     }
-  };
+  }, [messages, chatId, onTruncateMessagesAt, selectedProvider, selectedModel]);
 
   const handleAgentCancel = useCallback(async (messageId: string, runId: string) => {
     try {
@@ -2016,17 +2016,17 @@ export function ChatInterface({
     };
   }, [chatId, agentStore, startAgentRun, toast]);
 
-  const handleStartEdit = (msg: Message) => {
+  const handleStartEdit = useCallback((msg: Message) => {
     setEditingMessageId(msg.id);
     setEditContent(msg.content);
-  };
+  }, []);
 
-  const handleCancelEdit = () => {
+  const handleCancelEdit = useCallback(() => {
     setEditingMessageId(null);
     setEditContent("");
-  };
+  }, []);
 
-  const handleSendEdit = async (msgId: string) => {
+  const handleSendEdit = useCallback(async (msgId: string) => {
     if (!editContent.trim()) return;
 
     const msgIndex = messages.findIndex(m => m.id === msgId);
@@ -2102,7 +2102,7 @@ export function ChatInterface({
       setAiState("idle");
       abortControllerRef.current = null;
     }
-  };
+  }, [editContent, messages, chatId, onEditMessageAndTruncate, selectedProvider, selectedModel, onSendMessage]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -3366,15 +3366,72 @@ export function ChatInterface({
       return;
     }
 
+    // -------------------------------------------------------------------------
+    // 1. OPTIMISTIC UI: IMMEDIATE UPDATE (0ms LATENCY)
+    // -------------------------------------------------------------------------
+    // Capture state immediately
+    const userInput = input;
+    const currentUploadedFiles = [...uploadedFiles];
+    const userMsgId = Date.now().toString();
+
+    // Reset UI state immediately
+    setInput("");
+    if (chatId) clearDraft(chatId);
+    setUploadedFiles([]);
+
+    // Process attachments for message construction
+    const attachments = currentUploadedFiles
+      .filter((f: any) => f.status === "ready" || f.status === "processing")
+      .map((f: any) => ({
+        type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
+        name: f.name,
+        documentType: (() => {
+          if (f.type.startsWith("image/")) return undefined;
+          if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
+          if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
+          if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
+          return "word"; // default to word for text/docs
+        })() as "word" | "excel" | "ppt" | "pdf",
+        mimeType: f.type,
+        imageUrl: f.dataUrl,
+        storagePath: f.storagePath,
+        fileId: f.id,
+        spreadsheetData: f.spreadsheetData,
+      }));
+
+    // Construct the User Message object
+    const userMsg: Message = {
+      id: userMsgId,
+      role: "user",
+      content: userInput,
+      timestamp: new Date(),
+      requestId: generateRequestId(),
+      clientRequestId: generateClientRequestId(),
+      status: 'pending',
+      attachments: attachments.length > 0 ? attachments : undefined,
+    };
+
+    // Apply Optimistic Update IMMEDIATELY
+    setOptimisticMessages((prev: Message[]) => [...prev, userMsg]);
+
+    // Set initial AI state
+    setAiState("thinking");
+    streamingContentRef.current = "";
+    setStreamingContent("");
+
+    // -------------------------------------------------------------------------
+    // 2. ASYNC LOGIC (Agent Mode / Server Request)
+    // -------------------------------------------------------------------------
+
     // Auto-detect if task requires Agent mode (only for non-generation complex tasks)
-    const hasAttachedFiles = uploadedFiles.length > 0;
-    const complexityCheck = shouldAutoActivateAgent(input, hasAttachedFiles);
+    // Use captured state (userInput, currentUploadedFiles) not component state
+    const hasAttachedFiles = currentUploadedFiles.length > 0;
+    const complexityCheck = shouldAutoActivateAgent(userInput, hasAttachedFiles);
 
     if (!isGenerationRequest && complexityCheck.agent_required && complexityCheck.confidence === 'high') {
-      console.log("[handleSubmit] Auto-activating Agent mode:", complexityCheck.agent_reason);
 
-      const userMessageContent = input;
-      const readyFiles = uploadedFiles.filter((f: any) => f.status === "ready");
+
+      const readyFiles = currentUploadedFiles.filter((f: any) => f.status === "ready");
       const agentAttachments = readyFiles.map((f: any) => ({
         id: f.id,
         name: f.name,
@@ -3382,19 +3439,13 @@ export function ChatInterface({
         spreadsheetData: f.spreadsheetData
       }));
 
-      setInput("");
-      if (chatId) {
-        clearDraft(chatId);
-      }
-      setUploadedFiles([]);
-
       const agentMessageId = `agent-${Date.now()}`;
       setCurrentAgentMessageId(agentMessageId);
 
       try {
         const result = await startAgentRun(
           chatId || "",
-          userMessageContent,
+          userInput,
           agentMessageId,
           agentAttachments
         );
@@ -3406,35 +3457,24 @@ export function ChatInterface({
             duration: 4000,
           });
 
-          const userMessage: Message = {
-            id: `user-${Date.now()}`,
-            role: "user",
-            content: userMessageContent,
-            timestamp: new Date(),
-          };
-          // Show message immediately (optimistic update)
-          setOptimisticMessages((prev: Message[]) => [...prev, userMessage]);
-          onSendMessage(userMessage);
+          // Optimistic message already added above! just notify parent/server if needed
+          onSendMessage(userMsg);
 
           setSelectedTool(null);
           if (result.chatId && (!chatId || chatId.startsWith("pending-") || chatId === "")) {
             window.dispatchEvent(new CustomEvent("select-chat", { detail: { chatId: result.chatId, preserveKey: true } }));
           }
         } else {
-          // Agent failed - DON'T return, fall through to normal chat processing
-          console.log("[handleSubmit] Agent mode failed, falling back to chat");
-          setInput(userMessageContent);
-          setUploadedFiles(readyFiles);
+          // Agent failed - Fall through to normal chat processing
+
+          // No need to reset input/files, as message is already "sent" optimistically. 
+          // Just ensure onSendMessage runs below for the normal path.
           setCurrentAgentMessageId(null);
-          // Continue to normal chat processing below instead of returning
         }
       } catch (error) {
         console.error("Failed to auto-start agent run:", error);
-        // Agent failed - DON'T return, fall through to normal chat processing
-        setInput(userMessageContent);
-        setUploadedFiles(readyFiles);
         setCurrentAgentMessageId(null);
-        // Continue to normal chat processing below instead of returning
+        // Fall through to normal chat
       }
 
       // Only return if agent succeeded (result is truthy)
@@ -3443,36 +3483,11 @@ export function ChatInterface({
       }
     }
 
-    const attachments = uploadedFiles
-      .filter((f: any) => f.status === "ready" || f.status === "processing")
-      .map((f: any) => ({
-        type: (f.type.startsWith("image/") ? "image" : "document") as "image" | "document",
-        name: f.name,
-        documentType: (() => {
-          if (f.type.startsWith("image/")) return undefined;
-          if (f.type.includes("pdf") || f.name.toLowerCase().endsWith(".pdf")) return "pdf";
-          if (f.type.includes("sheet") || f.type.includes("excel") || f.type.includes("csv") || f.name.match(/\.(xlsx|xls|csv)$/i)) return "excel";
-          if (f.type.includes("presentation") || f.type.includes("powerpoint") || f.name.match(/\.(pptx|ppt)$/i)) return "ppt";
-          return "word"; // default to word for text/docs
-        })() as "word" | "excel" | "ppt" | "pdf", // Cast to allow pdf
-        mimeType: f.type,
-        imageUrl: f.dataUrl,
-        storagePath: f.storagePath,
-        fileId: f.id,
-        spreadsheetData: f.spreadsheetData,
-      }));
 
-    // Set thinking state FIRST to show stop button immediately
-    setAiState("thinking");
-    streamingContentRef.current = "";
-    setStreamingContent("");
-
-    const userInput = input;
-    const currentFiles = [...uploadedFiles];
-
+    // Regular Chat Flow (or fallback from failed Agent Mode)
     // Reset uiPhase to 'idle' for regular (non-Super Agent) messages
     if (uiPhase !== 'idle') {
-      console.log('[uiPhase] Reset to idle for regular message');
+
       setUiPhase('idle');
     }
     // Clear any pending uiPhase timer
@@ -3490,41 +3505,13 @@ export function ChatInterface({
     initialSteps.push({ step: "Buscando información relevante", status: "pending" });
     initialSteps.push({ step: "Generando respuesta", status: "pending" });
     setAiProcessSteps(initialSteps);
-    setInput("");
-    if (chatId) {
-      clearDraft(chatId);
-    }
-    setUploadedFiles([]);
 
-    // Generate unique IDs for idempotency
-    // userMsgId is already defined above, reusing it
-    const userMsgId = Date.now().toString();
-    const userRequestId = generateRequestId(); // Unique ID for user message
-    const clientRequestId = generateClientRequestId(); // For run-based idempotency
-    // Note: Each assistant message generates its own unique requestId inline
-    // Idempotency is handled in addMessage via markRequestProcessing
-
-    const userMsg: Message = {
-      id: userMsgId,
-      role: "user",
-      content: userInput,
-      timestamp: new Date(),
-      requestId: userRequestId,
-      clientRequestId, // For run-based idempotency - creates atomic user message + run
-      status: 'pending',
-      attachments: attachments.length > 0 ? attachments : undefined,
-    };
+    // NOTE: Input/Files already reset and UserMessage already constructed above.
 
     console.log("[handleSubmit] sending user message:", userMsg, "chatId:", chatId);
+    // Optimistic update ALREAD done. just send to parent/server.
+    // onSendMessage calls useChats.addMessage which handles server request
 
-    // CRITICAL: Add user message to UI IMMEDIATELY (optimistic update)
-    // This ensures the user sees their message with attachments right away,
-    // before any async operations like document analysis begin
-    console.log("[handleSubmit] Adding optimistic message, current count:", optimisticMessages.length);
-    setOptimisticMessages((prev: Message[]) => {
-      console.log("[handleSubmit] setOptimisticMessages: prev count:", prev.length, "adding:", userMsg.id);
-      return [...prev, userMsg];
-    });
 
     // DATA_MODE: Pre-check if we have document attachments that need analysis
     // This must happen BEFORE onSendMessage to avoid race conditions with chat navigation
