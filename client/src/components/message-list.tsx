@@ -1054,6 +1054,7 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
   const isPaused = agentRun.status === "paused";
   const isCancelling = agentRun.status === "cancelling";
   const isWaitingForResponse = agentRun.status === "starting" || agentRun.status === "queued";
+  const showObjective = isActive || isPaused;
 
   useEffect(() => {
     if (isActive && eventsEndRef.current) {
@@ -1255,7 +1256,7 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
       </div>
 
       {/* Objective display - show what the agent is working on */}
-      {objective && isActive && (
+      {objective && showObjective && (
         <div className="px-3 py-2 bg-purple-500/5 rounded-lg border border-purple-500/10">
           <div className="flex items-center gap-2 text-xs text-purple-600 dark:text-purple-400 font-medium uppercase tracking-wide mb-1">
             <Target className="h-3 w-3" />
