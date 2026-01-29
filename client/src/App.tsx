@@ -52,6 +52,7 @@ const SystemHealthPage = lazy(() => import("@/pages/admin/SystemHealth"));
 const WorkspaceSettingsPage = lazy(() => import("@/pages/workspace-settings"));
 const WorkspacePage = lazy(() => import("@/pages/workspace"));
 const SkillsPage = lazy(() => import("@/pages/skills"));
+const CodexPage = lazy(() => import("@/pages/codex"));
 const SpreadsheetAnalyzerPage = lazy(() => import("@/pages/SpreadsheetAnalyzer"));
 const MonitoringDashboard = lazy(() => import("@/pages/MonitoringDashboard"));
 const AboutPage = lazy(() => import("@/pages/about"));
@@ -153,6 +154,7 @@ function Router() {
             <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
             <Route path="/workspace" component={WorkspacePage} />
             <Route path="/skills" component={SkillsPage} />
+            <Route path="/codex" component={CodexPage} />
             <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
             <Route path="/monitoring" component={MonitoringDashboard} />
             <Route path="/about" component={AboutPage} />

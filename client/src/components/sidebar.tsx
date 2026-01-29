@@ -31,6 +31,7 @@ import {
   Folder,
   FolderOpen,
   Zap,
+  Code,
   SquarePen,
   Pin,
   Download,
@@ -608,6 +609,15 @@ export function Sidebar({
         >
           <LayoutGrid className="h-4 w-4" />
           Aplicaciones
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 px-2 text-sm font-medium liquid-button"
+          onClick={() => setLocation("/codex")}
+          data-testid="button-codex"
+        >
+          <Code className="h-4 w-4" />
+          Codex
         </Button>
       </div>
 
