@@ -1054,7 +1054,19 @@ const AgentRunContent = memo(function AgentRunContent({ agentRun, onCancel, onRe
   const isPaused = agentRun.status === "paused";
   const isCancelling = agentRun.status === "cancelling";
   const isWaitingForResponse = agentRun.status === "starting" || agentRun.status === "queued";
-  const showObjective = isActive || isPaused;
+  const showObjective = [
+    "starting",
+    "queued",
+    "planning",
+    "running",
+    "verifying",
+    "replanning",
+    "paused",
+    "cancelling",
+    "completed",
+    "failed",
+    "cancelled",
+  ].includes(agentRun.status);
 
   useEffect(() => {
     if (isActive && eventsEndRef.current) {
