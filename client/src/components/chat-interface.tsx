@@ -4719,27 +4719,35 @@ IMPORTANTE:
         }
 
 
-        //   if (error?.name === "AbortError") {
-        //     return;
-        //   }
+      } catch (error: any) {
+        if (error?.name === "AbortError") {
+          return;
+        }
 
-        //   const errorMessage = error?.message || "Error desconocido";
-        //   console.error("Chat error:", error);
+        if (streamIntervalRef.current) {
+          clearInterval(streamIntervalRef.current);
+          streamIntervalRef.current = null;
+        }
 
-        //   const errorMsg: Message = {
-        //     id: (Date.now() + 1).toString(),
-        //     role: "assistant",
-        //     content: `Lo siento, hubo un error al procesar tu mensaje: ${errorMessage}. Por favor intenta de nuevo.`,
-        //     timestamp: new Date(),
-        //     requestId: generateRequestId(),
-        //     userMessageId: userMsgId,
-        //   };
+        const errorMessage = error?.message || "Error desconocido";
+        console.error("Chat error:", error);
 
-        //   onSendMessage(errorMsg);
-        //   setAiState("idle");
-        //   setAiProcessSteps([]);
-        //   abortControllerRef.current = null;
-        // }
+        const errorMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: `Lo siento, hubo un error al procesar tu mensaje: ${errorMessage}. Por favor intenta de nuevo.`,
+          timestamp: new Date(),
+          requestId: generateRequestId(),
+          userMessageId: userMsgId,
+        };
+
+        onSendMessage(errorMsg);
+        setAiState("idle");
+        setAiProcessSteps([]);
+        streamingContentRef.current = "";
+        setStreamingContent("");
+        abortControllerRef.current = null;
+      }
       };
 
       const hasMessages = displayMessages.length > 0;
