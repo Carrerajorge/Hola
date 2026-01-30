@@ -1,4 +1,14 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "path";
+
+// Load environment variables based on NODE_ENV
+const nodeEnv = process.env.NODE_ENV || "development";
+if (nodeEnv === "production") {
+  dotenv.config({ path: path.resolve(process.cwd(), ".env.production") });
+}
+// Also load standard .env as fallback
+dotenv.config();
+
 import { env } from "./config/env"; // Validates env vars immediately on import
 import compression from "compression";
 import express, { type Request, Response, NextFunction } from "express";
