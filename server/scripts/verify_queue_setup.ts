@@ -1,4 +1,4 @@
-import "dotenv/config"; // Load environment variables
+import "../config/load-env"; // Load environment variables
 import { agentQueue, agentWorker } from "../agent/queue/agentQueue";
 import { agentManager } from "../agent/agentOrchestrator";
 

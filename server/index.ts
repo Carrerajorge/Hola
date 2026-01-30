@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./config/load-env";
 import { env } from "./config/env"; // Validates env vars immediately on import
 import compression from "compression";
 import express, { type Request, Response, NextFunction } from "express";
