@@ -70,6 +70,7 @@ import { ALL_TOOLS, SAFE_TOOLS, SYSTEM_TOOLS } from "./agent/langgraph/tools";
 import { getAllAgents, getAgentSummary, SPECIALIZED_AGENTS } from "./agent/langgraph/agents";
 import { createAuthenticatedWebSocketHandler, AuthenticatedWebSocket } from "./lib/wsAuth";
 import { llmGateway } from "./lib/llmGateway";
+import { generateAnonToken } from "./lib/anonToken";
 import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFilterStats } from "./services/contentFilter";
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
@@ -220,16 +221,28 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Initialize Passport
-  app.use(passport.initialize());
-  app.use(passport.session());
+  // Session + Passport (registers express-session before passport.session)
+  await setupAuth(app);
+  registerAuthRoutes(app);
 
   // Passport Auth Routes
   // Google
-  app.get("/api/auth/google", passport.authenticate("google", { scope: ["openid", "email", "profile"] }));
+  app.get("/api/auth/google", passport.authenticate("google", {
+    scope: ["openid", "email", "profile"],
+    prompt: "select_account",
+  }));
   app.get("/api/auth/google/callback",
     passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
-    (req, res) => {
+    (req, res, next) => {
+      if (req.session) {
+        req.session.save((err) => {
+          if (err) {
+            return next(err);
+          }
+          res.redirect("/?auth=success");
+        });
+        return;
+      }
       res.redirect("/?auth=success");
     }
   );
@@ -238,7 +251,16 @@ export async function registerRoutes(
   app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
   app.get("/api/auth/microsoft/callback",
     passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }),
-    (req, res) => {
+    (req, res, next) => {
+      if (req.session) {
+        req.session.save((err) => {
+          if (err) {
+            return next(err);
+          }
+          res.redirect("/?auth=success");
+        });
+        return;
+      }
       res.redirect("/?auth=success");
     }
   );
@@ -247,14 +269,19 @@ export async function registerRoutes(
   app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
   app.get("/api/auth/auth0/callback",
     passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }),
-    (req, res) => {
+    (req, res, next) => {
+      if (req.session) {
+        req.session.save((err) => {
+          if (err) {
+            return next(err);
+          }
+          res.redirect("/?auth=success");
+        });
+        return;
+      }
       res.redirect("/?auth=success");
     }
   );
-
-  // Legacy Replit Auth (Keep if needed, or remove if fully replacing)
-  await setupAuth(app);
-  registerAuthRoutes(app);
 
   // Global Compression Middleware (Gzip)
   app.use(compression);
@@ -280,13 +307,15 @@ export async function registerRoutes(
     }
 
     // For anonymous users, bind ID to session (not header) to prevent impersonation
-    const session = req.session as Partial<Express.Session> & { anonUserId?: string };
-    if (!session.anonUserId) {
-      const sessionId = req.sessionID;
-      session.anonUserId = sessionId ? `anon_${sessionId}` : null;
+    const session = req.session as (Partial<Express.Session> & { anonUserId?: string }) | undefined;
+    if (session) {
+      if (!session.anonUserId) {
+        const sessionId = req.sessionID;
+        session.anonUserId = sessionId ? `anon_${sessionId}` : null;
+      }
     }
 
-    const anonUserId = session.anonUserId;
+    const anonUserId = session?.anonUserId ?? null;
     res.json({
       userId: anonUserId,
       token: anonUserId ? generateAnonToken(anonUserId) : null,
