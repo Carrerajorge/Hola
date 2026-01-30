@@ -1,14 +1,4 @@
-import dotenv from "dotenv";
-import path from "path";
-
-// Load environment-specific .env file first, then .env as fallback.
-// dotenv.config() does NOT override already-set variables, so the more
-// specific file wins when both exist.
-if (process.env.NODE_ENV === "production") {
-  dotenv.config({ path: path.resolve(process.cwd(), ".env.production") });
-}
-dotenv.config(); // Loads .env (fallback / development default)
-
+import "./config/loadEnv"; // Side-effect: loads .env.production / .env BEFORE other imports
 import { env } from "./config/env"; // Validates env vars immediately on import
 import compression from "compression";
 import express, { type Request, Response, NextFunction } from "express";
