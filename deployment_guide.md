@@ -100,9 +100,11 @@ Visita `http://tu-vps-ip` o tu dominio configurado.
 
 ## Paso 5: Desplegar con script (opcional)
 
-Desde tu máquina local, puedes usar `deploy_vps.sh`. Acepta variables para no depender de SSH keys:
+Desde tu máquina local, puedes usar `deploy_vps.sh`. **Ojo:** el script vive en la raíz del repositorio, así que primero ve a esa carpeta y ejecútalo desde ahí. Acepta variables para no depender de SSH keys:
 
 ```bash
+cd /ruta/al/repo/Hola
+
 export VPS_HOST="69.62.98.126"
 export VPS_DIR="/var/www/michat"
 export VPS_GITHUB_TOKEN="ghp_xxx"
@@ -110,3 +112,5 @@ export REPO_HTTPS_URL="https://github.com/Carrerajorge/Hola.git"
 
 ./deploy_vps.sh
 ```
+
+Si lo ejecutas directamente en el VPS, asegúrate de estar dentro del repositorio clonado o usa la ruta completa al script (por ejemplo: `/var/www/michat/deploy_vps.sh`).
