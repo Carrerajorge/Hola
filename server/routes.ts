@@ -220,9 +220,9 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Initialize Passport
-  app.use(passport.initialize());
-  app.use(passport.session());
+  // Initialize session + auth middleware before any passport routes
+  await setupAuth(app);
+  registerAuthRoutes(app);
 
   // Passport Auth Routes
   // Google
@@ -251,10 +251,6 @@ export async function registerRoutes(
       res.redirect("/?auth=success");
     }
   );
-
-  // Legacy Replit Auth (Keep if needed, or remove if fully replacing)
-  await setupAuth(app);
-  registerAuthRoutes(app);
 
   // Global Compression Middleware (Gzip)
   app.use(compression);
