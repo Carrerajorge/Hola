@@ -81,10 +81,17 @@ const __dirname = dirname(__filename);
 "use strict";
 const { pathToFileURL } = require("url");
 const { join } = require("path");
-import(pathToFileURL(join(__dirname, "index.mjs")).href).catch(err => {
-  console.error("Failed to start application:", err);
-  process.exit(1);
-});
+
+console.log("[Wrapper] Starting application...");
+const modulePath = join(__dirname, "index.mjs");
+console.log("[Wrapper] Loading ESM module from:", modulePath);
+
+import(pathToFileURL(modulePath).href)
+  .then(() => console.log("[Wrapper] Module loaded successfully"))
+  .catch(err => {
+    console.error("[Wrapper] Failed to start application:", err);
+    process.exit(1);
+  });
 `;
   await writeFile("dist/index.cjs", startWrapper, "utf-8");
 
