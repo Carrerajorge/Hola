@@ -275,6 +275,17 @@ export function registerAuthRoutes(app: Express): void {
         if (err) {
           console.error("Logout error:", err);
         }
+        if (req.session) {
+          req.session.destroy((destroyErr: any) => {
+            if (destroyErr) {
+              console.error("Session destroy error:", destroyErr);
+            }
+            res.clearCookie("siragpt.sid");
+            res.json({ success: true });
+          });
+          return;
+        }
+        res.clearCookie("siragpt.sid");
         res.json({ success: true });
       });
     } catch (error) {
@@ -291,7 +302,7 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      const userId = req.user.claims?.sub;
+      const userId = req.user.claims?.sub || req.user.id;
       if (!userId) {
         return res.status(401).json({ message: "Unauthorized" });
       }
