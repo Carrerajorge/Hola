@@ -93,6 +93,20 @@ docker compose -f docker-compose.prod.yml up --build -d
 - **Reiniciar solo la app**: `docker compose -f docker-compose.prod.yml restart app`
 - **Parar todo**: `docker compose -f docker-compose.prod.yml down`
 
+### Solución a fallos de `npm ci`
+
+Si `npm ci` falla por desincronización entre `package.json` y `package-lock.json`, actualiza el lock en tu PC y súbelo a GitHub:
+
+```bash
+cd /ruta/al/repo/Hola
+npm install
+git add package-lock.json
+git commit -m "Sync package-lock"
+git push origin main
+```
+
+Luego en el VPS vuelve a ejecutar el despliegue.
+
 ## Verificar el Despliegue
 
 La aplicación debería estar corriendo en el puerto configurado (ej. 80, 443 o 5000).

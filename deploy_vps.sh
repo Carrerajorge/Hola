@@ -23,7 +23,9 @@ else \
   git pull origin main; \
 fi && \
 echo '📦 Instalando dependencias...' && \
-npm ci --include=dev && \
+npm ci --include=dev || \
+(echo '⚠️  npm ci falló. Intentando npm install --include=dev...' && \
+ npm install --include=dev) && \
 echo '🏗️  Compilando...' && \
 npm run build && \
 echo '🗄️  Sincronizando base de datos...' && \
