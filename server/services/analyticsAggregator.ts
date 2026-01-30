@@ -13,9 +13,11 @@ const COST_PER_1K_TOKENS: Record<string, number> = {
 };
 
 const DEFAULT_BUDGET_EUR = "100.00";
+const TABLE_EXISTS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 let aggregatorInterval: NodeJS.Timeout | null = null;
 let isRunning = false;
+const tableExistsCache = new Map<string, { exists: boolean; checkedAt: number }>();
 
 interface ProviderStats {
   provider: string;
@@ -40,9 +42,15 @@ function estimateCost(provider: string, tokensIn: number, tokensOut: number): nu
 }
 
 async function tableExists(tableName: string): Promise<boolean> {
+  const cached = tableExistsCache.get(tableName);
+  if (cached && Date.now() - cached.checkedAt < TABLE_EXISTS_CACHE_TTL_MS) {
+    return cached.exists;
+  }
   const result = await db.execute(sql`select to_regclass(${tableName}) as table_name`);
   const row = result.rows?.[0] as { table_name?: string | null } | undefined;
-  return Boolean(row?.table_name);
+  const exists = Boolean(row?.table_name);
+  tableExistsCache.set(tableName, { exists, checkedAt: Date.now() });
+  return exists;
 }
 
 async function getMissingTables(tableNames: string[]): Promise<string[]> {
