@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "../config/load-env";
 import { initTracing, getTracer } from "../lib/tracing";
 import { Logger } from "../lib/logger";
 

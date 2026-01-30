@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "../config/load-env";
 import { sql } from "drizzle-orm";
 import { db, pool } from "../db";
 import { Logger } from "../lib/logger";
@@ -136,4 +136,3 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
             process.exit(1);
         });
 }
-

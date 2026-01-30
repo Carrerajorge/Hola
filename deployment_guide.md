@@ -62,6 +62,7 @@ Luego ejecuta el script de despliegue desde tu máquina local (ver paso 5).
 ## Paso 3: Configuración de Variables de Entorno
 
 Asegúrate de crear el archivo `.env.production` en el servidor con los secretos reales.
+La aplicación carga automáticamente `.env.production` cuando `NODE_ENV=production` (y usa `.env` como respaldo si existe).
 
 ```bash
 # Copia el ejemplo si no existe

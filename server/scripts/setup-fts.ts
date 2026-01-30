@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "../config/load-env";
 import { pool } from "../db";
 import { Logger } from "../lib/logger";
 

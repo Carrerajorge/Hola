@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "../config/load-env";
 import { storage } from "../storage";
 import { setupFts } from "../lib/fts";
 import { db } from "../db";

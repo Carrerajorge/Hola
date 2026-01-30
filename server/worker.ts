@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./config/load-env";
 import { initTracing } from "./lib/tracing";
 
 // Initialize Distributed Tracing
