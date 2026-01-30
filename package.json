@@ -258,7 +258,6 @@
     "@types/html-to-docx": "^1.8.0",
     "@types/node": "^20.19.0",
     "@types/passport": "^1.0.17",
-    "@types/passport-auth0": "^1.0.9",
     "@types/passport-google-oauth20": "^2.0.16",
     "@types/passport-microsoft": "^1.0.0",
     "@types/qrcode": "^1.5.6",
