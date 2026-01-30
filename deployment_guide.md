@@ -74,9 +74,27 @@ nano .env.production
 **Variables Críticas:**
 
 - `DATABASE_URL`: Tu conexión a PostgreSQL.
-- `REDIS_URL`: Tu conexión a Redis (o usa el servicio dockerizado).
-- `SESSION_SECRET`: Una cadena larga y aleatoria.
-- `OPENAI_API_KEY`, etc.: Tus llaves de API.
+- `JWT_ACCESS_SECRET`: mínimo 32 caracteres.
+- `JWT_REFRESH_SECRET`: mínimo 32 caracteres.
+- `SESSION_SECRET`: mínimo 32 caracteres.
+- Al menos una clave LLM: `XAI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY` u `OPENAI_API_KEY`.
+- `REDIS_URL`: opcional (o usa el servicio dockerizado).
+
+Para generar secretos seguros:
+
+```bash
+openssl rand -hex 32
+```
+
+### 3.1 Reparar variables faltantes (script rápido)
+
+Si el servidor muestra errores como `DATABASE_URL: Required` o `SESSION_SECRET: Required`, ejecuta:
+
+```bash
+./fix_vps_env.sh
+```
+
+El script agrega `SESSION_SECRET`, `JWT_ACCESS_SECRET` y `JWT_REFRESH_SECRET` si faltan, pero **aún debes configurar al menos una LLM API key manualmente**.
 
 ## Paso 4: Levantar los Servicios
 

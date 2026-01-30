@@ -49,6 +49,21 @@ ssh "$VPS_USER@$VPS_HOST" "
         echo \"✅ Added SESSION_SECRET\"
     fi
 
+    # 6. Check for JWT secrets (required)
+    if ! grep -q \"JWT_ACCESS_SECRET=\" .env.production; then
+        echo \"JWT_ACCESS_SECRET=$(openssl rand -hex 32)\" >> .env.production
+        echo \"✅ Added JWT_ACCESS_SECRET\"
+    fi
+    if ! grep -q \"JWT_REFRESH_SECRET=\" .env.production; then
+        echo \"JWT_REFRESH_SECRET=$(openssl rand -hex 32)\" >> .env.production
+        echo \"✅ Added JWT_REFRESH_SECRET\"
+    fi
+
+    # 7. Check for at least one LLM API key (required)
+    if ! grep -qE \"^(XAI_API_KEY|GOOGLE_API_KEY|ANTHROPIC_API_KEY|OPENAI_API_KEY)=\" .env.production; then
+        echo \"⚠️  Missing LLM API key. Add at least one of: XAI_API_KEY, GOOGLE_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY\"
+    fi
+
     echo \"🔄 Restarting PM2...\"
     pm2 restart all --update-env
     pm2 save
