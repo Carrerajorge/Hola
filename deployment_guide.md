@@ -48,6 +48,17 @@ cd /opt/iliagpt
 git pull origin main
 ```
 
+### 2.3 Si el repo es privado (token HTTPS)
+
+Si el VPS no tiene llave SSH configurada, puedes usar un token de GitHub con permisos de lectura.
+
+```bash
+export VPS_GITHUB_TOKEN="ghp_xxx"
+export REPO_HTTPS_URL="https://github.com/Carrerajorge/Hola.git"
+```
+
+Luego ejecuta el script de despliegue desde tu máquina local (ver paso 5).
+
 ## Paso 3: Configuración de Variables de Entorno
 
 Asegúrate de crear el archivo `.env.production` en el servidor con los secretos reales.
@@ -86,3 +97,16 @@ docker compose -f docker-compose.prod.yml up --build -d
 
 La aplicación debería estar corriendo en el puerto configurado (ej. 80, 443 o 5000).
 Visita `http://tu-vps-ip` o tu dominio configurado.
+
+## Paso 5: Desplegar con script (opcional)
+
+Desde tu máquina local, puedes usar `deploy_vps.sh`. Acepta variables para no depender de SSH keys:
+
+```bash
+export VPS_HOST="69.62.98.126"
+export VPS_DIR="/var/www/michat"
+export VPS_GITHUB_TOKEN="ghp_xxx"
+export REPO_HTTPS_URL="https://github.com/Carrerajorge/Hola.git"
+
+./deploy_vps.sh
+```
