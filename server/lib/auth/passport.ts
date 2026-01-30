@@ -30,13 +30,13 @@ passport.deserializeUser(async (id: string, done) => {
 });
 
 // --- Google Strategy ---
-if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     passport.use(
         new GoogleStrategy(
             {
-                clientID: process.env.GOOGLE_CLIENT_ID,
-                clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-                callbackURL: "/api/auth/google/callback",
+                clientID: env.GOOGLE_CLIENT_ID,
+                clientSecret: env.GOOGLE_CLIENT_SECRET,
+                callbackURL: `${env.BASE_URL}/api/auth/google/callback`,
                 scope: ["openid", "email", "profile"],
                 passReqToCallback: true,
             },
@@ -94,7 +94,7 @@ if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
             {
                 clientID: env.MICROSOFT_CLIENT_ID,
                 clientSecret: env.MICROSOFT_CLIENT_SECRET,
-                callbackURL: "/api/auth/microsoft/callback",
+                callbackURL: `${env.BASE_URL}/api/auth/microsoft/callback`,
                 scope: ["openid", "profile", "email", "User.Read", "offline_access"],
                 authorizationURL: `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize`,
                 tokenURL: `https://login.microsoftonline.com/${env.MICROSOFT_TENANT_ID}/oauth2/v2.0/token`,
@@ -145,17 +145,17 @@ if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
 }
 
 // --- Auth0 Strategy ---
-if (process.env.AUTH0_DOMAIN && process.env.AUTH0_CLIENT_ID && process.env.AUTH0_CLIENT_SECRET) {
+if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
     passport.use(
         new Auth0Strategy(
             {
-                domain: process.env.AUTH0_DOMAIN,
-                clientID: process.env.AUTH0_CLIENT_ID,
-                clientSecret: process.env.AUTH0_CLIENT_SECRET,
-                callbackURL: "/api/auth/auth0/callback",
-                scope: "openid email profile offline_access"
+                domain: env.AUTH0_DOMAIN,
+                clientID: env.AUTH0_CLIENT_ID,
+                clientSecret: env.AUTH0_CLIENT_SECRET,
+                callbackURL: `${env.BASE_URL}/api/auth/auth0/callback`,
+                // scope is not part of the options interface, pass it as extra param if needed or rely on default
             },
-            async (accessToken, refreshToken, extraParams, profile, done) => {
+            async (accessToken: string, refreshToken: string, extraParams: any, profile: any, done: any) => {
                 try {
                     const email = profile.emails?.[0]?.value;
                     if (!email) return done(new Error("No email found in Auth0 profile"));

@@ -49,4 +49,4 @@ sandbox_workspace/.state/
 **/*.pyo
 
 # Ignore test artifacts
-artifacts/
+artifacts/node_modules_backup/

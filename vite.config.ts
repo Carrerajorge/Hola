@@ -90,6 +90,9 @@ export default defineConfig(async () => {
       host: "0.0.0.0",
       allowedHosts: true,
       fs: { strict: true, deny: ["**/.*"] },
+      watch: {
+        ignored: ["**/node_modules/**", "**/node_modules_backup/**"],
+      },
       proxy: {
         "/api": {
           target: "http://localhost:5001",
