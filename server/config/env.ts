@@ -1,13 +1,10 @@
 import dotenv from "dotenv";
-import path from "path";
 import { z } from "zod";
 
 // Ensure .env is loaded before validation (ESM imports run before module body)
-const nodeEnv = process.env.NODE_ENV || "development";
-if (nodeEnv === "production") {
-    dotenv.config({ path: path.resolve(process.cwd(), ".env.production") });
+if (process.env.NODE_ENV !== "production") {
+  dotenv.config();
 }
-dotenv.config();
 
 const envSchema = z.object({
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
