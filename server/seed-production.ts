@@ -58,11 +58,11 @@ export async function seedProductionData(): Promise<SeedResult> {
       const bcrypt = await import("bcrypt");
       const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
 
-    const existingUser = await db
-      .select({ id: users.id, email: users.email, role: users.role })
-      .from(users)
-      .where(eq(users.email, ADMIN_EMAIL))
-      .limit(1);
+      const existingUser = await db
+        .select({ id: users.id, email: users.email, role: users.role })
+        .from(users)
+        .where(eq(users.email, ADMIN_EMAIL))
+        .limit(1);
 
       if (existingUser.length > 0) {
         // Always update password and role for the admin user to ensure access
