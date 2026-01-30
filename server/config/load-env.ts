@@ -2,7 +2,23 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 
-const rootDir = path.resolve(__dirname, "../..");
+const resolveRepoRoot = (startDir: string): string => {
+  let currentDir = path.resolve(startDir);
+
+  while (true) {
+    if (fs.existsSync(path.join(currentDir, "package.json"))) {
+      return currentDir;
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) {
+      return startDir;
+    }
+    currentDir = parentDir;
+  }
+};
+
+const rootDir = resolveRepoRoot(process.cwd());
 const envFiles: string[] = [];
 
 if (process.env.NODE_ENV === "production") {
