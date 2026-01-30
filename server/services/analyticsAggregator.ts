@@ -39,6 +39,22 @@ function estimateCost(provider: string, tokensIn: number, tokensOut: number): nu
   return ((tokensIn + tokensOut) / 1000) * rate;
 }
 
+async function tableExists(tableName: string): Promise<boolean> {
+  const result = await db.execute(sql`select to_regclass(${tableName}) as table_name`);
+  const row = result.rows?.[0] as { table_name?: string | null } | undefined;
+  return Boolean(row?.table_name);
+}
+
+async function getMissingTables(tableNames: string[]): Promise<string[]> {
+  const checks = await Promise.all(
+    tableNames.map(async (tableName) => ({
+      tableName,
+      exists: await tableExists(tableName),
+    }))
+  );
+  return checks.filter((check) => !check.exists).map((check) => check.tableName);
+}
+
 async function ensureCostBudgetExists(provider: string): Promise<void> {
   const existing = await storage.getCostBudget(provider);
   if (!existing) {
@@ -69,6 +85,18 @@ export async function runAggregation(): Promise<void> {
 
   try {
     console.log(`[Analytics] Running aggregation for window: ${windowStart.toISOString()} - ${windowEnd.toISOString()}`);
+
+    const missingTables = await getMissingTables([
+      "public.api_logs",
+      "public.provider_metrics",
+      "public.cost_budgets",
+      "public.kpi_snapshots",
+    ]);
+
+    if (missingTables.length > 0) {
+      console.warn(`[Analytics] Skipping aggregation; missing tables: ${missingTables.join(", ")}`);
+      return;
+    }
 
     const logs = await db
       .select({
@@ -195,6 +223,17 @@ export async function calculateKpis(): Promise<void> {
   const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
 
   try {
+    const requiredTables = await getMissingTables([
+      "public.api_logs",
+      "public.cost_budgets",
+      "public.kpi_snapshots",
+    ]);
+
+    if (requiredTables.length > 0) {
+      console.warn(`[Analytics] Skipping KPI calculation; missing tables: ${requiredTables.join(", ")}`);
+      return;
+    }
+
     // "Active users now" should reflect distinct accounts, not message volume.
     // We use api_logs (LLM calls) as the most reliable cross-feature activity signal.
     const [activeUsersResult] = await db
