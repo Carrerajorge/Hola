@@ -223,7 +223,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   // Session setup first (required before passport)
-  await setupAuth(app);
+  await setupAuth(app, passport);
   
   // Initialize passport with strategies already registered
   app.use(passport.initialize());

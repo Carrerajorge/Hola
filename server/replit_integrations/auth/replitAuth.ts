@@ -1,7 +1,7 @@
 import * as client from "openid-client";
 import { Strategy, type VerifyFunction } from "openid-client/passport";
 
-import { passport } from "../../lib/auth/passport";
+import type { PassportStatic } from "passport";
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
@@ -150,7 +150,7 @@ async function upsertUser(claims: any) {
   });
 }
 
-export async function setupAuth(app: Express) {
+export async function setupAuth(app: Express, passportInstance: PassportStatic) {
   app.set("trust proxy", 1);
   app.use(getSession());
   // Note: passport.initialize() and passport.session() are now called in routes.ts
@@ -160,7 +160,7 @@ export async function setupAuth(app: Express) {
 
   const verify: VerifyFunction = async (
     tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
-    verified: passport.AuthenticateCallback
+    verified: passportInstance.AuthenticateCallback
   ) => {
     try {
       const user: any = {};
@@ -196,13 +196,13 @@ export async function setupAuth(app: Express) {
         },
         verify
       );
-      passport.use(strategy);
+      passportInstance.use(strategy);
       registeredStrategies.add(strategyName);
     }
   };
 
-  passport.serializeUser((user: Express.User, cb) => cb(null, user));
-  passport.deserializeUser((user: Express.User, cb) => cb(null, user));
+  passportInstance.serializeUser((user: Express.User, cb) => cb(null, user));
+  passportInstance.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", authRateLimiter, (req, res, next) => {
     // Local Dev Bypass
@@ -216,7 +216,7 @@ export async function setupAuth(app: Express) {
     console.log(`[Auth] Login initiated from IP: ${req.ip}, hostname: ${req.hostname}`);
 
     ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
+    passportInstance.authenticate(`replitauth:${req.hostname}`, {
       prompt: "login consent",
       scope: ["openid", "email", "profile", "offline_access"],
     })(req, res, next);
@@ -272,7 +272,7 @@ export async function setupAuth(app: Express) {
     }
 
     ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, (err: any, user: any, info: any) => {
+    passportInstance.authenticate(`replitauth:${req.hostname}`, (err: any, user: any, info: any) => {
       if (err) {
         AUTH_METRICS.loginFailures++;
         console.error(`[Auth] [${requestId}] Callback error after ${Date.now() - startTime}ms:`, {
