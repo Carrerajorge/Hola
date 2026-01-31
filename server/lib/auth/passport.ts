@@ -209,4 +209,12 @@ if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
     );
 }
 
+// Log registered strategies at startup to aid debugging
+try {
+    const strategyNames = Object.keys((passport as any)._strategies || {});
+    Logger.info(`[Passport] Registered strategies: ${strategyNames.join(", ") || "(none)"}`);
+} catch (error) {
+    Logger.warn(`[Passport] Failed to list strategies: ${error}`);
+}
+
 export { passport };
