@@ -181,8 +181,7 @@ export function log(message: string, source = "express") {
     {
       port,
       host: "0.0.0.0",
-      // reusePort is not supported on Windows, only Linux
-      ...(process.platform !== 'win32' && { reusePort: true }),
+      reusePort: true,
     },
     async () => {
       log(`serving on port ${port}`);
