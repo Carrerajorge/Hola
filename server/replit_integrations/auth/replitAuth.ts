@@ -153,8 +153,8 @@ async function upsertUser(claims: any) {
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
-  // Note: passport.initialize() and passport.session() are now called in routes.ts
-  // to ensure the passport instance with registered strategies is used
+  app.use(passport.initialize());
+  app.use(passport.session());
 
   const config = await getOidcConfig();
 
