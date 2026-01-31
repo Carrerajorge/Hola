@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { ObjectStorageService } from "./objectStorage";
 import { processDocument } from "./services/documentProcessing";
+import { env } from "./config/env";
 import { chunkText, generateEmbeddingsBatch } from "./embeddingService";
 import { StepUpdate } from "./agent";
 import { browserSessionManager, SessionEvent } from "./agent/browser";
@@ -226,62 +227,81 @@ export async function registerRoutes(
   registerAuthRoutes(app);
 
   // Passport Auth Routes
-  // Google
-  app.get("/api/auth/google", passport.authenticate("google", {
-    scope: ["openid", "email", "profile"],
-    prompt: "select_account",
-  }));
-  app.get("/api/auth/google/callback",
-    passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
-    (req, res, next) => {
-      if (req.session) {
-        req.session.save((err) => {
-          if (err) {
-            return next(err);
-          }
-          res.redirect("/?auth=success");
-        });
-        return;
+  // Google (only register if credentials are configured)
+  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+    app.get("/api/auth/google", passport.authenticate("google", {
+      scope: ["openid", "email", "profile"],
+      prompt: "select_account",
+    }));
+    app.get("/api/auth/google/callback",
+      passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
+      (req, res, next) => {
+        if (req.session) {
+          req.session.save((err) => {
+            if (err) {
+              return next(err);
+            }
+            res.redirect("/?auth=success");
+          });
+          return;
+        }
+        res.redirect("/?auth=success");
       }
-      res.redirect("/?auth=success");
-    }
-  );
+    );
+  } else {
+    // Return a helpful error when Google auth is not configured
+    app.get("/api/auth/google", (req, res) => {
+      res.status(503).json({ error: "Google authentication is not configured on this server" });
+    });
+  }
 
-  // Microsoft
-  app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
-  app.get("/api/auth/microsoft/callback",
-    passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }),
-    (req, res, next) => {
-      if (req.session) {
-        req.session.save((err) => {
-          if (err) {
-            return next(err);
-          }
-          res.redirect("/?auth=success");
-        });
-        return;
+  // Microsoft (only register if credentials are configured)
+  if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
+    app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
+    app.get("/api/auth/microsoft/callback",
+      passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }),
+      (req, res, next) => {
+        if (req.session) {
+          req.session.save((err) => {
+            if (err) {
+              return next(err);
+            }
+            res.redirect("/?auth=success");
+          });
+          return;
+        }
+        res.redirect("/?auth=success");
       }
-      res.redirect("/?auth=success");
-    }
-  );
+    );
+  } else {
+    app.get("/api/auth/microsoft", (req, res) => {
+      res.status(503).json({ error: "Microsoft authentication is not configured on this server" });
+    });
+  }
 
-  // Auth0
-  app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
-  app.get("/api/auth/auth0/callback",
-    passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }),
-    (req, res, next) => {
-      if (req.session) {
-        req.session.save((err) => {
-          if (err) {
-            return next(err);
-          }
-          res.redirect("/?auth=success");
-        });
-        return;
+  // Auth0 (only register if credentials are configured)
+  if (env.AUTH0_DOMAIN && env.AUTH0_CLIENT_ID && env.AUTH0_CLIENT_SECRET) {
+    app.get("/api/auth/auth0", passport.authenticate("auth0", { scope: "openid email profile offline_access" }));
+    app.get("/api/auth/auth0/callback",
+      passport.authenticate("auth0", { failureRedirect: "/login?error=auth0_failed" }),
+      (req, res, next) => {
+        if (req.session) {
+          req.session.save((err) => {
+            if (err) {
+              return next(err);
+            }
+            res.redirect("/?auth=success");
+          });
+          return;
+        }
+        res.redirect("/?auth=success");
       }
-      res.redirect("/?auth=success");
-    }
-  );
+    );
+  } else {
+    app.get("/api/auth/auth0", (req, res) => {
+      res.status(503).json({ error: "Auth0 authentication is not configured on this server" });
+    });
+  }
 
   // Global Compression Middleware (Gzip)
   app.use(compression);
