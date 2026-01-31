@@ -227,20 +227,10 @@ export async function registerRoutes(
 
   // Passport Auth Routes
   // Google
-  app.get(
-    "/api/auth/google",
-    (_req, res, next) => {
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
-      res.setHeader("Surrogate-Control", "no-store");
-      next();
-    },
-    passport.authenticate("google", {
-      scope: ["openid", "email", "profile"],
-      prompt: "select_account",
-    })
-  );
+  app.get("/api/auth/google", passport.authenticate("google", {
+    scope: ["openid", "email", "profile"],
+    prompt: "select_account",
+  }));
   app.get("/api/auth/google/callback",
     passport.authenticate("google", { failureRedirect: "/login?error=google_failed" }),
     (req, res, next) => {
@@ -258,17 +248,7 @@ export async function registerRoutes(
   );
 
   // Microsoft
-  app.get(
-    "/api/auth/microsoft",
-    (_req, res, next) => {
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.setHeader("Pragma", "no-cache");
-      res.setHeader("Expires", "0");
-      res.setHeader("Surrogate-Control", "no-store");
-      next();
-    },
-    passport.authenticate("microsoft")
-  );
+  app.get("/api/auth/microsoft", passport.authenticate("microsoft"));
   app.get("/api/auth/microsoft/callback",
     passport.authenticate("microsoft", { failureRedirect: "/login?error=microsoft_failed" }),
     (req, res, next) => {

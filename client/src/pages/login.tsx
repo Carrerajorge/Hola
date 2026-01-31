@@ -76,13 +76,13 @@ export default function LoginPage() {
   const handleGoogleLogin = () => {
     setIsGoogleLoading(true);
     setError("");
-    window.location.href = `/api/auth/google?ts=${Date.now()}`;
+    window.location.href = "/api/auth/google";
   };
 
   const handleMicrosoftLogin = () => {
     setIsMicrosoftLoading(true);
     setError("");
-    window.location.href = `/api/auth/microsoft?ts=${Date.now()}`;
+    window.location.href = "/api/auth/microsoft";
   };
 
   const handleMagicLink = async () => {
