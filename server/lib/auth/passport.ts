@@ -23,7 +23,18 @@ passport.deserializeUser(async (id: string, done) => {
         if (!user) {
             return done(null, false);
         }
-        done(null, user);
+        const hydratedUser = { ...user } as any;
+        if (!hydratedUser.claims) {
+            hydratedUser.claims = {
+                sub: hydratedUser.id,
+                email: hydratedUser.email,
+                name: hydratedUser.fullName || hydratedUser.username,
+                picture: hydratedUser.profileImageUrl,
+            };
+        } else if (!hydratedUser.claims.sub) {
+            hydratedUser.claims.sub = hydratedUser.id;
+        }
+        done(null, hydratedUser);
     } catch (error) {
         done(error);
     }

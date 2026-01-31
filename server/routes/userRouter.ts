@@ -16,8 +16,7 @@ export function createUserRouter() {
 
   router.get("/api/user/usage", async (req, res) => {
     try {
-      const user = (req as AuthenticatedRequest).user;
-      let userId = user?.claims?.sub;
+      let userId = getUserId(req);
 
       if (!userId) {
         const token = req.headers['x-anonymous-token'] as string;
@@ -132,8 +131,7 @@ export function createUserRouter() {
       const { id } = req.params;
 
       // For authenticated users, verify ownership
-      const user = (req as AuthenticatedRequest).user;
-      const authUserId = user?.claims?.sub;
+      const authUserId = getUserId(req);
 
       if (authUserId) {
         // Authenticated user - must match
@@ -195,8 +193,7 @@ export function createUserRouter() {
       const { id } = req.params;
 
       // For authenticated users, verify ownership
-      const user = (req as AuthenticatedRequest).user;
-      const authUserId = user?.claims?.sub;
+      const authUserId = getUserId(req);
 
       if (authUserId) {
         // Authenticated user - must match

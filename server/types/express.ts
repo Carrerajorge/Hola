@@ -47,7 +47,7 @@ export interface RequiredAuthRequest extends Request {
  */
 export function getUserId(req: Request): string | undefined {
     const authReq = req as AuthenticatedRequest;
-    return authReq.user?.claims?.sub;
+    return authReq.user?.claims?.sub || authReq.user?.id;
 }
 
 /**
@@ -65,5 +65,5 @@ export function getUserClaims(req: Request): UserClaims | undefined {
  */
 export function isAuthenticatedRequest(req: Request): req is RequiredAuthRequest {
     const authReq = req as AuthenticatedRequest;
-    return !!(authReq.user?.claims?.sub);
+    return !!(authReq.user?.claims?.sub || authReq.user?.id);
 }

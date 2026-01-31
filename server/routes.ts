@@ -295,8 +295,8 @@ export async function registerRoutes(
   // SECURITY: Anonymous user IDs are now bound to the session to prevent impersonation
   app.get("/api/session/identity", (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
-    const authUserId = user?.claims?.sub;
-    const authEmail = user?.claims?.email;
+    const authUserId = user?.claims?.sub || user?.id;
+    const authEmail = user?.claims?.email || (user as any)?.email;
 
     if (authUserId) {
       return res.json({
