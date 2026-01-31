@@ -161,9 +161,14 @@ const processingWorker = createWorker(QUEUE_NAMES.PROCESSING, async (job: Job) =
     }
 });
 
-processingWorker.on("ready", () => Logger.info("Processing Worker ready"));
-processingWorker.on("error", (e) => Logger.error("Processing Worker error", e));
+// --- Change the bottom of worker.ts to this ---
 
+if (processingWorker) {
+    processingWorker.on("ready", () => Logger.info("Processing Worker ready"));
+    processingWorker.on("error", (e:any) => Logger.error("Processing Worker error", e));
+} else {
+    Logger.error("❌ processingWorker could not be initialized. Check REDIS_URL.");
+}
 // ==========================================
 // Lifecycle
 // ==========================================
