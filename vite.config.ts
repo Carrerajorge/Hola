@@ -49,7 +49,6 @@ export default defineConfig(async () => {
         workbox: {
           globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-          navigateFallbackDenylist: [/^\/api\//],
         },
       }),
       ...replitPlugins,
