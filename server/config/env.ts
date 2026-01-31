@@ -1,13 +1,6 @@
 import dotenv from "dotenv";
-import path from "path";
 import { z } from "zod";
 
-// Ensure correct env file is loaded even when this module is imported before index.ts
-const nodeEnv = process.env.NODE_ENV || "development";
-if (nodeEnv === "production") {
-  dotenv.config({ path: path.resolve(process.cwd(), ".env.production") });
-}
-// Also load standard .env as fallback
 dotenv.config();
 
 const envSchema = z.object({
