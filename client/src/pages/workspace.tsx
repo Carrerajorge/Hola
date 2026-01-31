@@ -54,15 +54,15 @@ function ResizeHandle({ className, ...props }: { className?: string; id?: string
 
 function WorkspaceContent() {
   const [, setLocation] = useLocation();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, isReady } = useAuth();
   const isMobile = useIsMobile();
   const { activeDocumentId, setActiveDocument } = useWorkspace();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (isReady && !isLoading && !isAuthenticated) {
       setLocation("/welcome");
     }
-  }, [isAuthenticated, isLoading, setLocation]);
+  }, [isAuthenticated, isLoading, isReady, setLocation]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [isAiRailCollapsed, setIsAiRailCollapsed] = useState(false);

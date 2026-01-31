@@ -11,6 +11,7 @@ const ANON_TOKEN_KEY = "siragpt_anon_token";
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
+  isReady: boolean;
   isAuthenticated: boolean;
   login: () => void;
   logout: () => Promise<void>;
@@ -174,7 +175,7 @@ async function fetchUser(): Promise<User | null> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
 
-  const { data: user, isLoading, refetch } = useQuery<User | null>({
+  const { data: user, isLoading, isFetched, refetch } = useQuery<User | null>({
     queryKey: ["/api/auth/user"],
     queryFn: fetchUser,
     retry: false,
@@ -251,6 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{
       user: user ?? null,
       isLoading,
+      isReady: isFetched,
       isAuthenticated: !!user && !(user as any)?.isAnonymous,
       login,
       logout,

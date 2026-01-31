@@ -42,14 +42,14 @@ import { queryClient } from "@/lib/queryClient";
 export default function Home() {
   const isMobile = useIsMobile();
   const [, setLocation] = useLocation();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, isReady } = useAuth();
 
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (isReady && !isLoading && !isAuthenticated) {
       setLocation("/welcome");
     }
-  }, [isAuthenticated, isLoading, setLocation]);
+  }, [isAuthenticated, isLoading, isReady, setLocation]);
 
   useEffect(() => {
     useMediaLibrary.getState().preload();
