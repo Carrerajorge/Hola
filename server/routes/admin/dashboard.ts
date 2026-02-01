@@ -88,3 +88,100 @@ dashboardRouter.get("/", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// GET /api/admin/dashboard/new-users - Recent user registrations
+dashboardRouter.get("/new-users", async (req, res) => {
+    try {
+        const { hours = "24" } = req.query;
+        const hoursNum = parseInt(hours as string, 10) || 24;
+        const since = new Date(Date.now() - hoursNum * 60 * 60 * 1000);
+
+        const allUsers = await storage.getAllUsers();
+        const newUsers = allUsers
+            .filter(u => u.createdAt && new Date(u.createdAt) >= since)
+            .sort((a, b) => new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime())
+            .map(u => ({
+                id: u.id,
+                email: u.email,
+                fullName: u.fullName,
+                authProvider: u.authProvider,
+                createdAt: u.createdAt,
+                status: u.status
+            }));
+
+        res.json({
+            newUsers,
+            count: newUsers.length,
+            since: since.toISOString(),
+            hoursAgo: hoursNum
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/dashboard/active-sessions - Currently active users
+dashboardRouter.get("/active-sessions", async (req, res) => {
+    try {
+        const allUsers = await storage.getAllUsers();
+        const now = Date.now();
+        const fifteenMinutesAgo = now - 15 * 60 * 1000;
+
+        const activeSessions = allUsers
+            .filter(u => u.lastLoginAt && new Date(u.lastLoginAt).getTime() >= fifteenMinutesAgo)
+            .map(u => ({
+                id: u.id,
+                email: u.email,
+                fullName: u.fullName,
+                lastLoginAt: u.lastLoginAt,
+                plan: u.plan
+            }));
+
+        res.json({
+            activeSessions,
+            count: activeSessions.length,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/dashboard/user-activity - User activity summary
+dashboardRouter.get("/user-activity", async (req, res) => {
+    try {
+        const { userId } = req.query;
+        
+        if (!userId) {
+            return res.status(400).json({ error: "userId required" });
+        }
+
+        const user = await storage.getUser(userId as string);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const conversations = await storage.getConversationsByUserId(userId as string);
+        const auditLogs = await storage.getAuditLogsByResourceId(userId as string);
+
+        res.json({
+            user: {
+                id: user.id,
+                email: user.email,
+                fullName: user.fullName,
+                plan: user.plan,
+                status: user.status,
+                createdAt: user.createdAt,
+                lastLoginAt: user.lastLoginAt,
+                queryCount: user.queryCount,
+                tokensConsumed: user.tokensConsumed
+            },
+            activity: {
+                conversationCount: conversations.length,
+                recentAuditLogs: auditLogs.slice(0, 10)
+            }
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});

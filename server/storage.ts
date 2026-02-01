@@ -396,6 +396,12 @@ export interface IStorage {
   createConversationDocument(doc: InsertConversationDocument): Promise<ConversationDocument>;
   getConversationDocuments(chatId: string): Promise<ConversationDocument[]>;
   deleteConversationDocument(id: string): Promise<void>;
+  // Admin: User monitoring
+  getConversationsByUserId(userId: string): Promise<Chat[]>;
+  getMessagesByConversationId(conversationId: string): Promise<ChatMessage[]>;
+  deleteConversation(conversationId: string): Promise<void>;
+  getAuditLogsByResourceId(resourceId: string): Promise<AuditLog[]>;
+  createImpersonationToken(data: { token: string; adminId: string; targetUserId: string; expiresAt: Date }): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -2627,6 +2633,49 @@ export class MemStorage implements IStorage {
 
   async deleteConversationDocument(id: string): Promise<void> {
     await db.delete(conversationDocuments).where(eq(conversationDocuments.id, id));
+  }
+
+  // Admin: User monitoring methods
+  async getConversationsByUserId(userId: string): Promise<Chat[]> {
+    return dbRead.select()
+      .from(chats)
+      .where(eq(chats.userId, userId))
+      .orderBy(desc(chats.updatedAt));
+  }
+
+  async getMessagesByConversationId(conversationId: string): Promise<ChatMessage[]> {
+    return dbRead.select()
+      .from(chatMessages)
+      .where(eq(chatMessages.chatId, conversationId))
+      .orderBy(chatMessages.createdAt);
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    // Delete messages first, then the chat
+    await db.delete(chatMessages).where(eq(chatMessages.chatId, conversationId));
+    await db.delete(chats).where(eq(chats.id, conversationId));
+  }
+
+  async getAuditLogsByResourceId(resourceId: string): Promise<AuditLog[]> {
+    return dbRead.select()
+      .from(auditLogs)
+      .where(eq(auditLogs.resourceId, resourceId))
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(100);
+  }
+
+  async createImpersonationToken(data: { token: string; adminId: string; targetUserId: string; expiresAt: Date }): Promise<void> {
+    // Store impersonation token in audit log for security tracking
+    await this.createAuditLog({
+      action: "impersonation_token_created",
+      resource: "users",
+      resourceId: data.targetUserId,
+      details: {
+        adminId: data.adminId,
+        tokenHash: data.token.substring(0, 8) + "...", // Only store hash prefix
+        expiresAt: data.expiresAt.toISOString()
+      }
+    });
   }
 }
 

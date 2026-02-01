@@ -235,6 +235,163 @@ usersRouter.patch("/:id/role", async (req, res) => {
     }
 });
 
+// GET /api/admin/users/:id/conversations - Get all conversations of a user (admin monitoring)
+usersRouter.get("/:id/conversations", async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const user = await storage.getUser(userId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const conversations = await storage.getConversationsByUserId(userId);
+        
+        // Get message counts for each conversation
+        const conversationsWithStats = await Promise.all(
+            conversations.map(async (conv: any) => {
+                const messages = await storage.getMessagesByConversationId(conv.id);
+                return {
+                    ...conv,
+                    messageCount: messages?.length || 0,
+                    lastMessage: messages?.[messages.length - 1] || null
+                };
+            })
+        );
+
+        await storage.createAuditLog({
+            action: "admin_view_user_conversations",
+            resource: "users",
+            resourceId: userId,
+            details: { conversationCount: conversationsWithStats.length }
+        });
+
+        res.json({
+            user: { id: user.id, email: user.email, fullName: user.fullName },
+            conversations: conversationsWithStats,
+            total: conversationsWithStats.length
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// DELETE /api/admin/users/:id/conversations - Delete all conversations of a user
+usersRouter.delete("/:id/conversations", async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const user = await storage.getUser(userId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const conversations = await storage.getConversationsByUserId(userId);
+        let deletedCount = 0;
+
+        for (const conv of conversations) {
+            await storage.deleteConversation(conv.id);
+            deletedCount++;
+        }
+
+        await storage.createAuditLog({
+            action: "admin_delete_user_conversations",
+            resource: "users",
+            resourceId: userId,
+            details: { deletedCount }
+        });
+
+        res.json({ success: true, deletedCount });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/users/:id/impersonate - Generate impersonation token (for support)
+usersRouter.post("/:id/impersonate", async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const user = await storage.getUser(userId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        // Generate a temporary token for impersonation (valid for 1 hour)
+        const crypto = await import("crypto");
+        const token = crypto.randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+        // Store impersonation token
+        await storage.createImpersonationToken({
+            token,
+            adminId: (req as any).user?.id,
+            targetUserId: userId,
+            expiresAt
+        });
+
+        await storage.createAuditLog({
+            action: "admin_impersonate_user",
+            resource: "users",
+            resourceId: userId,
+            details: { expiresAt: expiresAt.toISOString() }
+        });
+
+        res.json({ 
+            success: true, 
+            token,
+            expiresAt,
+            warning: "Use this token responsibly. All actions will be logged."
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/users/:id/reset - Reset user to clean state
+usersRouter.post("/:id/reset", async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const { deleteConversations = true, resetStats = false } = req.body;
+
+        const user = await storage.getUser(userId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        let deletedConversations = 0;
+
+        // Delete all conversations if requested
+        if (deleteConversations) {
+            const conversations = await storage.getConversationsByUserId(userId);
+            for (const conv of conversations) {
+                await storage.deleteConversation(conv.id);
+                deletedConversations++;
+            }
+        }
+
+        // Reset stats if requested
+        if (resetStats) {
+            await storage.updateUser(userId, {
+                queryCount: 0,
+                tokensConsumed: 0
+            });
+        }
+
+        await storage.createAuditLog({
+            action: "admin_reset_user",
+            resource: "users",
+            resourceId: userId,
+            details: { deleteConversations, resetStats, deletedConversations }
+        });
+
+        res.json({ 
+            success: true, 
+            deletedConversations,
+            statsReset: resetStats
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Export endpoints
 usersRouter.get("/export", async (req, res) => {
     try {

@@ -74,6 +74,25 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
 
                     if (!user) {
                         user = await authStorage.upsertUser(userData);
+                        
+                        // Notify admin about new user registration
+                        try {
+                            const { storage } = await import("../../storage");
+                            await storage.createAuditLog({
+                                action: "user_registered",
+                                resource: "users",
+                                resourceId: user.id,
+                                details: {
+                                    email,
+                                    provider: "google",
+                                    fullName: profile.displayName,
+                                    timestamp: new Date().toISOString()
+                                }
+                            });
+                            Logger.info(`[Passport] New user registered via Google: ${email}`);
+                        } catch (auditError) {
+                            Logger.error(`[Passport] Failed to create audit log: ${auditError}`);
+                        }
                     } else {
                         // Refresh profile info
                         user = await authStorage.upsertUser({ ...userData, id: user.id });
