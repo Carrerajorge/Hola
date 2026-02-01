@@ -4,7 +4,7 @@ import { isAuthenticated, getSessionStats } from "./replitAuth";
 import { storage } from "../../storage";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
 import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/userRateLimiter";
-
+import { sendMagicLinkEmail } from "../../services/genericEmailService";
 
 // Admin credentials from environment variables - REQUIRED, no fallback for security
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -377,8 +377,13 @@ export function registerAuthRoutes(app: Express): void {
       const magicLinkUrl = getMagicLinkUrl(result.token!);
 
       if (process.env.NODE_ENV === "production") {
-        // TODO: Send email with magicLinkUrl
-        console.log(`[MagicLink] Would send email to ${email} with link: ${magicLinkUrl}`);
+        // Send email with magic link
+        const emailResult = await sendMagicLinkEmail(email, magicLinkUrl);
+        if (!emailResult.success) {
+          console.error(`[MagicLink] Failed to send email to ${email}:`, emailResult.error);
+          // Still return success but log the error
+        }
+        console.log(`[MagicLink] Sent email to ${email}`);
         res.json({
           success: true,
           message: "Hemos enviado un enlace mágico a tu correo electrónico."

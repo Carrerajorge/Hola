@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { storage } from "../../storage";
+import { sendPaymentEmail } from "../../services/genericEmailService";
 
 export const financeRouter = Router();
 
@@ -226,18 +227,35 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
             return res.status(404).json({ error: "Invoice not found" });
         }
 
-        // TODO: Implement actual email sending
-        // For now, just log the action
+        // Get user email
+        const user = await storage.getUser(invoice.userId);
+        if (!user?.email) {
+            return res.status(400).json({ error: "User has no email address" });
+        }
+
+        // Send email
+        const emailResult = await sendPaymentEmail(user.email, {
+            invoiceId: invoice.id,
+            amount: invoice.amount || 0,
+            currency: invoice.currency || "USD",
+            status: (invoice.status as "paid" | "pending" | "failed") || "pending",
+            invoiceUrl: `${process.env.APP_URL || "https://iliagpt.com"}/billing/invoices/${invoice.id}`
+        });
+
         await storage.createAuditLog({
             action: "invoice_resend",
             resource: "invoices",
             resourceId: req.params.id,
-            details: { userId: invoice.userId }
+            details: { userId: invoice.userId, emailSent: emailResult.success }
         });
+
+        if (!emailResult.success) {
+            return res.status(500).json({ error: "Failed to send email", details: emailResult.error });
+        }
 
         res.json({ 
             success: true, 
-            message: "Invoice resend scheduled",
+            message: "Invoice sent successfully",
             invoiceId: req.params.id
         });
     } catch (error: any) {
