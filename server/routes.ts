@@ -51,7 +51,7 @@ import redisSSERouter from "./routes/redisSSERouter";
 import streamingResumeRouter from "./routes/streamingResumeRouter";
 import superAgentRouter from "./routes/superAgentRoutes";
 import conversationMemoryRoutes from "./routes/conversationMemoryRoutes";
-import { contextRoutes } from "./memory";
+import { contextRoutes, semanticRoutes } from "./memory";
 import { createPythonToolsRouter } from "./routes/pythonToolsRouter";
 import { createToolExecutionRouter } from "./routes/toolExecutionRouter";
 import agentPlanRouter from "./routes/agentPlanRouter";
@@ -455,6 +455,7 @@ export async function registerRoutes(
   app.use("/api/sse", redisSSERouter);
   app.use("/api/streaming", streamingResumeRouter);
   app.use("/api/memory", conversationMemoryRoutes);
+  app.use("/api/memory/semantic", semanticRoutes); // Semantic memory search API
   app.use("/api/context", contextRoutes); // Enterprise context validation API
   app.use("/api", superAgentRouter);
   app.use("/api", createPythonToolsRouter());

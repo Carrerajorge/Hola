@@ -33,3 +33,14 @@ export {
     type MemoryQuery,
     type MemoryStats
 } from "./UserMemoryStore";
+
+// Tier 3: Semantic Memory (Vector Search)
+export {
+    semanticMemoryStore,
+    SemanticMemoryStore,
+    type MemoryChunk,
+    type SearchResult,
+    type SemanticSearchOptions
+} from "./SemanticMemoryStore";
+
+export { default as semanticRoutes } from "./semanticRoutes";
