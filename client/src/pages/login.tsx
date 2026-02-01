@@ -293,30 +293,18 @@ export default function LoginPage() {
             {/* Coming Soon Options */}
             <ComingSoonButton icon={Apple} label="Continuar con Apple" />
 
-            {/* Microsoft - Active when configured */}
-            <Button
-              variant="outline"
-              className="w-full h-14 justify-center gap-3 text-base font-medium border-2 border-white/20 
-                bg-white/10 hover:bg-white/20 text-white
-                hover:border-white/40 transition-all duration-300 rounded-xl 
-                shadow-lg hover:shadow-xl hover:shadow-blue-500/10
-                scale-hover fade-in-up fade-in-up-delay-2"
-              onClick={handleMicrosoftLogin}
-              disabled={isMicrosoftLoading}
-              data-testid="button-login-microsoft"
-            >
-              {isMicrosoftLoading ? (
-                <Loader2 className="h-6 w-6 animate-spin" />
-              ) : (
-                <svg className="h-6 w-6" viewBox="0 0 23 23">
+            {/* Microsoft - Coming Soon (requires Azure AD setup) */}
+            <ComingSoonButton 
+              icon={() => (
+                <svg className="h-5 w-5" viewBox="0 0 23 23">
                   <path fill="#f35325" d="M1 1h10v10H1z" />
                   <path fill="#81bc06" d="M12 1h10v10H12z" />
                   <path fill="#05a6f0" d="M1 12h10v10H1z" />
                   <path fill="#ffba08" d="M12 12h10v10H12z" />
                 </svg>
-              )}
-              {isMicrosoftLoading ? "Conectando..." : "Continuar con Microsoft"}
-            </Button>
+              )} 
+              label="Continuar con Microsoft" 
+            />
 
             {/* Phone Authentication */}
             <Button
