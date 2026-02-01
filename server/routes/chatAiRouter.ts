@@ -577,7 +577,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool } = req.body;
+      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, provider, session_id, docTool } = req.body;
 
       // DEBUG: Log all incoming request parameters for docTool verification
       console.log(`[Stream] 📥 REQUEST RECEIVED - docTool: ${JSON.stringify(docTool)}, chatId: ${chatId}, runId: ${runId}`);
@@ -663,6 +663,7 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       let gptSessionContract: GptSessionContract | null = null;
       let effectiveModel = model || DEFAULT_MODEL;
       let serverSessionId: string | null = null;
+      const effectiveProvider = provider || DEFAULT_PROVIDER;
 
       const isValidConversationIdForStream = (id?: string): boolean => {
         if (!id) return false;
@@ -1187,6 +1188,8 @@ ${attachmentContext}`;
         {
           userId: userId || conversationId || "anonymous",
           requestId,
+          model: effectiveModel,
+          provider: effectiveProvider,
           disableImageGeneration: hasAttachments,
           maxTokens: effectiveMaxTokens,
         }

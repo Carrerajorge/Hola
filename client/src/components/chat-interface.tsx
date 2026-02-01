@@ -4143,6 +4143,8 @@ IMPORTANTE:
                 runId: runInfo.id,
                 chatId: chatId,
                 attachments: streamAttachments.length > 0 ? streamAttachments : undefined,
+                provider: selectedProvider,
+                model: selectedModel,
                 // Send selected doc tool for production mode activation
                 docTool: selectedDocTool || null
               }),
