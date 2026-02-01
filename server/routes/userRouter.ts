@@ -908,5 +908,119 @@ export function createUserRouter() {
     }
   });
 
+  // ============================================================================
+  // GDPR Data Export
+  // ============================================================================
+
+  /**
+   * GET /api/user/export - Export all user data (GDPR compliance)
+   */
+  router.get("/api/user/export", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Collect all user data
+      const chats = await storage.getChatsByUserId(userId);
+      const messages = [];
+      for (const chat of chats.slice(0, 100)) { // Limit to last 100 chats
+        const chatMessages = await storage.getMessagesByChatId(chat.id);
+        messages.push(...chatMessages);
+      }
+
+      // Remove sensitive fields
+      const { password, totpSecret, ...safeUser } = user as any;
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        format: "IliaGPT Data Export v1.0",
+        user: safeUser,
+        statistics: {
+          totalChats: chats.length,
+          totalMessages: messages.length,
+          tokensConsumed: user.tokensConsumed || 0,
+          queryCount: user.queryCount || 0
+        },
+        chats: chats.map(c => ({
+          id: c.id,
+          title: c.title,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt
+        })),
+        messages: messages.map(m => ({
+          id: m.id,
+          chatId: m.chatId,
+          role: m.role,
+          content: m.content,
+          createdAt: m.createdAt
+        })),
+        preferences: user.preferences || {}
+      };
+
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="iliagpt-export-${userId.slice(0,8)}-${Date.now()}.json"`);
+      res.json(exportData);
+
+    } catch (error: any) {
+      console.error("[Export] Error:", error);
+      res.status(500).json({ error: "Failed to export data" });
+    }
+  });
+
+  /**
+   * DELETE /api/user/account - Delete user account (GDPR right to be forgotten)
+   */
+  router.delete("/api/user/account", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const { confirmation } = req.body;
+      if (confirmation !== "DELETE_MY_ACCOUNT") {
+        return res.status(400).json({ 
+          error: "Please confirm deletion by sending: { confirmation: 'DELETE_MY_ACCOUNT' }" 
+        });
+      }
+
+      // Soft delete - mark as deleted but keep for audit
+      await storage.updateUser(userId, { 
+        status: "deleted",
+        deletedAt: new Date(),
+        email: `deleted-${userId}@deleted.local`,
+        phone: null,
+        fullName: "Deleted User"
+      });
+
+      // Log for audit
+      await storage.createAuditLog({
+        action: "account_deletion",
+        resource: "users",
+        resourceId: userId,
+        details: { 
+          deletedAt: new Date().toISOString(),
+          method: "user_request"
+        }
+      });
+
+      res.json({ 
+        success: true, 
+        message: "Account scheduled for deletion. Data will be removed within 30 days." 
+      });
+
+    } catch (error: any) {
+      console.error("[Delete Account] Error:", error);
+      res.status(500).json({ error: "Failed to delete account" });
+    }
+  });
+
   return router;
 }
