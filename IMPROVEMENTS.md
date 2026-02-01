@@ -108,6 +108,6 @@
 - [x] Auto-deduplicación por similitud semántica
 - [x] Extracción automática de memorias desde conversaciones
 - [x] API endpoints: /api/memory/semantic/*
-- [ ] Persistencia en base de datos (actualmente in-memory)
+- [x] Persistencia en base de datos (semantic_memory_chunks table)
 - [ ] UI para gestionar memorias del usuario
 
