@@ -1,324 +1,368 @@
 /**
- * Accessibility Utilities (#8)
+ * Accessibility Utilities and Components
  * WCAG 2.1 AA compliance helpers
  */
 
-import React, { useEffect, useRef, useState, useCallback, ReactNode } from 'react';
+import React, { useEffect, useRef, useState, createContext, useContext } from 'react';
+import { cn } from '@/lib/utils';
 
-// ============================================
-// ARIA LIVE ANNOUNCER
-// ============================================
+// ============= SKIP LINKS =============
 
-let announcer: HTMLDivElement | null = null;
-
-function getAnnouncer(): HTMLDivElement {
-    if (!announcer && typeof document !== 'undefined') {
-        announcer = document.createElement('div');
-        announcer.id = 'aria-live-announcer';
-        announcer.setAttribute('aria-live', 'polite');
-        announcer.setAttribute('aria-atomic', 'true');
-        announcer.setAttribute('role', 'status');
-        announcer.style.cssText = `
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      padding: 0;
-      margin: -1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-      border: 0;
-    `;
-        document.body.appendChild(announcer);
-    }
-    return announcer!;
+export function SkipLinks() {
+  return (
+    <div className="sr-only focus-within:not-sr-only">
+      <a
+        href="#main-content"
+        className="fixed top-2 left-2 z-[100] bg-primary text-primary-foreground px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        Saltar al contenido principal
+      </a>
+      <a
+        href="#chat-input"
+        className="fixed top-2 left-48 z-[100] bg-primary text-primary-foreground px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        Ir al chat
+      </a>
+    </div>
+  );
 }
 
-export function announce(message: string, priority: 'polite' | 'assertive' = 'polite') {
-    const announcer = getAnnouncer();
-    announcer.setAttribute('aria-live', priority);
+// ============= FOCUS TRAP =============
 
-    // Clear and set to trigger announcement
-    announcer.textContent = '';
-    setTimeout(() => {
-        announcer.textContent = message;
-    }, 50);
+interface FocusTrapProps {
+  children: React.ReactNode;
+  active?: boolean;
+  returnFocusOnDeactivate?: boolean;
 }
 
-// React hook for announcements
+export function FocusTrap({ 
+  children, 
+  active = true, 
+  returnFocusOnDeactivate = true 
+}: FocusTrapProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+
+    previousFocusRef.current = document.activeElement as HTMLElement;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const focusableElements = container.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    firstElement?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      if (e.shiftKey) {
+        if (document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement?.focus();
+        }
+      } else {
+        if (document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement?.focus();
+        }
+      }
+    };
+
+    container.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      container.removeEventListener('keydown', handleKeyDown);
+      if (returnFocusOnDeactivate && previousFocusRef.current) {
+        previousFocusRef.current.focus();
+      }
+    };
+  }, [active, returnFocusOnDeactivate]);
+
+  return <div ref={containerRef}>{children}</div>;
+}
+
+// ============= LIVE REGION =============
+
+interface LiveRegionProps {
+  message: string;
+  politeness?: 'polite' | 'assertive';
+  className?: string;
+}
+
+export function LiveRegion({ 
+  message, 
+  politeness = 'polite',
+  className 
+}: LiveRegionProps) {
+  return (
+    <div
+      role="status"
+      aria-live={politeness}
+      aria-atomic="true"
+      className={cn("sr-only", className)}
+    >
+      {message}
+    </div>
+  );
+}
+
+// Hook for announcing messages
 export function useAnnounce() {
-    return useCallback((message: string, priority: 'polite' | 'assertive' = 'polite') => {
-        announce(message, priority);
-    }, []);
+  const [message, setMessage] = useState('');
+
+  const announce = (text: string, delay = 100) => {
+    setMessage('');
+    setTimeout(() => setMessage(text), delay);
+  };
+
+  return { message, announce };
 }
 
-// ============================================
-// FOCUS TRAP
-// ============================================
+// ============= KEYBOARD NAVIGATION =============
 
-const FOCUSABLE_ELEMENTS = [
-    'a[href]',
-    'button:not([disabled])',
-    'input:not([disabled])',
-    'select:not([disabled])',
-    'textarea:not([disabled])',
-    '[tabindex]:not([tabindex="-1"])',
-].join(', ');
-
-export function useFocusTrap(isActive: boolean = true) {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const previousFocusRef = useRef<HTMLElement | null>(null);
-
-    useEffect(() => {
-        if (!isActive || !containerRef.current) return;
-
-        // Store previous focus
-        previousFocusRef.current = document.activeElement as HTMLElement;
-
-        const container = containerRef.current;
-        const focusableElements = container.querySelectorAll<HTMLElement>(FOCUSABLE_ELEMENTS);
-        const firstElement = focusableElements[0];
-        const lastElement = focusableElements[focusableElements.length - 1];
-
-        // Focus first element
-        firstElement?.focus();
-
-        function handleKeyDown(e: KeyboardEvent) {
-            if (e.key !== 'Tab') return;
-
-            if (e.shiftKey) {
-                if (document.activeElement === firstElement) {
-                    e.preventDefault();
-                    lastElement?.focus();
-                }
-            } else {
-                if (document.activeElement === lastElement) {
-                    e.preventDefault();
-                    firstElement?.focus();
-                }
-            }
-        }
-
-        container.addEventListener('keydown', handleKeyDown);
-
-        return () => {
-            container.removeEventListener('keydown', handleKeyDown);
-            // Restore focus
-            previousFocusRef.current?.focus();
-        };
-    }, [isActive]);
-
-    return containerRef;
+interface KeyboardNavigationProps {
+  children: React.ReactNode;
+  orientation?: 'horizontal' | 'vertical';
+  loop?: boolean;
+  onSelect?: (index: number) => void;
 }
 
-// ============================================
-// FOCUS VISIBLE
-// ============================================
+export function KeyboardNavigation({
+  children,
+  orientation = 'vertical',
+  loop = true,
+  onSelect
+}: KeyboardNavigationProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
 
-export function useFocusVisible() {
-    const [isFocusVisible, setIsFocusVisible] = useState(false);
-    const [hadKeyboardEvent, setHadKeyboardEvent] = useState(true);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-    useEffect(() => {
-        function handleKeyDown(e: KeyboardEvent) {
-            if (e.metaKey || e.ctrlKey || e.altKey) return;
-            setHadKeyboardEvent(true);
-        }
+    const items = container.querySelectorAll<HTMLElement>('[data-nav-item]');
 
-        function handlePointerDown() {
-            setHadKeyboardEvent(false);
-        }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isVertical = orientation === 'vertical';
+      const prevKey = isVertical ? 'ArrowUp' : 'ArrowLeft';
+      const nextKey = isVertical ? 'ArrowDown' : 'ArrowRight';
 
-        document.addEventListener('keydown', handleKeyDown);
-        document.addEventListener('mousedown', handlePointerDown);
-        document.addEventListener('pointerdown', handlePointerDown);
-        document.addEventListener('touchstart', handlePointerDown);
+      if (e.key === prevKey) {
+        e.preventDefault();
+        setActiveIndex((prev) => {
+          const newIndex = prev - 1;
+          if (newIndex < 0) return loop ? items.length - 1 : 0;
+          return newIndex;
+        });
+      } else if (e.key === nextKey) {
+        e.preventDefault();
+        setActiveIndex((prev) => {
+          const newIndex = prev + 1;
+          if (newIndex >= items.length) return loop ? 0 : items.length - 1;
+          return newIndex;
+        });
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onSelect?.(activeIndex);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        setActiveIndex(0);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        setActiveIndex(items.length - 1);
+      }
+    };
 
-        return () => {
-            document.removeEventListener('keydown', handleKeyDown);
-            document.removeEventListener('mousedown', handlePointerDown);
-            document.removeEventListener('pointerdown', handlePointerDown);
-            document.removeEventListener('touchstart', handlePointerDown);
-        };
-    }, []);
+    container.addEventListener('keydown', handleKeyDown);
+    return () => container.removeEventListener('keydown', handleKeyDown);
+  }, [orientation, loop, activeIndex, onSelect]);
 
-    const onFocus = useCallback(() => {
-        setIsFocusVisible(hadKeyboardEvent);
-    }, [hadKeyboardEvent]);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-    const onBlur = useCallback(() => {
-        setIsFocusVisible(false);
-    }, []);
+    const items = container.querySelectorAll<HTMLElement>('[data-nav-item]');
+    items.forEach((item, index) => {
+      item.setAttribute('tabindex', index === activeIndex ? '0' : '-1');
+      if (index === activeIndex) {
+        item.focus();
+      }
+    });
+  }, [activeIndex]);
 
-    return { isFocusVisible, focusVisibleProps: { onFocus, onBlur } };
+  return (
+    <div ref={containerRef} role="listbox" aria-orientation={orientation}>
+      {children}
+    </div>
+  );
 }
 
-// ============================================
-// SKIP LINK
-// ============================================
+// ============= HIGH CONTRAST MODE =============
 
-export function SkipLink({ targetId, children = 'Saltar al contenido principal' }: {
-    targetId: string;
-    children?: ReactNode;
-}) {
-    return (
-        <a
-            href={`#${targetId}`}
-            className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[9999] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:shadow-lg"
-        >
-            {children}
-        </a>
-    );
+interface HighContrastContextType {
+  isHighContrast: boolean;
+  toggleHighContrast: () => void;
 }
 
-// ============================================
-// ROVING TABINDEX
-// ============================================
+const HighContrastContext = createContext<HighContrastContextType>({
+  isHighContrast: false,
+  toggleHighContrast: () => {}
+});
 
-export function useRovingTabIndex(itemCount: number, orientation: 'horizontal' | 'vertical' = 'vertical') {
-    const [activeIndex, setActiveIndex] = useState(0);
+export function HighContrastProvider({ children }: { children: React.ReactNode }) {
+  const [isHighContrast, setIsHighContrast] = useState(() => {
+    return localStorage.getItem('high-contrast') === 'true';
+  });
 
-    const handleKeyDown = useCallback((e: React.KeyboardEvent, index: number) => {
-        const isVertical = orientation === 'vertical';
-        const prevKey = isVertical ? 'ArrowUp' : 'ArrowLeft';
-        const nextKey = isVertical ? 'ArrowDown' : 'ArrowRight';
-
-        if (e.key === prevKey) {
-            e.preventDefault();
-            setActiveIndex((prev) => (prev - 1 + itemCount) % itemCount);
-        } else if (e.key === nextKey) {
-            e.preventDefault();
-            setActiveIndex((prev) => (prev + 1) % itemCount);
-        } else if (e.key === 'Home') {
-            e.preventDefault();
-            setActiveIndex(0);
-        } else if (e.key === 'End') {
-            e.preventDefault();
-            setActiveIndex(itemCount - 1);
-        }
-    }, [itemCount, orientation]);
-
-    const getItemProps = useCallback((index: number) => ({
-        tabIndex: index === activeIndex ? 0 : -1,
-        onKeyDown: (e: React.KeyboardEvent) => handleKeyDown(e, index),
-        onFocus: () => setActiveIndex(index),
-    }), [activeIndex, handleKeyDown]);
-
-    return { activeIndex, setActiveIndex, getItemProps };
-}
-
-// ============================================
-// SCREEN READER ONLY
-// ============================================
-
-import type { ElementType } from 'react';
-
-export function VisuallyHidden({ children, as: Component = 'span' }: {
-    children: ReactNode;
-    as?: ElementType;
-}) {
-    return (
-        <Component className="sr-only">
-            {children}
-        </Component>
-    );
-}
-
-// ============================================
-// ACCESSIBLE ICON BUTTON
-// ============================================
-
-import { forwardRef } from 'react';
-import { Button, ButtonProps } from '@/components/ui/button';
-
-interface IconButtonProps extends ButtonProps {
-    label: string;
-    icon: ReactNode;
-}
-
-export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
-    ({ label, icon, ...props }, ref) => {
-        return (
-            <Button ref={ref} aria-label={label} {...props}>
-                {icon}
-                <VisuallyHidden>{label}</VisuallyHidden>
-            </Button>
-        );
+  useEffect(() => {
+    if (isHighContrast) {
+      document.documentElement.classList.add('high-contrast');
+    } else {
+      document.documentElement.classList.remove('high-contrast');
     }
-);
-IconButton.displayName = 'IconButton';
+    localStorage.setItem('high-contrast', String(isHighContrast));
+  }, [isHighContrast]);
 
-// ============================================
-// LIVE REGION FOR STREAMING
-// ============================================
-
-export function StreamingLiveRegion({ content, isStreaming }: {
-    content: string;
-    isStreaming: boolean;
-}) {
-    const [announced, setAnnounced] = useState('');
-
-    useEffect(() => {
-        if (!isStreaming && content && content !== announced) {
-            // Announce completion
-            announce('Respuesta completada');
-            setAnnounced(content);
-        }
-    }, [content, isStreaming, announced]);
-
-    return (
-        <div
-            role="status"
-            aria-live="polite"
-            aria-atomic="false"
-            aria-relevant="additions text"
-            className="sr-only"
-        >
-            {isStreaming ? 'Generando respuesta...' : ''}
-        </div>
-    );
+  return (
+    <HighContrastContext.Provider 
+      value={{ 
+        isHighContrast, 
+        toggleHighContrast: () => setIsHighContrast(!isHighContrast) 
+      }}
+    >
+      {children}
+    </HighContrastContext.Provider>
+  );
 }
 
-// ============================================
-// REDUCED MOTION HOOK
-// ============================================
-
-export function usePrefersReducedMotion() {
-    const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-
-    useEffect(() => {
-        const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-        setPrefersReducedMotion(mediaQuery.matches);
-
-        const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
-        mediaQuery.addEventListener('change', handler);
-        return () => mediaQuery.removeEventListener('change', handler);
-    }, []);
-
-    return prefersReducedMotion;
+export function useHighContrast() {
+  return useContext(HighContrastContext);
 }
 
-// ============================================
-// HEADING LEVEL CONTEXT
-// ============================================
+// ============= REDUCED MOTION =============
 
-const HeadingLevelContext = React.createContext(1);
+export function useReducedMotion(): boolean {
+  const [reducedMotion, setReducedMotion] = useState(false);
 
-export function useHeadingLevel() {
-    return React.useContext(HeadingLevelContext);
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReducedMotion(mediaQuery.matches);
+
+    const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    mediaQuery.addEventListener('change', handler);
+    return () => mediaQuery.removeEventListener('change', handler);
+  }, []);
+
+  return reducedMotion;
 }
 
-export function Section({ children }: { children: ReactNode }) {
-    const level = useHeadingLevel();
-    return (
-        <HeadingLevelContext.Provider value={Math.min(level + 1, 6)}>
-            <section>{children}</section>
-        </HeadingLevelContext.Provider>
-    );
+// ============= ACCESSIBLE BUTTON =============
+
+interface AccessibleButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  loading?: boolean;
+  loadingText?: string;
+  icon?: React.ReactNode;
 }
 
-export function Heading({ children, className }: { children: ReactNode; className?: string }) {
-    const level = useHeadingLevel();
-    const Tag = `h${level}` as ElementType;
-    return <Tag className={className}>{children}</Tag>;
+export function AccessibleButton({
+  children,
+  loading,
+  loadingText = 'Cargando...',
+  icon,
+  disabled,
+  className,
+  ...props
+}: AccessibleButtonProps) {
+  return (
+    <button
+      {...props}
+      disabled={disabled || loading}
+      aria-busy={loading}
+      aria-disabled={disabled || loading}
+      className={cn(
+        "inline-flex items-center justify-center gap-2",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+        className
+      )}
+    >
+      {loading ? (
+        <>
+          <span className="animate-spin">⏳</span>
+          <span className="sr-only">{loadingText}</span>
+          <span aria-hidden="true">{loadingText}</span>
+        </>
+      ) : (
+        <>
+          {icon}
+          {children}
+        </>
+      )}
+    </button>
+  );
 }
+
+// ============= SCREEN READER ONLY =============
+
+interface SrOnlyProps {
+  children: React.ReactNode;
+  focusable?: boolean;
+}
+
+export function SrOnly({ children, focusable }: SrOnlyProps) {
+  return (
+    <span
+      className={cn(
+        "absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0",
+        focusable && "focus:static focus:w-auto focus:h-auto focus:p-2 focus:m-0 focus:overflow-visible"
+      )}
+      style={{ clip: 'rect(0, 0, 0, 0)' }}
+    >
+      {children}
+    </span>
+  );
+}
+
+// ============= TOOLTIP WITH KEYBOARD SUPPORT =============
+
+interface AccessibleTooltipProps {
+  content: string;
+  children: React.ReactNode;
+}
+
+export function AccessibleTooltip({ content, children }: AccessibleTooltipProps) {
+  const [isVisible, setIsVisible] = useState(false);
+  const id = useRef(`tooltip-${Math.random().toString(36).substring(7)}`);
+
+  return (
+    <div className="relative inline-block">
+      <div
+        onMouseEnter={() => setIsVisible(true)}
+        onMouseLeave={() => setIsVisible(false)}
+        onFocus={() => setIsVisible(true)}
+        onBlur={() => setIsVisible(false)}
+        aria-describedby={id.current}
+      >
+        {children}
+      </div>
+      <div
+        id={id.current}
+        role="tooltip"
+        className={cn(
+          "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs bg-popover text-popover-foreground rounded shadow-lg whitespace-nowrap z-50 transition-opacity",
+          isVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+        )}
+      >
+        {content}
+      </div>
+    </div>
+  );
+}
+export { SkipLinks as SkipLink } from './accessibility';
