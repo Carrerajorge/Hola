@@ -112,15 +112,24 @@ modelsRouter.get("/stats", async (req, res) => {
 
 modelsRouter.patch("/:id", async (req, res) => {
     try {
+        // Get model before update for audit
+        const previousModel = await storage.getAiModel(req.params.id);
         const model = await storage.updateAiModel(req.params.id, req.body);
         if (!model) {
             return res.status(404).json({ error: "Model not found" });
         }
-        await storage.createAuditLog({
-            action: "model_update",
+        await auditLog(req, {
+            action: AuditActions.MODEL_UPDATED,
             resource: "ai_models",
             resourceId: req.params.id,
-            details: req.body
+            details: {
+                changes: req.body,
+                previousStatus: previousModel?.status,
+                newStatus: req.body.status,
+                updatedBy: (req as any).user?.email
+            },
+            category: "admin",
+            severity: "info"
         });
         res.json(model);
     } catch (error: any) {
@@ -130,11 +139,19 @@ modelsRouter.patch("/:id", async (req, res) => {
 
 modelsRouter.delete("/:id", async (req, res) => {
     try {
+        const existing = await storage.getAiModel(req.params.id);
         await storage.deleteAiModel(req.params.id);
-        await storage.createAuditLog({
-            action: "model_delete",
+        await auditLog(req, {
+            action: AuditActions.MODEL_DELETED,
             resource: "ai_models",
-            resourceId: req.params.id
+            resourceId: req.params.id,
+            details: {
+                modelName: existing?.name,
+                provider: existing?.provider,
+                deletedBy: (req as any).user?.email
+            },
+            category: "admin",
+            severity: "warning"
         });
         res.json({ success: true });
     } catch (error: any) {
@@ -359,6 +376,68 @@ modelsRouter.post("/:id/test", async (req, res) => {
                 error: testError.message
             });
         }
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/models/usage - Get usage stats by model
+modelsRouter.get("/usage", async (req, res) => {
+    try {
+        const { period = "7d" } = req.query;
+        const periodMs = {
+            "1d": 24 * 60 * 60 * 1000,
+            "7d": 7 * 24 * 60 * 60 * 1000,
+            "30d": 30 * 24 * 60 * 60 * 1000
+        }[period as string] || 7 * 24 * 60 * 60 * 1000;
+        
+        const startDate = new Date(Date.now() - periodMs);
+        const metrics = await storage.getProviderMetrics(undefined, startDate, new Date());
+        
+        // Aggregate by model
+        const byModel: Record<string, { requests: number; tokens: number; errors: number; avgLatency: number }> = {};
+        
+        metrics.forEach(m => {
+            const key = m.provider;
+            if (!byModel[key]) {
+                byModel[key] = { requests: 0, tokens: 0, errors: 0, avgLatency: 0 };
+            }
+            byModel[key].requests += m.totalRequests || 0;
+            byModel[key].tokens += m.totalTokens || 0;
+            byModel[key].errors += m.errorCount || 0;
+            byModel[key].avgLatency = m.avgLatency || byModel[key].avgLatency;
+        });
+        
+        res.json({
+            period,
+            startDate,
+            usage: Object.entries(byModel).map(([model, stats]) => ({
+                model,
+                ...stats,
+                errorRate: stats.requests > 0 ? ((stats.errors / stats.requests) * 100).toFixed(2) : "0"
+            }))
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/models/health - Health check for all providers
+modelsRouter.get("/health", async (req, res) => {
+    try {
+        const providers = getAvailableProviders();
+        const health: Record<string, { available: boolean; hasKey: boolean; lastCheck: string }> = {};
+        
+        for (const provider of providers) {
+            const hasKey = await checkApiKeyExists(provider);
+            health[provider] = {
+                available: hasKey,
+                hasKey,
+                lastCheck: new Date().toISOString()
+            };
+        }
+        
+        res.json(health);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

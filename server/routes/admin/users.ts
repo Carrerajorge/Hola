@@ -205,6 +205,7 @@ usersRouter.get("/:id", async (req, res) => {
 usersRouter.post("/:id/block", async (req, res) => {
     try {
         const { reason } = req.body || {};
+        const previousUser = await storage.getUser(req.params.id);
         const user = await storage.updateUser(req.params.id, { 
             status: "blocked",
             blockedAt: new Date(),
@@ -213,11 +214,17 @@ usersRouter.post("/:id/block", async (req, res) => {
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
-        await storage.createAuditLog({
-            action: "user_block",
+        await auditLog(req, {
+            action: AuditActions.USER_BLOCKED,
             resource: "users",
             resourceId: req.params.id,
-            details: { reason }
+            details: { 
+                reason,
+                userEmail: previousUser?.email,
+                blockedBy: (req as any).user?.email
+            },
+            category: "security",
+            severity: "warning"
         });
         res.json({ success: true, user });
     } catch (error: any) {
@@ -228,6 +235,7 @@ usersRouter.post("/:id/block", async (req, res) => {
 // POST /api/admin/users/:id/unblock - Unblock a user
 usersRouter.post("/:id/unblock", async (req, res) => {
     try {
+        const previousUser = await storage.getUser(req.params.id);
         const user = await storage.updateUser(req.params.id, { 
             status: "active",
             blockedAt: null,
@@ -236,10 +244,16 @@ usersRouter.post("/:id/unblock", async (req, res) => {
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
-        await storage.createAuditLog({
-            action: "user_unblock",
+        await auditLog(req, {
+            action: AuditActions.USER_UNBLOCKED,
             resource: "users",
-            resourceId: req.params.id
+            resourceId: req.params.id,
+            details: {
+                userEmail: previousUser?.email,
+                unblockedBy: (req as any).user?.email
+            },
+            category: "security",
+            severity: "info"
         });
         res.json({ success: true, user });
     } catch (error: any) {
@@ -254,6 +268,7 @@ usersRouter.patch("/:id/role", async (req, res) => {
         if (!role || !["user", "admin", "moderator"].includes(role)) {
             return res.status(400).json({ error: "Invalid role. Must be: user, admin, or moderator" });
         }
+        const previousUser = await storage.getUser(req.params.id);
         const user = await storage.updateUser(req.params.id, { role });
         if (!user) {
             return res.status(404).json({ error: "User not found" });

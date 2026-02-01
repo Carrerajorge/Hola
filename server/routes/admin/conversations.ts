@@ -381,22 +381,36 @@ conversationsRouter.post("/:id/unarchive", async (req, res) => {
 // DELETE /api/admin/conversations/:id - Delete a conversation
 conversationsRouter.delete("/:id", async (req, res) => {
     try {
+        // Get conversation info before deletion for audit
+        const [existing] = await db.select()
+            .from(chats)
+            .where(eq(chats.id, req.params.id))
+            .limit(1);
+
+        if (!existing) {
+            return res.status(404).json({ error: "Conversation not found" });
+        }
+
         // First delete all messages
-        await db.delete(chatMessages).where(eq(chatMessages.chatId, req.params.id));
+        const deletedMessages = await db.delete(chatMessages).where(eq(chatMessages.chatId, req.params.id));
         
         // Then delete the chat
         const [deleted] = await db.delete(chats)
             .where(eq(chats.id, req.params.id))
             .returning();
 
-        if (!deleted) {
-            return res.status(404).json({ error: "Conversation not found" });
-        }
-
-        await storage.createAuditLog({
-            action: "conversation_delete",
+        await auditLog(req, {
+            action: AuditActions.CONVERSATION_DELETED,
             resource: "chats",
-            resourceId: req.params.id
+            resourceId: req.params.id,
+            details: {
+                title: existing.title,
+                userId: existing.userId,
+                messageCount: existing.messageCount,
+                deletedBy: (req as any).user?.email
+            },
+            category: "admin",
+            severity: "warning"
         });
 
         res.json({ success: true });
