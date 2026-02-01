@@ -315,3 +315,86 @@ conversationsRouter.post("/:id/notes", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// POST /api/admin/conversations/:id/archive - Archive a conversation
+conversationsRouter.post("/:id/archive", async (req, res) => {
+    try {
+        const [updated] = await db.update(chats)
+            .set({
+                conversationStatus: "archived",
+                endedAt: new Date(),
+                updatedAt: new Date()
+            })
+            .where(eq(chats.id, req.params.id))
+            .returning();
+
+        if (!updated) {
+            return res.status(404).json({ error: "Conversation not found" });
+        }
+
+        await storage.createAuditLog({
+            action: "conversation_archive",
+            resource: "chats",
+            resourceId: req.params.id
+        });
+
+        res.json({ success: true, conversation: updated });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/conversations/:id/unarchive - Unarchive a conversation
+conversationsRouter.post("/:id/unarchive", async (req, res) => {
+    try {
+        const [updated] = await db.update(chats)
+            .set({
+                conversationStatus: "active",
+                endedAt: null,
+                updatedAt: new Date()
+            })
+            .where(eq(chats.id, req.params.id))
+            .returning();
+
+        if (!updated) {
+            return res.status(404).json({ error: "Conversation not found" });
+        }
+
+        await storage.createAuditLog({
+            action: "conversation_unarchive",
+            resource: "chats",
+            resourceId: req.params.id
+        });
+
+        res.json({ success: true, conversation: updated });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// DELETE /api/admin/conversations/:id - Delete a conversation
+conversationsRouter.delete("/:id", async (req, res) => {
+    try {
+        // First delete all messages
+        await db.delete(chatMessages).where(eq(chatMessages.chatId, req.params.id));
+        
+        // Then delete the chat
+        const [deleted] = await db.delete(chats)
+            .where(eq(chats.id, req.params.id))
+            .returning();
+
+        if (!deleted) {
+            return res.status(404).json({ error: "Conversation not found" });
+        }
+
+        await storage.createAuditLog({
+            action: "conversation_delete",
+            resource: "chats",
+            resourceId: req.params.id
+        });
+
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});

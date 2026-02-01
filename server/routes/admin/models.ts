@@ -257,3 +257,104 @@ modelsRouter.get("/providers/list", async (req, res) => { // Renamed from /provi
         res.status(500).json({ error: error.message });
     }
 });
+
+// GET /api/admin/models/health - Real-time health check for all LLM providers
+modelsRouter.get("/health", async (req, res) => {
+    try {
+        const { llmGateway } = await import("../../lib/llmGateway");
+        const healthStatus = await llmGateway.healthCheck();
+        
+        const providers = {
+            xai: {
+                name: "xAI (Grok)",
+                available: healthStatus?.xai?.available ?? false,
+                latency: healthStatus?.xai?.latency ?? null,
+                error: healthStatus?.xai?.error ?? null,
+                hasApiKey: !!process.env.XAI_API_KEY
+            },
+            gemini: {
+                name: "Google Gemini",
+                available: healthStatus?.gemini?.available ?? false,
+                latency: healthStatus?.gemini?.latency ?? null,
+                error: healthStatus?.gemini?.error ?? null,
+                hasApiKey: !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_API_KEY
+            }
+        };
+
+        const allHealthy = Object.values(providers).every(p => p.available || !p.hasApiKey);
+        const anyAvailable = Object.values(providers).some(p => p.available);
+
+        res.json({
+            status: anyAvailable ? "healthy" : "degraded",
+            allProvidersHealthy: allHealthy,
+            providers,
+            checkedAt: new Date().toISOString()
+        });
+    } catch (error: any) {
+        res.status(500).json({ 
+            status: "error",
+            error: error.message,
+            checkedAt: new Date().toISOString()
+        });
+    }
+});
+
+// POST /api/admin/models/:id/test - Test a specific model
+modelsRouter.post("/:id/test", async (req, res) => {
+    try {
+        const model = await storage.getAiModelById(req.params.id);
+        if (!model) {
+            return res.status(404).json({ error: "Model not found" });
+        }
+
+        const { llmGateway } = await import("../../lib/llmGateway");
+        const testPrompt = "Say 'OK' if you can read this.";
+        
+        const startTime = Date.now();
+        try {
+            const response = await llmGateway.chat(
+                [{ role: "user", content: testPrompt }],
+                { 
+                    model: model.modelId,
+                    maxTokens: 10,
+                    timeout: 10000
+                }
+            );
+            const latency = Date.now() - startTime;
+
+            await storage.createAuditLog({
+                action: "model_test",
+                resource: "ai_models",
+                resourceId: req.params.id,
+                details: { success: true, latency, modelId: model.modelId }
+            });
+
+            res.json({
+                success: true,
+                model: model.name,
+                provider: model.provider,
+                latency,
+                response: response.content?.slice(0, 100)
+            });
+        } catch (testError: any) {
+            const latency = Date.now() - startTime;
+            
+            await storage.createAuditLog({
+                action: "model_test",
+                resource: "ai_models",
+                resourceId: req.params.id,
+                details: { success: false, error: testError.message, modelId: model.modelId }
+            });
+
+            res.json({
+                success: false,
+                model: model.name,
+                provider: model.provider,
+                latency,
+                error: testError.message
+            });
+        }
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});

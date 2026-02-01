@@ -6,13 +6,83 @@ import { hashPassword } from "../../utils/password";
 import { validateBody } from "../../middleware/validateRequest";
 import { asyncHandler } from "../../middleware/errorHandler";
 import { createUserBodySchema } from "../../schemas/apiSchemas";
+import { sql, ilike, or, desc, asc } from "drizzle-orm";
 
 export const usersRouter = Router();
 
+// GET /api/admin/users - List with pagination, search, and filters
 usersRouter.get("/", async (req, res) => {
     try {
-        const users = await storage.getAllUsers();
-        res.json(users);
+        const {
+            page = "1",
+            limit = "20",
+            search = "",
+            sortBy = "createdAt",
+            sortOrder = "desc",
+            status,
+            role,
+            plan
+        } = req.query as Record<string, string>;
+
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+        const offset = (pageNum - 1) * limitNum;
+
+        // Build query with search
+        let allUsers = await storage.getAllUsers();
+        
+        // Apply search filter
+        if (search) {
+            const searchLower = search.toLowerCase();
+            allUsers = allUsers.filter(u => 
+                u.email?.toLowerCase().includes(searchLower) ||
+                u.firstName?.toLowerCase().includes(searchLower) ||
+                u.lastName?.toLowerCase().includes(searchLower) ||
+                u.fullName?.toLowerCase().includes(searchLower)
+            );
+        }
+
+        // Apply status filter
+        if (status) {
+            allUsers = allUsers.filter(u => u.status === status);
+        }
+
+        // Apply role filter
+        if (role) {
+            allUsers = allUsers.filter(u => u.role === role);
+        }
+
+        // Apply plan filter
+        if (plan) {
+            allUsers = allUsers.filter(u => u.plan === plan);
+        }
+
+        // Sort
+        const validSortFields = ["createdAt", "email", "queryCount", "tokensConsumed", "lastLoginAt"];
+        const sortField = validSortFields.includes(sortBy) ? sortBy : "createdAt";
+        allUsers.sort((a, b) => {
+            const aVal = (a as any)[sortField] ?? 0;
+            const bVal = (b as any)[sortField] ?? 0;
+            if (sortOrder === "asc") {
+                return aVal > bVal ? 1 : -1;
+            }
+            return aVal < bVal ? 1 : -1;
+        });
+
+        const total = allUsers.length;
+        const paginatedUsers = allUsers.slice(offset, offset + limitNum);
+
+        res.json({
+            users: paginatedUsers,
+            pagination: {
+                page: pageNum,
+                limit: limitNum,
+                total,
+                totalPages: Math.ceil(total / limitNum),
+                hasNext: pageNum * limitNum < total,
+                hasPrev: pageNum > 1
+            }
+        });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
@@ -78,6 +148,88 @@ usersRouter.delete("/:id", async (req, res) => {
             resourceId: req.params.id
         });
         res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/users/:id - Get single user details
+usersRouter.get("/:id", async (req, res) => {
+    try {
+        const user = await storage.getUser(req.params.id);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        res.json(user);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/users/:id/block - Block a user
+usersRouter.post("/:id/block", async (req, res) => {
+    try {
+        const { reason } = req.body || {};
+        const user = await storage.updateUser(req.params.id, { 
+            status: "blocked",
+            blockedAt: new Date(),
+            blockReason: reason || "Blocked by admin"
+        });
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        await storage.createAuditLog({
+            action: "user_block",
+            resource: "users",
+            resourceId: req.params.id,
+            details: { reason }
+        });
+        res.json({ success: true, user });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/users/:id/unblock - Unblock a user
+usersRouter.post("/:id/unblock", async (req, res) => {
+    try {
+        const user = await storage.updateUser(req.params.id, { 
+            status: "active",
+            blockedAt: null,
+            blockReason: null
+        });
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        await storage.createAuditLog({
+            action: "user_unblock",
+            resource: "users",
+            resourceId: req.params.id
+        });
+        res.json({ success: true, user });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// PATCH /api/admin/users/:id/role - Update user role
+usersRouter.patch("/:id/role", async (req, res) => {
+    try {
+        const { role } = req.body;
+        if (!role || !["user", "admin", "moderator"].includes(role)) {
+            return res.status(400).json({ error: "Invalid role. Must be: user, admin, or moderator" });
+        }
+        const user = await storage.updateUser(req.params.id, { role });
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        await storage.createAuditLog({
+            action: "user_role_change",
+            resource: "users",
+            resourceId: req.params.id,
+            details: { newRole: role }
+        });
+        res.json({ success: true, user });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
