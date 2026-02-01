@@ -13,9 +13,11 @@ const COST_PER_1K_TOKENS: Record<string, number> = {
 };
 
 const DEFAULT_BUDGET_EUR = "100.00";
+const TABLE_EXISTS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 let aggregatorInterval: NodeJS.Timeout | null = null;
 let isRunning = false;
+const tableExistsCache = new Map<string, { exists: boolean; checkedAt: number }>();
 
 interface ProviderStats {
   provider: string;
@@ -37,6 +39,28 @@ function calculatePercentile(sortedValues: number[], percentile: number): number
 function estimateCost(provider: string, tokensIn: number, tokensOut: number): number {
   const rate = COST_PER_1K_TOKENS[provider.toLowerCase()] || COST_PER_1K_TOKENS.default;
   return ((tokensIn + tokensOut) / 1000) * rate;
+}
+
+async function tableExists(tableName: string): Promise<boolean> {
+  const cached = tableExistsCache.get(tableName);
+  if (cached && Date.now() - cached.checkedAt < TABLE_EXISTS_CACHE_TTL_MS) {
+    return cached.exists;
+  }
+  const result = await db.execute(sql`select to_regclass(${tableName}) as table_name`);
+  const row = result.rows?.[0] as { table_name?: string | null } | undefined;
+  const exists = Boolean(row?.table_name);
+  tableExistsCache.set(tableName, { exists, checkedAt: Date.now() });
+  return exists;
+}
+
+async function getMissingTables(tableNames: string[]): Promise<string[]> {
+  const checks = await Promise.all(
+    tableNames.map(async (tableName) => ({
+      tableName,
+      exists: await tableExists(tableName),
+    }))
+  );
+  return checks.filter((check) => !check.exists).map((check) => check.tableName);
 }
 
 async function ensureCostBudgetExists(provider: string): Promise<void> {
@@ -69,6 +93,18 @@ export async function runAggregation(): Promise<void> {
 
   try {
     console.log(`[Analytics] Running aggregation for window: ${windowStart.toISOString()} - ${windowEnd.toISOString()}`);
+
+    const missingTables = await getMissingTables([
+      "public.api_logs",
+      "public.provider_metrics",
+      "public.cost_budgets",
+      "public.kpi_snapshots",
+    ]);
+
+    if (missingTables.length > 0) {
+      console.warn(`[Analytics] Skipping aggregation; missing tables: ${missingTables.join(", ")}`);
+      return;
+    }
 
     const logs = await db
       .select({
@@ -195,48 +231,73 @@ export async function calculateKpis(): Promise<void> {
   const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
 
   try {
-    const [activeUsersResult] = await db
-      .select({ count: count() })
-      .from(chatMessages)
-      .where(gte(chatMessages.createdAt, tenMinutesAgo));
-    const activeUsersNow = activeUsersResult?.count || 0;
+    const requiredTables = await getMissingTables([
+      "public.cost_budgets",
+      "public.kpi_snapshots",
+    ]);
 
-    const [queriesResult] = await db
-      .select({ count: count() })
-      .from(apiLogs)
-      .where(gte(apiLogs.createdAt, oneMinuteAgo));
-    const queriesPerMinute = queriesResult?.count || 0;
+    if (requiredTables.length > 0) {
+      console.warn(`[Analytics] Skipping KPI calculation; missing tables: ${requiredTables.join(", ")}`);
+      return;
+    }
 
-    const [tokensResult] = await db
-      .select({
-        totalIn: sql<number>`COALESCE(SUM(${apiLogs.tokensIn}), 0)`,
-        totalOut: sql<number>`COALESCE(SUM(${apiLogs.tokensOut}), 0)`,
-      })
-      .from(apiLogs)
-      .where(gte(apiLogs.createdAt, todayStart));
-    const tokensConsumedToday = (tokensResult?.totalIn || 0) + (tokensResult?.totalOut || 0);
+    const hasChatMessages = await tableExists("public.chat_messages");
+    const hasApiLogs = await tableExists("public.api_logs");
 
-    const [latencyResult] = await db
-      .select({
-        avg: sql<number>`COALESCE(AVG(${apiLogs.latencyMs}), 0)`,
-      })
-      .from(apiLogs)
-      .where(gte(apiLogs.createdAt, todayStart));
-    const avgLatencyMs = Math.round(latencyResult?.avg || 0);
+    let activeUsersNow = 0;
+    if (hasChatMessages) {
+      const activeUsersResult = await db
+        .select({ count: count() })
+        .from(chatMessages)
+        .where(gte(chatMessages.createdAt, tenMinutesAgo));
+      activeUsersNow = activeUsersResult[0]?.count || 0;
+    }
 
-    const [errorResult] = await db
-      .select({
-        total: count(),
-        errors: sql<number>`SUM(CASE WHEN ${apiLogs.statusCode} >= 400 THEN 1 ELSE 0 END)`,
-      })
-      .from(apiLogs)
-      .where(gte(apiLogs.createdAt, todayStart));
+    let queriesPerMinute = 0;
+    let tokensConsumedToday = 0;
+    let avgLatencyMs = 0;
 
-    const totalToday = errorResult?.total || 0;
-    const errorsToday = errorResult?.errors || 0;
-    const errorRatePercentage = totalToday > 0
-      ? ((errorsToday / totalToday) * 100).toFixed(2)
-      : "0.00";
+    if (hasApiLogs) {
+      const queriesResult = await db
+        .select({ count: count() })
+        .from(apiLogs)
+        .where(gte(apiLogs.createdAt, oneMinuteAgo));
+      queriesPerMinute = queriesResult[0]?.count || 0;
+
+      const tokensResult = await db
+        .select({
+          totalIn: sql<number>`COALESCE(SUM(${apiLogs.tokensIn}), 0)`,
+          totalOut: sql<number>`COALESCE(SUM(${apiLogs.tokensOut}), 0)`,
+        })
+        .from(apiLogs)
+        .where(gte(apiLogs.createdAt, todayStart));
+      tokensConsumedToday = (tokensResult[0]?.totalIn || 0) + (tokensResult[0]?.totalOut || 0);
+
+      const latencyResult = await db
+        .select({
+          avg: sql<number>`COALESCE(AVG(${apiLogs.latencyMs}), 0)`,
+        })
+        .from(apiLogs)
+        .where(gte(apiLogs.createdAt, todayStart));
+      avgLatencyMs = Math.round(latencyResult[0]?.avg || 0);
+    }
+
+    let errorRatePercentage = "0.00";
+    if (hasApiLogs) {
+      const errorResult = await db
+        .select({
+          total: count(),
+          errors: sql<number>`SUM(CASE WHEN ${apiLogs.statusCode} >= 400 THEN 1 ELSE 0 END)`,
+        })
+        .from(apiLogs)
+        .where(gte(apiLogs.createdAt, todayStart));
+
+      const totalToday = errorResult?.[0]?.total || 0;
+      const errorsToday = errorResult?.[0]?.errors || 0;
+      errorRatePercentage = totalToday > 0
+        ? ((errorsToday / totalToday) * 100).toFixed(2)
+        : "0.00";
+    }
 
     const budgets = await storage.getCostBudgets();
     let revenueToday = 0;

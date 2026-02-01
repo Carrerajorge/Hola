@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { users, aiModels } from "@shared/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 
 const ADMIN_EMAIL = "Carrerajorge874@gmail.com";
 const GEMINI_MODELS_TO_ENABLE = [
@@ -25,6 +25,12 @@ function shouldRunSeed(): boolean {
   return isProduction || seedFlagEnabled;
 }
 
+async function tableExists(tableName: string): Promise<boolean> {
+  const result = await db.execute(sql`select to_regclass(${tableName}) as table_name`);
+  const row = result.rows?.[0] as { table_name?: string | null } | undefined;
+  return Boolean(row?.table_name);
+}
+
 export async function seedProductionData(): Promise<SeedResult> {
   const result: SeedResult = {
     userUpdated: false,
@@ -43,43 +49,49 @@ export async function seedProductionData(): Promise<SeedResult> {
   console.log(`[seed] Starting production seed...`);
 
   try {
-    const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "202212.";
-    const bcrypt = await import("bcrypt");
-    const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
-
-    const existingUser = await db
-      .select({ id: users.id, email: users.email, role: users.role })
-      .from(users)
-      .where(eq(users.email, ADMIN_EMAIL))
-      .limit(1);
-
-    if (existingUser.length > 0) {
-      // Always update password and role for the admin user to ensure access
-      await db
-        .update(users)
-        .set({
-          role: "admin",
-          password: hashedPassword
-        })
-        .where(eq(users.email, ADMIN_EMAIL));
-
-      result.userUpdated = true;
-      console.log(`[seed] User ${ADMIN_EMAIL} updated to admin with configured password`);
+    const hasUsersTable = await tableExists("public.users");
+    if (!hasUsersTable) {
+      result.userMissing = true;
+      console.warn("[seed] Users table missing; skipping admin seed.");
     } else {
-      // CREATE the admin user if they don't exist
-      await db.insert(users).values({
-        email: ADMIN_EMAIL,
-        password: hashedPassword,
-        role: "admin",
-        username: "admin",
-        firstName: "Admin",
-        lastName: "User",
-        status: "active",
-        emailVerified: "true",
-        authProvider: "email"
-      });
-      result.userUpdated = true;
-      console.log(`[seed] Created admin user ${ADMIN_EMAIL}`);
+      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "202212.";
+      const bcrypt = await import("bcrypt");
+      const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
+
+      const existingUser = await db
+        .select({ id: users.id, email: users.email, role: users.role })
+        .from(users)
+        .where(eq(users.email, ADMIN_EMAIL))
+        .limit(1);
+
+      if (existingUser.length > 0) {
+        // Always update password and role for the admin user to ensure access
+        await db
+          .update(users)
+          .set({
+            role: "admin",
+            password: hashedPassword
+          })
+          .where(eq(users.email, ADMIN_EMAIL));
+
+        result.userUpdated = true;
+        console.log(`[seed] User ${ADMIN_EMAIL} updated to admin with configured password`);
+      } else {
+        // CREATE the admin user if they don't exist
+        await db.insert(users).values({
+          email: ADMIN_EMAIL,
+          password: hashedPassword,
+          role: "admin",
+          username: "admin",
+          firstName: "Admin",
+          lastName: "User",
+          status: "active",
+          emailVerified: "true",
+          authProvider: "email"
+        });
+        result.userUpdated = true;
+        console.log(`[seed] Created admin user ${ADMIN_EMAIL}`);
+      }
     }
   } catch (error) {
     const errMsg = `User update failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -88,6 +100,16 @@ export async function seedProductionData(): Promise<SeedResult> {
   }
 
   try {
+    const hasAiModelsTable = await tableExists("public.ai_models");
+    if (!hasAiModelsTable) {
+      console.warn("[seed] AI models table missing; skipping model enablement.");
+      result.modelsMissing = GEMINI_MODELS_TO_ENABLE.length;
+      console.log(`[seed] WARNING: Missing ${result.modelsMissing} model rows: ${GEMINI_MODELS_TO_ENABLE.join(", ")} - these must exist in ai_models table`);
+      console.log(`[seed] WARNING: No Gemini models found in ai_models table - run initial migration/seed first`);
+      console.log(`[seed] Completed: userUpdated=${result.userUpdated}, userMissing=${result.userMissing}, modelsEnabled=${result.modelsEnabled}, modelsAlreadyEnabled=${result.modelsAlreadyEnabled}, modelsMissing=${result.modelsMissing}, errors=${result.errors.length}`);
+      return result;
+    }
+
     const geminiModels = await db
       .select({
         id: aiModels.id,
@@ -159,6 +181,37 @@ export async function getSeedStatus(): Promise<{
     geminiModelsMissing: number;
   };
 }> {
+  const [hasUsersTable, hasAiModelsTable] = await Promise.all([
+    tableExists("public.users"),
+    tableExists("public.ai_models"),
+  ]);
+
+  if (!hasUsersTable || !hasAiModelsTable) {
+    if (!hasUsersTable) {
+      console.warn("[seed-status] Users table missing; cannot read admin user.");
+    }
+    if (!hasAiModelsTable) {
+      console.warn("[seed-status] AI models table missing; cannot read model status.");
+    }
+
+    return {
+      adminUser: null,
+      enabledModels: [],
+      geminiModelsStatus: GEMINI_MODELS_TO_ENABLE.map((modelId) => ({
+        modelId,
+        exists: false,
+        isEnabled: false,
+      })),
+      summary: {
+        userExists: false,
+        userIsAdmin: false,
+        geminiModelsTotal: GEMINI_MODELS_TO_ENABLE.length,
+        geminiModelsEnabled: 0,
+        geminiModelsMissing: GEMINI_MODELS_TO_ENABLE.length,
+      },
+    };
+  }
+
   const adminUser = await db
     .select({ email: users.email, role: users.role })
     .from(users)
