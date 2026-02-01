@@ -1354,6 +1354,7 @@ const cleanSkipRunStreamDedup = (): void => {
       let gptSessionContract: GptSessionContract | null = null;
       let effectiveModel = model || DEFAULT_MODEL;
       let serverSessionId: string | null = null;
+      const effectiveProvider = provider || DEFAULT_PROVIDER;
 
       const isValidConversationIdForStream = (id?: string): boolean => {
         if (!id) return false;
@@ -2392,6 +2393,8 @@ ${attachmentContext}`;
         {
           userId: userId || conversationId || "anonymous",
           requestId,
+          model: effectiveModel,
+          provider: effectiveProvider,
           disableImageGeneration: hasAttachments,
           maxTokens: laneMaxTokens,
           model: effectiveModel,
