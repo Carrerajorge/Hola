@@ -1093,6 +1093,12 @@ toolRegistry.register(writeFileTool);
 toolRegistry.register(shellCommandTool);
 toolRegistry.register(listFilesTool);
 
+// Register extended tools
+import { extendedTools } from "./extendedTools";
+for (const tool of extendedTools) {
+  toolRegistry.register(tool);
+}
+
 export {
   analyzeSpreadsheetSchema,
   webSearchSchema,
