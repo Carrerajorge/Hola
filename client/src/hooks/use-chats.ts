@@ -129,6 +129,8 @@ const PENDING_CHAT_PREFIX = "pending-";
 const pendingToRealIdMap = new Map<string, string>();
 const pendingMessageQueue = new Map<string, Message[]>();
 const chatCreationInProgress = new Set<string>();
+// Promise resolvers for queued messages - resolved when flush completes
+const pendingFlushResolvers = new Map<string, Array<(result: { run?: ChatRun; deduplicated?: boolean } | undefined) => void>>();
 
 // Idempotency: Track messages being processed to prevent duplicates
 const processingRequestIds = new Set<string>();
@@ -835,13 +837,17 @@ export function useChats() {
     return { pendingId, stableKey };
   }, []);
 
-  const flushPendingMessages = async (pendingId: string, realChatId: string) => {
+  const flushPendingMessages = async (pendingId: string, realChatId: string): Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined> => {
+    let lastResult: { run?: ChatRun; deduplicated?: boolean } | undefined = undefined;
+    
     while (pendingMessageQueue.has(pendingId) && pendingMessageQueue.get(pendingId)!.length > 0) {
       const queuedMessages = [...(pendingMessageQueue.get(pendingId) || [])];
       pendingMessageQueue.set(pendingId, []);
 
       for (const msg of queuedMessages) {
         try {
+          const clientRequestId = msg.role === 'user' ? (msg as any).clientRequestId || generateClientRequestId() : undefined;
+          
           const res = await fetch(`/api/chats/${realChatId}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -849,6 +855,7 @@ export function useChats() {
               role: msg.role,
               content: msg.content,
               requestId: msg.requestId,
+              clientRequestId,
               userMessageId: msg.userMessageId,
               attachments: msg.attachments,
               sources: msg.sources,
@@ -867,6 +874,25 @@ export function useChats() {
               processingRequestIds.delete(msg.requestId);
             }
           }
+          
+          // If response includes a run, track it for AI streaming
+          if (res.ok) {
+            const data = await res.json();
+            if (data.run) {
+              const run: ChatRun = {
+                id: data.run.id,
+                chatId: realChatId,
+                clientRequestId: data.run.clientRequestId,
+                userMessageId: data.run.userMessageId,
+                status: data.run.status,
+                assistantMessageId: data.run.assistantMessageId,
+                lastSeq: data.run.lastSeq
+              };
+              setActiveRun(realChatId, run);
+              console.log(`[Run] Created run ${run.id} for new chat ${realChatId}`);
+              lastResult = { run, deduplicated: !!data.deduplicated };
+            }
+          }
         } catch (error) {
           console.error("Error flushing queued message:", error);
           // Remove from processing on error so retry is possible
@@ -877,6 +903,15 @@ export function useChats() {
       }
     }
     pendingMessageQueue.delete(pendingId);
+    
+    // Resolve any pending promises waiting for this flush
+    const resolvers = pendingFlushResolvers.get(pendingId) || [];
+    for (const resolve of resolvers) {
+      resolve(lastResult);
+    }
+    pendingFlushResolvers.delete(pendingId);
+    
+    return lastResult;
   };
 
   const addMessage = useCallback(async (chatId: string, message: Message): Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined> => {
@@ -947,15 +982,18 @@ export function useChats() {
       pendingMessageQueue.set(chatId, queue);
 
       try {
+        console.log("[addMessage] Creating new chat via POST /api/chats");
         const res = await fetch("/api/chats", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title })
         });
+        console.log("[addMessage] POST /api/chats response:", res.status, res.ok);
 
         if (res.ok) {
           const newChat = await res.json();
           const realChatId = newChat.id;
+          console.log("[addMessage] Chat created with id:", realChatId);
 
           pendingToRealIdMap.set(chatId, realChatId);
 
@@ -967,7 +1005,11 @@ export function useChats() {
           }));
           setActiveChatId(realChatId);
 
-          await flushPendingMessages(chatId, realChatId);
+          console.log("[addMessage] Calling flushPendingMessages");
+          const flushResult = await flushPendingMessages(chatId, realChatId);
+          console.log("[addMessage] flushPendingMessages result:", flushResult);
+          // Always return the flush result (even if undefined) to prevent falling through
+          return flushResult;
         } else {
           // Server creation failed - keep messages in local-only mode (visible in UI)
           // Mark requestIds as complete to prevent re-processing but keep messages visible
@@ -976,7 +1018,14 @@ export function useChats() {
             if (msg.requestId) markRequestComplete(msg.requestId);
           });
           pendingMessageQueue.delete(chatId);
+          // Resolve pending promises with undefined (no run)
+          const resolvers = pendingFlushResolvers.get(chatId) || [];
+          for (const resolve of resolvers) {
+            resolve(undefined);
+          }
+          pendingFlushResolvers.delete(chatId);
           console.warn("Chat creation failed, operating in local-only mode");
+          return undefined;
         }
       } catch (error) {
         console.error("Error creating chat on first message:", error);
@@ -986,6 +1035,13 @@ export function useChats() {
           if (msg.requestId) markRequestComplete(msg.requestId);
         });
         pendingMessageQueue.delete(chatId);
+        // Resolve pending promises with undefined (no run)
+        const resolvers = pendingFlushResolvers.get(chatId) || [];
+        for (const resolve of resolvers) {
+          resolve(undefined);
+        }
+        pendingFlushResolvers.delete(chatId);
+        return undefined;
       } finally {
         chatCreationInProgress.delete(chatId);
       }
@@ -994,6 +1050,13 @@ export function useChats() {
       const queue = pendingMessageQueue.get(queueKey) || [];
       queue.push(message);
       pendingMessageQueue.set(queueKey, queue);
+      
+      // Return a promise that will be resolved when flush completes
+      return new Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined>((resolve) => {
+        const resolvers = pendingFlushResolvers.get(queueKey) || [];
+        resolvers.push(resolve);
+        pendingFlushResolvers.set(queueKey, resolvers);
+      });
     } else {
       try {
         // For user messages, use run-based idempotency with clientRequestId

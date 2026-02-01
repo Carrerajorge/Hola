@@ -42,10 +42,10 @@ export default function LandingPage() {
         <nav className="hidden md:flex items-center gap-6 text-sm">
           <span onClick={() => setLocation("/about")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Sobre nosotros</span>
           <span onClick={() => setLocation("/learn")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Aprender</span>
-          <a href="#" className="text-zinc-400 hover:text-white transition-colors duration-200">Business</a>
-          <a href="#" className="text-zinc-400 hover:text-white transition-colors duration-200">Precios</a>
-          <a href="#" className="text-purple-400 hover:text-purple-300 transition-colors duration-200">Imágenes</a>
-          <a href="#" className="text-zinc-400 hover:text-white transition-colors duration-200">Descargar</a>
+          <span onClick={() => setLocation("/business")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Business</span>
+          <span onClick={() => setLocation("/pricing")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Precios</span>
+          <span onClick={() => setLocation("/login")} className="text-purple-400 hover:text-purple-300 transition-colors duration-200 cursor-pointer">Imágenes</span>
+          <span onClick={() => setLocation("/download")} className="text-zinc-400 hover:text-white transition-colors duration-200 cursor-pointer">Descargar</span>
         </nav>
 
         <div className="flex items-center gap-3">

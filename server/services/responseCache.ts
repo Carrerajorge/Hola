@@ -1,257 +1,193 @@
 /**
- * Response Cache Layer - ILIAGPT PRO 3.0
+ * Response Cache Service
  * 
- * Intelligent caching for similar queries.
- * Reduces API costs 30-50% and improves latency.
+ * Caché inteligente para respuestas de chat.
+ * Reduce latencia de respuestas simples de ~1500ms a <50ms.
  */
 
-import crypto from "crypto";
+import crypto from 'crypto';
 
-// ============== Types ==============
-
-export interface CacheEntry {
-    key: string;
-    query: string;
-    response: string;
-    modelId: string;
-    tokens: number;
-    createdAt: Date;
-    expiresAt: Date;
-    hitCount: number;
-    metadata?: Record<string, any>;
+interface CachedResponse {
+  content: string;
+  role: string;
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+  };
+  cachedAt: number;
+  hits: number;
 }
 
-export interface CacheConfig {
-    maxSize?: number;
-    defaultTTL?: number; // seconds
-    similarityThreshold?: number; // 0-1
-    enableSimilarityMatching?: boolean;
+interface CacheStats {
+  hits: number;
+  misses: number;
+  size: number;
+  hitRate: string;
 }
 
-export interface CacheStats {
-    hits: number;
-    misses: number;
-    hitRate: number;
-    totalEntries: number;
-    memoryUsageMB: number;
+class ResponseCache {
+  private cache: Map<string, CachedResponse> = new Map();
+  private stats = { hits: 0, misses: 0 };
+  
+  // Configuration
+  private readonly TTL = 5 * 60 * 1000; // 5 minutes
+  private readonly MAX_SIZE = 1000; // Max cached responses
+  private readonly MAX_MESSAGE_LENGTH = 100; // Only cache short messages
+  
+  // Patterns that should be cached (simple greetings, common questions)
+  private readonly CACHEABLE_PATTERNS = [
+    /^hola$/i,
+    /^hola[,!.]?\s*(cómo estás|como estas)?[?!]?$/i,
+    /^hi$/i,
+    /^hello$/i,
+    /^hey$/i,
+    /^buenos?\s*(días|dias|tardes|noches)$/i,
+    /^good\s*(morning|afternoon|evening|night)$/i,
+    /^thanks?$/i,
+    /^gracias$/i,
+    /^ok(ay)?$/i,
+    /^bye$/i,
+    /^adiós$/i,
+    /^chao$/i,
+  ];
+  
+  /**
+   * Generate cache key from message
+   */
+  private generateKey(message: string, model?: string): string {
+    const normalized = message.toLowerCase().trim();
+    const hash = crypto.createHash('md5')
+      .update(`${normalized}:${model || 'default'}`)
+      .digest('hex');
+    return hash;
+  }
+  
+  /**
+   * Check if message is cacheable
+   */
+  isCacheable(message: string): boolean {
+    if (!message || message.length > this.MAX_MESSAGE_LENGTH) {
+      return false;
+    }
+    
+    const normalized = message.trim();
+    return this.CACHEABLE_PATTERNS.some(pattern => pattern.test(normalized));
+  }
+  
+  /**
+   * Get cached response
+   */
+  get(message: string, model?: string): CachedResponse | null {
+    if (!this.isCacheable(message)) {
+      return null;
+    }
+    
+    const key = this.generateKey(message, model);
+    const cached = this.cache.get(key);
+    
+    if (!cached) {
+      this.stats.misses++;
+      return null;
+    }
+    
+    // Check TTL
+    if (Date.now() - cached.cachedAt > this.TTL) {
+      this.cache.delete(key);
+      this.stats.misses++;
+      return null;
+    }
+    
+    // Update stats
+    cached.hits++;
+    this.stats.hits++;
+    
+    console.log(`[Cache] HIT for "${message.substring(0, 30)}..." (${cached.hits} hits)`);
+    
+    return cached;
+  }
+  
+  /**
+   * Store response in cache
+   */
+  set(message: string, response: { content: string; role: string; usage?: any }, model?: string): void {
+    if (!this.isCacheable(message)) {
+      return;
+    }
+    
+    // Enforce max size (LRU-like: remove oldest)
+    if (this.cache.size >= this.MAX_SIZE) {
+      const oldestKey = this.cache.keys().next().value;
+      if (oldestKey) {
+        this.cache.delete(oldestKey);
+      }
+    }
+    
+    const key = this.generateKey(message, model);
+    
+    this.cache.set(key, {
+      content: response.content,
+      role: response.role || 'assistant',
+      usage: response.usage || { promptTokens: 0, completionTokens: 0 },
+      cachedAt: Date.now(),
+      hits: 0
+    });
+    
+    console.log(`[Cache] STORED "${message.substring(0, 30)}..."`);
+  }
+  
+  /**
+   * Get cache statistics
+   */
+  getStats(): CacheStats {
+    const total = this.stats.hits + this.stats.misses;
+    return {
+      hits: this.stats.hits,
+      misses: this.stats.misses,
+      size: this.cache.size,
+      hitRate: total > 0 ? ((this.stats.hits / total) * 100).toFixed(1) + '%' : '0%'
+    };
+  }
+  
+  /**
+   * Clear cache
+   */
+  clear(): void {
+    this.cache.clear();
+    this.stats = { hits: 0, misses: 0 };
+    console.log('[Cache] Cleared');
+  }
+  
+  /**
+   * Pre-warm cache with common responses
+   */
+  warmUp(): void {
+    const commonResponses: Array<{ message: string; response: string }> = [
+      { message: 'hola', response: '¡Hola! ¿En qué puedo ayudarte?' },
+      { message: 'hola, cómo estás?', response: '¡Hola! Estoy muy bien, gracias por preguntar. ¿En qué puedo ayudarte hoy?' },
+      { message: 'hi', response: 'Hi! How can I help you?' },
+      { message: 'hello', response: 'Hello! How can I assist you today?' },
+      { message: 'buenos días', response: '¡Buenos días! ¿En qué puedo ayudarte?' },
+      { message: 'buenas tardes', response: '¡Buenas tardes! ¿En qué puedo ayudarte?' },
+      { message: 'buenas noches', response: '¡Buenas noches! ¿En qué puedo ayudarte?' },
+      { message: 'gracias', response: '¡De nada! Si necesitas algo más, aquí estoy.' },
+      { message: 'thanks', response: "You're welcome! Let me know if you need anything else." },
+      { message: 'ok', response: '¿Hay algo más en lo que pueda ayudarte?' },
+      { message: 'bye', response: '¡Hasta luego! Que tengas un excelente día.' },
+      { message: 'adiós', response: '¡Adiós! Fue un placer ayudarte.' },
+    ];
+    
+    for (const { message, response } of commonResponses) {
+      this.set(message, { content: response, role: 'assistant' });
+    }
+    
+    console.log(`[Cache] Warmed up with ${commonResponses.length} responses`);
+  }
 }
 
-// ============== Cache Implementation ==============
+// Singleton instance
+export const responseCache = new ResponseCache();
 
-export class ResponseCache {
-    private cache: Map<string, CacheEntry> = new Map();
-    private stats = { hits: 0, misses: 0 };
-    private config: Required<CacheConfig>;
+// Warm up on import
+responseCache.warmUp();
 
-    constructor(config: CacheConfig = {}) {
-        this.config = {
-            maxSize: config.maxSize ?? 1000,
-            defaultTTL: config.defaultTTL ?? 3600, // 1 hour
-            similarityThreshold: config.similarityThreshold ?? 0.85,
-            enableSimilarityMatching: config.enableSimilarityMatching ?? true,
-        };
-    }
-
-    /**
-     * Generate cache key from query
-     */
-    private generateKey(query: string, modelId: string): string {
-        const normalized = this.normalizeQuery(query);
-        return crypto
-            .createHash("sha256")
-            .update(`${modelId}:${normalized}`)
-            .digest("hex")
-            .slice(0, 16);
-    }
-
-    /**
-     * Normalize query for better matching
-     */
-    private normalizeQuery(query: string): string {
-        return query
-            .toLowerCase()
-            .trim()
-            .replace(/\s+/g, " ")
-            .replace(/[^\w\s]/g, "");
-    }
-
-    /**
-     * Calculate similarity between two queries
-     */
-    private calculateSimilarity(query1: string, query2: string): number {
-        const words1 = new Set(this.normalizeQuery(query1).split(" "));
-        const words2 = new Set(this.normalizeQuery(query2).split(" "));
-
-        const intersection = new Set([...words1].filter(x => words2.has(x)));
-        const union = new Set([...words1, ...words2]);
-
-        return intersection.size / union.size; // Jaccard similarity
-    }
-
-    /**
-     * Get cached response
-     */
-    get(query: string, modelId: string): CacheEntry | null {
-        const key = this.generateKey(query, modelId);
-
-        // Direct hit
-        const entry = this.cache.get(key);
-        if (entry && entry.expiresAt > new Date()) {
-            entry.hitCount++;
-            this.stats.hits++;
-            return entry;
-        }
-
-        // Similarity matching
-        if (this.config.enableSimilarityMatching) {
-            for (const [, cachedEntry] of this.cache) {
-                if (cachedEntry.modelId !== modelId) continue;
-                if (cachedEntry.expiresAt <= new Date()) continue;
-
-                const similarity = this.calculateSimilarity(query, cachedEntry.query);
-                if (similarity >= this.config.similarityThreshold) {
-                    cachedEntry.hitCount++;
-                    this.stats.hits++;
-                    return cachedEntry;
-                }
-            }
-        }
-
-        this.stats.misses++;
-        return null;
-    }
-
-    /**
-     * Store response in cache
-     */
-    set(
-        query: string,
-        response: string,
-        modelId: string,
-        tokens: number,
-        ttl?: number,
-        metadata?: Record<string, any>
-    ): void {
-        const key = this.generateKey(query, modelId);
-        const expiresAt = new Date(
-            Date.now() + (ttl ?? this.config.defaultTTL) * 1000
-        );
-
-        // Evict if at capacity
-        if (this.cache.size >= this.config.maxSize) {
-            this.evictOldest();
-        }
-
-        this.cache.set(key, {
-            key,
-            query,
-            response,
-            modelId,
-            tokens,
-            createdAt: new Date(),
-            expiresAt,
-            hitCount: 0,
-            metadata,
-        });
-    }
-
-    /**
-     * Evict oldest/least used entries
-     */
-    private evictOldest(): void {
-        const now = new Date();
-
-        // First, remove expired
-        for (const [key, entry] of this.cache) {
-            if (entry.expiresAt <= now) {
-                this.cache.delete(key);
-            }
-        }
-
-        // If still over capacity, remove least used
-        if (this.cache.size >= this.config.maxSize) {
-            const entries = Array.from(this.cache.entries())
-                .sort((a, b) => a[1].hitCount - b[1].hitCount);
-
-            const toRemove = Math.ceil(this.config.maxSize * 0.1); // Remove 10%
-            for (let i = 0; i < toRemove && i < entries.length; i++) {
-                this.cache.delete(entries[i][0]);
-            }
-        }
-    }
-
-    /**
-     * Invalidate cache for specific model
-     */
-    invalidateModel(modelId: string): void {
-        for (const [key, entry] of this.cache) {
-            if (entry.modelId === modelId) {
-                this.cache.delete(key);
-            }
-        }
-    }
-
-    /**
-     * Clear entire cache
-     */
-    clear(): void {
-        this.cache.clear();
-        this.stats = { hits: 0, misses: 0 };
-    }
-
-    /**
-     * Get cache statistics
-     */
-    getStats(): CacheStats {
-        const total = this.stats.hits + this.stats.misses;
-        let memoryUsage = 0;
-
-        for (const entry of this.cache.values()) {
-            memoryUsage += entry.response.length + entry.query.length;
-        }
-
-        return {
-            hits: this.stats.hits,
-            misses: this.stats.misses,
-            hitRate: total > 0 ? this.stats.hits / total : 0,
-            totalEntries: this.cache.size,
-            memoryUsageMB: memoryUsage / (1024 * 1024),
-        };
-    }
-
-    /**
-     * Get all entries (for persistence)
-     */
-    getEntries(): CacheEntry[] {
-        return Array.from(this.cache.values());
-    }
-
-    /**
-     * Restore entries (from persistence)
-     */
-    restoreEntries(entries: CacheEntry[]): void {
-        const now = new Date();
-        for (const entry of entries) {
-            if (new Date(entry.expiresAt) > now) {
-                this.cache.set(entry.key, {
-                    ...entry,
-                    createdAt: new Date(entry.createdAt),
-                    expiresAt: new Date(entry.expiresAt),
-                });
-            }
-        }
-    }
-}
-
-// ============== Singleton ==============
-
-let cacheInstance: ResponseCache | null = null;
-
-export function getResponseCache(config?: CacheConfig): ResponseCache {
-    if (!cacheInstance) {
-        cacheInstance = new ResponseCache(config);
-    }
-    return cacheInstance;
-}
-
-export default ResponseCache;
+export default responseCache;

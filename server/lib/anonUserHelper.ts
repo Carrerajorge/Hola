@@ -14,14 +14,28 @@ import type { Request } from "express";
  * @returns User ID string or null if unable to determine
  */
 export function getSecureUserId(req: Request): string | null {
-  // 1. Try authenticated user first
+  // 1. Try authenticated user first (Passport puts user here after deserialize)
   const user = (req as any).user;
-  const authUserId = user?.claims?.sub;
+  const authUserId = user?.claims?.sub || user?.id;
   if (authUserId) {
     return authUserId;
   }
 
   const session = req.session as any;
+
+  // 1.5 Check session.authUserId (workaround for Passport serialization issues)
+  if (session?.authUserId) {
+    return session.authUserId;
+  }
+
+  // 1.6 Check session.passport.user for user info
+  const passportUser = session?.passport?.user;
+  if (passportUser?.claims?.sub) {
+    return passportUser.claims.sub;
+  }
+  if (passportUser?.id) {
+    return passportUser.id;
+  }
 
   // 2. Check X-Anonymous-User-Id header ONLY if it matches session-bound ID
   const headerUserId = req.headers['x-anonymous-user-id'];
@@ -70,7 +84,20 @@ export function getOrCreateSecureUserId(req: Request): string {
  */
 export function isAuthenticated(req: Request): boolean {
   const user = (req as any).user;
-  return !!user?.claims?.sub;
+  if (user?.claims?.sub || user?.id) {
+    return true;
+  }
+  
+  // Also check session workaround
+  const session = req.session as any;
+  if (session?.authUserId) {
+    return true;
+  }
+  if (session?.passport?.user?.claims?.sub || session?.passport?.user?.id) {
+    return true;
+  }
+  
+  return false;
 }
 
 /**

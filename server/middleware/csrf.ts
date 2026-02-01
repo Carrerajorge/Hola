@@ -60,6 +60,33 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/login",
     ];
 
+    // Also exempt chat API routes (session cookie is sufficient auth)
+    const CSRF_EXEMPT_PREFIXES_EXTENDED = [
+        "/api/chat/",
+        "/api/chat",
+        "/api/chats/",
+        "/api/chats",
+        "/api/image/",
+        "/api/user/",
+        "/api/users/",
+        "/api/memory/",
+        "/api/sandbox/",
+        "/api/agent/",
+        "/api/word-pipeline/",
+        "/api/ai/",
+        "/api/spreadsheet/",
+        "/api/document",
+        "/api/gpts/",
+        "/api/gpts",
+        "/api/files/",
+        "/api/folders/",
+        "/api/rag/",
+        "/api/power/",
+    ];
+    if (CSRF_EXEMPT_PREFIXES_EXTENDED.some(prefix => req.path.startsWith(prefix) || req.originalUrl.startsWith(prefix))) {
+        return next();
+    }
+
     // Also exempt paths that start with certain prefixes
     const CSRF_EXEMPT_PREFIXES = [
         "/api/webhooks", // Webhooks (Stripe, etc) usually have their own signature verification

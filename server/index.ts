@@ -177,57 +177,60 @@ export function log(message: string, source = "express") {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = env.PORT;
-  const server = httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    async () => {
-      log(`serving on port ${port}`);
-      log(`Environment: ${isProduction ? "PRODUCTION" : "development"}`);
-      log(`Database: ${dbConnected ? "connected" : "NOT CONNECTED"}`);
-      startAggregator();
-      await seedProductionData();
 
-      // Setup graceful shutdown with connection draining
-      setupGracefulShutdown(httpServer, {
-        timeout: 30000,
-        onShutdown: async () => {
-          log("Running application cleanup...");
-        },
-      });
+  // In local development on macOS, `reusePort` can throw ENOTSUP.
+  // Only use host/reusePort settings in production deployments.
+  const listenOptions = isProduction
+    ? ({ port, host: "0.0.0.0", reusePort: true } as const)
+    : port;
 
-      // Register database cleanup
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const server = (httpServer.listen as any)(listenOptions, async () => {
+    log(`serving on port ${port}`);
+    log(`Environment: ${isProduction ? "PRODUCTION" : "development"}`);
+    log(`Database: ${dbConnected ? "connected" : "NOT CONNECTED"}`);
+    startAggregator();
+    await seedProductionData();
+
+    // Setup graceful shutdown with connection draining
+    setupGracefulShutdown(httpServer, {
+      timeout: 30000,
+      onShutdown: async () => {
+        log("Running application cleanup...");
+      },
+    });
+
+    // Register database cleanup
+    registerCleanup(async () => {
+      log("Stopping database health checks...");
+      stopHealthChecks();
+      log("Draining database connections...");
+      await drainConnections();
+      log("Database cleanup complete");
+    });
+
+    // Register Python service cleanup
+    if (startPythonService && pythonServiceManager.isRunning()) {
       registerCleanup(async () => {
-        log("Stopping database health checks...");
-        stopHealthChecks();
-        log("Draining database connections...");
-        await drainConnections();
-        log("Database cleanup complete");
+        log("Stopping Python service...");
+        pythonServiceManager.stop();
       });
+    }
 
-      // Register Python service cleanup
-      if (startPythonService && pythonServiceManager.isRunning()) {
-        registerCleanup(async () => {
-          log("Stopping Python service...");
-          pythonServiceManager.stop();
-        });
-      }
+    // Register OpenTelemetry tracing cleanup
+    registerCleanup(async () => {
+      log("Shutting down OpenTelemetry tracing...");
+      await shutdownTracing();
+      log("OpenTelemetry tracing shutdown complete");
+    });
 
-      // Register OpenTelemetry tracing cleanup
-      registerCleanup(async () => {
-        log("Shutting down OpenTelemetry tracing...");
-        await shutdownTracing();
-        log("OpenTelemetry tracing shutdown complete");
-      });
+    const tracingStatus = getTracingMetrics();
+    log(
+      `OpenTelemetry: initialized=${tracingStatus.isInitialized}, sampleRate=${tracingStatus.sampleRate * 100}%`,
+    );
 
-      const tracingStatus = getTracingMetrics();
-      log(`OpenTelemetry: initialized=${tracingStatus.isInitialized}, sampleRate=${tracingStatus.sampleRate * 100}%`);
-
-      log("Graceful shutdown handler configured");
-    },
-  );
+    log("Graceful shutdown handler configured");
+  });
 
   // Hardened Server Timeouts (Slowloris Protection)
   server.headersTimeout = 60000; // 60s

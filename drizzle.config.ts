@@ -6,6 +6,7 @@ if (!process.env.DATABASE_URL) {
 
 export default defineConfig({
   out: "./migrations",
+  // Schema is organized under shared/schema/* and re-exported by shared/schema/index.ts
   schema: "./shared/schema/index.ts",
   dialect: "postgresql",
   dbCredentials: {

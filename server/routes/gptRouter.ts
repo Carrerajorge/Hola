@@ -112,10 +112,15 @@ export function createGptRouter() {
   router.post("/gpts", async (req, res) => {
     try {
       const {
-        name, slug, description, avatar, categoryId, creatorId,
+        name, slug, description, avatar, categoryId,
         visibility, systemPrompt, temperature, topP, maxTokens,
         welcomeMessage, capabilities, conversationStarters, isPublished
       } = req.body;
+
+      // Get authenticated user ID
+      const session = req.session as any;
+      const userId = (req as any).user?.claims?.sub || (req as any).user?.id || session?.authUserId;
+      const creatorId = userId || null;
 
       if (!name || !slug || !systemPrompt) {
         return res.status(400).json({ error: "name, slug, and systemPrompt are required" });
@@ -132,7 +137,7 @@ export function createGptRouter() {
         description: description || null,
         avatar: avatar || null,
         categoryId: categoryId || null,
-        creatorId: creatorId || null,
+        creatorId: creatorId,
         visibility: visibility || "private",
         systemPrompt,
         temperature: temperature || "0.7",

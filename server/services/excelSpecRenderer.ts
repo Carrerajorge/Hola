@@ -1,4 +1,5 @@
-import ExcelJS from "exceljs";
+import * as ExcelJSModule from "exceljs";
+const ExcelJS = ExcelJSModule.default || ExcelJSModule;
 import type { ExcelSpec, TableSpec, ChartSpec, SheetLayoutSpec, HeaderStyle } from "../../shared/documentSpecs";
 import { tokenizeMarkdown, hasMarkdown, RichTextToken } from "./richText/markdownTokenizer";
 import { formatLatexForExcel } from "./richText/latexToImage";

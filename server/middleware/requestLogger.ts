@@ -39,9 +39,10 @@ export function requestLoggerMiddleware(
 
     res.on("finish", () => {
       const durationMs = Date.now() - startTime;
-      // NOTE: REMOVED res.setHeader here - cannot set headers after response is sent!
-      // The X-Response-Time header would need to be set BEFORE the response ends,
-      // but that's not possible in a "finish" handler.
+
+      // Headers are already sent by the time the 'finish' event fires.
+      // Only set response headers before headers are sent.
+      // (We still log duration here.)
 
       const isError = res.statusCode >= 400;
 

@@ -34,6 +34,8 @@ import gmailOAuthRouter from "./routes/gmailOAuthRouter";
 import { createGmailMcpRouter } from "./mcp/gmailMcpServer";
 import healthRouter from "./routes/healthRouter";
 import aiExcelRouter from "./routes/aiExcelRouter";
+import powerRouter from "./routes/powerRouter";
+import multiAgentRouter from "./routes/multiAgentRouter";
 import { metricsHandler, getMetricsJson } from "./lib/parePrometheusMetrics";
 import { createHealthRouter as createPareHealthRouter, getHealthSummary as getPareHealthSummary } from "./lib/pareHealthChecks";
 import { getMetricsSummary as getPareMetricsSummary } from "./lib/pareMetrics";
@@ -313,21 +315,47 @@ export async function registerRoutes(
 
   // Session identity endpoint for consistent user ID across frontend/backend
   // SECURITY: Anonymous user IDs are now bound to the session to prevent impersonation
-  app.get("/api/session/identity", (req: Request, res: Response) => {
+  app.get("/api/session/identity", async (req: Request, res: Response) => {
     const user = (req as AuthenticatedRequest).user;
-    const authUserId = user?.claims?.sub || user?.id;
-    const authEmail = user?.claims?.email || (user as any)?.email;
+    const session = req.session as any;
+    
+    // First try req.user (Passport authenticated)
+    let authUserId = user?.claims?.sub || user?.id;
+    let authEmail = user?.claims?.email || (user as any)?.email;
+
+    // If not found in req.user, try session.authUserId (email login)
+    if (!authUserId && session?.authUserId) {
+      authUserId = session.authUserId;
+      // Try to get email from session passport user
+      const passportUser = session.passport?.user;
+      if (passportUser) {
+        authEmail = passportUser.claims?.email || passportUser.email;
+      }
+    }
 
     if (authUserId) {
-      return res.json({
-        userId: authUserId,
-        email: authEmail,
-        isAnonymous: false
-      });
+      // Get fresh role from database
+      try {
+        const dbUser = await storage.getUser(authUserId);
+        const role = dbUser?.role || 'user';
+        return res.json({
+          userId: authUserId,
+          email: authEmail || dbUser?.email,
+          role: role,
+          isAnonymous: false
+        });
+      } catch (e) {
+        // Fallback if DB lookup fails
+        return res.json({
+          userId: authUserId,
+          email: authEmail,
+          role: 'user',
+          isAnonymous: false
+        });
+      }
     }
 
     // For anonymous users, bind ID to session (not header) to prevent impersonation
-    const session = req.session as (Partial<Express.Session> & { anonUserId?: string }) | undefined;
     if (session) {
       if (!session.anonUserId) {
         const sessionId = req.sessionID;
@@ -392,6 +420,11 @@ export async function registerRoutes(
 
   app.use("/health", healthRouter);
   app.use("/health/pare", createPareHealthRouter());
+  
+  // Simple API health check
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
 
   // API Documentation
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -405,6 +438,8 @@ export async function registerRoutes(
     });
   });
   app.use("/api/ai", aiExcelRouter);
+  app.use("/api/power", powerRouter);
+  app.use("/api/agents", multiAgentRouter);
   app.use("/api/errors", errorRouter);
   app.use("/api/spreadsheet", createSpreadsheetRouter());
   app.use("/api/chat", createChatRoutes());

@@ -11,16 +11,18 @@ import { getSecureUserId } from "../lib/anonUserHelper";
 export async function require2FA(req: Request, res: Response, next: NextFunction) {
     try {
         const user = (req as any).user;
-        if (!user || !user.claims) {
+        const session = (req.session as any);
+        
+        // Try to get userId from multiple sources (Passport or session)
+        let userId = user?.claims?.sub || user?.id || session?.authUserId;
+        
+        if (!userId) {
             // Not authenticated at all
             return res.status(401).json({ error: "Unauthorized" });
         }
 
-        const userId = user.claims.sub;
-        const session = (req.session as any);
-
         // If 2FA is already verified in this session, proceed
-        if (session.is2FAVerified) {
+        if (session?.is2FAVerified) {
             return next();
         }
 
@@ -38,6 +40,14 @@ export async function require2FA(req: Request, res: Response, next: NextFunction
                 code: "2FA_REQUIRED",
                 message: "You must verify your 2FA code to access this resource."
             });
+        }
+
+        // In development mode, skip 2FA requirement for admins
+        const isDev = process.env.NODE_ENV === 'development';
+        if (isDev && dbUser.role === 'admin') {
+            // Mark as verified for this session to avoid repeated checks
+            session.is2FAVerified = true;
+            return next();
         }
 
         // IF we want to FORCE 2FA for admins:

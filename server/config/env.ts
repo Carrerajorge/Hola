@@ -10,7 +10,12 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   DATABASE_READ_URL: z.string().optional(),
 
+  // LLM keys
   GEMINI_API_KEY: z.string().optional(),
+  GOOGLE_API_KEY: z.string().optional(), // backward/alternate name used in parts of the codebase
+  OPENAI_API_KEY: z.string().optional(),
+  XAI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
 
   SESSION_SECRET: z.string().min(1, "SESSION_SECRET is required"),
 

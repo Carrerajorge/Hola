@@ -3,6 +3,7 @@ import { llmGateway } from "../lib/llmGateway";
 import { geminiChat, geminiStreamChat, GEMINI_MODELS, GeminiChatMessage } from "../lib/gemini";
 import { LIMITS, MEMORY_INTENT_KEYWORDS } from "../lib/constants";
 import { storage } from "../storage";
+import { responseCache } from "./responseCache";
 import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
 import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, multiIntentManager, multiIntentPipeline } from "../agent";
@@ -420,6 +421,22 @@ export async function handleChatRequest(
   const { useRag = true, conversationId, userId, images, onAgentProgress, gptSession, gptConfig, documentMode, figmaMode, provider = DEFAULT_PROVIDER, model = DEFAULT_MODEL, attachmentContext = "", forceDirectResponse = false, hasRawAttachments = false, lastImageBase64, lastImageId } = options;
   const hasImages = images && images.length > 0;
 
+  // FAST PATH: Check cache for simple greetings/messages
+  const lastUserMessage = messages.filter(m => m.role === "user").pop();
+  if (lastUserMessage && !hasImages && !hasRawAttachments && messages.length <= 2) {
+    const cachedResponse = responseCache.get(lastUserMessage.content, model);
+    if (cachedResponse) {
+      console.log(`[ChatService] Cache HIT for "${lastUserMessage.content.substring(0, 30)}..."`);
+      return {
+        content: cachedResponse.content,
+        role: "assistant",
+        sources: [],
+        usage: cachedResponse.usage,
+        cached: true
+      };
+    }
+  }
+
   // Fetch user settings for feature flags and preferences
   let userSettings: Awaited<ReturnType<typeof storage.getUserSettings>> = null;
   let companyKnowledge: Awaited<ReturnType<typeof storage.getActiveCompanyKnowledge>> = [];
@@ -561,7 +578,7 @@ export async function handleChatRequest(
     }
   }
 
-  const lastUserMessage = messages.filter(m => m.role === "user").pop();
+  // lastUserMessage already defined above for cache check
 
   if (lastUserMessage) {
     // GMAIL INTEGRATION: Detectar y manejar solicitudes de correo electrónico
@@ -2154,12 +2171,19 @@ REGLAS OBLIGATORIAS:
 
     console.log(`[ChatService] LLM Gateway response: ${gatewayResponse.latencyMs}ms, tokens: ${gatewayResponse.usage?.totalTokens || 0}`);
 
-    return {
+    const response = {
       content: gatewayResponse.content,
-      role: "assistant",
+      role: "assistant" as const,
       sources,
       webSources: webSources.length > 0 ? webSources : undefined,
       usage: gatewayResponse.usage
     };
+
+    // Cache simple responses for future use
+    if (lastUserMessage && messages.length <= 2 && !hasImages) {
+      responseCache.set(lastUserMessage.content, response, model);
+    }
+
+    return response;
   }
 }

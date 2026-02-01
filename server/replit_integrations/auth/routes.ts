@@ -14,6 +14,13 @@ function isAdminConfigured(): boolean {
   return !!(ADMIN_EMAIL && ADMIN_PASSWORD && ADMIN_PASSWORD.length >= 8);
 }
 
+// Sanitize user object to remove sensitive fields
+function sanitizeUser(user: any): any {
+  if (!user) return user;
+  const { password, ...safeUser } = user;
+  return safeUser;
+}
+
 // Register auth-specific routes
 export function registerAuthRoutes(app: Express): void {
   // Legacy routes removed in favor of Passport.js in server/routes.ts
@@ -74,6 +81,15 @@ export function registerAuthRoutes(app: Express): void {
           if (err) {
             return res.status(500).json({ message: "Error al iniciar sesión" });
           }
+
+          // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+          // Some environments end up persisting an empty `passport` object.
+          if (req.session) {
+            req.session.authUserId = adminId;
+            req.session.passport = req.session.passport || {};
+            req.session.passport.user = adminUser;
+          }
+
           // Force session save before responding
           req.session.save(async (saveErr: any) => {
             if (saveErr) {
@@ -81,7 +97,7 @@ export function registerAuthRoutes(app: Express): void {
               return res.status(500).json({ message: "Error al guardar sesión" });
             }
             const user = await authStorage.getUser(adminId);
-            res.json({ success: true, user });
+            res.json({ success: true, user: sanitizeUser(user) });
           });
         });
       }
@@ -134,13 +150,22 @@ export function registerAuthRoutes(app: Express): void {
           email: dbUser.email,
           first_name: dbUser.firstName || "",
           last_name: dbUser.lastName || "",
+          role: dbUser.role || "user",
         },
+        role: dbUser.role || "user",
         expires_at: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60),
       };
 
       req.login(sessionUser, async (err: any) => {
         if (err) {
           return res.status(500).json({ message: "Error al iniciar sesión" });
+        }
+
+        // Workaround: persist userId explicitly (robust even if Passport serialization fails).
+        if (req.session) {
+          req.session.authUserId = dbUser.id;
+          req.session.passport = req.session.passport || {};
+          req.session.passport.user = sessionUser;
         }
 
         // Track login and update last login
@@ -168,7 +193,7 @@ export function registerAuthRoutes(app: Express): void {
             console.error("Session save error:", saveErr);
             return res.status(500).json({ message: "Error al guardar sesión" });
           }
-          res.json({ success: true, user: dbUser });
+          res.json({ success: true, user: sanitizeUser(dbUser) });
         });
       });
     } catch (error) {
@@ -297,13 +322,24 @@ export function registerAuthRoutes(app: Express): void {
   // Get current authenticated user
   app.get("/api/auth/user", async (req: any, res) => {
     try {
-      // Check if user is authenticated via passport session
-      if (!req.isAuthenticated() || !req.user) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
+      // Passport should populate req.user, but in some environments we observed
+      // sessions persisted with `req.session.passport.user` while `req.user` is missing.
+      // Fallback to the session payload so login persists.
+      const sessionUser = req.session?.passport?.user;
+      const effectiveUser = req.user || sessionUser;
+      const userId =
+        effectiveUser?.claims?.sub ||
+        effectiveUser?.id ||
+        req.session?.authUserId;
 
-      const userId = req.user.claims?.sub || req.user.id;
       if (!userId) {
+        console.warn("[Auth] /api/auth/user unauthorized", {
+          hasCookieHeader: !!req.headers.cookie,
+          sessionID: req.sessionID,
+          hasSession: !!req.session,
+          sessionPassportKeys: req.session?.passport ? Object.keys(req.session.passport) : null,
+          authUserId: req.session?.authUserId,
+        });
         return res.status(401).json({ message: "Unauthorized" });
       }
 
@@ -312,7 +348,7 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "User not found" });
       }
 
-      res.json(user);
+      res.json(sanitizeUser(user));
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });

@@ -18,6 +18,7 @@ import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator"
 import { MediaLibraryModal } from "@/components/media-library-modal";
 import { useMediaLibrary } from "@/hooks/use-media-library";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+
 import { useFavorites } from "@/hooks/use-favorites";
 import { usePromptTemplates } from "@/hooks/use-prompt-templates";
 import { useNotifications } from "@/hooks/use-notifications";
@@ -287,7 +288,7 @@ export default function Home() {
     setAiStateRaw('idle');
   }, [setActiveChatId]);
 
-  const handleSendNewChatMessage = useCallback((message: Message) => {
+  const handleSendNewChatMessage = useCallback(async (message: Message) => {
     const { pendingId, stableKey } = createChat();
     pendingChatIdRef.current = pendingId;
     // CRITICAL: Use the stableKey from createChat to ensure chatInterfaceKey
@@ -295,7 +296,7 @@ export default function Home() {
     // component remount when newChatStableKey is cleared during navigation.
     setNewChatStableKey(stableKey);
     setIsNewChatMode(false);
-    addMessage(pendingId, message);
+    return await addMessage(pendingId, message);
   }, [createChat, addMessage]);
 
   // Stable message sender that uses the correct chat ID
@@ -374,8 +375,7 @@ export default function Home() {
       return await addMessage(targetChatId, message);
     } else {
       // Fallback: create new chat
-      handleSendNewChatMessage(message);
-      return undefined;
+      return await handleSendNewChatMessage(message);
     }
   }, [activeChat?.id, addMessage, handleSendNewChatMessage, createChat, addMessage]);
 
@@ -635,23 +635,26 @@ export default function Home() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col h-full w-full min-h-0">
         {isAppsDialogOpen ? (
-          <AppsView
-            onClose={() => setIsAppsDialogOpen(false)}
-            onOpenGmail={() => {
-              setIsAppsDialogOpen(false);
-            }}
-          />
+          
+            <AppsView
+              onClose={() => setIsAppsDialogOpen(false)}
+              onOpenGmail={() => {
+                setIsAppsDialogOpen(false);
+              }}
+            />
+          
         ) : (activeChat || isNewChatMode || chats.length === 0 || selectedProjectId) && (
-          <ChatInterface
-            key={chatInterfaceKey}
-            messages={currentMessages}
-            setMessages={noopSetMessages}
-            onSendMessage={handleSendMessage}
-            isSidebarOpen={isSidebarOpen}
-            onToggleSidebar={() => setIsSidebarOpen(true)}
-            onCloseSidebar={() => setIsSidebarOpen(false)}
-            activeGpt={activeGpt}
-            aiState={aiState}
+          
+            <ChatInterface
+              key={chatInterfaceKey}
+              messages={currentMessages}
+              setMessages={noopSetMessages}
+              onSendMessage={handleSendMessage}
+              isSidebarOpen={isSidebarOpen}
+              onToggleSidebar={() => setIsSidebarOpen(true)}
+              onCloseSidebar={() => setIsSidebarOpen(false)}
+              activeGpt={activeGpt}
+              aiState={aiState}
             setAiState={setAiState}
             aiStateChatId={aiStateChatId}
             aiProcessSteps={aiProcessSteps}
@@ -686,16 +689,19 @@ export default function Home() {
             setActiveRunId={setActiveRunId}
             selectedProjectId={selectedProjectId}
           />
+          
         )}
       </main>
 
       {/* GPT Explorer Modal */}
-      <GptExplorer
-        open={isGptExplorerOpen}
-        onOpenChange={setIsGptExplorerOpen}
-        onSelectGpt={handleSelectGpt}
-        onCreateGpt={handleCreateGpt}
-      />
+      
+        <GptExplorer
+          open={isGptExplorerOpen}
+          onOpenChange={setIsGptExplorerOpen}
+          onSelectGpt={handleSelectGpt}
+          onCreateGpt={handleCreateGpt}
+        />
+      
 
       {/* About GPT Dialog */}
       <AboutGptDialog
@@ -730,21 +736,25 @@ export default function Home() {
       />
 
       {/* GPT Builder Modal */}
-      <GptBuilder
-        open={isGptBuilderOpen}
-        onOpenChange={setIsGptBuilderOpen}
-        editingGpt={editingGpt}
-        onSave={() => {
-          setIsGptBuilderOpen(false);
+      
+        <GptBuilder
+          open={isGptBuilderOpen}
+          onOpenChange={setIsGptBuilderOpen}
+          editingGpt={editingGpt}
+          onSave={() => {
+            setIsGptBuilderOpen(false);
           setEditingGpt(null);
         }}
-      />
+        />
+      
 
       {/* User Library Modal */}
-      <UserLibrary
-        open={isLibraryOpen}
-        onOpenChange={setIsLibraryOpen}
-      />
+      
+        <UserLibrary
+          open={isLibraryOpen}
+          onOpenChange={setIsLibraryOpen}
+        />
+      
 
       {/* Media Library Modal */}
       <MediaLibraryModal
@@ -767,10 +777,12 @@ export default function Home() {
       />
 
       {/* Settings Dialog */}
-      <SettingsDialog
-        open={isSettingsOpen}
-        onOpenChange={setIsSettingsOpen}
-      />
+      
+        <SettingsDialog
+          open={isSettingsOpen}
+          onOpenChange={setIsSettingsOpen}
+        />
+      
 
       {/* Keyboard Shortcuts Dialog */}
       <KeyboardShortcutsDialog

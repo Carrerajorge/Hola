@@ -8,6 +8,15 @@ import os from "os";
 
 export const healthRouter = Router();
 
+// Simple health check - always responds quickly
+healthRouter.get("/", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 healthRouter.get("/detailed", async (req, res) => {
   const status: any = {
     status: "ok",

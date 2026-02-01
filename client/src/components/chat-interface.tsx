@@ -749,8 +749,16 @@ export function ChatInterface({
   const { availableModels, isLoading: isModelsLoading, isAnyModelAvailable, selectedModelId, setSelectedModelId } = useModelAvailability();
 
   const selectedModelData = useMemo(() => {
-    if (!selectedModelId) return availableModels[0] || null;
-    return availableModels.find((m: any) => m.id === selectedModelId || m.modelId === selectedModelId) || availableModels[0] || null;
+    // If user selected a model, use that
+    if (selectedModelId) {
+      const found = availableModels.find((m: any) => m.id === selectedModelId || m.modelId === selectedModelId);
+      if (found) return found;
+    }
+    // Default: prefer Gemini models over others (Perplexity has no API key)
+    const preferredModel = availableModels.find((m: any) => 
+      m.provider === 'google' && m.modelId?.includes('gemini')
+    );
+    return preferredModel || availableModels[0] || null;
   }, [selectedModelId, availableModels]);
 
   const selectedProvider = selectedModelData?.provider || "gemini";

@@ -1,4 +1,5 @@
-import ExcelJS from "exceljs";
+import * as ExcelJSModule from "exceljs";
+const ExcelJS = (ExcelJSModule as any).default || ExcelJSModule;
 import type { FileParser, ParsedResult, DetectedFileType } from "./base";
 
 export class XlsxParser implements FileParser {

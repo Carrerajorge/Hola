@@ -42,11 +42,11 @@ const RATE_LIMIT_CONFIGS = {
         duration: 60,
         blockDuration: 60,
     },
-    // Trusted IPs / Admins - High limits
+    // Trusted IPs / Admins / Development - Very high limits
     trusted: {
-        points: 2000,
+        points: 10000,
         duration: 60,
-        blockDuration: 10,
+        blockDuration: 5,
     },
 };
 
@@ -236,15 +236,29 @@ export function createCustomRateLimiter(options: {
 export const rateLimiter = (req: Request, res: Response, next: NextFunction) => {
     const path = req.path.toLowerCase();
 
+    // Skip rate limiting for health checks and status endpoints
+    if (path.includes('/health') || path.includes('/status') || path === '/') {
+        return next();
+    }
+
     // Determine which limiter to use based on path
     let tier: RateLimitTier = 'default';
 
     // Check for Trusted Role (Admin) or Trusted IP (Internal)
     const user = (req as any).user;
-    const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1';
+    const ip = req.ip || req.socket.remoteAddress || '';
+    const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip.includes('localhost');
 
     // Check if user is admin (claims.role or role property depending on object structure)
     const isAdmin = user?.claims?.role === 'admin' || user?.role === 'admin';
+
+    // In development, be more permissive - BYPASS rate limiting entirely
+    const isDev = process.env.NODE_ENV === 'development';
+
+    if (isDev) {
+        // Skip rate limiting entirely in development
+        return next();
+    }
 
     if (isAdmin || isLocalhost) {
         tier = 'trusted';

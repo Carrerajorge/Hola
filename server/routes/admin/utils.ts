@@ -12,8 +12,11 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
     try {
         const userReq = req as AuthenticatedRequest;
-        const userEmail = userReq.user?.claims?.email;
-        const userId = userReq.user?.claims?.sub;
+        const session = req.session as any;
+        
+        // Get user info from either Passport or session
+        const userEmail = userReq.user?.claims?.email || session?.passport?.user?.claims?.email;
+        const userId = userReq.user?.claims?.sub || userReq.user?.id || session?.authUserId;
 
         // SECURITY: Check both email (from env) and database role
         let isAdmin = false;

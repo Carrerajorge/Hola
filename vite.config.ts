@@ -13,23 +13,24 @@ export default defineConfig(async () => {
   const replitPlugins =
     !isProd && isReplit
       ? [
-        (await import("@replit/vite-plugin-cartographer")).cartographer(),
-        (await import("@replit/vite-plugin-dev-banner")).devBanner(),
-      ]
+          (await import("@replit/vite-plugin-cartographer")).cartographer(),
+          (await import("@replit/vite-plugin-dev-banner")).devBanner(),
+        ]
       : [];
 
   return {
     plugins: [
       react(),
-      runtimeErrorOverlay(),
+      // The Replit runtime error modal can break local dev and is only useful in Replit.
+      ...(isReplit ? [runtimeErrorOverlay()] : []),
       tailwindcss(),
       metaImagesPlugin(),
       VitePWA({
         registerType: "autoUpdate",
         includeAssets: ["favicon.ico", "robots.txt", "apple-touch-icon.png"],
         manifest: {
-          name: "ILIAGPT - AI Assistant",
-          short_name: "ILIAGPT",
+          name: "MICHAT PRO - AI Assistant",
+          short_name: "MICHAT",
           description: "Advanced AI Assistant Platform with Enterprise Security",
           theme_color: "#0f172a",
           background_color: "#0f172a",
@@ -48,7 +49,7 @@ export default defineConfig(async () => {
         },
         workbox: {
           globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
         },
       }),
       ...replitPlugins,
@@ -58,10 +59,19 @@ export default defineConfig(async () => {
         "@": path.resolve(import.meta.dirname, "client", "src"),
         "@shared": path.resolve(import.meta.dirname, "shared"),
         "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+
+        // Force a single React instance to avoid "Invalid hook call" in dev.
+        react: path.resolve(import.meta.dirname, "node_modules/react"),
+        "react-dom": path.resolve(import.meta.dirname, "node_modules/react-dom"),
+        "react/jsx-runtime": path.resolve(import.meta.dirname, "node_modules/react/jsx-runtime"),
+        "react/jsx-dev-runtime": path.resolve(import.meta.dirname, "node_modules/react/jsx-dev-runtime"),
       },
+      dedupe: ["react", "react-dom"],
     },
     css: {
-      postcss: { plugins: [] },
+      postcss: {
+        plugins: [],
+      },
     },
     root: path.resolve(import.meta.dirname, "client"),
     build: {
@@ -87,9 +97,13 @@ export default defineConfig(async () => {
       },
     },
     server: {
-      host: "0.0.0.0",
+      // Use localhost in dev so the session cookie host matches and login persists.
+      host: "localhost",
       allowedHosts: true,
-      fs: { strict: true, deny: ["**/.*"] },
+      fs: {
+        strict: true,
+        deny: ["**/.*"],
+      },
       watch: {
         ignored: ["**/node_modules/**", "**/node_modules_backup/**"],
       },
@@ -105,5 +119,5 @@ export default defineConfig(async () => {
         },
       },
     },
-  } as import("vite").UserConfig;
+  };
 });
