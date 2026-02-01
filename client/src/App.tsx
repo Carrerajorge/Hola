@@ -60,6 +60,7 @@ const PricingPage = lazy(() => import("@/pages/pricing"));
 const BusinessPage = lazy(() => import("@/pages/business"));
 const DownloadPage = lazy(() => import("@/pages/download"));
 const PowerPage = lazy(() => import("@/pages/power"));
+const MemoryPage = lazy(() => import("@/pages/memory"));
 
 function GlobalKeyboardShortcuts() {
   const [, setLocation] = useLocation();
@@ -157,6 +158,7 @@ function Router() {
             <Route path="/workspace-settings" component={WorkspaceSettingsPage} />
             <Route path="/workspace" component={WorkspacePage} />
             <Route path="/skills" component={SkillsPage} />
+            <Route path="/memory" component={MemoryPage} />
             <Route path="/spreadsheet-analyzer" component={SpreadsheetAnalyzerPage} />
             <Route path="/monitoring" component={MonitoringDashboard} />
             <Route path="/about" component={AboutPage} />
