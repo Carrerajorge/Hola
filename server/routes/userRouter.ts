@@ -828,5 +828,85 @@ export function createUserRouter() {
     }
   });
 
+  // ============================================================================
+  // User Preferences (General)
+  // ============================================================================
+
+  /**
+   * GET /api/user/preferences - Get current user's preferences
+   */
+  router.get("/api/user/preferences", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json(user.preferences || {});
+    } catch (error: any) {
+      console.error("[Preferences] Error getting:", error);
+      res.status(500).json({ error: "Failed to get preferences" });
+    }
+  });
+
+  /**
+   * PATCH /api/user/preferences - Update some preferences
+   */
+  router.patch("/api/user/preferences", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const updates = req.body;
+      if (!updates || typeof updates !== "object") {
+        return res.status(400).json({ error: "Invalid preferences" });
+      }
+
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const currentPrefs = (user.preferences as Record<string, unknown>) || {};
+      const newPrefs = { ...currentPrefs, ...updates };
+
+      await storage.updateUser(userId, { preferences: newPrefs });
+      res.json(newPrefs);
+    } catch (error: any) {
+      console.error("[Preferences] Error updating:", error);
+      res.status(500).json({ error: "Failed to update preferences" });
+    }
+  });
+
+  /**
+   * PUT /api/user/preferences - Replace all preferences
+   */
+  router.put("/api/user/preferences", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      const preferences = req.body;
+      if (!preferences || typeof preferences !== "object") {
+        return res.status(400).json({ error: "Invalid preferences" });
+      }
+
+      await storage.updateUser(userId, { preferences });
+      res.json(preferences);
+    } catch (error: any) {
+      console.error("[Preferences] Error replacing:", error);
+      res.status(500).json({ error: "Failed to replace preferences" });
+    }
+  });
+
   return router;
 }
