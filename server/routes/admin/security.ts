@@ -208,3 +208,156 @@ securityRouter.get("/logs", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// GET /api/admin/security/config - Get current security configuration
+securityRouter.get("/config", async (req, res) => {
+    try {
+        const config = {
+            csp: {
+                enabled: true,
+                directives: {
+                    defaultSrc: ["'self'"],
+                    scriptSrc: ["'self'", "https://cdn.jsdelivr.net"],
+                    styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net"],
+                    fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+                    imgSrc: ["'self'", "data:", "blob:", "https:"],
+                    connectSrc: ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "wss:", "ws:"]
+                }
+            },
+            cors: {
+                enabled: true,
+                origins: process.env.CORS_ORIGINS?.split(",") || ["*"],
+                credentials: true
+            },
+            rateLimit: {
+                enabled: true,
+                windowMs: 60000,
+                maxRequests: 100,
+                byUser: true,
+                byIp: true
+            },
+            csrf: {
+                enabled: true,
+                cookieName: "XSRF-TOKEN",
+                headerName: "X-CSRF-Token"
+            },
+            headers: {
+                xFrameOptions: "SAMEORIGIN",
+                xContentTypeOptions: "nosniff",
+                referrerPolicy: "strict-origin-when-cross-origin"
+            }
+        };
+
+        res.json(config);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/security/threats - Get recent threat analysis
+securityRouter.get("/threats", async (req, res) => {
+    try {
+        const auditLogs = await storage.getAuditLogs(1000);
+        const now = new Date();
+        const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        const recentLogs = auditLogs.filter(l => 
+            l.createdAt && new Date(l.createdAt) >= last24h
+        );
+
+        // Analyze threats
+        const loginFailures = recentLogs.filter(l => l.action?.includes("login_failed"));
+        const blockedRequests = recentLogs.filter(l => l.action?.includes("blocked") || l.action?.includes("rate_limit"));
+        const unauthorizedAccess = recentLogs.filter(l => l.action?.includes("unauthorized") || l.action?.includes("403"));
+
+        // Group by IP
+        const ipCounts: Record<string, number> = {};
+        loginFailures.forEach(l => {
+            const ip = l.ipAddress || "unknown";
+            ipCounts[ip] = (ipCounts[ip] || 0) + 1;
+        });
+
+        const suspiciousIps = Object.entries(ipCounts)
+            .filter(([_, count]) => count >= 5)
+            .map(([ip, count]) => ({ ip, failedAttempts: count }));
+
+        res.json({
+            summary: {
+                loginFailures: loginFailures.length,
+                blockedRequests: blockedRequests.length,
+                unauthorizedAccess: unauthorizedAccess.length,
+                totalThreats: loginFailures.length + blockedRequests.length + unauthorizedAccess.length
+            },
+            suspiciousIps,
+            recentThreats: [...loginFailures, ...blockedRequests, ...unauthorizedAccess]
+                .slice(0, 20)
+                .map(l => ({
+                    action: l.action,
+                    ip: l.ipAddress,
+                    timestamp: l.createdAt,
+                    details: l.details
+                })),
+            period: "24h"
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/security/ip/block - Block an IP address
+securityRouter.post("/ip/block", async (req, res) => {
+    try {
+        const { ip, reason, duration } = req.body;
+        if (!ip) {
+            return res.status(400).json({ error: "IP address is required" });
+        }
+
+        // Create a security policy for the blocked IP
+        const policy = await storage.createSecurityPolicy({
+            policyName: `Block IP: ${ip}`,
+            policyType: "ip_block",
+            rules: { ip, blockedAt: new Date().toISOString(), duration: duration || "permanent" },
+            priority: 100,
+            appliedTo: "global",
+            isEnabled: "true"
+        });
+
+        await storage.createAuditLog({
+            action: "ip_blocked",
+            resource: "security",
+            details: { ip, reason, duration }
+        });
+
+        res.json({ success: true, policy });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// DELETE /api/admin/security/ip/unblock/:ip - Unblock an IP address
+securityRouter.delete("/ip/unblock/:ip", async (req, res) => {
+    try {
+        const ip = req.params.ip;
+        const policies = await storage.getSecurityPolicies();
+        const blockPolicy = policies.find(p => 
+            p.policyType === "ip_block" && 
+            (p.rules as any)?.ip === ip
+        );
+
+        if (!blockPolicy) {
+            return res.status(404).json({ error: "IP block policy not found" });
+        }
+
+        await storage.deleteSecurityPolicy(blockPolicy.id);
+
+        await storage.createAuditLog({
+            action: "ip_unblocked",
+            resource: "security",
+            details: { ip }
+        });
+
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});

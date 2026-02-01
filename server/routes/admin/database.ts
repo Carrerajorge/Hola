@@ -380,3 +380,131 @@ databaseRouter.get("/indexes", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// POST /api/admin/database/backup - Initiate a database backup
+databaseRouter.post("/backup", asyncHandler(async (req, res) => {
+    const { type = "full", tables } = req.body;
+    
+    // For now, we'll export data as JSON since pg_dump requires shell access
+    const backupData: Record<string, any[]> = {};
+    const tablesToBackup = tables || ["users", "chats", "ai_models", "payments", "invoices", "settings_config"];
+    
+    for (const tableName of tablesToBackup) {
+        try {
+            const safeTableName = tableName.replace(/[^a-zA-Z0-9_]/g, '');
+            const result = await db.execute(sql`SELECT * FROM ${sql.raw(safeTableName)}`);
+            backupData[tableName] = result.rows as any[];
+        } catch (err: any) {
+            backupData[tableName] = [];
+        }
+    }
+
+    const backupMeta = {
+        timestamp: new Date().toISOString(),
+        type,
+        tables: Object.keys(backupData),
+        rowCounts: Object.fromEntries(
+            Object.entries(backupData).map(([k, v]) => [k, v.length])
+        ),
+        version: "1.0"
+    };
+
+    await storage.createAuditLog({
+        action: "database_backup",
+        resource: "database",
+        details: { type, tables: tablesToBackup, rowCounts: backupMeta.rowCounts }
+    });
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename=backup_${Date.now()}.json`);
+    res.json({ meta: backupMeta, data: backupData });
+}));
+
+// GET /api/admin/database/backups - List available backups (if stored)
+databaseRouter.get("/backups", async (req, res) => {
+    try {
+        // Check generated_reports folder for backup files
+        const fs = require("fs").promises;
+        const path = require("path");
+        const backupsDir = path.join(process.cwd(), "backups");
+        
+        try {
+            const files = await fs.readdir(backupsDir);
+            const backups = files
+                .filter((f: string) => f.endsWith(".json") && f.startsWith("backup_"))
+                .map((f: string) => ({
+                    filename: f,
+                    timestamp: parseInt(f.replace("backup_", "").replace(".json", "")),
+                    path: `/api/admin/database/backups/${f}`
+                }))
+                .sort((a: any, b: any) => b.timestamp - a.timestamp);
+            
+            res.json({ backups });
+        } catch (err) {
+            // Directory doesn't exist
+            res.json({ backups: [], note: "No backups found" });
+        }
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/database/vacuum - Run VACUUM ANALYZE
+databaseRouter.post("/vacuum", asyncHandler(async (req, res) => {
+    const { table } = req.body;
+    
+    if (table) {
+        const safeTableName = table.replace(/[^a-zA-Z0-9_]/g, '');
+        await db.execute(sql`VACUUM ANALYZE ${sql.raw(safeTableName)}`);
+    } else {
+        await db.execute(sql`VACUUM ANALYZE`);
+    }
+
+    await storage.createAuditLog({
+        action: "database_vacuum",
+        resource: "database",
+        details: { table: table || "all" }
+    });
+
+    res.json({ success: true, message: table ? `VACUUM ANALYZE completed for ${table}` : "VACUUM ANALYZE completed for all tables" });
+}));
+
+// GET /api/admin/database/connections - Get active database connections
+databaseRouter.get("/connections", async (req, res) => {
+    try {
+        const connections = await db.execute(sql`
+            SELECT 
+                pid,
+                usename as username,
+                application_name,
+                client_addr as client_ip,
+                state,
+                query_start,
+                state_change,
+                wait_event_type,
+                wait_event,
+                LEFT(query, 100) as current_query
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+            ORDER BY query_start DESC NULLS LAST
+            LIMIT 50
+        `);
+
+        const summary = await db.execute(sql`
+            SELECT 
+                state,
+                COUNT(*) as count
+            FROM pg_stat_activity
+            WHERE datname = current_database()
+            GROUP BY state
+        `);
+
+        res.json({
+            connections: connections.rows,
+            summary: summary.rows,
+            maxConnections: await db.execute(sql`SHOW max_connections`).then(r => r.rows[0])
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});

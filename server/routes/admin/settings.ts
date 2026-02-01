@@ -129,3 +129,155 @@ settingsRouter.post("/seed", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// POST /api/admin/settings/diff - Save only changed settings (diff mode)
+settingsRouter.post("/diff", async (req, res) => {
+    try {
+        const { settings } = req.body;
+        if (!settings || typeof settings !== "object") {
+            return res.status(400).json({ error: "settings object is required" });
+        }
+
+        const updated: any[] = [];
+        const unchanged: string[] = [];
+        const errors: { key: string; error: string }[] = [];
+
+        for (const [key, newValue] of Object.entries(settings)) {
+            try {
+                const existing = await storage.getSettingsConfigByKey(key);
+                if (!existing) {
+                    errors.push({ key, error: "Setting not found" });
+                    continue;
+                }
+
+                // Compare values - only update if different
+                const currentValue = existing.value;
+                if (JSON.stringify(currentValue) === JSON.stringify(newValue)) {
+                    unchanged.push(key);
+                    continue;
+                }
+
+                // Update only changed values
+                const result = await storage.upsertSettingsConfig({
+                    ...existing,
+                    value: newValue as any,
+                    updatedBy: req.body.updatedBy,
+                    defaultValue: existing.defaultValue as any
+                });
+                updated.push({ key, oldValue: currentValue, newValue, setting: result });
+            } catch (err: any) {
+                errors.push({ key, error: err.message });
+            }
+        }
+
+        if (updated.length > 0) {
+            await storage.createAuditLog({
+                action: "settings_diff_update",
+                resource: "settings_config",
+                details: { 
+                    updated: updated.map(u => u.key),
+                    unchanged: unchanged.length,
+                    errors: errors.length
+                }
+            });
+        }
+
+        res.json({
+            success: true,
+            updated: updated.length,
+            unchanged: unchanged.length,
+            errors: errors.length,
+            changes: updated,
+            unchangedKeys: unchanged,
+            errorDetails: errors
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/settings/export - Export all settings
+settingsRouter.get("/export", async (req, res) => {
+    try {
+        const settings = await storage.getSettingsConfig();
+        const exportData = settings.reduce((acc: Record<string, any>, s) => {
+            acc[s.key] = {
+                value: s.value,
+                category: s.category,
+                description: s.description,
+                updatedAt: s.updatedAt
+            };
+            return acc;
+        }, {});
+
+        await storage.createAuditLog({
+            action: "settings_export",
+            resource: "settings_config",
+            details: { count: settings.length }
+        });
+
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Content-Disposition", `attachment; filename=settings_${Date.now()}.json`);
+        res.json(exportData);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/settings/import - Import settings from JSON
+settingsRouter.post("/import", async (req, res) => {
+    try {
+        const { settings, overwrite = false } = req.body;
+        if (!settings || typeof settings !== "object") {
+            return res.status(400).json({ error: "settings object is required" });
+        }
+
+        const imported: string[] = [];
+        const skipped: string[] = [];
+        const errors: { key: string; error: string }[] = [];
+
+        for (const [key, data] of Object.entries(settings)) {
+            try {
+                const existing = await storage.getSettingsConfigByKey(key);
+                if (existing && !overwrite) {
+                    skipped.push(key);
+                    continue;
+                }
+
+                const value = typeof data === "object" && (data as any).value !== undefined 
+                    ? (data as any).value 
+                    : data;
+
+                if (existing) {
+                    await storage.upsertSettingsConfig({
+                        ...existing,
+                        value: value as any,
+                        updatedBy: req.body.updatedBy,
+                        defaultValue: existing.defaultValue as any
+                    });
+                    imported.push(key);
+                }
+            } catch (err: any) {
+                errors.push({ key, error: err.message });
+            }
+        }
+
+        await storage.createAuditLog({
+            action: "settings_import",
+            resource: "settings_config",
+            details: { imported: imported.length, skipped: skipped.length, errors: errors.length }
+        });
+
+        res.json({
+            success: true,
+            imported: imported.length,
+            skipped: skipped.length,
+            errors: errors.length,
+            importedKeys: imported,
+            skippedKeys: skipped,
+            errorDetails: errors
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
