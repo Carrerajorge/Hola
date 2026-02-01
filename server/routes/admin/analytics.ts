@@ -459,3 +459,50 @@ analyticsRouter.get("/llm/metrics", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// Import analytics tracker
+import { analyticsTracker } from "../../services/analyticsTracker";
+
+// GET /api/admin/analytics/realtime - Real-time metrics
+analyticsRouter.get("/realtime", async (req, res) => {
+    try {
+        const metrics = analyticsTracker.getRealTimeMetrics();
+        res.json(metrics);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/analytics/sessions/active - Active sessions
+analyticsRouter.get("/sessions/active", async (req, res) => {
+    try {
+        const minutes = parseInt(req.query.minutes as string) || 5;
+        const sessions = analyticsTracker.getActiveSessions(minutes);
+        res.json({
+            sessions,
+            count: sessions.length
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/analytics/track - Track event (for frontend)
+analyticsRouter.post("/track", async (req, res) => {
+    try {
+        const { eventType, sessionId, page, action, metadata } = req.body;
+        const userId = (req as any).user?.id;
+        
+        if (eventType === "page_view") {
+            analyticsTracker.trackPageView(userId, sessionId, page, metadata);
+        } else if (eventType === "action") {
+            analyticsTracker.trackAction(userId, sessionId, action, metadata);
+        } else if (eventType === "chat_query") {
+            analyticsTracker.trackChatQuery(userId, sessionId, metadata);
+        }
+        
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
