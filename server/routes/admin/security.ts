@@ -384,3 +384,118 @@ securityRouter.delete("/ip/unblock/:ip", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// GET /api/admin/security/audit-logs/export - Export audit logs as CSV
+securityRouter.get("/audit-logs/export", async (req, res) => {
+    try {
+        const { format = "csv", date_from, date_to, action } = req.query;
+        
+        let logs = await storage.getAuditLogs(10000);
+        
+        // Apply filters
+        if (action) {
+            logs = logs.filter(l => l.action?.includes(action as string));
+        }
+        if (date_from) {
+            const fromDate = new Date(date_from as string);
+            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) >= fromDate);
+        }
+        if (date_to) {
+            const toDate = new Date(date_to as string);
+            logs = logs.filter(l => l.createdAt && new Date(l.createdAt) <= toDate);
+        }
+        
+        // Log the export action
+        await auditLog(req, {
+            action: AuditActions.ADMIN_EXPORT_DATA,
+            resource: "audit_logs",
+            details: { 
+                format, 
+                recordCount: logs.length,
+                exportedBy: (req as any).user?.email 
+            },
+            category: "security",
+            severity: "warning"
+        });
+        
+        if (format === "json") {
+            res.setHeader("Content-Type", "application/json");
+            res.setHeader("Content-Disposition", `attachment; filename=audit_logs_${new Date().toISOString().split("T")[0]}.json`);
+            return res.json(logs);
+        }
+        
+        // Default: CSV
+        const csvHeaders = ["id", "action", "resource", "resourceId", "userId", "ipAddress", "userAgent", "createdAt", "details"];
+        const csvRows = logs.map(log => [
+            log.id,
+            log.action,
+            log.resource || "",
+            log.resourceId || "",
+            log.userId || "",
+            log.ipAddress || "",
+            (log.userAgent || "").replace(/,/g, ";").substring(0, 100),
+            log.createdAt ? new Date(log.createdAt).toISOString() : "",
+            JSON.stringify(log.details || {}).replace(/,/g, ";")
+        ]);
+        
+        const csv = [csvHeaders.join(","), ...csvRows.map(row => row.join(","))].join("\n");
+        
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader("Content-Disposition", `attachment; filename=audit_logs_${new Date().toISOString().split("T")[0]}.csv`);
+        res.send(csv);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Import security alerts service
+import { securityAlerts } from "../../services/securityAlerts";
+
+// GET /api/admin/security/alerts - Get security alerts
+securityRouter.get("/alerts", async (req, res) => {
+    try {
+        const { limit = "50", unresolved } = req.query;
+        const alerts = securityAlerts.getAlerts(
+            parseInt(limit as string),
+            unresolved === "true"
+        );
+        res.json({
+            alerts,
+            stats: securityAlerts.getStats()
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/security/alerts/:id/resolve - Resolve an alert
+securityRouter.post("/alerts/:id/resolve", async (req, res) => {
+    try {
+        const success = securityAlerts.resolveAlert(req.params.id);
+        if (!success) {
+            return res.status(404).json({ error: "Alert not found" });
+        }
+        
+        await auditLog(req, {
+            action: "security.alert_resolved",
+            resource: "security_alerts",
+            resourceId: req.params.id,
+            details: { resolvedBy: (req as any).user?.email },
+            category: "security",
+            severity: "info"
+        });
+        
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/security/alerts/stats - Get alert statistics
+securityRouter.get("/alerts/stats", async (req, res) => {
+    try {
+        res.json(securityAlerts.getStats());
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});

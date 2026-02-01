@@ -84,6 +84,7 @@ import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
+import { SecurityAlertsPanel } from "@/components/admin/SecurityAlerts";
 
 type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel";
 
@@ -2921,6 +2922,7 @@ function SecuritySection() {
         <TabsList>
           <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
           <TabsTrigger value="policies" data-testid="tab-policies">Policies</TabsTrigger>
+          <TabsTrigger value="alerts" data-testid="tab-alerts">Alertas</TabsTrigger>
           <TabsTrigger value="audit-logs" data-testid="tab-audit-logs">Audit Logs</TabsTrigger>
         </TabsList>
 
@@ -3161,6 +3163,10 @@ function SecuritySection() {
               </tbody>
             </table>
           </div>
+        </TabsContent>
+
+        <TabsContent value="alerts" className="space-y-4">
+          <SecurityAlertsPanel />
         </TabsContent>
 
         <TabsContent value="audit-logs" className="space-y-4">
