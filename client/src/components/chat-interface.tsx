@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { SkeletonChatMessages } from "@/components/skeletons";
 import { useDraft } from "@/hooks/use-draft";
+import { getAnonUserIdHeader } from "@/lib/apiClient";
+import { WelcomeAnimation } from "@/components/welcome-animation";
 import {
   Plus,
   ArrowUp,
@@ -1813,7 +1815,8 @@ export function ChatInterface({
 
       const response = await fetch("/api/chat/stream", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+        credentials: "include",
         body: JSON.stringify({
           messages: chatHistory,
           chatId,
@@ -2064,7 +2067,8 @@ export function ChatInterface({
 
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+        credentials: "include",
         body: JSON.stringify({
           messages: historyUpToEdit,
           provider: selectedProvider,
@@ -2535,6 +2539,78 @@ export function ChatInterface({
   }, [input]);
 
   const handleSubmit = async () => {
+    // EMERGENCY DEBUG - REMOVE AFTER FIX
+    console.error("[DEBUG] handleSubmit CALLED at", new Date().toISOString());
+    
+    // EMERGENCY FALLBACK: If input is present and starts with "!", do direct API call
+    if (input.trim().startsWith("!")) {
+      const cleanInput = input.trim().substring(1); // Remove the "!" prefix
+      console.error("[DEBUG] EMERGENCY FALLBACK triggered with:", cleanInput);
+      setInput("");
+      setAiState("thinking");
+      
+      try {
+        const response = await fetch("/api/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: cleanInput }],
+            model: "grok-3"
+          })
+        });
+        
+        if (!response.ok) {
+          console.error("[DEBUG] EMERGENCY FALLBACK fetch failed:", response.status);
+          setAiState("idle");
+          return;
+        }
+        
+        // Read the stream
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let fullContent = "";
+        
+        while (reader) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+          
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.content) {
+                  fullContent += data.content;
+                  setStreamingContent(fullContent);
+                }
+              } catch (e) {
+                // Ignore parse errors
+              }
+            }
+          }
+        }
+        
+        // Create the response message
+        const assistantMsg: Message = {
+          id: `emergency-${Date.now()}`,
+          role: "assistant",
+          content: fullContent || "No response received",
+          timestamp: new Date()
+        };
+        onSendMessage(assistantMsg);
+        setStreamingContent("");
+        setAiState("idle");
+        console.error("[DEBUG] EMERGENCY FALLBACK completed successfully");
+        return;
+      } catch (error) {
+        console.error("[DEBUG] EMERGENCY FALLBACK error:", error);
+        setAiState("idle");
+        return;
+      }
+    }
+    
     // MOCK CITATION TRIGGER FOR VERIFICATION
     if (input.trim() === "/test-citation") {
       const mockMsg: Message = {
@@ -2586,6 +2662,108 @@ export function ChatInterface({
     if (!hasInput && !hasFiles && !hasSelectionWithInstruction) {
       console.log("[handleSubmit] no content to submit, returning");
       return;
+    }
+
+    // EMERGENCY BYPASS: For simple text messages without files, go directly to streaming API
+    // This bypasses all the complex chat creation logic that's failing
+    if (hasInput && !hasFiles && !selectedTool && !selectedDocText) {
+      console.error("[EMERGENCY BYPASS] Simple text message - going direct to API");
+      const userInput = input.trim();
+      setInput("");
+      
+      // Show user message immediately
+      const userMsgId = `user-${Date.now()}`;
+      const userMessage: Message = {
+        id: userMsgId,
+        role: "user",
+        content: userInput,
+        timestamp: new Date(),
+        requestId: `req_${Date.now()}`
+      };
+      onSendMessage(userMessage);
+      
+      setAiState("thinking");
+      streamingContentRef.current = "";
+      setStreamingContent("");
+      
+      try {
+        const response = await fetch("/api/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: userInput }],
+            model: selectedModel || "grok-3"
+          })
+        });
+        
+        if (!response.ok) {
+          console.error("[EMERGENCY BYPASS] API error:", response.status);
+          const errorMsg: Message = {
+            id: `error-${Date.now()}`,
+            role: "assistant",
+            content: "Lo siento, hubo un error al procesar tu mensaje. Por favor, intenta de nuevo.",
+            timestamp: new Date()
+          };
+          onSendMessage(errorMsg);
+          setAiState("idle");
+          return;
+        }
+        
+        // Read the SSE stream
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let fullContent = "";
+        setAiState("responding");
+        
+        while (reader) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+          
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.content) {
+                  fullContent += data.content;
+                  streamingContentRef.current = fullContent;
+                  setStreamingContent(fullContent);
+                }
+              } catch (e) {
+                // Ignore parse errors for incomplete JSON
+              }
+            }
+          }
+        }
+        
+        // Create assistant message with full response
+        const assistantMsg: Message = {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: fullContent || "No se recibió respuesta del servidor.",
+          timestamp: new Date(),
+          userMessageId: userMsgId
+        };
+        onSendMessage(assistantMsg);
+        streamingContentRef.current = "";
+        setStreamingContent("");
+        setAiState("idle");
+        console.error("[EMERGENCY BYPASS] Completed successfully");
+        return;
+      } catch (error) {
+        console.error("[EMERGENCY BYPASS] Error:", error);
+        const errorMsg: Message = {
+          id: `error-${Date.now()}`,
+          role: "assistant",
+          content: "Error de conexión. Por favor, verifica tu conexión e intenta de nuevo.",
+          timestamp: new Date()
+        };
+        onSendMessage(errorMsg);
+        setAiState("idle");
+        return;
+      }
     }
 
     // Handle Agent mode - show in chat, not side panel
@@ -2674,7 +2852,8 @@ export function ChatInterface({
         abortControllerRef.current = new AbortController();
         const response = await fetch("/api/chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
           body: JSON.stringify({
             messages: [{
               role: "user",
@@ -2882,7 +3061,8 @@ export function ChatInterface({
         try {
           const response = await fetch("/api/chat/stream", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            credentials: "include",
             body: JSON.stringify({
               messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: "user", content: generationInput }],
               chatId,
@@ -3629,7 +3809,23 @@ export function ChatInterface({
 
     // Send user message and get run info for SSE streaming
     try {
-      const messageResult = await onSendMessage(userMsg);
+      console.log("[handleSubmit] ABOUT TO CALL onSendMessage");
+      
+      // Add timeout to detect stuck promises
+      const messageResultPromise = onSendMessage(userMsg);
+      const timeoutPromise = new Promise<undefined>((_, reject) => 
+        setTimeout(() => reject(new Error("onSendMessage timeout after 10s")), 10000)
+      );
+      
+      let messageResult;
+      try {
+        messageResult = await Promise.race([messageResultPromise, timeoutPromise]);
+      } catch (timeoutError: any) {
+        console.error("[handleSubmit] onSendMessage failed or timed out:", timeoutError);
+        // Fallback: call stream directly without waiting for run
+        messageResult = undefined;
+      }
+      
       console.log("[handleSubmit] messageResult:", messageResult);
       const runInfo = messageResult?.run;
 
@@ -3691,7 +3887,7 @@ export function ChatInterface({
 
           const chatResponse = await fetch("/api/chat", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
             credentials: "include",
             body: JSON.stringify({
               messages: fullMessages,
@@ -4136,7 +4332,8 @@ IMPORTANTE:
 
             const response = await fetch("/api/chat/stream", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+              credentials: "include",
               body: JSON.stringify({
                 messages: finalChatHistory,
                 conversationId: chatId,
@@ -4493,7 +4690,8 @@ IMPORTANTE:
 
             const response = await fetch("/api/chat", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+              credentials: "include",
               body: JSON.stringify({
                 messages: finalChatHistory,
                 images: imageDataUrls.length > 0 ? imageDataUrls : undefined,
@@ -4987,39 +5185,37 @@ IMPORTANTE:
                 </div>
               )}
 
-              {/* Centered content when no messages */}
+              {/* Centered content when no messages - Futuristic Welcome */}
               {!hasMessages && (
                 <div className="flex-1 flex flex-col items-center justify-center">
-                  <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
-                    {activeGpt ? (
-                      <>
-                        <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
-                          {activeGpt.avatar ? (
-                            <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
-                          ) : (
-                            <Bot className="h-8 w-8 text-muted-foreground" />
-                          )}
-                        </div>
-                        <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
-                        <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
-                        {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
-                            {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
-                              <button
-                                key={idx}
-                                onClick={() => setInput(starter)}
-                                className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
-                              >
-                                {starter}
-                              </button>
-                            ))}
-                          </div>
+                  {activeGpt ? (
+                    <div className="flex flex-col items-center justify-center text-center space-y-4 mb-6">
+                      <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-2">
+                        {activeGpt.avatar ? (
+                          <img src={activeGpt.avatar} alt={activeGpt.name} className="w-full h-full rounded-2xl object-cover" />
+                        ) : (
+                          <Bot className="h-8 w-8 text-muted-foreground" />
                         )}
-                      </>
-                    ) : (
-                      <p className="text-muted-foreground">¿En qué puedo ayudarte?</p>
-                    )}
-                  </div>
+                      </div>
+                      <h2 className="text-xl font-semibold">{activeGpt.name}</h2>
+                      <p className="text-muted-foreground max-w-md">{activeGpt.welcomeMessage || activeGpt.description || "¿En qué puedo ayudarte?"}</p>
+                      {activeGpt.conversationStarters && activeGpt.conversationStarters.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-4 justify-center max-w-xl">
+                          {activeGpt.conversationStarters.filter(s => s).map((starter, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => setInput(starter)}
+                              className="px-4 py-2 text-sm border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                            >
+                              {starter}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <WelcomeAnimation />
+                  )}
                 </div>
               )}
 

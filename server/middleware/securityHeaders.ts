@@ -20,18 +20,16 @@ export interface SecurityHeadersConfig {
 
 const DEFAULT_CSP_DIRECTIVES: Record<string, string[]> = {
   "default-src": ["'self'"],
-  // Production CSP: Use nonces for inline scripts in production
-  // For development, we need unsafe-inline for hot reload
-  "script-src": process.env.NODE_ENV === 'production'
-    ? ["'self'", "https://cdn.jsdelivr.net"]
-    : ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net"],
-  "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+  // Allow inline scripts in production via unsafe-inline (required for React hydration and PWA)
+  "script-src": ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://accounts.google.com"],
+  "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://accounts.google.com"],
   "font-src": ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "data:"],
   "img-src": ["'self'", "data:", "blob:", "https:"],
-  "connect-src": ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "wss:", "ws:"],
+  "connect-src": ["'self'", "https://api.x.ai", "https://generativelanguage.googleapis.com", "https://accounts.google.com", "wss:", "ws:"],
+  "frame-src": ["'self'", "https://accounts.google.com"],
   "frame-ancestors": ["'self'"],
   "base-uri": ["'self'"],
-  "form-action": ["'self'"],
+  "form-action": ["'self'", "https://accounts.google.com"],
   "object-src": ["'none'"],
   "upgrade-insecure-requests": [],
 };

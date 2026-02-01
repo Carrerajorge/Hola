@@ -50,6 +50,17 @@ export default defineConfig(async () => {
         workbox: {
           globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
+          // Don't cache API requests - let them pass through to the network
+          navigateFallbackDenylist: [/^\/api\//],
+          runtimeCaching: [
+            {
+              urlPattern: /^\/api\//,
+              handler: 'NetworkOnly',
+            },
+          ],
+          // Force new SW on every build
+          skipWaiting: true,
+          clientsClaim: true,
         },
       }),
       ...replitPlugins,

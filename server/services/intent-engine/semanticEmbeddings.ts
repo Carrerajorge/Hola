@@ -2,7 +2,9 @@ import { GoogleGenAI } from "@google/genai";
 import type { IntentType } from "../../../shared/schemas/intent";
 import { logStructured } from "./telemetry";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+// Only initialize AI if we have a valid key
+const hasGeminiKey = !!(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 10);
+const ai = hasGeminiKey ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! }) : null;
 
 const EMBEDDING_MODEL = "text-embedding-004";
 const EMBEDDING_DIMENSIONS = 768;
@@ -799,10 +801,56 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return magnitude === 0 ? 0 : dotProduct / magnitude;
 }
 
+// Simple TF-IDF style fallback embedding when no API key
+function generateSimpleEmbedding(text: string): number[] {
+  const normalized = text.toLowerCase().replace(/[^\w\s]/g, "");
+  const words = normalized.split(/\s+/).filter(w => w.length > 2);
+  const embedding = new Array(EMBEDDING_DIMENSIONS).fill(0);
+  
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    // Use multiple hash positions for better distribution
+    const hash1 = Math.abs(hashCode(word)) % EMBEDDING_DIMENSIONS;
+    const hash2 = Math.abs(hashCode(word + "_2")) % EMBEDDING_DIMENSIONS;
+    const hash3 = Math.abs(hashCode(word + "_3")) % EMBEDDING_DIMENSIONS;
+    
+    embedding[hash1] += 1 / (i + 1);
+    embedding[hash2] += 0.5 / (i + 1);
+    embedding[hash3] += 0.25 / (i + 1);
+  }
+  
+  // L2 normalize
+  const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+  if (magnitude > 0) {
+    for (let i = 0; i < embedding.length; i++) {
+      embedding[i] /= magnitude;
+    }
+  }
+  
+  return embedding;
+}
+
+function hashCode(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash;
+}
+
 async function generateEmbedding(text: string): Promise<number[]> {
   const cacheKey = text.toLowerCase().trim().substring(0, 500);
   const cached = embeddingCache.get(cacheKey);
   if (cached) return cached;
+
+  // If no Gemini API key, use simple fallback immediately
+  if (!ai) {
+    const embedding = generateSimpleEmbedding(text);
+    embeddingCache.set(cacheKey, embedding);
+    return embedding;
+  }
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -826,15 +874,21 @@ async function generateEmbedding(text: string): Promise<number[]> {
         continue;
       }
       if (attempt === MAX_RETRIES - 1) {
-        logStructured("error", "Embedding generation failed after retries", {
+        logStructured("warn", "Embedding generation failed, using fallback", {
           error: error.message,
           text_preview: text.substring(0, 50)
         });
-        throw error;
+        // Fallback to simple embedding instead of throwing
+        const embedding = generateSimpleEmbedding(text);
+        embeddingCache.set(cacheKey, embedding);
+        return embedding;
       }
     }
   }
-  throw new Error("Failed to generate embedding");
+  // Final fallback
+  const embedding = generateSimpleEmbedding(text);
+  embeddingCache.set(cacheKey, embedding);
+  return embedding;
 }
 
 async function generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {

@@ -6,7 +6,7 @@ export const openai = new OpenAI({
 });
 
 export const MODELS = {
-  TEXT: "grok-2-latest",
+  TEXT: "grok-3-mini",
   VISION: "grok-2-vision-1212",
   GROK_REASONING: "grok-4-1-fast-reasoning"
 } as const;

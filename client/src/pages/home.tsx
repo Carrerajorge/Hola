@@ -301,6 +301,9 @@ export default function Home() {
 
   // Stable message sender that uses the correct chat ID
   const handleSendMessage = useCallback(async (message: Message) => {
+    // EMERGENCY DEBUG
+    console.error("[CRITICAL] handleSendMessage in home.tsx called:", { messageContent: message.content?.substring(0, 50), activeChat: activeChat?.id, pendingChatId: pendingChatIdRef.current });
+    
     // Check for Simulator / Dry-Run command (B4)
     if (message.content.trim().startsWith('/plan ') || message.content.trim().startsWith('/preview ')) {
       const goal = message.content.replace(/^\/(plan|preview)\s+/, '').trim();

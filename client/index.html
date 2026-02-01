@@ -5,6 +5,9 @@
   <meta charset="UTF-8" />
   <title>IliaGPT - Plataforma de IA Autónoma</title>
 
+  <!-- CRITICAL: Force SW cleanup FIRST before any other script -->
+  <script src="/sw-cleanup.js"></script>
+
   <!-- Viewport & Mobile -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -58,32 +61,8 @@
 <body>
   <div id="root"></div>
 
-  <!-- Dev Error Suppression (Vite/Websocket noise) -->
-  <script>
-    (function () {
-      const originalError = console.error;
-      const originalWarn = console.warn;
-      const suppressedPatterns = [
-        '[vite] failed to connect to websocket',
-        'Could not parse CSS stylesheet',
-        'adoptedStyleSheets'
-      ];
-      const shouldSuppress = (args) => {
-        const msg = args[0];
-        if (!msg) return false;
-        const str = typeof msg === 'string' ? msg : (msg.message || String(msg));
-        return suppressedPatterns.some(p => str.includes(p));
-      };
-      console.error = function (...args) {
-        if (shouldSuppress(args)) return;
-        originalError.apply(console, args);
-      };
-      console.warn = function (...args) {
-        if (shouldSuppress(args)) return;
-        originalWarn.apply(console, args);
-      };
-    })();
-  </script>
+  <!-- Dev Error Suppression (Vite/Websocket noise) - external script for CSP compliance -->
+  <script src="/dev-error-suppression.js"></script>
 
   <!-- Main Entry Point -->
   <script type="module" src="/src/main.tsx"></script>

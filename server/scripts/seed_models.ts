@@ -6,7 +6,7 @@ const NEW_MODELS = [
     {
         name: "Grok 2.0 (Latest)",
         provider: "xai",
-        modelId: "grok-2-latest",
+        modelId: "grok-3-mini",
         description: "XAI Grok 2.0 - Fast and capable.",
         isEnabled: "true",
         displayOrder: 20,

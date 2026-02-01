@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from "date-fns";
+import { getAnonUserIdHeader } from "@/lib/apiClient";
 
 import { type AgentRunStatus } from "@/stores/agent-store";
 
@@ -587,13 +588,19 @@ export function useChats() {
 
   const loadChatsFromServer = useCallback(async () => {
     try {
-      const res = await fetch("/api/chats");
+      const res = await fetch("/api/chats", {
+        headers: { ...getAnonUserIdHeader() },
+        credentials: "include"
+      });
       if (!res.ok) throw new Error("Failed to load chats");
       const serverChats = await res.json();
 
       const formattedChats: Chat[] = await Promise.all(
         serverChats.map(async (chat: any) => {
-          const chatRes = await fetch(`/api/chats/${chat.id}`);
+          const chatRes = await fetch(`/api/chats/${chat.id}`, {
+            headers: { ...getAnonUserIdHeader() },
+            credentials: "include"
+          });
           const fullChat = await chatRes.json();
           return {
             id: chat.id,
@@ -632,45 +639,8 @@ export function useChats() {
         })
       );
 
-      const mockChat: Chat = {
-        id: 'verify-citations-chat',
-        stableKey: 'verify-citations-stable',
-        title: 'Verification: Internal Citations',
-        timestamp: Date.now() + 10000, // Ensure it's top
-        messages: [
-          {
-            id: 'msg-verify-1',
-            role: 'assistant',
-            content: 'Here is a citation with page number [1]. And one with section (Source 2). And one with both [3].',
-            timestamp: new Date(),
-            webSources: [
-              {
-                url: 'https://example.com/p10',
-                title: 'Document A',
-                domain: 'docs.com',
-                source: { name: 'Doc A', domain: 'docs.com' },
-                metadata: { pageNumber: 10, totalPages: 50 }
-              },
-              {
-                url: 'https://example.com/sec',
-                title: 'Document B',
-                domain: 'docs.com',
-                source: { name: 'Doc B', domain: 'docs.com' },
-                metadata: { section: 'Methodology' }
-              },
-              {
-                url: 'https://example.com/both',
-                title: 'Document C',
-                domain: 'docs.com',
-                source: { name: 'Doc C', domain: 'docs.com' },
-                metadata: { pageNumber: 99, section: 'Conclusion' }
-              }
-            ]
-          } as Message
-        ]
-      };
-
-      return [mockChat, ...formattedChats].sort((a, b) => b.timestamp - a.timestamp);
+      // Return chats sorted by timestamp (no mock data)
+      return formattedChats.sort((a, b) => b.timestamp - a.timestamp);
     } catch (error) {
       console.error("Error loading chats from server:", error);
       return null;
@@ -740,7 +710,8 @@ export function useChats() {
 
                     const res = await fetch("/api/chats", {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
+                      headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+                      credentials: "include",
                       body: JSON.stringify({ title, messages: messagesToSync })
                     });
 
@@ -850,7 +821,8 @@ export function useChats() {
           
           const res = await fetch(`/api/chats/${realChatId}/messages`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+            credentials: "include",
             body: JSON.stringify({
               role: msg.role,
               content: msg.content,
@@ -915,9 +887,14 @@ export function useChats() {
   };
 
   const addMessage = useCallback(async (chatId: string, message: Message): Promise<{ run?: ChatRun; deduplicated?: boolean } | undefined> => {
+    // EMERGENCY DEBUG
+    console.error("[CRITICAL] addMessage called:", { chatId, messageRole: message.role, messageContent: message.content?.substring(0, 50) });
+    
     const resolvedChatId = pendingToRealIdMap.get(chatId) || chatId;
     const isPending = resolvedChatId.startsWith(PENDING_CHAT_PREFIX);
     const isCreatingChat = chatCreationInProgress.has(chatId) || chatCreationInProgress.has(resolvedChatId);
+
+    console.error("[CRITICAL] addMessage state:", { resolvedChatId, isPending, isCreatingChat, messageRole: message.role });
 
     // Idempotency guard: Use markRequestProcessing to claim the requestId
     // Returns false if already processing or saved - skip duplicate calls
@@ -939,31 +916,50 @@ export function useChats() {
     let messageAdded = false;
 
     // Check if message already exists in chat (by ID) and add if not
-    setChats(prev => prev.map(chat => {
-      const matchId = chat.id === chatId || chat.id === resolvedChatId;
-      if (matchId) {
-        // Prevent duplicate message by checking if same ID exists
-        const messageExists = chat.messages.some(m => m.id === message.id);
-        if (messageExists) {
-          console.log(`[Dedup] Message with same ID already exists: ${message.id}`);
-          // Mark as complete (not just delete from processing) to prevent future re-claims
-          if (message.requestId) {
-            markRequestComplete(message.requestId);
-          }
-          return chat;
-        }
-
+    setChats(prev => {
+      // First check if chat exists
+      const chatExists = prev.some(chat => chat.id === chatId || chat.id === resolvedChatId);
+      
+      if (!chatExists && isPending) {
+        // Chat doesn't exist yet - create it with this message
+        console.error("[CRITICAL] Chat doesn't exist, creating new pending chat");
         messageAdded = true;
-        const isFirstMessage = chat.messages.length === 0;
-        return {
-          ...chat,
-          messages: [...chat.messages, message],
-          title: isFirstMessage && message.role === "user" ? title : chat.title,
-          timestamp: Date.now()
-        };
+        return [...prev, {
+          id: chatId,
+          title: title,
+          messages: [message],
+          timestamp: Date.now(),
+          stableKey: `stable-${chatId}`
+        }];
       }
-      return chat;
-    }));
+      
+      // Chat exists - try to add message to it
+      return prev.map(chat => {
+        const matchId = chat.id === chatId || chat.id === resolvedChatId;
+        if (matchId) {
+          // Prevent duplicate message by checking if same ID exists
+          const messageExists = chat.messages.some(m => m.id === message.id);
+          if (messageExists) {
+            console.log(`[Dedup] Message with same ID already exists: ${message.id}`);
+            // Mark as complete (not just delete from processing) to prevent future re-claims
+            if (message.requestId) {
+              markRequestComplete(message.requestId);
+            }
+            return chat;
+          }
+
+          messageAdded = true;
+          const isFirstMessage = chat.messages.length === 0;
+          return {
+            ...chat,
+            messages: [...chat.messages, message],
+            title: isFirstMessage && message.role === "user" ? title : chat.title,
+            timestamp: Date.now()
+          };
+        }
+        return chat;
+      });
+    });
 
     // If message wasn't added (duplicate), don't proceed with persistence
     if (!messageAdded) {
@@ -982,12 +978,15 @@ export function useChats() {
       pendingMessageQueue.set(chatId, queue);
 
       try {
+        console.error("[CRITICAL] About to POST /api/chats - this is the server call");
         console.log("[addMessage] Creating new chat via POST /api/chats");
         const res = await fetch("/api/chats", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
           body: JSON.stringify({ title })
         });
+        console.error("[CRITICAL] POST /api/chats response received:", res.status, res.ok);
         console.log("[addMessage] POST /api/chats response:", res.status, res.ok);
 
         if (res.ok) {
@@ -1064,7 +1063,8 @@ export function useChats() {
 
         const res = await fetch(`/api/chats/${resolvedChatId}/messages`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+          credentials: "include",
           body: JSON.stringify({
             role: message.role,
             content: message.content,
@@ -1152,7 +1152,11 @@ export function useChats() {
     });
 
     try {
-      await fetch(`/api/chats/${chatId}`, { method: "DELETE" });
+      await fetch(`/api/chats/${chatId}`, { 
+        method: "DELETE",
+        headers: { ...getAnonUserIdHeader() },
+        credentials: "include"
+      });
     } catch (error) {
       console.error("Error deleting chat from server:", error);
     }
@@ -1166,7 +1170,8 @@ export function useChats() {
     try {
       await fetch(`/api/chats/${chatId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+        credentials: "include",
         body: JSON.stringify({ title: newTitle })
       });
     } catch (error) {
@@ -1187,7 +1192,8 @@ export function useChats() {
     try {
       await fetch(`/api/chats/${chatId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+        credentials: "include",
         body: JSON.stringify({ archived: newArchived })
       });
     } catch (error) {
@@ -1208,7 +1214,8 @@ export function useChats() {
     try {
       await fetch(`/api/chats/${chatId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+        credentials: "include",
         body: JSON.stringify({ hidden: newHidden })
       });
     } catch (error) {
@@ -1229,6 +1236,9 @@ export function useChats() {
 
     try {
       await fetch(`/api/chats/${chatId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
+        credentials: "include",
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pinned: newPinned, pinnedAt })
