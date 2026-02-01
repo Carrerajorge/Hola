@@ -85,6 +85,7 @@ import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
 import { ActivityFeed } from "@/components/admin/ActivityFeed";
 import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
 import { SecurityAlertsPanel } from "@/components/admin/SecurityAlerts";
+import { AdminNotificationsPopover } from "@/components/admin/NotificationsPopover";
 
 type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel";
 
@@ -5002,9 +5003,12 @@ export default function AdminPage() {
         </div>
         <ScrollArea className="flex-1">
           <div className="p-2">
-            <h2 className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Administration
-            </h2>
+            <div className="flex items-center justify-between px-3 py-2">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Administration
+              </h2>
+              <AdminNotificationsPopover />
+            </div>
             <nav className="flex flex-col gap-1">
               {navItems.map((item) => (
                 <Button

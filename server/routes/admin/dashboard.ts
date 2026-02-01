@@ -207,3 +207,50 @@ dashboardRouter.get("/user-activity", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// Import admin notifications
+import { adminNotifications } from "../../services/adminNotifications";
+
+// GET /api/admin/dashboard/notifications - Get admin notifications
+dashboardRouter.get("/notifications", async (req, res) => {
+    try {
+        const { includeRead = "true" } = req.query;
+        const notifications = adminNotifications.getAll(includeRead === "true");
+        res.json({
+            notifications,
+            unreadCount: adminNotifications.getUnreadCount()
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/dashboard/notifications/:id/read - Mark notification as read
+dashboardRouter.post("/notifications/:id/read", async (req, res) => {
+    try {
+        const success = adminNotifications.markAsRead(req.params.id);
+        res.json({ success });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/admin/dashboard/notifications/read-all - Mark all as read
+dashboardRouter.post("/notifications/read-all", async (req, res) => {
+    try {
+        const count = adminNotifications.markAllAsRead();
+        res.json({ success: true, markedRead: count });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// DELETE /api/admin/dashboard/notifications/:id - Delete notification
+dashboardRouter.delete("/notifications/:id", async (req, res) => {
+    try {
+        const success = adminNotifications.delete(req.params.id);
+        res.json({ success });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
