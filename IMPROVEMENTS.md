@@ -109,5 +109,5 @@
 - [x] Extracción automática de memorias desde conversaciones
 - [x] API endpoints: /api/memory/semantic/*
 - [x] Persistencia en base de datos (semantic_memory_chunks table)
-- [ ] UI para gestionar memorias del usuario
+- [x] UI para gestionar memorias del usuario (/memory)
 

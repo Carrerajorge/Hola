@@ -113,10 +113,13 @@ Comenzando auditoría del sistema...
 1. `c5966f7` - docs: API documentation + continuous improvement tracking
 2. `f59f2f9` - fix: TypeScript type definitions for speech recognition
 3. `c4fec83` - feat: database persistence for semantic memory store
+4. `bf7fdf6` - feat: generic email service for magic links and invoices
+5. `ecc9cf9` - feat: memory management page (/memory)
 
 ## Próximos Pasos
 1. Configurar Twilio para SMS cuando usuario regrese a Perú
 2. Habilitar Microsoft OAuth cuando Azure AD esté configurado
 3. ~~Persistir memoria semántica en base de datos~~ ✅ HECHO
 4. Agregar exportación PDF a reportes
-5. UI para gestionar memorias del usuario
+5. ~~UI para gestionar memorias del usuario~~ ✅ HECHO
+6. Configurar Resend API key para emails en producción

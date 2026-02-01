@@ -35,7 +35,8 @@ import {
   SquarePen,
   Pin,
   Download,
-  MoveRight
+  MoveRight,
+  Brain
 } from "lucide-react";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { cn } from "@/lib/utils";
@@ -1075,6 +1076,10 @@ export function Sidebar({
                 <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/privacy"); }} data-testid="button-privacy">
                   <Shield className="h-4 w-4" />
                   Privacidad
+                </Button>
+                <Button variant="ghost" className="justify-start gap-3 text-sm h-10 font-normal liquid-button" onClick={() => { setIsUserMenuOpen(false); setLocation("/memory"); }} data-testid="button-memory">
+                  <Brain className="h-4 w-4" />
+                  Mis Memorias
                 </Button>
 
                 {user?.role === "admin" && (
