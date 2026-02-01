@@ -3,6 +3,7 @@ import { storage } from "../../storage";
 import { db } from "../../db";
 import { users, chats, chatMessages } from "@shared/schema";
 import { eq, desc, and, gte, lte, ilike, sql, inArray } from "drizzle-orm";
+import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const conversationsRouter = Router();
 
@@ -257,11 +258,13 @@ conversationsRouter.patch("/:id/flag", async (req, res) => {
             return res.status(404).json({ error: "Conversation not found" });
         }
 
-        await storage.createAuditLog({
-            action: "conversation_flag",
+        await auditLog(req, {
+            action: "chat.flagged",
             resource: "chats",
             resourceId: req.params.id,
-            details: { flagStatus }
+            details: { flagStatus, flaggedBy: (req as any).user?.email },
+            category: "admin",
+            severity: "warning"
         });
 
         res.json(updated);
@@ -332,10 +335,13 @@ conversationsRouter.post("/:id/archive", async (req, res) => {
             return res.status(404).json({ error: "Conversation not found" });
         }
 
-        await storage.createAuditLog({
-            action: "conversation_archive",
+        await auditLog(req, {
+            action: "chat.archived",
             resource: "chats",
-            resourceId: req.params.id
+            resourceId: req.params.id,
+            details: { archivedBy: (req as any).user?.email },
+            category: "admin",
+            severity: "info"
         });
 
         res.json({ success: true, conversation: updated });

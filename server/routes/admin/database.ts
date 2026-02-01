@@ -3,6 +3,7 @@ import { storage } from "../../storage";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { asyncHandler } from "../../middleware/errorHandler";
+import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const databaseRouter = Router();
 
@@ -309,14 +310,17 @@ databaseRouter.post("/query", async (req, res) => {
         const result = await db.execute(sql`${sql.raw(query)}`);
         const executionTime = Date.now() - startTime;
 
-        await storage.createAuditLog({
-            action: "database_query",
+        await auditLog(req, {
+            action: AuditActions.DB_QUERY_EXECUTED,
             resource: "database",
             details: {
                 query: query.substring(0, 500),
                 rowsReturned: result.rows.length,
-                executionTimeMs: executionTime
-            }
+                executionTimeMs: executionTime,
+                executedBy: (req as any).user?.email
+            },
+            category: "data",
+            severity: "warning"
         });
 
         res.json({

@@ -82,6 +82,8 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import AnalyticsDashboard from "@/components/admin/AnalyticsDashboard";
 import { SpreadsheetEditor } from "@/components/spreadsheet/SpreadsheetEditor";
+import { ActivityFeed } from "@/components/admin/ActivityFeed";
+import { RealtimeMetricsPanel } from "@/components/admin/RealtimeMetrics";
 
 type AdminSection = "dashboard" | "users" | "conversations" | "ai-models" | "payments" | "invoices" | "analytics" | "database" | "security" | "reports" | "settings" | "agentic" | "excel";
 
@@ -308,6 +310,14 @@ function DashboardSection() {
               ))
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Real-time Metrics and Activity Feed */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+        <RealtimeMetricsPanel />
+        <div className="rounded-lg border p-4">
+          <ActivityFeed limit={15} />
         </div>
       </div>
     </div>

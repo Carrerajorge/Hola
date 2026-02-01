@@ -165,7 +165,8 @@ securityRouter.get("/audit-logs", async (req, res) => {
         const paginatedLogs = logs.slice((pageNum - 1) * limitNum, pageNum * limitNum);
 
         res.json({
-            data: paginatedLogs,
+            logs: paginatedLogs,
+            data: paginatedLogs, // Backwards compatibility
             pagination: {
                 page: pageNum,
                 limit: limitNum,
