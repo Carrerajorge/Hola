@@ -7,6 +7,7 @@ import { validateBody } from "../../middleware/validateRequest";
 import { asyncHandler } from "../../middleware/errorHandler";
 import { createUserBodySchema } from "../../schemas/apiSchemas";
 import { sql, ilike, or, desc, asc } from "drizzle-orm";
+import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const usersRouter = Router();
 
@@ -112,27 +113,47 @@ usersRouter.post("/", validateBody(createUserBodySchema), asyncHandler(async (re
         role: role || "user",
         status: "active"
     }).returning();
-    await storage.createAuditLog({
-        action: "user_create",
+    
+    // Enhanced audit log with full context
+    await auditLog(req, {
+        action: AuditActions.USER_CREATED,
         resource: "users",
         resourceId: user.id,
-        details: { email, plan, role }
+        details: { email, plan, role, createdBy: (req as any).user?.email },
+        category: "admin",
+        severity: "info"
     });
+    
     res.json(user);
 }));
 
 usersRouter.patch("/:id", async (req, res) => {
     try {
+        const previousUser = await storage.getUserById(req.params.id);
         const user = await storage.updateUser(req.params.id, req.body);
         if (!user) {
             return res.status(404).json({ error: "User not found" });
         }
-        await storage.createAuditLog({
-            action: "user_update",
+        
+        // Enhanced audit log with before/after details
+        await auditLog(req, {
+            action: AuditActions.USER_UPDATED,
             resource: "users",
             resourceId: req.params.id,
-            details: req.body
+            details: { 
+                changes: req.body,
+                previousValues: previousUser ? {
+                    email: previousUser.email,
+                    role: previousUser.role,
+                    plan: previousUser.plan,
+                    status: previousUser.status
+                } : null,
+                updatedBy: (req as any).user?.email
+            },
+            category: "admin",
+            severity: "info"
         });
+        
         res.json(user);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -141,12 +162,26 @@ usersRouter.patch("/:id", async (req, res) => {
 
 usersRouter.delete("/:id", async (req, res) => {
     try {
+        const userToDelete = await storage.getUserById(req.params.id);
         await storage.deleteUser(req.params.id);
-        await storage.createAuditLog({
-            action: "user_delete",
+        
+        // Enhanced audit log with deleted user info
+        await auditLog(req, {
+            action: AuditActions.USER_DELETED,
             resource: "users",
-            resourceId: req.params.id
+            resourceId: req.params.id,
+            details: {
+                deletedUser: userToDelete ? {
+                    email: userToDelete.email,
+                    role: userToDelete.role,
+                    plan: userToDelete.plan
+                } : null,
+                deletedBy: (req as any).user?.email
+            },
+            category: "admin",
+            severity: "warning"
         });
+        
         res.json({ success: true });
     } catch (error: any) {
         res.status(500).json({ error: error.message });

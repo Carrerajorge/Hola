@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
+import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const reportsRouter = Router();
 

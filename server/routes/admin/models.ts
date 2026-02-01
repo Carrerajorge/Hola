@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from "../../types/express";
 import { storage } from "../../storage";
 import { checkApiKeyExists } from "./utils";
 import { syncModelsForProvider, syncAllProviders, getAvailableProviders, getModelStats } from "../../services/aiModelSyncService";
+import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const modelsRouter = Router();
 
@@ -24,12 +25,16 @@ modelsRouter.post("/", async (req, res) => {
         const model = await storage.createAiModel({
             name, provider, modelId, costPer1k, description, status
         });
-        await storage.createAuditLog({
-            action: "model_create",
+        
+        await auditLog(req, {
+            action: "model.created",
             resource: "ai_models",
             resourceId: model.id,
-            details: { name, provider }
+            details: { name, provider, modelId, status, createdBy: (req as any).user?.email },
+            category: "admin",
+            severity: "info"
         });
+        
         res.json(model);
     } catch (error: any) {
         res.status(500).json({ error: error.message });

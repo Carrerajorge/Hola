@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { storage } from "../../storage";
+import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const settingsRouter = Router();
 
@@ -50,17 +51,29 @@ settingsRouter.put("/:key", async (req, res) => {
         if (!existing) {
             return res.status(404).json({ error: "Setting not found" });
         }
+        const previousValue = existing.value;
         const updated = await storage.upsertSettingsConfig({
             ...existing,
             value: req.body.value,
             updatedBy: req.body.updatedBy,
             defaultValue: existing.defaultValue as any
         });
-        await storage.createAuditLog({
-            action: "setting_update",
+        
+        await auditLog(req, {
+            action: AuditActions.ADMIN_SETTINGS_CHANGED,
             resource: "settings_config",
-            details: { key: req.params.key, value: req.body.value }
+            resourceId: req.params.key,
+            details: { 
+                key: req.params.key, 
+                previousValue,
+                newValue: req.body.value,
+                category: existing.category,
+                changedBy: (req as any).user?.email
+            },
+            category: "config",
+            severity: "warning"
         });
+        
         res.json(updated);
     } catch (error: any) {
         res.status(500).json({ error: error.message });

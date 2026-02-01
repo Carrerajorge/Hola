@@ -1,8 +1,30 @@
 import { Router } from "express";
 import { storage } from "../../storage";
 import { llmGateway } from "../../lib/llmGateway";
+import { getRealtimeMetrics, getExtendedDashboardStats } from "../../services/realtimeMetrics";
+import { auditLog } from "../../services/auditLogger";
 
 export const dashboardRouter = Router();
+
+// GET /api/admin/dashboard/realtime - Real-time metrics endpoint
+dashboardRouter.get("/realtime", async (req, res) => {
+    try {
+        const metrics = await getRealtimeMetrics();
+        res.json(metrics);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/dashboard/extended - Extended stats with trends
+dashboardRouter.get("/extended", async (req, res) => {
+    try {
+        const stats = await getExtendedDashboardStats();
+        res.json(stats);
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 dashboardRouter.get("/", async (req, res) => {
     try {

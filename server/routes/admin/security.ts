@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { storage } from "../../storage";
+import { auditLog, AuditActions } from "../../services/auditLogger";
 
 export const securityRouter = Router();
 
@@ -40,11 +41,13 @@ securityRouter.post("/policies", async (req, res) => {
             createdBy
         });
 
-        await storage.createAuditLog({
-            action: "security_policy_create",
+        await auditLog(req, {
+            action: AuditActions.SECURITY_POLICY_CREATED,
             resource: "security_policies",
             resourceId: policy.id,
-            details: { policyName, policyType }
+            details: { policyName, policyType, rules, priority, appliedTo, createdBy: (req as any).user?.email },
+            category: "security",
+            severity: "warning"
         });
 
         res.json(policy);
@@ -55,16 +58,27 @@ securityRouter.post("/policies", async (req, res) => {
 
 securityRouter.put("/policies/:id", async (req, res) => {
     try {
+        const previousPolicy = await storage.getSecurityPolicy(req.params.id);
         const policy = await storage.updateSecurityPolicy(req.params.id, req.body);
         if (!policy) {
             return res.status(404).json({ error: "Policy not found" });
         }
 
-        await storage.createAuditLog({
-            action: "security_policy_update",
+        await auditLog(req, {
+            action: AuditActions.SECURITY_POLICY_UPDATED,
             resource: "security_policies",
             resourceId: req.params.id,
-            details: req.body
+            details: { 
+                changes: req.body,
+                previousValues: previousPolicy ? {
+                    policyName: previousPolicy.policyName,
+                    policyType: previousPolicy.policyType,
+                    isEnabled: previousPolicy.isEnabled
+                } : null,
+                updatedBy: (req as any).user?.email
+            },
+            category: "security",
+            severity: "warning"
         });
 
         res.json(policy);
@@ -82,11 +96,19 @@ securityRouter.delete("/policies/:id", async (req, res) => {
 
         await storage.deleteSecurityPolicy(req.params.id);
 
-        await storage.createAuditLog({
-            action: "security_policy_delete",
+        await auditLog(req, {
+            action: AuditActions.SECURITY_POLICY_DELETED,
             resource: "security_policies",
             resourceId: req.params.id,
-            details: { policyName: existing.policyName }
+            details: { 
+                deletedPolicy: {
+                    policyName: existing.policyName,
+                    policyType: existing.policyType
+                },
+                deletedBy: (req as any).user?.email
+            },
+            category: "security",
+            severity: "critical"
         });
 
         res.json({ success: true });
