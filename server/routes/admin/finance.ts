@@ -199,6 +199,7 @@ financeRouter.patch("/invoices/:id", async (req, res) => {
 // POST /api/admin/finance/invoices/:id/mark-paid - Mark invoice as paid
 financeRouter.post("/invoices/:id/mark-paid", async (req, res) => {
     try {
+        const previousInvoice = await storage.getInvoices().then(invoices => invoices.find(i => i.id === req.params.id));
         const invoice = await storage.updateInvoice(req.params.id, {
             status: "paid",
             paidAt: new Date()
@@ -207,10 +208,17 @@ financeRouter.post("/invoices/:id/mark-paid", async (req, res) => {
             return res.status(404).json({ error: "Invoice not found" });
         }
 
-        await storage.createAuditLog({
-            action: "invoice_mark_paid",
+        await auditLog(req, {
+            action: AuditActions.INVOICE_PAID,
             resource: "invoices",
-            resourceId: req.params.id
+            resourceId: req.params.id,
+            details: {
+                invoiceNumber: previousInvoice?.invoiceNumber,
+                amount: previousInvoice?.amount,
+                markedBy: (req as any).user?.email
+            },
+            category: "admin",
+            severity: "info"
         });
 
         res.json({ success: true, invoice });
@@ -243,11 +251,18 @@ financeRouter.post("/invoices/:id/resend", async (req, res) => {
             invoiceUrl: `${process.env.APP_URL || "https://iliagpt.com"}/billing/invoices/${invoice.id}`
         });
 
-        await storage.createAuditLog({
-            action: "invoice_resend",
+        await auditLog(req, {
+            action: AuditActions.INVOICE_SENT,
             resource: "invoices",
             resourceId: req.params.id,
-            details: { userId: invoice.userId, emailSent: emailResult.success }
+            details: { 
+                userId: invoice.userId, 
+                emailSent: emailResult.success,
+                recipientEmail: user.email,
+                sentBy: (req as any).user?.email
+            },
+            category: "admin",
+            severity: "info"
         });
 
         if (!emailResult.success) {

@@ -1922,18 +1922,20 @@ function AIModelsSection() {
 function PaymentsSection() {
   const queryClient = useQueryClient();
 
-  const { data: payments = [], isLoading } = useQuery({
-    queryKey: ["/api/admin/payments"],
+  const { data: paymentsData, isLoading } = useQuery({
+    queryKey: ["/api/admin/finance/payments"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/payments", { credentials: "include" });
+      const res = await fetch("/api/admin/finance/payments", { credentials: "include" });
       return res.json();
     }
   });
+  
+  const payments = paymentsData?.payments || paymentsData || [];
 
   const { data: stats } = useQuery({
-    queryKey: ["/api/admin/payments/stats"],
+    queryKey: ["/api/admin/finance/payments/stats"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/payments/stats", { credentials: "include" });
+      const res = await fetch("/api/admin/finance/payments/stats", { credentials: "include" });
       return res.json();
     }
   });
@@ -1994,17 +1996,19 @@ function InvoicesSection() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState({ invoiceNumber: "", amount: "", userId: "" });
 
-  const { data: invoices = [], isLoading } = useQuery({
-    queryKey: ["/api/admin/invoices"],
+  const { data: invoicesData, isLoading } = useQuery({
+    queryKey: ["/api/admin/finance/invoices"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/invoices", { credentials: "include" });
+      const res = await fetch("/api/admin/finance/invoices", { credentials: "include" });
       return res.json();
     }
   });
+  
+  const invoices = invoicesData?.invoices || invoicesData || [];
 
   const createInvoiceMutation = useMutation({
     mutationFn: async (invoice: any) => {
-      const res = await fetch("/api/admin/invoices", {
+      const res = await fetch("/api/admin/finance/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(invoice),
@@ -2013,7 +2017,7 @@ function InvoicesSection() {
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/finance/invoices"] });
       setShowAddModal(false);
     }
   });
