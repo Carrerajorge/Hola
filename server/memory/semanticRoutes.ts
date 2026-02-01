@@ -200,7 +200,7 @@ router.get("/stats", async (req: Request, res: Response) => {
         }
 
         await semanticMemoryStore.initialize();
-        const stats = semanticMemoryStore.getStats(userId);
+        const stats = await semanticMemoryStore.getStats(userId);
 
         res.json(stats);
     } catch (error: any) {

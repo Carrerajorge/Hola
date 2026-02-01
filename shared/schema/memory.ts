@@ -370,3 +370,28 @@ export const insertRetrievalTelemetrySchema = createInsertSchema(retrievalTeleme
 
 export type InsertRetrievalTelemetry = z.infer<typeof insertRetrievalTelemetrySchema>;
 export type RetrievalTelemetry = typeof retrievalTelemetry.$inferSelect;
+
+// Semantic Memory Chunks - stores user memories with vector embeddings
+export const semanticMemoryChunks = pgTable("semantic_memory_chunks", {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    type: varchar("type", { length: 50 }).notNull(), // fact, preference, conversation, instruction, note
+    source: varchar("source", { length: 100 }).default("explicit"),
+    confidence: integer("confidence").default(80), // 0-100
+    accessCount: integer("access_count").default(0),
+    tags: text("tags").array().default([]),
+    metadata: jsonb("metadata").default({}),
+    lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+    index("semantic_memory_user_idx").on(table.userId),
+    index("semantic_memory_type_idx").on(table.type),
+    index("semantic_memory_created_idx").on(table.createdAt),
+]);
+
+export const insertSemanticMemoryChunkSchema = createInsertSchema(semanticMemoryChunks);
+
+export type InsertSemanticMemoryChunk = z.infer<typeof insertSemanticMemoryChunkSchema>;
+export type SemanticMemoryChunk = typeof semanticMemoryChunks.$inferSelect;

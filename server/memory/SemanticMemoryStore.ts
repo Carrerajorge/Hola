@@ -4,11 +4,15 @@
  * Vector-based memory search using embeddings for semantic similarity.
  * Inspired by OpenClaw's memory system - uses embeddings to find related memories
  * even when wording differs.
+ * 
+ * Now with database persistence!
  */
 
 import { db } from "../db";
 import { storage } from "../storage";
 import { llmGateway } from "../lib/llmGateway";
+import { semanticMemoryChunks } from "../../shared/schema/memory";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import * as crypto from "crypto";
 
 // ============================================================================
@@ -182,13 +186,51 @@ class EmbeddingProvider {
 
 export class SemanticMemoryStore {
     private embeddingProvider = new EmbeddingProvider();
-    private memoryChunks = new Map<string, MemoryChunk[]>(); // userId -> chunks
+    private memoryCache = new Map<string, MemoryChunk[]>(); // In-memory cache for performance
     private initialized = false;
 
     async initialize(): Promise<void> {
         if (this.initialized) return;
-        console.log("[SemanticMemoryStore] Initialized with embedding support");
+        console.log("[SemanticMemoryStore] Initialized with database persistence and embedding support");
         this.initialized = true;
+    }
+
+    /**
+     * Load user memories from database into cache
+     */
+    private async loadUserMemories(userId: string): Promise<MemoryChunk[]> {
+        if (this.memoryCache.has(userId)) {
+            return this.memoryCache.get(userId)!;
+        }
+
+        try {
+            const dbMemories = await db.select().from(semanticMemoryChunks)
+                .where(eq(semanticMemoryChunks.userId, userId))
+                .orderBy(desc(semanticMemoryChunks.createdAt))
+                .limit(500);
+
+            const chunks: MemoryChunk[] = dbMemories.map(m => ({
+                id: m.id,
+                userId: m.userId,
+                content: m.content,
+                type: m.type as MemoryChunk["type"],
+                embedding: undefined, // Will be computed on-demand
+                metadata: {
+                    source: m.source || "explicit",
+                    createdAt: m.createdAt,
+                    lastAccessed: m.lastAccessedAt,
+                    accessCount: m.accessCount || 0,
+                    confidence: (m.confidence || 80) / 100,
+                    tags: m.tags || []
+                }
+            }));
+
+            this.memoryCache.set(userId, chunks);
+            return chunks;
+        } catch (error) {
+            console.error("[SemanticMemoryStore] Error loading from DB:", error);
+            return this.memoryCache.get(userId) || [];
+        }
     }
 
     /**
@@ -207,6 +249,36 @@ export class SemanticMemoryStore {
         // Get embedding for the content
         const embedding = await this.embeddingProvider.getEmbedding(content);
 
+        // Load existing memories
+        const userChunks = await this.loadUserMemories(userId);
+        
+        // Check for duplicates by semantic similarity
+        const similar = await this.findSimilar(userId, content, { limit: 1, minScore: 0.95 });
+        if (similar.length > 0) {
+            // Update existing instead of creating duplicate
+            const existing = similar[0].chunk;
+            existing.metadata.lastAccessed = new Date();
+            existing.metadata.accessCount++;
+            existing.metadata.confidence = Math.max(existing.metadata.confidence, options.confidence ?? 0.8);
+            
+            // Update in database
+            try {
+                await db.update(semanticMemoryChunks)
+                    .set({
+                        lastAccessedAt: new Date(),
+                        accessCount: existing.metadata.accessCount,
+                        confidence: Math.round(existing.metadata.confidence * 100),
+                        updatedAt: new Date()
+                    })
+                    .where(eq(semanticMemoryChunks.id, existing.id));
+            } catch (error) {
+                console.error("[SemanticMemoryStore] Error updating in DB:", error);
+            }
+            
+            console.log(`[SemanticMemoryStore] Updated existing memory: ${existing.id}`);
+            return existing;
+        }
+
         const chunk: MemoryChunk = {
             id: `mem_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
             userId,
@@ -223,23 +295,29 @@ export class SemanticMemoryStore {
             }
         };
 
-        // Store in memory (would persist to DB in production)
-        const userChunks = this.memoryChunks.get(userId) || [];
-        
-        // Check for duplicates by semantic similarity
-        const similar = await this.findSimilar(userId, content, { limit: 1, minScore: 0.95 });
-        if (similar.length > 0) {
-            // Update existing instead of creating duplicate
-            const existing = similar[0].chunk;
-            existing.metadata.lastAccessed = new Date();
-            existing.metadata.accessCount++;
-            existing.metadata.confidence = Math.max(existing.metadata.confidence, options.confidence ?? 0.8);
-            console.log(`[SemanticMemoryStore] Updated existing memory: ${existing.id}`);
-            return existing;
+        // Insert into database
+        try {
+            await db.insert(semanticMemoryChunks).values({
+                id: chunk.id,
+                userId: chunk.userId,
+                content: chunk.content,
+                type: chunk.type,
+                source: chunk.metadata.source,
+                confidence: Math.round(chunk.metadata.confidence * 100),
+                accessCount: 0,
+                tags: chunk.metadata.tags || [],
+                metadata: {},
+                lastAccessedAt: new Date(),
+                createdAt: new Date(),
+                updatedAt: new Date()
+            });
+        } catch (error) {
+            console.error("[SemanticMemoryStore] Error inserting into DB:", error);
         }
 
+        // Add to cache
         userChunks.push(chunk);
-        this.memoryChunks.set(userId, userChunks);
+        this.memoryCache.set(userId, userChunks);
 
         console.log(`[SemanticMemoryStore] Stored memory: ${chunk.id} (${type})`);
         return chunk;
@@ -262,7 +340,7 @@ export class SemanticMemoryStore {
             vectorWeight = 0.7
         } = options;
 
-        const userChunks = this.memoryChunks.get(userId) || [];
+        const userChunks = await this.loadUserMemories(userId);
         if (userChunks.length === 0) return [];
 
         // Get query embedding
@@ -275,6 +353,11 @@ export class SemanticMemoryStore {
             // Filter by type if specified
             if (types && types.length > 0 && !types.includes(chunk.type)) {
                 continue;
+            }
+
+            // Compute embedding on demand if not cached
+            if (!chunk.embedding) {
+                chunk.embedding = await this.embeddingProvider.getEmbedding(chunk.content);
             }
 
             // Calculate vector similarity
@@ -336,7 +419,7 @@ export class SemanticMemoryStore {
             sortBy?: "recent" | "accessed" | "confidence";
         } = {}
     ): Promise<MemoryChunk[]> {
-        let chunks = this.memoryChunks.get(userId) || [];
+        let chunks = await this.loadUserMemories(userId);
 
         if (options.types && options.types.length > 0) {
             chunks = chunks.filter(c => options.types!.includes(c.type));
@@ -370,11 +453,22 @@ export class SemanticMemoryStore {
      * Delete a specific memory
      */
     async forget(userId: string, memoryId: string): Promise<boolean> {
-        const chunks = this.memoryChunks.get(userId) || [];
+        const chunks = await this.loadUserMemories(userId);
         const index = chunks.findIndex(c => c.id === memoryId);
         
         if (index >= 0) {
+            // Remove from database
+            try {
+                await db.delete(semanticMemoryChunks)
+                    .where(eq(semanticMemoryChunks.id, memoryId));
+            } catch (error) {
+                console.error("[SemanticMemoryStore] Error deleting from DB:", error);
+            }
+            
+            // Remove from cache
             chunks.splice(index, 1);
+            this.memoryCache.set(userId, chunks);
+            
             console.log(`[SemanticMemoryStore] Deleted memory: ${memoryId}`);
             return true;
         }
@@ -490,13 +584,13 @@ export class SemanticMemoryStore {
     /**
      * Get memory statistics
      */
-    getStats(userId: string): {
+    async getStats(userId: string): Promise<{
         totalMemories: number;
         byType: Record<string, number>;
         avgConfidence: number;
         embeddingProvider: string;
-    } {
-        const chunks = this.memoryChunks.get(userId) || [];
+    }> {
+        const chunks = await this.loadUserMemories(userId);
         const byType: Record<string, number> = {};
         let totalConfidence = 0;
 
@@ -515,6 +609,13 @@ export class SemanticMemoryStore {
                     ? "openai" 
                     : "simple"
         };
+    }
+
+    /**
+     * Clear user's memory cache (forces reload from DB)
+     */
+    clearCache(userId: string): void {
+        this.memoryCache.delete(userId);
     }
 
     // ============================================================================
