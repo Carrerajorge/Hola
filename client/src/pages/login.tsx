@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { X, Apple, Phone, Loader2, Mail, Sparkles } from "lucide-react";
+import { X, Apple, Phone, Loader2, Mail, Sparkles, ArrowLeft } from "lucide-react";
 import { queryClient } from "@/lib/queryClient";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -32,6 +32,14 @@ export default function LoginPage() {
   const [magicLinkUrl, setMagicLinkUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  // Phone auth states
+  const [showPhoneAuth, setShowPhoneAuth] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [isPhoneLoading, setIsPhoneLoading] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [devCode, setDevCode] = useState<string | null>(null);
 
 
 
@@ -120,6 +128,87 @@ export default function LoginPage() {
     }
   };
 
+  // Phone authentication handlers
+  const handleSendOtp = async () => {
+    if (!phoneNumber) {
+      setError("Ingresa tu número de teléfono");
+      return;
+    }
+
+    setIsPhoneLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/auth/phone/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phoneNumber }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setOtpSent(true);
+        setSuccessMessage(data.message);
+        if (data.devCode) {
+          setDevCode(data.devCode);
+        }
+      } else {
+        setError(data.message || "Error al enviar el código");
+      }
+    } catch (err) {
+      setError("Error al enviar el código");
+    } finally {
+      setIsPhoneLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpCode) {
+      setError("Ingresa el código de verificación");
+      return;
+    }
+
+    setIsPhoneLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/auth/phone/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ phone: phoneNumber, code: otpCode }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        window.location.href = "/";
+      } else {
+        setError(data.message || "Código incorrecto");
+      }
+    } catch (err) {
+      setError("Error al verificar el código");
+    } finally {
+      setIsPhoneLoading(false);
+    }
+  };
+
+  const handlePhoneLogin = () => {
+    setShowPhoneAuth(true);
+    setError("");
+  };
+
+  const handleBackFromPhone = () => {
+    setShowPhoneAuth(false);
+    setOtpSent(false);
+    setPhoneNumber("");
+    setOtpCode("");
+    setDevCode(null);
+    setError("");
+    setSuccessMessage("");
+  };
+
   const ComingSoonButton = ({ icon: Icon, label }: { icon: any; label: string }) => (
     <TooltipProvider>
       <Tooltip>
@@ -174,6 +263,7 @@ export default function LoginPage() {
             </p>
           </div>
 
+          {!showPhoneAuth && (
           <div className="space-y-3">
             {/* Google - Working */}
             <Button
@@ -228,17 +318,34 @@ export default function LoginPage() {
               {isMicrosoftLoading ? "Conectando..." : "Continuar con Microsoft"}
             </Button>
 
-            <ComingSoonButton icon={Phone} label="Continuar con el teléfono" />
+            {/* Phone Authentication */}
+            <Button
+              variant="outline"
+              className="w-full h-14 justify-center gap-3 text-base font-medium border-2 border-white/20 
+                bg-white/10 hover:bg-white/20 text-white
+                hover:border-white/40 transition-all duration-300 rounded-xl 
+                shadow-lg hover:shadow-xl hover:shadow-green-500/10
+                scale-hover fade-in-up fade-in-up-delay-3"
+              onClick={handlePhoneLogin}
+              data-testid="button-login-phone"
+            >
+              <Phone className="h-5 w-5" />
+              Continuar con el teléfono
+            </Button>
           </div>
+          )}
 
+          {!showPhoneAuth && (
           <div className="flex items-center gap-4 my-6 fade-in-up fade-in-up-delay-3">
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
             <span className="text-zinc-500 text-sm">o</span>
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
           </div>
+          )}
 
-          {/* Magic Link Success State */}
-          {magicLinkSent ? (
+          {!showPhoneAuth && (
+          /* Magic Link Success State */
+          magicLinkSent ? (
             <div className="space-y-4 fade-in-up">
               <div className="bg-emerald-500/20 border border-emerald-500/30 rounded-xl p-4 text-center">
                 <Sparkles className="h-8 w-8 text-emerald-400 mx-auto mb-2" />
@@ -332,18 +439,122 @@ export default function LoginPage() {
                 </TooltipProvider>
               </div>
             </div>
+          )
           )}
 
-          <p className="text-center text-sm text-zinc-500 mt-6 fade-in-up fade-in-up-delay-5">
-            ¿No tienes una cuenta?{" "}
-            <button
-              onClick={() => setLocation("/signup")}
-              className="text-purple-400 hover:text-purple-300 hover:underline transition-colors"
-              data-testid="link-goto-signup"
-            >
-              Suscríbete gratis
-            </button>
-          </p>
+          {/* Phone Authentication View */}
+          {showPhoneAuth && (
+            <div className="space-y-4 fade-in-up">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-zinc-400 hover:text-white -ml-2"
+                onClick={handleBackFromPhone}
+              >
+                <ArrowLeft className="h-4 w-4 mr-1" />
+                Volver
+              </Button>
+
+              <div className="text-center mb-4">
+                <Phone className="h-10 w-10 text-green-400 mx-auto mb-2" />
+                <h3 className="text-lg font-medium text-white">
+                  {otpSent ? "Ingresa el código" : "Ingresa tu número"}
+                </h3>
+                <p className="text-sm text-zinc-400">
+                  {otpSent 
+                    ? "Te enviamos un código de 6 dígitos" 
+                    : "Te enviaremos un código de verificación"}
+                </p>
+              </div>
+
+              {!otpSent ? (
+                <>
+                  <Input
+                    type="tel"
+                    placeholder="+51 918 714 054"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    className="h-12 text-base bg-white/5 border-white/20 text-white placeholder:text-zinc-500
+                      focus:border-green-500/50 focus:ring-green-500/20 rounded-xl"
+                    data-testid="input-phone-number"
+                  />
+                  {error && (
+                    <p className="text-sm text-red-400 text-center bg-red-500/10 py-2 px-3 rounded-lg">{error}</p>
+                  )}
+                  <Button
+                    className="w-full h-12 text-base bg-gradient-to-r from-green-600 to-emerald-600 
+                      hover:from-green-500 hover:to-emerald-500 border-0 text-white font-medium
+                      shadow-lg shadow-green-500/25 hover:shadow-green-500/40
+                      transition-all duration-300 rounded-xl"
+                    onClick={handleSendOtp}
+                    disabled={isPhoneLoading}
+                    data-testid="button-send-otp"
+                  >
+                    {isPhoneLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Enviar código"}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {devCode && (
+                    <div className="bg-blue-500/20 border border-blue-500/30 rounded-xl p-3 text-center">
+                      <p className="text-xs text-blue-300 font-medium">Modo desarrollo - Tu código es:</p>
+                      <p className="text-2xl font-mono text-blue-200 tracking-widest">{devCode}</p>
+                    </div>
+                  )}
+                  <Input
+                    type="text"
+                    placeholder="000000"
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="h-14 text-2xl text-center tracking-widest font-mono bg-white/5 border-white/20 text-white placeholder:text-zinc-500
+                      focus:border-green-500/50 focus:ring-green-500/20 rounded-xl"
+                    maxLength={6}
+                    data-testid="input-otp-code"
+                    onKeyDown={(e) => e.key === 'Enter' && handleVerifyOtp()}
+                  />
+                  {error && (
+                    <p className="text-sm text-red-400 text-center bg-red-500/10 py-2 px-3 rounded-lg">{error}</p>
+                  )}
+                  <Button
+                    className="w-full h-12 text-base bg-gradient-to-r from-green-600 to-emerald-600 
+                      hover:from-green-500 hover:to-emerald-500 border-0 text-white font-medium
+                      shadow-lg shadow-green-500/25 hover:shadow-green-500/40
+                      transition-all duration-300 rounded-xl"
+                    onClick={handleVerifyOtp}
+                    disabled={isPhoneLoading || otpCode.length !== 6}
+                    data-testid="button-verify-otp"
+                  >
+                    {isPhoneLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Verificar"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="w-full text-zinc-400 hover:text-white"
+                    onClick={() => {
+                      setOtpSent(false);
+                      setOtpCode("");
+                      setDevCode(null);
+                      setError("");
+                    }}
+                  >
+                    Reenviar código
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+
+          {!showPhoneAuth && (
+            <p className="text-center text-sm text-zinc-500 mt-6 fade-in-up fade-in-up-delay-5">
+              ¿No tienes una cuenta?{" "}
+              <button
+                onClick={() => setLocation("/signup")}
+                className="text-purple-400 hover:text-purple-300 hover:underline transition-colors"
+                data-testid="link-goto-signup"
+              >
+                Suscríbete gratis
+              </button>
+            </p>
+          )}
         </div>
       </div>
     </div>

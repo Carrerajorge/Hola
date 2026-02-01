@@ -305,6 +305,10 @@ export async function registerRoutes(
     });
   }
 
+  // Phone Authentication (OTP)
+  const { phoneAuthRouter } = await import("./routes/phoneAuthRouter");
+  app.use("/api/auth/phone", phoneAuthRouter);
+
   // Global Compression Middleware (Gzip)
   app.use(compression);
 

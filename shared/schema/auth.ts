@@ -87,9 +87,10 @@ export const users = pgTable("users", {
     lastIp: varchar("last_ip"),
     userAgent: text("user_agent"),
     countryCode: varchar("country_code", { length: 2 }),
-    authProvider: text("auth_provider").default("email"), // email, google, sso
+    authProvider: text("auth_provider").default("email"), // email, google, sso, phone
     is2faEnabled: text("is_2fa_enabled").default("false"),
     emailVerified: text("email_verified").default("false"),
+    phoneVerified: text("phone_verified").default("false"),
     referralCode: varchar("referral_code"),
     referredBy: varchar("referred_by"),
     internalNotes: text("internal_notes"),
