@@ -153,6 +153,25 @@ export function log(message: string, source = "express") {
     log("[WARNING] Database connection failed - some features may not work");
   }
 
+  // Verify LLM connectivity in production
+  if (isProduction) {
+    try {
+      const { llmGateway } = await import("./lib/llmGateway");
+      const llmHealth = await llmGateway.healthCheck();
+      if (llmHealth.xai?.available) {
+        log("✅ xAI LLM connected");
+      }
+      if (llmHealth.gemini?.available) {
+        log("✅ Gemini LLM connected");
+      }
+      if (!llmHealth.xai?.available && !llmHealth.gemini?.available) {
+        log("[WARNING] No LLM providers available - chat will not work");
+      }
+    } catch (error) {
+      log("[WARNING] LLM health check failed:", error);
+    }
+  }
+
 
   await registerRoutes(httpServer, app);
 

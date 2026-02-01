@@ -3,6 +3,7 @@ import multer from 'multer';
 import { advancedDocumentAnalyzer, AdvancedAnalysisResult } from '../services/advancedDocumentAnalyzer';
 import { parseDocument, extractContent } from '../services/documentIngestion';
 import { isScannedDocument } from '../services/ocrService';
+import { optionalAuth } from '../middleware/optionalAuth';
 
 const router = Router();
 const upload = multer({ 
@@ -10,13 +11,22 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }
 });
 
+// Middleware to require auth for document analysis (prevents abuse)
+const requireAuthForAnalysis = (req: Request, res: Response, next: Function) => {
+  // Allow in development, require auth in production
+  if (process.env.NODE_ENV === 'production' && !(req as any).user) {
+    return res.status(401).json({ error: 'Authentication required for document analysis' });
+  }
+  next();
+};
+
 interface AnalysisOptions {
   includeOCR?: boolean;
   generateSummary?: boolean;
   analysisModules?: string[];
 }
 
-router.post('/analyze', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/analyze', optionalAuth, requireAuthForAnalysis, upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file provided' });

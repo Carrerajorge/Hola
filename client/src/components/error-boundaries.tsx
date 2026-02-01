@@ -50,7 +50,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         // Call custom error handler
         this.props.onError?.(error, errorInfo);
 
-        // TODO: Send to error reporting service (Sentry)
+        // Log error for analytics (Sentry-ready hook)
+        if (typeof window !== 'undefined' && (window as any).Sentry) {
+            (window as any).Sentry.captureException(error, {
+                extra: { componentStack: errorInfo?.componentStack }
+            });
+        }
     }
 
     componentDidUpdate(prevProps: ErrorBoundaryProps): void {

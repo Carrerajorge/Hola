@@ -48,7 +48,20 @@ function validateEnv() {
     process.exit(1);
   }
 
-  return result.data;
+  // Warn about missing LLM keys
+  const data = result.data;
+  if (!data.XAI_API_KEY && !data.GEMINI_API_KEY && !data.OPENAI_API_KEY) {
+    console.warn("⚠️  WARNING: No LLM API keys configured (XAI_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY)");
+    console.warn("   Chat functionality will not work without at least one LLM provider.");
+  } else {
+    const providers = [];
+    if (data.XAI_API_KEY) providers.push("xAI");
+    if (data.GEMINI_API_KEY) providers.push("Gemini");
+    if (data.OPENAI_API_KEY) providers.push("OpenAI");
+    console.log(`✅ LLM Providers configured: ${providers.join(", ")}`);
+  }
+
+  return data;
 }
 
 export const env = validateEnv();

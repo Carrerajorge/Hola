@@ -93,16 +93,23 @@ phoneAuthRouter.post("/send-code", async (req, res) => {
       details: { phone: normalizedPhone.slice(-4) } // Only log last 4 digits
     });
     
-    // TODO: Integrate with SMS provider
-    // Example with Twilio:
-    // if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-    //   const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    //   await twilio.messages.create({
-    //     body: `Tu código de verificación de ILIAGPT es: ${otp}`,
-    //     from: process.env.TWILIO_PHONE_NUMBER,
-    //     to: normalizedPhone
-    //   });
-    // }
+    // Integrate with SMS provider (Twilio)
+    if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER) {
+      try {
+        const twilio = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        await twilio.messages.create({
+          body: `Tu código de verificación de ILIAGPT es: ${otp}`,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: normalizedPhone
+        });
+        console.log(`[PhoneAuth] SMS sent to ${normalizedPhone.slice(0, 6)}***`);
+      } catch (smsError: any) {
+        console.error('[PhoneAuth] SMS sending failed:', smsError.message);
+        // Continue with dev mode fallback
+      }
+    } else if (!isDev) {
+      console.warn('[PhoneAuth] Twilio not configured - SMS not sent');
+    }
     
     res.json({ 
       success: true, 

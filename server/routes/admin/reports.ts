@@ -355,6 +355,77 @@ reportsRouter.get("/download/:id", async (req, res) => {
     }
 });
 
+// Generate PDF report
+reportsRouter.post("/generate-pdf/:id", async (req, res) => {
+    try {
+        const report = await storage.getGeneratedReport(req.params.id);
+        if (!report) {
+            return res.status(404).json({ error: "Report not found" });
+        }
+
+        // Simple HTML-to-PDF using template
+        const fs = require("fs").promises;
+        const path = require("path");
+
+        const reportsDir = path.join(process.cwd(), "generated_reports");
+        const files = await fs.readdir(reportsDir).catch(() => []);
+        const jsonFile = files.find((f: string) => f.includes(report.type) && f.endsWith('.json'));
+
+        let data: any[] = [];
+        if (jsonFile) {
+            const content = await fs.readFile(path.join(reportsDir, jsonFile), "utf-8");
+            data = JSON.parse(content);
+        }
+
+        // Generate HTML for PDF
+        const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>${report.name}</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 40px; }
+        h1 { color: #333; border-bottom: 2px solid #667eea; padding-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { background: #667eea; color: white; padding: 12px; text-align: left; }
+        td { padding: 10px; border-bottom: 1px solid #ddd; }
+        tr:nth-child(even) { background: #f9f9f9; }
+        .footer { margin-top: 40px; color: #666; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>${report.name}</h1>
+    <p>Generado: ${new Date().toLocaleDateString('es')}</p>
+    <p>Total de registros: ${data.length}</p>
+    
+    <table>
+        <thead>
+            <tr>${data.length > 0 ? Object.keys(data[0]).map(k => `<th>${k}</th>`).join('') : ''}</tr>
+        </thead>
+        <tbody>
+            ${data.slice(0, 100).map(row => 
+                `<tr>${Object.values(row).map(v => `<td>${v ?? ''}</td>`).join('')}</tr>`
+            ).join('')}
+        </tbody>
+    </table>
+    
+    <div class="footer">
+        <p>IliaGPT - Reporte generado automáticamente</p>
+    </div>
+</body>
+</html>`;
+
+        // Return HTML that can be printed to PDF by browser
+        res.setHeader("Content-Type", "text/html");
+        res.setHeader("Content-Disposition", `attachment; filename="${report.name.replace(/\s+/g, "_")}.html"`);
+        res.send(htmlContent);
+
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Delete generated report
 reportsRouter.delete("/generated/:id", async (req, res) => {
     try {
