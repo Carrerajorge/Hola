@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod";
-import { ToolDefinition, ToolResult, createArtifact, createError } from "../toolRegistry";
+import { ToolDefinition, ToolResult, createArtifact, createError } from "./toolTypes";
 import { randomUUID } from "crypto";
 
 // ============================================================================
