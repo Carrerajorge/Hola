@@ -3,6 +3,7 @@ import { authStorage } from "./storage";
 import { isAuthenticated, getSessionStats } from "./replitAuth";
 import { storage } from "../../storage";
 import { hashPassword, verifyPassword, isHashed } from "../../utils/password";
+import { loginSchema, registerSchema, validate } from "../../validation/schemas";
 import { rateLimiter as authRateLimiter, getRateLimitStats } from "../../middleware/userRateLimiter";
 import { sendMagicLinkEmail } from "../../services/genericEmailService";
 
@@ -49,11 +50,16 @@ export function registerAuthRoutes(app: Express): void {
   // User login with email/password (for users created by admin)
   app.post("/api/auth/login", authRateLimiter, async (req: any, res) => {
     try {
-      const { email, password } = req.body;
-
-      if (!email || !password) {
-        return res.status(400).json({ message: "Email y contraseña son requeridos" });
+      // Validate input
+      const validation = loginSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: "Datos inválidos",
+          errors: validation.error.errors.map(e => ({ field: e.path.join('.'), message: e.message }))
+        });
       }
+      
+      const { email, password } = validation.data;
 
       // Check if it's the admin (case-insensitive email comparison)
       if (isAdminConfigured() && email.toLowerCase() === ADMIN_EMAIL!.toLowerCase() && password === ADMIN_PASSWORD) {
