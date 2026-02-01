@@ -100,3 +100,14 @@
 2. Implementar exportación PDF en Reports
 3. Habilitar health check real de LLMs
 4. Limpiar archivos duplicados
+
+## H) Memory System (OpenClaw Inspired)
+- [x] SemanticMemoryStore - búsqueda vectorial con embeddings
+- [x] Soporte Gemini/OpenAI embeddings + fallback simple
+- [x] Búsqueda híbrida (BM25 + vector similarity)
+- [x] Auto-deduplicación por similitud semántica
+- [x] Extracción automática de memorias desde conversaciones
+- [x] API endpoints: /api/memory/semantic/*
+- [ ] Persistencia en base de datos (actualmente in-memory)
+- [ ] UI para gestionar memorias del usuario
+
