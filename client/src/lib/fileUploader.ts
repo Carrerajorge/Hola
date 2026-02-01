@@ -112,8 +112,8 @@ export class ChunkedFileUploader {
         resolve(e.data);
       };
       
-      this.worker.addEventListener('message', handleMessage);
-      this.worker.postMessage({
+      this.worker!.addEventListener('message', handleMessage);
+      this.worker!.postMessage({
         type: 'validate',
         file: {
           name: file.name,
@@ -266,7 +266,7 @@ export class ChunkedFileUploader {
     file: File,
     config: FileConfig,
     onProgress: (percent: number) => void
-  ): Promise<string> {
+  ): Promise<{ storagePath: string; fileId?: string }> {
     const totalChunks = Math.ceil(file.size / config.chunkSize);
     
     const createResponse = await fetch('/api/objects/multipart/create', {

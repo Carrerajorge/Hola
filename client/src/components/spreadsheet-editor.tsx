@@ -1942,10 +1942,7 @@ export function SpreadsheetEditor({
 
     if (useVirtualized) {
       const cell = sparseGrid.getCell(active.row, active.col) || { value: '' };
-      const engine = new FormulaEngine((r: number, c: number) => {
-        const data = sparseGrid.getCell(r, c);
-        return data?.value ?? '';
-      });
+      const engine = new FormulaEngine(sparseGrid);
       const result = engine.evaluate(formula);
       sparseGrid.setCell(active.row, active.col, {
         ...cell,

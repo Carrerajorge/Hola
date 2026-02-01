@@ -4,7 +4,7 @@
  * Renders h1-h6 headings with anchors.
  */
 
-import React from 'react';
+import React, { ElementType } from 'react';
 import type { HeadingBlock as HeadingBlockType } from '../../types/blocks';
 import type { RenderContext } from '../../types/content';
 import { useContentTheme } from '../../renderers/block-renderer';
@@ -18,7 +18,7 @@ export default function HeadingBlock({ block, context }: Props) {
     const theme = useContentTheme();
     const { level, value, anchor } = block;
 
-    const Tag = `h${level}` as keyof JSX.IntrinsicElements;
+    const Tag = `h${level}` as ElementType;
 
     const styles: React.CSSProperties = {
         fontSize: theme.blocks.heading.sizes[`h${level}` as keyof typeof theme.blocks.heading.sizes],

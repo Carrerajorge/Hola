@@ -8,7 +8,7 @@
  * - Language detection
  */
 
-import "@/types/speech.d";
+/// <reference path="../types/speech.d.ts" />
 
 import { useState, useCallback, useRef, useEffect } from "react";
 

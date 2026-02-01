@@ -49,7 +49,7 @@ const OPTS_MIN_COLUMN_WIDTH = 180;
 function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: VirtualizedGridProps) {
   return (
     <AutoSizer>
-      {({ height, width }) => {
+      {({ height, width }: { height: number; width: number }) => {
         const columnCount = Math.floor((width + GUTTER_SIZE) / (OPTS_MIN_COLUMN_WIDTH + GUTTER_SIZE));
         const safeColumnCount = Math.max(1, columnCount);
         const columnWidth = (width - (safeColumnCount - 1) * GUTTER_SIZE) / safeColumnCount;
@@ -65,7 +65,7 @@ function VirtualizedMediaGrid({ items, onSelect, onDelete, onDownload }: Virtual
             width={width}
             className="px-6 py-4"
           >
-            {({ columnIndex, rowIndex, style }) => {
+            {({ columnIndex, rowIndex, style }: { columnIndex: number; rowIndex: number; style: React.CSSProperties }) => {
               const index = rowIndex * safeColumnCount + columnIndex;
               if (index >= items.length) return null;
               const item = items[index];

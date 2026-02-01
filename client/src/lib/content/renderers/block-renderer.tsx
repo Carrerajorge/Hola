@@ -343,10 +343,11 @@ export function StreamingRenderer({
     useEffect(() => {
         const reader = stream.getReader();
         let buffer = '';
+        let cancelled = false;
 
         async function processStream() {
             try {
-                while (true) {
+                while (!cancelled) {
                     const { done, value } = await reader.read();
                     if (done) break;
 
@@ -356,16 +357,23 @@ export function StreamingRenderer({
                         setBlocks(result.content.blocks);
                     }
                 }
-                setIsComplete(true);
-                onComplete?.();
+                if (!cancelled) {
+                    setIsComplete(true);
+                    onComplete?.();
+                }
             } catch (error) {
-                console.error('[StreamingRenderer] Error:', error);
+                if (!cancelled) {
+                    console.error('[StreamingRenderer] Error:', error);
+                }
             }
         }
 
         processStream();
 
-        return () => reader.cancel();
+        return () => {
+            cancelled = true;
+            reader.cancel().catch(() => {});
+        };
     }, [stream, onComplete]);
 
     return (

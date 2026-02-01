@@ -226,3 +226,13 @@ export function LazyLoadErrorBoundary({ children }: { children: ReactNode }) {
         </ErrorBoundary>
     );
 }
+
+export function ThreeJSErrorBoundary({ children }: { children: ReactNode }) {
+    return (
+        <ErrorBoundary level="component" onError={(error) => {
+            console.error('[ThreeJS] Error:', error);
+        }}>
+            {children}
+        </ErrorBoundary>
+    );
+}
