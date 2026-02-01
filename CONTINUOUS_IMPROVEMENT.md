@@ -108,6 +108,7 @@ Comenzando auditoría del sistema...
 | Users | 11 | Usuarios registrados |
 | Models | ✅ OK | xAI + Gemini configurados |
 | Memory | ✅ OK | Persistencia en DB habilitada |
+| GDPR | ✅ OK | Export + Delete endpoints |
 
 ## Commits Realizados (Sesión 6h)
 1. `c5966f7` - docs: API documentation + continuous improvement tracking
@@ -115,6 +116,9 @@ Comenzando auditoría del sistema...
 3. `c4fec83` - feat: database persistence for semantic memory store
 4. `bf7fdf6` - feat: generic email service for magic links and invoices
 5. `ecc9cf9` - feat: memory management page (/memory)
+6. `8c0c69e` - feat: memory link in sidebar
+7. `3c36a05` - feat: user preferences system
+8. `02d78d1` - feat: GDPR data export and account deletion
 
 ## Próximos Pasos
 1. Configurar Twilio para SMS cuando usuario regrese a Perú
@@ -123,3 +127,4 @@ Comenzando auditoría del sistema...
 4. Agregar exportación PDF a reportes
 5. ~~UI para gestionar memorias del usuario~~ ✅ HECHO
 6. Configurar Resend API key para emails en producción
+7. ~~GDPR compliance (export/delete)~~ ✅ HECHO
