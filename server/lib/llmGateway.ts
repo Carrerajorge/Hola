@@ -1200,44 +1200,53 @@ class LLMGateway {
     xai: { available: boolean; latencyMs?: number; error?: string };
     gemini: { available: boolean; latencyMs?: number; error?: string };
   }> {
-    const testMessage: ChatCompletionMessageParam[] = [
-      { role: "user", content: "ping" }
-    ];
-
     const results: any = { xai: { available: false }, gemini: { available: false } };
 
-    // Test xAI - DISABLED FOR STABILITY
-    /*
+    // Test xAI with quick timeout
     if (process.env.XAI_API_KEY) {
       try {
         const start = Date.now();
-        await this.executeXai(testMessage, { requestId: "health-xai", timeout: 10000 } as any, MODELS.TEXT, start);
+        const client = new OpenAI({
+          baseURL: "https://api.x.ai/v1",
+          apiKey: process.env.XAI_API_KEY,
+          timeout: 5000,
+        });
+        await client.chat.completions.create({
+          model: "grok-3-mini-fast",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 5,
+        });
         results.xai = { available: true, latencyMs: Date.now() - start };
       } catch (error: any) {
-        results.xai = { available: false, error: error.message };
+        results.xai = { available: false, error: error.message?.slice(0, 100) };
       }
     }
-    */
-    // Return dummy success for xAI if key exists
-    if (process.env.XAI_API_KEY) {
-      results.xai = { available: true, latencyMs: 1 };
-    }
 
-    // Test Gemini - DISABLED FOR STABILITY
-    /*
+    // Test Gemini with quick timeout
     if (process.env.GEMINI_API_KEY) {
       try {
         const start = Date.now();
-        await this.executeGemini(testMessage, { requestId: "health-gemini", timeout: 10000 } as any, GEMINI_MODELS.FLASH_PREVIEW, start);
-        results.gemini = { available: true, latencyMs: Date.now() - start };
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: "hi" }] }],
+              generationConfig: { maxOutputTokens: 5 }
+            }),
+            signal: AbortSignal.timeout(5000)
+          }
+        );
+        if (response.ok) {
+          results.gemini = { available: true, latencyMs: Date.now() - start };
+        } else {
+          const err = await response.json().catch(() => ({}));
+          results.gemini = { available: false, error: (err as any)?.error?.message?.slice(0, 100) || "API error" };
+        }
       } catch (error: any) {
-        results.gemini = { available: false, error: error.message };
+        results.gemini = { available: false, error: error.message?.slice(0, 100) };
       }
-    }
-    */
-    // Return dummy success for Gemini if key exists
-    if (process.env.GEMINI_API_KEY) {
-      results.gemini = { available: true, latencyMs: 1 };
     }
 
     return results;
