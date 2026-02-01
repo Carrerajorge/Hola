@@ -211,9 +211,11 @@ export function useRovingTabIndex(itemCount: number, orientation: 'horizontal' |
 // SCREEN READER ONLY
 // ============================================
 
+import type { ElementType } from 'react';
+
 export function VisuallyHidden({ children, as: Component = 'span' }: {
     children: ReactNode;
-    as?: keyof JSX.IntrinsicElements;
+    as?: ElementType;
 }) {
     return (
         <Component className="sr-only">
@@ -317,6 +319,6 @@ export function Section({ children }: { children: ReactNode }) {
 
 export function Heading({ children, className }: { children: ReactNode; className?: string }) {
     const level = useHeadingLevel();
-    const Tag = `h${level}` as keyof JSX.IntrinsicElements;
+    const Tag = `h${level}` as ElementType;
     return <Tag className={className}>{children}</Tag>;
 }

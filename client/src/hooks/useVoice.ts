@@ -8,6 +8,8 @@
  * - Language detection
  */
 
+import "@/types/speech.d";
+
 import { useState, useCallback, useRef, useEffect } from "react";
 
 export interface VoiceConfig {
