@@ -14,14 +14,32 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         const userReq = req as AuthenticatedRequest;
         const session = req.session as any;
         
-        // Get user info from either Passport or session
+        // Get user info from multiple possible sources
         const userEmail = userReq.user?.claims?.email || 
-                         session?.passport?.user?.claims?.email || 
                          userReq.user?.email ||
-                         session?.passport?.user?.email;
-        const userId = userReq.user?.claims?.sub || userReq.user?.id || session?.authUserId;
+                         session?.passport?.user?.claims?.email || 
+                         session?.passport?.user?.email ||
+                         (req as any).user?.profile?.emails?.[0]?.value;
+                         
+        const userId = userReq.user?.claims?.sub || 
+                      userReq.user?.id || 
+                      session?.authUserId ||
+                      session?.passport?.user?.claims?.sub ||
+                      session?.passport?.user?.id;
 
-        console.log("[Admin] Auth check:", { userEmail, userId, hasUser: !!userReq.user });
+        console.log("[Admin] Auth check:", { 
+            userEmail, 
+            userId, 
+            hasUser: !!userReq.user,
+            hasSession: !!session,
+            sessionKeys: session ? Object.keys(session) : []
+        });
+
+        // If no user info at all, reject
+        if (!userEmail && !userId) {
+            console.log("[Admin] No user info found in request");
+            return res.status(401).json({ error: "Authentication required" });
+        }
 
         // SECURITY: Check both email (from env) and database role
         let isAdmin = false;
@@ -44,13 +62,20 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
             
             // Fallback: check by email if userId didn't find admin
             if (!dbUser?.role && userEmail) {
-                const result = await db.select({ role: users.role, email: users.email })
+                const result = await db.select({ role: users.role, email: users.email, id: users.id })
                     .from(users).where(eq(users.email, userEmail));
                 dbUser = result[0];
+                
+                // Also try case-insensitive search
+                if (!dbUser) {
+                    const allUsers = await db.select({ role: users.role, email: users.email, id: users.id })
+                        .from(users);
+                    dbUser = allUsers.find(u => u.email?.toLowerCase() === userEmail.toLowerCase());
+                }
             }
             
             isAdmin = dbUser?.role === "admin";
-            console.log("[Admin] DB check:", { dbRole: dbUser?.role, isAdmin });
+            console.log("[Admin] DB check:", { dbRole: dbUser?.role, dbEmail: dbUser?.email, isAdmin });
         }
 
         if (!isAdmin) {
