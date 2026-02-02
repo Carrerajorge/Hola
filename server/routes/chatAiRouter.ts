@@ -1341,6 +1341,7 @@ ${attachmentContext}`;
         }
 
         if (chunk.done) {
+          console.log(`[Stream] Sending 'done' event with ${detectedWebSources.length} webSources`);
           writeSse(res, 'done', {
             sequenceId: chunk.sequenceId,
             requestId: chunk.requestId,
