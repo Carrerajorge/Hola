@@ -629,10 +629,11 @@ export function useChats() {
                 googleFormPreview: msg.googleFormPreview,
                 gmailPreview: msg.gmailPreview,
                 generatedImage: msg.generatedImage,
-                webSources: msg.webSources,
-                confidence: msg.confidence,
-                uncertaintyReason: msg.uncertaintyReason,
-                retrievalSteps: msg.retrievalSteps,
+                // webSources can come from metadata or direct field
+                webSources: msg.webSources || msg.metadata?.webSources,
+                confidence: msg.confidence || msg.metadata?.confidence,
+                uncertaintyReason: msg.uncertaintyReason || msg.metadata?.uncertaintyReason,
+                retrievalSteps: msg.retrievalSteps || msg.metadata?.retrievalSteps,
               };
             }),
           };
@@ -834,7 +835,11 @@ export function useChats() {
               figmaDiagram: msg.figmaDiagram,
               googleFormPreview: msg.googleFormPreview,
               gmailPreview: msg.gmailPreview,
-              generatedImage: msg.generatedImage
+              generatedImage: msg.generatedImage,
+              webSources: msg.webSources,
+              confidence: msg.confidence,
+              uncertaintyReason: msg.uncertaintyReason,
+              retrievalSteps: msg.retrievalSteps
             })
           });
 
@@ -1076,7 +1081,11 @@ export function useChats() {
             figmaDiagram: message.figmaDiagram,
             googleFormPreview: message.googleFormPreview,
             gmailPreview: message.gmailPreview,
-            generatedImage: message.generatedImage
+            generatedImage: message.generatedImage,
+            webSources: message.webSources, // For news cards display
+            confidence: message.confidence,
+            uncertaintyReason: message.uncertaintyReason,
+            retrievalSteps: message.retrievalSteps
           })
         });
 
