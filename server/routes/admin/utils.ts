@@ -15,8 +15,13 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         const session = req.session as any;
         
         // Get user info from either Passport or session
-        const userEmail = userReq.user?.claims?.email || session?.passport?.user?.claims?.email;
+        const userEmail = userReq.user?.claims?.email || 
+                         session?.passport?.user?.claims?.email || 
+                         userReq.user?.email ||
+                         session?.passport?.user?.email;
         const userId = userReq.user?.claims?.sub || userReq.user?.id || session?.authUserId;
+
+        console.log("[Admin] Auth check:", { userEmail, userId, hasUser: !!userReq.user });
 
         // SECURITY: Check both email (from env) and database role
         let isAdmin = false;
@@ -24,12 +29,28 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
         // Check against env-configured admin email (if set)
         if (ADMIN_EMAIL && userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
             isAdmin = true;
+            console.log("[Admin] Matched ADMIN_EMAIL env var");
         }
 
-        // Always verify against database role for proper authorization
-        if (!isAdmin && userId) {
-            const [user] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
-            isAdmin = user?.role === "admin";
+        // Verify against database role - check by userId OR email
+        if (!isAdmin) {
+            let dbUser = null;
+            
+            if (userId) {
+                const result = await db.select({ role: users.role, email: users.email })
+                    .from(users).where(eq(users.id, userId));
+                dbUser = result[0];
+            }
+            
+            // Fallback: check by email if userId didn't find admin
+            if (!dbUser?.role && userEmail) {
+                const result = await db.select({ role: users.role, email: users.email })
+                    .from(users).where(eq(users.email, userEmail));
+                dbUser = result[0];
+            }
+            
+            isAdmin = dbUser?.role === "admin";
+            console.log("[Admin] DB check:", { dbRole: dbUser?.role, isAdmin });
         }
 
         if (!isAdmin) {
