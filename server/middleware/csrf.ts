@@ -82,6 +82,7 @@ export const csrfProtection = (req: Request, res: Response, next: NextFunction) 
         "/api/folders/",
         "/api/rag/",
         "/api/power/",
+        "/api/academic/",
     ];
     if (CSRF_EXEMPT_PREFIXES_EXTENDED.some(prefix => req.path.startsWith(prefix) || req.originalUrl.startsWith(prefix))) {
         return next();
