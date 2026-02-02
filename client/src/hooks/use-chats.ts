@@ -1239,8 +1239,6 @@ export function useChats() {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...getAnonUserIdHeader() },
         credentials: "include",
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pinned: newPinned, pinnedAt })
       });
     } catch (error) {

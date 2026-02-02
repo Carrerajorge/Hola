@@ -459,7 +459,7 @@ export async function handleChatRequest(
   // - voiceEnabled: controls voice input/output features
   const featureFlags = {
     memoryEnabled: userSettings?.featureFlags?.memoryEnabled ?? false,
-    webSearchAuto: userSettings?.featureFlags?.webSearchAuto ?? false,
+    webSearchAuto: userSettings?.featureFlags?.webSearchAuto ?? true, // Enabled by default for all users
     codeInterpreterEnabled: userSettings?.featureFlags?.codeInterpreterEnabled ?? true,
     connectorSearchAuto: userSettings?.featureFlags?.connectorSearchAuto ?? false,
     canvasEnabled: userSettings?.featureFlags?.canvasEnabled ?? true,
