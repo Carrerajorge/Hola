@@ -313,6 +313,7 @@ export function createStripeRouter() {
 
     try {
       const { usageQuotaService } = await import("../services/usageQuotaService");
+      const subscriptionService = await import("../services/subscriptionService");
 
       switch (event.type) {
         case 'checkout.session.completed': {
@@ -321,53 +322,83 @@ export function createStripeRouter() {
 
           if (userId) {
             console.log(`[Stripe] Checkout completed for user ${userId}`);
-            // Logic to determine plan from priceId could be enhanced here
-            // For now, assuming successful subscription means 'pro' or checking metadata
-            // Real implementation should check session.line_items or subscription details
 
-            // Refetch subscription to get details if needed
             if (session.subscription) {
               const stripe = await getUncachableStripeClient();
               const subscription = await stripe.subscriptions.retrieve(session.subscription);
+              
+              // Handle subscription created with notifications
+              await subscriptionService.handleSubscriptionCreated(subscription);
+              
               const priceId = subscription.items.data[0].price.id;
+              const amount = subscription.items.data[0].price.unit_amount || 0;
+              
+              // Determine plan from amount
+              let plan = "go";
+              if (amount === 500) plan = "go";
+              else if (amount === 1000) plan = "plus";
+              else if (amount === 20000) plan = "pro";
+              else if (amount === 2500) plan = "business";
 
-              // Map priceId to plan - simplified logic
-              // Ideally we'd look up the product metadata
-              // For this implementation effectively enabling "pro"
-
-              await usageQuotaService.updateUserPlan(userId, "pro");
+              await usageQuotaService.updateUserPlan(userId, plan);
             }
           }
           break;
         }
 
+        case 'customer.subscription.created': {
+          const subscription = event.data.object as any;
+          await subscriptionService.handleSubscriptionCreated(subscription);
+          break;
+        }
+
         case 'customer.subscription.updated': {
           const subscription = event.data.object as any;
-          const userId = subscription.metadata?.userId; // Metadata might be on customer or session, not always subscription
-
-          // Better strategy: Find user by stripeCustomerId
+          await subscriptionService.handleSubscriptionUpdated(subscription);
+          
+          // Also update via legacy service
           const [dbUser] = await db.select().from(users).where(eq(users.stripeCustomerId, subscription.customer));
 
           if (dbUser) {
             const status = subscription.status;
+            const amount = subscription.items?.data?.[0]?.price?.unit_amount || 0;
+            
+            let plan = "free";
             if (status === 'active') {
-              // Determine plan level
-              await usageQuotaService.updateUserPlan(dbUser.id, "pro");
-            } else if (status === 'past_due' || status === 'canceled' || status === 'unpaid') {
-              await usageQuotaService.updateUserPlan(dbUser.id, "free");
+              if (amount === 500) plan = "go";
+              else if (amount === 1000) plan = "plus";
+              else if (amount === 20000) plan = "pro";
+              else if (amount === 2500) plan = "business";
+              else plan = "pro"; // Default to pro if unknown
             }
+            
+            await usageQuotaService.updateUserPlan(dbUser.id, plan);
           }
           break;
         }
 
         case 'customer.subscription.deleted': {
           const subscription = event.data.object as any;
+          await subscriptionService.handleSubscriptionDeleted(subscription);
+          
           const [dbUser] = await db.select().from(users).where(eq(users.stripeCustomerId, subscription.customer));
 
           if (dbUser) {
             console.log(`[Stripe] Subscription deleted for user ${dbUser.id}`);
             await usageQuotaService.updateUserPlan(dbUser.id, "free");
           }
+          break;
+        }
+        
+        case 'invoice.payment_succeeded': {
+          const invoice = event.data.object as any;
+          await subscriptionService.handlePaymentSucceeded(invoice);
+          break;
+        }
+        
+        case 'invoice.payment_failed': {
+          const invoice = event.data.object as any;
+          await subscriptionService.handlePaymentFailed(invoice);
           break;
         }
       }
