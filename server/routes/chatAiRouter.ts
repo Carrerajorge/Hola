@@ -758,7 +758,8 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
           console.log(`[Stream] IntentRouter: intent=${intentResult.intent}, confidence=${intentResult.confidence.toFixed(2)}, format=${intentResult.output_format || 'none'}`);
 
           // PRODUCTION MODE INTERCEPT - Check immediately after intent detection
-          if (isProductionIntent(intentResult) && intentResult.confidence >= 0.5) {
+          // Pass userMessageText to detect if user wants to search for articles first
+          if (isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
             console.log(`[Stream] 🚀 PRODUCTION MODE ACTIVATED: intent=${intentResult.intent}, topic=${intentResult.slots.topic}`);
 
             try {
@@ -923,10 +924,11 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         // PRODUCTION MODE INTERCEPT: Handle document creation requests
         // Debug log to trace production mode evaluation
         console.log(`\n\n🔥🔥🔥 [Stream] PRODUCTION CHECK START 🔥🔥🔥`);
-        console.log(`[Stream] PRODUCTION CHECK: intent=${intentResult.intent}, confidence=${intentResult.confidence.toFixed(2)}, isProductionIntent=${isProductionIntent(intentResult)}`);
+        console.log(`[Stream] PRODUCTION CHECK: intent=${intentResult.intent}, confidence=${intentResult.confidence.toFixed(2)}, isProductionIntent=${isProductionIntent(intentResult, userMessageText)}`);
         console.log(`🔥🔥🔥 [Stream] PRODUCTION CHECK END 🔥🔥🔥\n\n`);
 
-        if (isProductionIntent(intentResult) && intentResult.confidence >= 0.5) {
+        // Pass userMessageText to detect if user wants to search for articles first
+        if (isProductionIntent(intentResult, userMessageText) && intentResult.confidence >= 0.5) {
           const effectiveUserId = user?.claims?.sub || 'anonymous';
           const effectiveChatId = chatId || conversationId || `chat_${Date.now()}`;
 

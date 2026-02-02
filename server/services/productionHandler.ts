@@ -45,8 +45,35 @@ const PRODUCTION_INTENTS = [
     'CREATE_SPREADSHEET',
 ] as const;
 
-export function isProductionIntent(intentResult: IntentResult | null): boolean {
+// Patterns that indicate user wants to SEARCH first, not just create a document
+const SEARCH_FIRST_PATTERNS = [
+    /buscar?me\s+\d+\s*(artículos?|papers?|estudios?|investigacion)/i,
+    /buscar?\s+\d+\s*(artículos?|papers?|estudios?)/i,
+    /encontrar?\s+\d+\s*(artículos?|papers?|estudios?)/i,
+    /dame\s+\d+\s*(artículos?|papers?|estudios?|citas?)/i,
+    /necesito\s+\d+\s*(artículos?|papers?|estudios?|referencias?)/i,
+    /buscar?\s*(artículos?\s+)?cient[ií]ficos?\s+sobre/i,
+    /artículos?\s+cient[ií]ficos?\s+(de|sobre|en)\s+/i,
+    /scholar\s+search/i,
+    /google\s+scholar/i,
+    /scopus/i,
+    /pubmed/i,
+];
+
+function requiresSearchFirst(message: string): boolean {
+    return SEARCH_FIRST_PATTERNS.some(pattern => pattern.test(message));
+}
+
+export function isProductionIntent(intentResult: IntentResult | null, message?: string): boolean {
     if (!intentResult) return false;
+    
+    // If user explicitly wants to search for articles first, don't activate production mode
+    // Let the chat service handle the academic search
+    if (message && requiresSearchFirst(message)) {
+        console.log(`[ProductionHandler] Search-first detected, skipping production mode for: "${message.slice(0, 50)}..."`);
+        return false;
+    }
+    
     return PRODUCTION_INTENTS.includes(intentResult.intent as any);
 }
 
