@@ -1362,9 +1362,10 @@ ${attachmentContext}`;
         }
       }
 
-      // Update assistant message with full content and mark run as done
+      // Update assistant message with full content, webSources and mark run as done
       if (claimedRun && assistantMessageId) {
-        await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done');
+        const metadata = detectedWebSources.length > 0 ? { webSources: detectedWebSources } : undefined;
+        await storage.updateChatMessageContent(assistantMessageId, fullContent, 'done', metadata);
         await storage.updateChatRunStatus(claimedRun.id, 'done');
       }
 
