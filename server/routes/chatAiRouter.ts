@@ -619,6 +619,74 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
+      // AUTOMATIC ACADEMIC/WEB SEARCH: Detect if message needs search and add results
+      const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
+      const userQuery = lastUserMsg?.content || '';
+      
+      if (userQuery && !forceWebSearch && !webSearchAuto) {
+        try {
+          const { needsAcademicSearch, needsWebSearch, searchWeb } = await import('../services/webSearch');
+          const { academicEngineV3, generateAPACitation } = await import('../services/academicResearchEngineV3');
+          
+          // Check for academic search patterns
+          if (needsAcademicSearch(userQuery)) {
+            console.log(`[Stream] 🎓 ACADEMIC SEARCH DETECTED for: "${userQuery.slice(0, 50)}..."`);
+            
+            try {
+              const engineResult = await academicEngineV3.search({
+                query: userQuery,
+                maxResults: 15,
+                yearFrom: 2020,
+                yearTo: new Date().getFullYear(),
+                sources: ["scielo", "openalex", "semantic_scholar", "crossref", "core", "pubmed", "arxiv", "doaj"]
+              });
+              
+              if (engineResult.papers.length > 0) {
+                const academicContext = engineResult.papers.slice(0, 10).map((paper, i) => 
+                  `[${i + 1}] ${paper.title}\nAutores: ${paper.authors.map(a => a.name).join(', ') || 'No disponible'}\nAño: ${paper.year || 'N/A'}\nJournal: ${paper.journal || 'N/A'}\nDOI: ${paper.doi || 'N/A'}\nURL: ${paper.url || (paper.doi ? `https://doi.org/${paper.doi}` : 'N/A')}\nResumen: ${(paper.abstract || '').substring(0, 300)}...\nCita APA: ${generateAPACitation(paper)}`
+                ).join('\n\n');
+                
+                const systemMessage = {
+                  role: 'system',
+                  content: `ARTÍCULOS ACADÉMICOS ENCONTRADOS (${engineResult.papers.length} resultados de ${engineResult.sources.map(s => s.name).join(', ')}):\n\n${academicContext}\n\nUSA ESTOS ARTÍCULOS para responder al usuario. Incluye citas APA y URLs para cada referencia.`
+                };
+                
+                clientMessages.unshift(systemMessage);
+                console.log(`[Stream] 🎓 Academic search found ${engineResult.papers.length} papers from ${engineResult.sources.length} sources`);
+              }
+            } catch (academicError) {
+              console.error('[Stream] Academic search error:', academicError);
+            }
+          }
+          // Check for web search patterns (news, current events, etc)
+          else if (needsWebSearch(userQuery)) {
+            console.log(`[Stream] 🌐 WEB SEARCH DETECTED for: "${userQuery.slice(0, 50)}..."`);
+            
+            try {
+              const searchResults = await searchWeb(userQuery, 10);
+              
+              if (searchResults.results.length > 0) {
+                const searchContext = searchResults.results
+                  .map((r: any, i: number) => `[${i + 1}] ${r.title}\n${r.snippet}\nFuente: ${r.url}`)
+                  .join('\n\n');
+                
+                const systemMessage = {
+                  role: 'system',
+                  content: `RESULTADOS DE BÚSQUEDA WEB para "${userQuery}":\n\n${searchContext}\n\nUsa esta información actualizada para responder al usuario, citando las fuentes cuando sea apropiado.`
+                };
+                
+                clientMessages.unshift(systemMessage);
+                console.log(`[Stream] 🌐 Web search found ${searchResults.results.length} results`);
+              }
+            } catch (webError) {
+              console.error('[Stream] Web search error:', webError);
+            }
+          }
+        } catch (importError) {
+          console.error('[Stream] Failed to import search modules:', importError);
+        }
+      }
+
       // CONTEXT FIX: Augment client messages with server-side history
       const effectiveChatId = chatId || conversationId;
       const messages = await conversationMemoryManager.augmentWithHistory(
