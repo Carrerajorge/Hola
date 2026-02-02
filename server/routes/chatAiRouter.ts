@@ -1346,6 +1346,7 @@ ${attachmentContext}`;
             requestId: chunk.requestId,
             runId: effectiveRunId,
             intent: unifiedContext?.requestSpec.intent,
+            webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
             timestamp: Date.now(),
             ...sessionMetadata
           });
