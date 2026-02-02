@@ -78,6 +78,13 @@ import { getUserConfig, setUserConfig, getDefaultConfig, validatePatterns, getFi
 import { getLogs, getLogStats, type LogFilters } from "./lib/structuredLogger";
 import { getActiveRequests, getRequestStats } from "./lib/requestTracer";
 import { getAllServicesHealth, getOverallStatus, initializeHealthMonitoring } from "./lib/healthMonitor";
+import { templatesRouter } from "./routes/templatesRouter";
+import { webhooksRouter } from "./routes/webhooksRouter";
+import { twoFactorRouter } from "./routes/twoFactorRouter";
+import { apiKeysRouter } from "./routes/apiKeysRouter";
+import { memoryRouter } from "./routes/memoryRouter";
+import { advancedAnalyticsRouter } from "./routes/admin/advancedAnalytics";
+import { automationsRouter } from "./routes/admin/automations";
 import { getActiveAlerts, getAlertHistory, getAlertStats, resolveAlert } from "./lib/alertManager";
 import { recordConnectorUsage, getConnectorStats, getAllConnectorStats, resetConnectorStats, isValidConnector, type ConnectorName } from "./lib/connectorMetrics";
 import { checkConnectorHealth, checkAllConnectorsHealth, getHealthSummary, startPeriodicHealthCheck } from "./lib/connectorAlerting";
@@ -450,6 +457,15 @@ export async function registerRoutes(
   app.use("/api/agent", createAgentModeRouter());
   app.use("/api", createSandboxAgentRouter());
   app.use("/api", createLangGraphRouter());
+  
+  // New routes from 8H plan
+  app.use("/api/templates", templatesRouter);
+  app.use("/api/webhooks", webhooksRouter);
+  app.use("/api/2fa", twoFactorRouter);
+  app.use("/api/api-keys", apiKeysRouter);
+  app.use("/api/memory", memoryRouter);
+  app.use("/api/admin/analytics/advanced", advancedAnalyticsRouter);
+  app.use("/api/admin/automations", automationsRouter);
   app.use("/api", createRegistryRouter());
   app.use("/api/word-pipeline", wordPipelineRoutes);
   app.use("/api/sse", redisSSERouter);
