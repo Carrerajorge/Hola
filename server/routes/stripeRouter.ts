@@ -145,7 +145,7 @@ export function createStripeRouter() {
         return res.status(401).json({ error: "Debes iniciar sesión para suscribirte" });
       }
 
-      const { priceId } = req.body;
+      const { priceId, utmSource, utmMedium, utmCampaign, referrer } = req.body;
       if (!priceId) {
         return res.status(400).json({ error: "priceId is required" });
       }
@@ -176,8 +176,15 @@ export function createStripeRouter() {
 
       const domain = process.env.REPLIT_DOMAINS?.split(',')[0] || 'localhost:5000';
       const protocol = domain.includes('localhost') ? 'http' : 'https';
+      
+      // Extract tracking info from request
+      const ipAddress = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.ip || '';
+      const userAgent = req.headers['user-agent'] || '';
+      const deviceType = /Mobile|Android|iPhone|iPad/i.test(userAgent) ? 'Mobile' : 'Desktop';
+      const browserMatch = userAgent.match(/(Chrome|Firefox|Safari|Edge|Opera)/i);
+      const browser = browserMatch ? browserMatch[1] : 'Unknown';
 
-      // Add retry logic for session creation
+      // Add retry logic for session creation with tracking metadata
       const session = await withRetry(
         () => stripe.checkout.sessions.create({
           customer: customerId,
@@ -186,10 +193,33 @@ export function createStripeRouter() {
           mode: 'subscription',
           success_url: `${protocol}://${domain}/?subscription=success`,
           cancel_url: `${protocol}://${domain}/?subscription=cancelled`,
-          metadata: { userId }
+          metadata: { 
+            userId,
+            ipAddress: ipAddress.substring(0, 50),
+            device: deviceType,
+            browser: browser,
+            utmSource: utmSource?.substring(0, 50) || '',
+            utmMedium: utmMedium?.substring(0, 50) || '',
+            utmCampaign: utmCampaign?.substring(0, 50) || '',
+            referrer: referrer?.substring(0, 100) || '',
+          },
+          subscription_data: {
+            metadata: {
+              userId,
+              ipAddress: ipAddress.substring(0, 50),
+              device: deviceType,
+              browser: browser,
+              utmSource: utmSource?.substring(0, 50) || '',
+              utmMedium: utmMedium?.substring(0, 50) || '',
+              utmCampaign: utmCampaign?.substring(0, 50) || '',
+              referrer: referrer?.substring(0, 100) || '',
+            }
+          }
         }),
         { maxAttempts: 3, initialDelayMs: 1000 }
       );
+      
+      console.log(`[Stripe] Checkout session created for user ${userId} | Session: ${session.id}`);
 
       res.json({ url: session.url });
     } catch (error: any) {
@@ -314,6 +344,9 @@ export function createStripeRouter() {
     try {
       const { usageQuotaService } = await import("../services/usageQuotaService");
       const subscriptionService = await import("../services/subscriptionService");
+      
+      // Log webhook event for tracing
+      console.log(`[Stripe Webhook] Received event: ${event.type} | ID: ${event.id}`);
 
       switch (event.type) {
         case 'checkout.session.completed': {
@@ -327,8 +360,8 @@ export function createStripeRouter() {
               const stripe = await getUncachableStripeClient();
               const subscription = await stripe.subscriptions.retrieve(session.subscription);
               
-              // Handle subscription created with notifications
-              await subscriptionService.handleSubscriptionCreated(subscription);
+              // Handle subscription created with notifications (pass event.id for idempotency)
+              await subscriptionService.handleSubscriptionCreated(subscription, event.id);
               
               const priceId = subscription.items.data[0].price.id;
               const amount = subscription.items.data[0].price.unit_amount || 0;
@@ -348,13 +381,13 @@ export function createStripeRouter() {
 
         case 'customer.subscription.created': {
           const subscription = event.data.object as any;
-          await subscriptionService.handleSubscriptionCreated(subscription);
+          await subscriptionService.handleSubscriptionCreated(subscription, event.id);
           break;
         }
 
         case 'customer.subscription.updated': {
           const subscription = event.data.object as any;
-          await subscriptionService.handleSubscriptionUpdated(subscription);
+          await subscriptionService.handleSubscriptionUpdated(subscription, event.id);
           
           // Also update via legacy service
           const [dbUser] = await db.select().from(users).where(eq(users.stripeCustomerId, subscription.customer));
@@ -379,7 +412,7 @@ export function createStripeRouter() {
 
         case 'customer.subscription.deleted': {
           const subscription = event.data.object as any;
-          await subscriptionService.handleSubscriptionDeleted(subscription);
+          await subscriptionService.handleSubscriptionDeleted(subscription, event.id);
           
           const [dbUser] = await db.select().from(users).where(eq(users.stripeCustomerId, subscription.customer));
 
@@ -392,20 +425,20 @@ export function createStripeRouter() {
         
         case 'invoice.payment_succeeded': {
           const invoice = event.data.object as any;
-          await subscriptionService.handlePaymentSucceeded(invoice);
+          await subscriptionService.handlePaymentSucceeded(invoice, event.id);
           break;
         }
         
         case 'invoice.payment_failed': {
           const invoice = event.data.object as any;
-          await subscriptionService.handlePaymentFailed(invoice);
+          await subscriptionService.handlePaymentFailed(invoice, event.id);
           break;
         }
       }
 
       res.json({ received: true });
     } catch (err: any) {
-      console.error(`Webhook handler error: ${err.message}`);
+      console.error(`[Stripe Webhook] Handler error for ${event.type}: ${err.message}`);
       res.status(500).send(`Webhook Handler Error: ${err.message}`);
     }
   });
