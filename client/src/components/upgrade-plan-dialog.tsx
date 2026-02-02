@@ -52,7 +52,7 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
     },
     {
       name: "Plus",
-      price: 20,
+      price: 10,
       description: "Descubre toda la experiencia",
       buttonText: "Obtener Plus",
       buttonVariant: "default" as const,
