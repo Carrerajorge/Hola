@@ -110,6 +110,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog";
 import { PromptSuggestions } from "@/components/prompt-suggestions";
 import { MessageFeedback } from "@/components/message-feedback";
+import { UpgradePromptModal, useUpgradePrompt } from "@/components/upgrade-prompt-modal";
 // AgentPanel removed - progress is shown inline in chat messages
 import { useAuth } from "@/hooks/use-auth";
 import { useConversationState } from "@/hooks/use-conversation-state";
@@ -377,6 +378,17 @@ export function ChatInterface({
     isAdmin: (user as any)?.isAdmin || (user?.email === 'Carrerajorge874@gmail.com'),
     isPaid: (user as any)?.isPaid || (user?.status === 'active')
   } : null, [user]);
+
+  // Upgrade prompt for free users after 3rd query
+  const {
+    showPrompt: showUpgradePrompt,
+    queryCount,
+    incrementQuery,
+    closePrompt: closeUpgradePrompt,
+    isFreeUser,
+  } = useUpgradePrompt(user?.plan);
+  
+  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
 
   // Sync with chat store for future full migration
   const { setInput: setStoreInput } = useChatStore();
@@ -2675,6 +2687,9 @@ export function ChatInterface({
       console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
       const userInput = input.trim();
       setInput("");
+      
+      // Track query for free users (upgrade prompt)
+      incrementQuery();
       
       // Clear the web tool after use
       if (selectedTool === "web") {
@@ -6071,6 +6086,23 @@ IMPORTANTE:
         open={showPricingModal}
         onClose={() => setShowPricingModal(false)}
         quota={quotaInfo || { remaining: 0, limit: 3, resetAt: null, plan: "free" }}
+      />
+
+      {/* Upgrade Prompt Modal for free users after 3rd query */}
+      <UpgradePromptModal
+        isOpen={showUpgradePrompt}
+        onClose={closeUpgradePrompt}
+        onUpgrade={() => {
+          closeUpgradePrompt();
+          setShowUpgradeDialog(true);
+        }}
+        queryCount={queryCount}
+      />
+
+      {/* Upgrade Dialog triggered from prompt */}
+      <UpgradePlanDialog
+        open={showUpgradeDialog}
+        onOpenChange={setShowUpgradeDialog}
       />
 
       {/* Agent Panel removed - progress is shown inline in chat messages */}
