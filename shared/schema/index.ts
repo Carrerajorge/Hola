@@ -9,4 +9,5 @@ export * from "./agent";
 export * from "./library";
 export * from "./memory";
 export * from "./org";
+export * from "./workspace";
 

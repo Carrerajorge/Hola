@@ -25,6 +25,7 @@ import { createRetrievalAdminRouter } from "./routes/retrievalAdminRouter";
 import { createAgentRouter } from "./routes/agentRouter";
 import { createFigmaRouter } from "./routes/figmaRouter";
 import { createLibraryRouter } from "./routes/libraryRouter";
+import { createWorkspaceRouter } from "./routes/workspaceRouter";
 import { createCodeRouter } from "./routes/codeRouter";
 import { createUserRouter } from "./routes/userRouter";
 import { createChatAiRouter } from "./routes/chatAiRouter";
@@ -419,6 +420,7 @@ export async function registerRoutes(
   app.use("/api", createAgentRouter(broadcastBrowserEvent));
   app.use(createFigmaRouter());
   app.use(createLibraryRouter());
+  app.use(createWorkspaceRouter());
   app.use(createCodeRouter());
   app.use(createUserRouter());
   app.use("/api", createChatAiRouter(broadcastAgentUpdate));

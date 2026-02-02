@@ -37,6 +37,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { apiFetch } from "@/lib/apiClient";
 import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
+import { useCloudLibrary } from "@/hooks/use-cloud-library";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
 
@@ -56,10 +57,11 @@ export default function WorkspaceSettingsPage() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
-  const [workspaceName, setWorkspaceName] = useState("Espacio de trabajo de Usuario");
-
-  const orgId = "org-jafx80c2QSREjgK800cnLCwe";
-  const workspaceId = "09c512b0-ee54-4546-9016-b5f13fa0477a";
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [orgId, setOrgId] = useState<string>("");
+  const [workspaceId, setWorkspaceId] = useState<string>("");
+  const [logoFileUuid, setLogoFileUuid] = useState<string | null>(null);
+  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
 
   const [billingStatus, setBillingStatus] = useState<{
     subscriptionStatus: string | null;
@@ -88,16 +90,34 @@ export default function WorkspaceSettingsPage() {
 
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       try {
         const res = await apiFetch("/api/billing/status");
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setBillingStatus(data);
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled) setBillingStatus(data);
+        }
       } catch {
         // ignore
       }
     })();
+
+    (async () => {
+      try {
+        const res = await apiFetch("/api/workspace/me");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setOrgId(data.orgId || "");
+        setWorkspaceId(data.workspaceId || "");
+        setWorkspaceName(data.name || "");
+        setLogoFileUuid(data.logoFileUuid || null);
+      } catch {
+        // ignore
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
@@ -105,6 +125,66 @@ export default function WorkspaceSettingsPage() {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
+  };
+
+  const { uploadFile, isUploading } = useCloudLibrary();
+
+  const handleLogoUpload = async (file: File) => {
+    // Client-side validations
+    const allowed = ["image/png", "image/jpeg", "image/webp"];
+    if (file.size > 2 * 1024 * 1024) {
+      alert("El logo no puede superar 2MB");
+      return;
+    }
+    if (file.type && !allowed.includes(file.type)) {
+      alert("Formato no permitido. Use PNG, JPG o WebP");
+      return;
+    }
+
+    const saved = await uploadFile({
+      file,
+      metadata: {
+        name: "Workspace Logo",
+        description: "Logo del espacio de trabajo",
+      },
+    });
+
+    setLogoFileUuid(saved.uuid);
+
+    // Persist immediately
+    setIsSavingWorkspace(true);
+    try {
+      const res = await apiFetch("/api/workspace/me", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logoFileUuid: saved.uuid }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLogoFileUuid(data.logoFileUuid || null);
+      }
+    } finally {
+      setIsSavingWorkspace(false);
+    }
+  };
+
+  const handleSaveName = async () => {
+    setIsSavingWorkspace(true);
+    try {
+      const res = await apiFetch("/api/workspace/me", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: workspaceName }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(data?.error || "No se pudo guardar");
+        return;
+      }
+      setWorkspaceName(data.name || workspaceName);
+    } finally {
+      setIsSavingWorkspace(false);
+    }
   };
 
   const renderContent = () => {
@@ -123,14 +203,26 @@ export default function WorkspaceSettingsPage() {
               <h2 className="text-lg font-medium">Aspecto</h2>
               
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <span className="text-sm">Nombre de espacio de trabajo</span>
-                  <Input 
-                    value={workspaceName}
-                    onChange={(e) => setWorkspaceName(e.target.value)}
-                    className="w-72"
-                    data-testid="input-workspace-name"
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={workspaceName}
+                      onChange={(e) => setWorkspaceName(e.target.value)}
+                      className="w-72"
+                      data-testid="input-workspace-name"
+                      placeholder="Espacio de trabajo"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isSavingWorkspace || !workspaceName.trim()}
+                      onClick={handleSaveName}
+                      data-testid="button-save-workspace-name"
+                    >
+                      Guardar
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -138,12 +230,27 @@ export default function WorkspaceSettingsPage() {
                     <span className="text-sm">Logotipo</span>
                     <Info className="h-3 w-3 text-muted-foreground" />
                   </div>
-                  <div className="border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center text-center">
-                    <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">Suelta el archivo aquí para cargarlo.</p>
-                    <button className="text-sm text-primary hover:underline mt-1" data-testid="button-browse-files">
-                      Explorar archivos
-                    </button>
+                  <div className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center">
+                    <Upload className="h-7 w-7 text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">PNG/JPG/WebP, máx. 2MB</p>
+                    <div className="mt-2">
+                      <label className="text-sm text-primary hover:underline cursor-pointer" data-testid="button-browse-files">
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) handleLogoUpload(f);
+                            e.target.value = '';
+                          }}
+                        />
+                        {isUploading ? "Subiendo..." : "Explorar archivos"}
+                      </label>
+                    </div>
+                    {logoFileUuid && (
+                      <p className="mt-2 text-xs text-muted-foreground">Logo actualizado</p>
+                    )}
                   </div>
                 </div>
               </div>
