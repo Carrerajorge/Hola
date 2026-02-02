@@ -1559,23 +1559,23 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
     if (!academicPolicyCheck.allowed) {
       console.log(`[ChatService:WebSearch] Academic search blocked by policy: ${academicPolicyCheck.reason}`);
     } else {
-      console.log(`[ChatService:WebSearch] Academic search triggered - using Academic Research Engine v2.0`);
+      console.log(`[ChatService:WebSearch] Academic search triggered - using Academic Research Engine v3.0`);
       const searchStartTime = Date.now();
       try {
-        // Use the new Academic Research Engine for better results
-        const engineResult = await academicEngine.search({
+        // Use the new Academic Research Engine v3.0 for better results
+        const engineResult = await academicEngineV3.search({
           query: lastUserMessage.content,
           maxResults: 20,
           yearFrom: 2020,
           yearTo: new Date().getFullYear(),
-          sources: ["openalex", "semantic_scholar", "crossref"]
+          sources: ["scielo", "openalex", "semantic_scholar", "crossref", "core", "pubmed", "arxiv", "doaj"]
         });
         
-        await logToolCall(userId || "anonymous", "academic_search", "academic_engine",
+        await logToolCall(userId || "anonymous", "academic_search", "academic_engine_v3",
           { query: lastUserMessage.content }, { count: engineResult.papers.length, sources: engineResult.sources }, "success", Date.now() - searchStartTime);
 
         if (engineResult.papers.length > 0) {
-          webSearchInfo = "\n\n**Artículos académicos encontrados (OpenAlex + Semantic Scholar + CrossRef):**\n" +
+          webSearchInfo = "\n\n**Artículos académicos encontrados (8 fuentes: SciELO, OpenAlex, Semantic Scholar, CrossRef, CORE, PubMed, arXiv, DOAJ):**\n" +
             engineResult.papers.slice(0, 15).map((paper, i) =>
               `[${i + 1}] Autores: ${paper.authors.map(a => a.name).join(", ") || "No disponible"}\nAño: ${paper.year || "No disponible"}\nTítulo: ${paper.title}\nJournal: ${paper.journal || "No disponible"}\nDOI: ${paper.doi || "No disponible"}\nURL: ${paper.url || paper.doi ? `https://doi.org/${paper.doi}` : "No disponible"}\nResumen: ${(paper.abstract || "No disponible").substring(0, 300)}...\nCita APA 7: ${generateAPACitation(paper)}`
             ).join("\n\n");
