@@ -619,11 +619,12 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
         }
       }
 
-      // AUTOMATIC ACADEMIC/WEB SEARCH: Detect if message needs search and add results
+      // AUTOMATIC ACADEMIC/WEB SEARCH: Always detect if message needs search and add results
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
       const userQuery = lastUserMsg?.content || '';
       
-      if (userQuery && !forceWebSearch && !webSearchAuto) {
+      // Always try to detect search needs, regardless of forceWebSearch/webSearchAuto flags
+      if (userQuery) {
         try {
           const { needsAcademicSearch, needsWebSearch, searchWeb } = await import('../services/webSearch');
           const { academicEngineV3, generateAPACitation } = await import('../services/academicResearchEngineV3');
