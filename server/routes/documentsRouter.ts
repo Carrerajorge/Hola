@@ -22,6 +22,7 @@ import { excelSpecSchema, docSpecSchema, cvSpecSchema } from "../../shared/docum
 import { llmGateway } from "../lib/llmGateway";
 import { generateAgentToolsExcel } from "../lib/agentToolsGenerator";
 import { executeDocxCode } from "../services/docxCodeGenerator";
+import { requireNetworkAccessEnabled } from "../middleware/networkAccessGuard";
 
 export function createDocumentsRouter() {
   const router = Router();
@@ -405,7 +406,7 @@ export function createDocumentsRouter() {
   });
 
   // Execute user-edited DOCX code
-  router.post("/execute-code", async (req, res) => {
+  router.post("/execute-code", requireNetworkAccessEnabled(), async (req, res) => {
     try {
       const { code } = req.body;
 

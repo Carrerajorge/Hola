@@ -1,11 +1,12 @@
 import { Router } from "express";
 import * as codeInterpreter from "../services/codeInterpreterService";
 import * as pistonService from "../services/pistonService";
+import { requireNetworkAccessEnabled } from "../middleware/networkAccessGuard";
 
 export function createCodeRouter() {
   const router = Router();
 
-  router.post("/api/code-interpreter/run", async (req, res) => {
+  router.post("/api/code-interpreter/run", requireNetworkAccessEnabled(), async (req, res) => {
     try {
       const { code, conversationId, language } = req.body;
       
@@ -63,7 +64,7 @@ export function createCodeRouter() {
     }
   });
 
-  router.post("/api/sandbox/execute", async (req, res) => {
+  router.post("/api/sandbox/execute", requireNetworkAccessEnabled(), async (req, res) => {
     try {
       const { code, language, stdin, args } = req.body;
 

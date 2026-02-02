@@ -111,6 +111,10 @@ export const users = pgTable("users", {
     monthlyTokensUsed: integer("monthly_tokens_used"),
     tokensResetAt: timestamp("tokens_reset_at"),
     preferences: jsonb("preferences"),
+    // Multi-tenant (v2): organization/workspace ownership
+    orgId: text("org_id").default("default"),
+    // Per-user toggle: allow network access during code execution when org permits
+    networkAccessEnabled: boolean("network_access_enabled").default(false),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
     deletedAt: timestamp("deleted_at"),

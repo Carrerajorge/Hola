@@ -46,22 +46,23 @@ const DEFAULT_CONFIG: SandboxConfig = {
 };
 
 // Dangerous modules and functions to block
-const BLOCKED_MODULES = [
+// Note: network-related modules become allowed when config.allowNetwork=true
+const BASE_BLOCKED_MODULES = [
   "os",
   "subprocess",
   "sys",
-  "socket",
-  "urllib",
-  "requests",
-  "http",
-  "ftplib",
-  "smtplib",
   "shutil",
   "pickle",
   "ctypes",
   "multiprocessing",
   "__builtins__.__import__",
-];
+] as const;
+
+const NETWORK_MODULES = ["socket", "urllib", "requests", "http", "ftplib", "smtplib"] as const;
+
+function getBlockedModules(config: SandboxConfig): string[] {
+  return config.allowNetwork ? [...BASE_BLOCKED_MODULES] : [...BASE_BLOCKED_MODULES, ...NETWORK_MODULES];
+}
 
 const BLOCKED_FUNCTIONS = [
   "exec",
@@ -79,7 +80,7 @@ const BLOCKED_FUNCTIONS = [
 
 // Create sandbox wrapper script
 function createSandboxWrapper(userCode: string, config: SandboxConfig): string {
-  const blockedModulesStr = BLOCKED_MODULES.map(m => `"${m}"`).join(", ");
+  const blockedModulesStr = getBlockedModules(config).map(m => `"${m}"`).join(", ");
   const blockedFunctionsStr = BLOCKED_FUNCTIONS.map(f => `"${f}"`).join(", ");
 
   return `

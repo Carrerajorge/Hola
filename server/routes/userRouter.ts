@@ -4,7 +4,7 @@ import { storage } from "../storage";
 import { db } from "../db";
 import { getSecureUserId } from "../lib/anonUserHelper";
 import { verifyAnonToken } from "../lib/anonToken";
-import { notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema, integrationProviders, integrationTools } from "@shared/schema";
+import { notificationEventTypes, responsePreferencesSchema, userProfileSchema, featureFlagsSchema, integrationProviders, integrationTools, users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { usageQuotaService } from "../services/usageQuotaService";
 import { AuthenticatedRequest, getUserId } from "../types/express";
@@ -39,6 +39,63 @@ export function createUserRouter() {
       res.status(500).json({ error: "Failed to get usage status" });
     }
   });
+
+  router.get("/api/network-access/status", async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const { getNetworkAccessPolicyForUser } = await import("../services/networkAccessPolicyService");
+      const policy = await getNetworkAccessPolicyForUser(userId);
+      res.json(policy);
+    } catch (error: any) {
+      console.error("Error getting network-access status:", error);
+      res.status(500).json({ error: "Failed to get network-access status" });
+    }
+  });
+
+  router.put("/api/network-access/user", validateBody(z.object({ enabled: z.boolean() })), async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const { setUserNetworkAccessEnabled } = await import("../services/networkAccessPolicyService");
+      const policy = await setUserNetworkAccessEnabled(userId, req.body.enabled);
+      res.json(policy);
+    } catch (error: any) {
+      console.error("Error setting user network-access:", error);
+      res.status(500).json({ error: "Failed to update network-access" });
+    }
+  });
+
+  router.put(
+    "/api/network-access/org",
+    validateBody(z.object({ enabled: z.boolean() })),
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        if (!userId) {
+          return res.status(401).json({ error: "Unauthorized" });
+        }
+
+        const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+        const role = (dbUser as any)?.role || "guest";
+        if (!['admin', 'superadmin', 'team_admin'].includes(role)) {
+          return res.status(403).json({ error: "Insufficient permissions", code: "PERMISSION_DENIED" });
+        }
+
+        const orgId = (dbUser as any)?.orgId || "default";
+        const { setOrgNetworkAccessEnabled } = await import("../services/networkAccessPolicyService");
+        const row = await setOrgNetworkAccessEnabled(orgId, req.body.enabled);
+        res.json({ success: true, orgId, ...row });
+      } catch (error: any) {
+        console.error("Error setting org network-access:", error);
+        res.status(500).json({ error: "Failed to update org network-access" });
+      }
+    }
+  );
 
   router.get("/api/notification-event-types", async (req, res) => {
     try {
