@@ -8,7 +8,8 @@ import { withRetry } from "../lib/retryUtility";
 const PLAN_PRICE_MAPPING: Record<string, { name: string; amount: number; interval?: string }> = {
   price_go_monthly: { name: "Go", amount: 500, interval: "month" },
   price_plus_monthly: { name: "Plus", amount: 1000, interval: "month" },
-  price_pro_yearly: { name: "Pro", amount: 2000, interval: "year" },
+  price_pro_monthly: { name: "Pro", amount: 20000, interval: "month" },
+  price_business_monthly: { name: "Business", amount: 2500, interval: "month" },
 };
 
 export function createStripeRouter() {
@@ -206,23 +207,30 @@ export function createStripeRouter() {
         {
           name: "IliaGPT Go",
           description: "Logra más con una IA más avanzada - 50 solicitudes por día",
-          priceAmount: 500,
+          priceAmount: 500, // $5
           interval: "month" as const,
           metadata: { plan: "go" }
         },
         {
           name: "IliaGPT Plus",
           description: "Descubre toda la experiencia - 200 solicitudes por día",
-          priceAmount: 1000,
+          priceAmount: 1000, // $10
           interval: "month" as const,
           metadata: { plan: "plus" }
         },
         {
           name: "IliaGPT Pro",
           description: "Maximiza tu productividad - Mensajes ilimitados",
-          priceAmount: 2000,
-          interval: "year" as const,
+          priceAmount: 20000, // $200
+          interval: "month" as const,
           metadata: { plan: "pro" }
+        },
+        {
+          name: "IliaGPT Business",
+          description: "Mejora la productividad con IA para equipos",
+          priceAmount: 2500, // $25
+          interval: "month" as const,
+          metadata: { plan: "business" }
         }
       ];
 
