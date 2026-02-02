@@ -1,17 +1,19 @@
 import Stripe from 'stripe';
 
-// Stripe credentials from environment variables
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
-const STRIPE_PUBLISHABLE_KEY = process.env.STRIPE_PUBLISHABLE_KEY || '';
-
 let stripeClient: Stripe | null = null;
+
+// Get the secret key lazily to ensure dotenv has loaded
+function getSecretKey(): string {
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  if (!key) {
+    throw new Error('STRIPE_SECRET_KEY not configured');
+  }
+  return key;
+}
 
 export function getStripeClient(): Stripe {
   if (!stripeClient) {
-    if (!STRIPE_SECRET_KEY) {
-      throw new Error('STRIPE_SECRET_KEY not configured');
-    }
-    stripeClient = new Stripe(STRIPE_SECRET_KEY, {
+    stripeClient = new Stripe(getSecretKey(), {
       apiVersion: '2024-12-18.acacia',
     });
   }
@@ -24,17 +26,15 @@ export async function getUncachableStripeClient(): Promise<Stripe> {
 }
 
 export function getStripePublishableKey(): string {
-  if (!STRIPE_PUBLISHABLE_KEY) {
+  const key = process.env.STRIPE_PUBLISHABLE_KEY || '';
+  if (!key) {
     throw new Error('STRIPE_PUBLISHABLE_KEY not configured');
   }
-  return STRIPE_PUBLISHABLE_KEY;
+  return key;
 }
 
 export function getStripeSecretKey(): string {
-  if (!STRIPE_SECRET_KEY) {
-    throw new Error('STRIPE_SECRET_KEY not configured');
-  }
-  return STRIPE_SECRET_KEY;
+  return getSecretKey();
 }
 
 // Plan configuration
