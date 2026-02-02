@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
-import { Image, Video, FileText, Download, X, FolderOpen, Trash2, Upload, HardDrive } from "lucide-react";
+import { Image, Video, FileText, Download, X, FolderOpen, Trash2, Upload, HardDrive, LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   useCloudLibrary,
@@ -28,7 +28,7 @@ interface UserLibraryProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type FilterType = "all" | "image" | "video" | "document";
+type FilterType = "all" | "image" | "video" | "document" | "app";
 
 import { Grid } from "react-window";
 import { AutoSizer } from "react-virtualized-auto-sizer";
@@ -504,6 +504,15 @@ export function UserLibrary({ open, onOpenChange }: UserLibraryProps) {
                 >
                   <FileText className="h-4 w-4" />
                   Documentos
+                </TabsTrigger>
+
+                <TabsTrigger
+                  value="app"
+                  className="px-4 gap-2"
+                  data-testid="tab-apps"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  Apps
                 </TabsTrigger>
               </TabsList>
             </div>

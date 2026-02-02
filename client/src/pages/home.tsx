@@ -15,7 +15,6 @@ import { FavoritesDialog } from "@/components/favorites-dialog";
 import { CodexDialog } from "@/components/codex-dialog";
 import { PromptTemplatesDialog } from "@/components/prompt-templates-dialog";
 import { OfflineIndicator, OfflineBanner } from "@/components/offline-indicator";
-import { MediaLibraryModal } from "@/components/media-library-modal";
 import { useMediaLibrary } from "@/hooks/use-media-library";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 
@@ -64,7 +63,6 @@ export default function Home() {
   const [aboutGptId, setAboutGptId] = useState<string | null>(null);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isCodexOpen, setIsCodexOpen] = useState(false);
-  const [isMediaLibraryOpen, setIsMediaLibraryOpen] = useState(false);
   const [isAppsDialogOpen, setIsAppsDialogOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -421,7 +419,7 @@ export default function Home() {
   };
 
   const handleOpenLibrary = () => {
-    setIsMediaLibraryOpen(true);
+    setIsLibraryOpen(true);
   };
 
   const handleOpenCodex = () => {
@@ -537,7 +535,6 @@ export default function Home() {
         setIsExportOpen(false);
         setIsGptExplorerOpen(false);
         setIsLibraryOpen(false);
-        setIsMediaLibraryOpen(false);
         setIsFavoritesOpen(false);
         setIsTemplatesOpen(false);
       },
@@ -757,14 +754,6 @@ export default function Home() {
           open={isLibraryOpen}
           onOpenChange={setIsLibraryOpen}
         />
-      
-
-      {/* Media Library Modal */}
-      <MediaLibraryModal
-        open={isMediaLibraryOpen}
-        onOpenChange={setIsMediaLibraryOpen}
-      />
-
       {/* Codex Dialog */}
       <CodexDialog
         isOpen={isCodexOpen}
