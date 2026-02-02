@@ -47,17 +47,27 @@ const PRODUCTION_INTENTS = [
 
 // Patterns that indicate user wants to SEARCH first, not just create a document
 const SEARCH_FIRST_PATTERNS = [
-    /buscar?me\s+\d+\s*(artículos?|papers?|estudios?|investigacion)/i,
-    /buscar?\s+\d+\s*(artículos?|papers?|estudios?)/i,
-    /encontrar?\s+\d+\s*(artículos?|papers?|estudios?)/i,
-    /dame\s+\d+\s*(artículos?|papers?|estudios?|citas?)/i,
-    /necesito\s+\d+\s*(artículos?|papers?|estudios?|referencias?)/i,
-    /buscar?\s*(artículos?\s+)?cient[ií]ficos?\s+sobre/i,
-    /artículos?\s+cient[ií]ficos?\s+(de|sobre|en)\s+/i,
+    // "buscame X articulos/papers"
+    /buscame\s+\d+\s*(art[ií]culos?|papers?|estudios?|investigacion)/i,
+    /buscarme\s+\d+\s*(art[ií]culos?|papers?|estudios?|investigacion)/i,
+    /busca\s+\d+\s*(art[ií]culos?|papers?|estudios?)/i,
+    /buscar\s+\d+\s*(art[ií]culos?|papers?|estudios?)/i,
+    /encontrar\s+\d+\s*(art[ií]culos?|papers?|estudios?)/i,
+    /dame\s+\d+\s*(art[ií]culos?|papers?|estudios?|citas?)/i,
+    /necesito\s+\d+\s*(art[ií]culos?|papers?|estudios?|referencias?)/i,
+    
+    // "articulos cientificos de/sobre"
+    /art[ií]culos?\s+cient[ií]ficos?\s+(de|sobre|en|d)\s*/i,
+    /busca.*art[ií]culos?\s+cient[ií]ficos?/i,
+    /buscame.*art[ií]culos?\s+cient[ií]ficos?/i,
+    
+    // Explicit search requests
+    /buscar?\s*(art[ií]culos?\s+)?cient[ií]ficos?\s+sobre/i,
     /scholar\s+search/i,
     /google\s+scholar/i,
     /scopus/i,
     /pubmed/i,
+    /scielo/i,
 ];
 
 function requiresSearchFirst(message: string): boolean {
