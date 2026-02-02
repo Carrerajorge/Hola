@@ -1,240 +1,210 @@
 /**
- * Encryption at Rest Service (#58)
- * AES-256-GCM encryption for sensitive data
+ * Encryption Service
+ * Data encryption at rest using AES-256-GCM
  */
 
-import crypto from 'crypto';
+import crypto from "crypto";
 
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
-const ALGORITHM = 'aes-256-gcm';
+// Configuration
+const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
-const AUTH_TAG_LENGTH = 16;
+const TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
+const KEY_LENGTH = 32;
+const ITERATIONS = 100000;
 
-// Derive key from password (for user-specific encryption)
-function deriveKey(password: string, salt: Buffer): Buffer {
-    return crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
-}
-
-// Get master key
-function getMasterKey(): Buffer {
-    if (ENCRYPTION_KEY.length !== 64) {
-        throw new Error('ENCRYPTION_KEY must be 64 hex characters (32 bytes)');
+// Get encryption key from environment or generate
+const getEncryptionKey = (): Buffer => {
+  const envKey = process.env.ENCRYPTION_KEY;
+  if (envKey) {
+    // If hex string, convert to buffer
+    if (envKey.length === 64) {
+      return Buffer.from(envKey, "hex");
     }
-    return Buffer.from(ENCRYPTION_KEY, 'hex');
-}
+    // Hash the key to ensure correct length
+    return crypto.createHash("sha256").update(envKey).digest();
+  }
+  
+  // Generate a key (in production, this should be set in env)
+  console.warn("[Encryption] No ENCRYPTION_KEY set, using derived key");
+  return crypto.createHash("sha256").update("iliagpt-default-key-change-me").digest();
+};
+
+const MASTER_KEY = getEncryptionKey();
 
 /**
- * Encrypt data with AES-256-GCM
- * @returns Base64 encoded string: IV + AuthTag + CipherText
+ * Encrypt data
  */
 export function encrypt(plaintext: string): string {
-    const iv = crypto.randomBytes(IV_LENGTH);
-    const key = getMasterKey();
-
-    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
-
-    let encrypted = cipher.update(plaintext, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-
-    const authTag = cipher.getAuthTag();
-
-    // Combine: IV (16) + AuthTag (16) + Ciphertext
-    const combined = Buffer.concat([
-        iv,
-        authTag,
-        Buffer.from(encrypted, 'hex')
-    ]);
-
-    return combined.toString('base64');
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, MASTER_KEY, iv);
+  
+  let encrypted = cipher.update(plaintext, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  
+  const tag = cipher.getAuthTag();
+  
+  // Return: iv (hex) + tag (hex) + encrypted (hex)
+  return iv.toString("hex") + tag.toString("hex") + encrypted;
 }
 
 /**
- * Decrypt data encrypted with encrypt()
+ * Decrypt data
  */
 export function decrypt(encryptedData: string): string {
-    const combined = Buffer.from(encryptedData, 'base64');
-
-    // Extract parts
-    const iv = combined.subarray(0, IV_LENGTH);
-    const authTag = combined.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
-    const ciphertext = combined.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
-
-    const key = getMasterKey();
-
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(authTag);
-
-    let decrypted = decipher.update(ciphertext);
-    decrypted = Buffer.concat([decrypted, decipher.final()]);
-
-    return decrypted.toString('utf8');
+  const iv = Buffer.from(encryptedData.slice(0, IV_LENGTH * 2), "hex");
+  const tag = Buffer.from(encryptedData.slice(IV_LENGTH * 2, IV_LENGTH * 2 + TAG_LENGTH * 2), "hex");
+  const encrypted = encryptedData.slice(IV_LENGTH * 2 + TAG_LENGTH * 2);
+  
+  const decipher = crypto.createDecipheriv(ALGORITHM, MASTER_KEY, iv);
+  decipher.setAuthTag(tag);
+  
+  let decrypted = decipher.update(encrypted, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  
+  return decrypted;
 }
 
 /**
- * Encrypt with user-specific key (for E2E encryption)
- * @returns Base64 encoded string: Salt + IV + AuthTag + CipherText
+ * Encrypt object
  */
-export function encryptWithPassword(plaintext: string, password: string): string {
-    const salt = crypto.randomBytes(SALT_LENGTH);
-    const key = deriveKey(password, salt);
-    const iv = crypto.randomBytes(IV_LENGTH);
-
-    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
-
-    let encrypted = cipher.update(plaintext, 'utf8', 'hex');
-    encrypted += cipher.final('hex');
-
-    const authTag = cipher.getAuthTag();
-
-    // Combine: Salt (32) + IV (16) + AuthTag (16) + Ciphertext
-    const combined = Buffer.concat([
-        salt,
-        iv,
-        authTag,
-        Buffer.from(encrypted, 'hex')
-    ]);
-
-    return combined.toString('base64');
+export function encryptObject(obj: object): string {
+  return encrypt(JSON.stringify(obj));
 }
 
 /**
- * Decrypt data encrypted with encryptWithPassword()
+ * Decrypt object
  */
-export function decryptWithPassword(encryptedData: string, password: string): string {
-    const combined = Buffer.from(encryptedData, 'base64');
-
-    // Extract parts
-    const salt = combined.subarray(0, SALT_LENGTH);
-    const iv = combined.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
-    const authTag = combined.subarray(SALT_LENGTH + IV_LENGTH, SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
-    const ciphertext = combined.subarray(SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
-
-    const key = deriveKey(password, salt);
-
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(authTag);
-
-    let decrypted = decipher.update(ciphertext);
-    decrypted = Buffer.concat([decrypted, decipher.final()]);
-
-    return decrypted.toString('utf8');
+export function decryptObject<T>(encryptedData: string): T {
+  return JSON.parse(decrypt(encryptedData));
 }
 
 /**
- * Hash data with SHA-256 (one-way, for comparisons)
+ * Hash password with salt
  */
-export function hash(data: string): string {
-    return crypto.createHash('sha256').update(data).digest('hex');
+export function hashWithSalt(password: string, salt?: string): { hash: string; salt: string } {
+  const useSalt = salt || crypto.randomBytes(SALT_LENGTH).toString("hex");
+  const hash = crypto.pbkdf2Sync(password, useSalt, ITERATIONS, KEY_LENGTH, "sha256").toString("hex");
+  return { hash, salt: useSalt };
+}
+
+/**
+ * Verify password against hash
+ */
+export function verifyHash(password: string, hash: string, salt: string): boolean {
+  const result = hashWithSalt(password, salt);
+  return result.hash === hash;
 }
 
 /**
  * Generate secure random token
  */
-export function generateSecureToken(length: number = 32): string {
-    return crypto.randomBytes(length).toString('hex');
+export function generateSecureToken(length = 32): string {
+  return crypto.randomBytes(length).toString("hex");
 }
 
 /**
- * Encrypt object (JSON)
+ * Generate API key
  */
-export function encryptObject<T>(obj: T): string {
-    return encrypt(JSON.stringify(obj));
+export function generateApiKey(): string {
+  const prefix = "ilgpt_";
+  const key = crypto.randomBytes(24).toString("base64url");
+  return prefix + key;
 }
 
 /**
- * Decrypt to object
+ * Hash API key for storage
  */
-export function decryptObject<T>(encryptedData: string): T {
-    const json = decrypt(encryptedData);
-    return JSON.parse(json);
+export function hashApiKey(apiKey: string): string {
+  return crypto.createHash("sha256").update(apiKey).digest("hex");
 }
 
 /**
- * Encrypt specific fields in an object
+ * Mask sensitive data
  */
-export function encryptFields<T extends Record<string, any>>(
-    obj: T,
-    fieldsToEncrypt: (keyof T)[]
-): T {
-    const result = { ...obj };
-
-    for (const field of fieldsToEncrypt) {
-        if (result[field] !== undefined && result[field] !== null) {
-            const value = typeof result[field] === 'string'
-                ? result[field]
-                : JSON.stringify(result[field]);
-            result[field] = encrypt(value) as any;
-        }
-    }
-
-    return result;
+export function maskSensitive(data: string, visibleStart = 4, visibleEnd = 4): string {
+  if (data.length <= visibleStart + visibleEnd) {
+    return "*".repeat(data.length);
+  }
+  
+  const start = data.slice(0, visibleStart);
+  const end = data.slice(-visibleEnd);
+  const middle = "*".repeat(Math.min(data.length - visibleStart - visibleEnd, 8));
+  
+  return start + middle + end;
 }
 
 /**
- * Decrypt specific fields in an object
+ * Encrypt file content
  */
-export function decryptFields<T extends Record<string, any>>(
-    obj: T,
-    fieldsToDecrypt: (keyof T)[]
-): T {
-    const result = { ...obj };
-
-    for (const field of fieldsToDecrypt) {
-        if (result[field] !== undefined && result[field] !== null) {
-            try {
-                const decrypted = decrypt(result[field] as string);
-                // Try to parse as JSON, if fails keep as string
-                try {
-                    result[field] = JSON.parse(decrypted);
-                } catch {
-                    result[field] = decrypted as any;
-                }
-            } catch (e) {
-                // Field wasn't encrypted, keep as is
-            }
-        }
-    }
-
-    return result;
-}
-
-// ============================================
-// DATABASE INTEGRATION HELPERS
-// ============================================
-
-/**
- * Middleware for Drizzle - encrypt before insert
- */
-export function createEncryptedColumn(columnName: string) {
-    return {
-        mapToDriverValue: (value: string) => encrypt(value),
-        mapFromDriverValue: (value: string) => decrypt(value),
-    };
+export function encryptBuffer(buffer: Buffer): Buffer {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, MASTER_KEY, iv);
+  
+  const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  
+  // Return: iv + tag + encrypted
+  return Buffer.concat([iv, tag, encrypted]);
 }
 
 /**
- * Encrypt message content for storage
+ * Decrypt file content
  */
-export function encryptMessage(content: string, userId: number): string {
-    // Add metadata for key rotation support
-    const payload = {
-        v: 1, // version
-        t: Date.now(),
-        c: content,
-    };
-    return encrypt(JSON.stringify(payload));
+export function decryptBuffer(encryptedBuffer: Buffer): Buffer {
+  const iv = encryptedBuffer.slice(0, IV_LENGTH);
+  const tag = encryptedBuffer.slice(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
+  const encrypted = encryptedBuffer.slice(IV_LENGTH + TAG_LENGTH);
+  
+  const decipher = crypto.createDecipheriv(ALGORITHM, MASTER_KEY, iv);
+  decipher.setAuthTag(tag);
+  
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]);
 }
 
 /**
- * Decrypt message content from storage
+ * Rotate encryption key (re-encrypt data with new key)
  */
-export function decryptMessage(encrypted: string): string {
-    try {
-        const payload = JSON.parse(decrypt(encrypted));
-        return payload.c;
-    } catch {
-        // Fallback for legacy non-versioned data
-        return decrypt(encrypted);
-    }
+export async function rotateEncryptionKey(
+  oldKey: Buffer,
+  newKey: Buffer,
+  data: string
+): Promise<string> {
+  // Decrypt with old key
+  const iv = Buffer.from(data.slice(0, IV_LENGTH * 2), "hex");
+  const tag = Buffer.from(data.slice(IV_LENGTH * 2, IV_LENGTH * 2 + TAG_LENGTH * 2), "hex");
+  const encrypted = data.slice(IV_LENGTH * 2 + TAG_LENGTH * 2);
+  
+  const decipher = crypto.createDecipheriv(ALGORITHM, oldKey, iv);
+  decipher.setAuthTag(tag);
+  
+  let decrypted = decipher.update(encrypted, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  
+  // Re-encrypt with new key
+  const newIv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, newKey, newIv);
+  
+  let newEncrypted = cipher.update(decrypted, "utf8", "hex");
+  newEncrypted += cipher.final("hex");
+  
+  const newTag = cipher.getAuthTag();
+  
+  return newIv.toString("hex") + newTag.toString("hex") + newEncrypted;
+}
+
+/**
+ * Secure comparison (constant time)
+ */
+export function secureCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+/**
+ * Generate session fingerprint
+ */
+export function generateFingerprint(userAgent: string, ip: string): string {
+  const data = `${userAgent}|${ip}`;
+  return crypto.createHash("sha256").update(data).digest("hex").slice(0, 16);
 }
