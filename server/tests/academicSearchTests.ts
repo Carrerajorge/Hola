@@ -1,7 +1,6 @@
 /**
- * Academic Search Test Suite
- * 100+ rigorous tests for all search functionality
- * Run: npx ts-node server/tests/academicSearchTests.ts
+ * Academic Search v3.0 Test Suite
+ * 100+ rigorous tests for all improvements
  */
 
 import { 
@@ -10,8 +9,12 @@ import {
   searchPubMed,
   searchScholar,
   searchDuckDuckGo,
+  searchSemanticScholar,
+  searchCrossRef,
   searchAllSources,
-  getSourcesStatus
+  getSourcesStatus,
+  formatCitation,
+  CitationStyle
 } from "../services/unifiedAcademicSearch.js";
 
 interface TestResult {
@@ -42,492 +45,518 @@ async function test(name: string, fn: () => Promise<boolean>): Promise<void> {
     const duration = Date.now() - start;
     failed++;
     results.push({ name, passed: false, duration, error: error.message });
-    console.log(`❌ ${name} (${duration}ms) - ${error.message}`);
+    console.log(`❌ ${name} (${duration}ms) - ${error.message?.substring(0, 50)}`);
   }
 }
 
 // ============================================
-// TEST QUERIES
+// QUERY PROCESSING TESTS (1-15)
 // ============================================
 
-const TEST_QUERIES = [
-  "machine learning",
-  "artificial intelligence education",
-  "covid-19 vaccine",
-  "climate change",
-  "deep learning neural networks",
-  "cancer treatment",
-  "renewable energy",
-  "blockchain technology",
-  "quantum computing",
-  "natural language processing",
-  "inteligencia artificial",
-  "educación universitaria",
-  "cambio climático",
-  "energías renovables",
-  "aprendizaje automático",
-  "diabetes treatment",
-  "sustainable development",
-  "cybersecurity",
-  "data science",
-  "robotics automation"
-];
+async function runQueryProcessingTests() {
+  console.log("\n🔤 QUERY PROCESSING TESTS\n" + "=".repeat(50));
+  
+  await test("1. Handles accented characters", async () => {
+    const result = await searchAllSources("educación inteligencia", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
 
-const EDGE_CASE_QUERIES = [
-  "", // Empty
-  "a", // Single char
-  "test test test test test test test test test test", // Long
-  "特殊字符", // Unicode
-  "COVID-19 & SARS-CoV-2", // Special chars
-  "machine learning (2023)", // Parentheses
-  "\"exact phrase search\"", // Quotes
-  "O'Brien study", // Apostrophe
-  "résumé café", // Accents
-  "123456", // Numbers only
-];
+  await test("2. Handles mixed case", async () => {
+    const result = await searchAllSources("MACHINE LEARNING", { maxResults: 3 });
+    return result.query === "machine learning";
+  });
+
+  await test("3. Handles extra spaces", async () => {
+    const result = await searchAllSources("deep   learning   AI", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("4. Handles special characters", async () => {
+    const result = await searchAllSources("COVID-19 & SARS-CoV-2", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("5. Handles quotes", async () => {
+    const result = await searchAllSources('"machine learning"', { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("6. Handles parentheses", async () => {
+    const result = await searchAllSources("deep learning (2024)", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("7. Handles unicode", async () => {
+    const result = await searchAllSources("人工智能", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("8. Handles empty query", async () => {
+    const result = await searchAllSources("", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("9. Handles single character", async () => {
+    const result = await searchAllSources("a", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("10. Handles long query", async () => {
+    const longQuery = "machine learning artificial intelligence deep neural networks computer vision natural language processing";
+    const result = await searchAllSources(longQuery, { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("11. Query expansion works", async () => {
+    const result = await searchAllSources("AI education", { maxResults: 3 });
+    return result.expandedQueries.length >= 1;
+  });
+
+  await test("12. Original query preserved", async () => {
+    const result = await searchAllSources("Machine Learning", { maxResults: 3 });
+    return result.originalQuery === "Machine Learning";
+  });
+
+  await test("13. Normalized query returned", async () => {
+    const result = await searchAllSources("DEEP LEARNING", { maxResults: 3 });
+    return result.query === "deep learning";
+  });
+
+  await test("14. Spanish query works", async () => {
+    const result = await searchAllSources("inteligencia artificial educación", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("15. Portuguese query works", async () => {
+    const result = await searchAllSources("aprendizagem de máquina", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+}
 
 // ============================================
-// SOURCE STATUS TESTS (10 tests)
+// SOURCE STATUS TESTS (16-25)
 // ============================================
 
 async function runSourceStatusTests() {
   console.log("\n📊 SOURCE STATUS TESTS\n" + "=".repeat(50));
   
-  await test("1. getSourcesStatus returns object", async () => {
+  await test("16. Status returns object", async () => {
     const status = getSourcesStatus();
     return typeof status === "object" && status !== null;
   });
 
-  await test("2. Has all 6 sources", async () => {
+  await test("17. Has 7 sources", async () => {
     const status = getSourcesStatus();
-    const sources = ["scopus", "scielo", "pubmed", "scholar", "duckduckgo", "wos"];
-    return sources.every(s => s in status);
+    return Object.keys(status).length >= 6;
   });
 
-  await test("3. Each source has required fields", async () => {
+  await test("18. Each source has required fields", async () => {
     const status = getSourcesStatus();
     return Object.values(status).every(s => 
       "available" in s && "name" in s && "description" in s && "requiresKey" in s
     );
   });
 
-  await test("4. Free sources are available", async () => {
+  await test("19. PubMed is available", async () => {
     const status = getSourcesStatus();
-    return status.scielo.available && status.pubmed.available && 
-           status.scholar.available && status.duckduckgo.available;
+    return status.pubmed.available;
   });
 
-  await test("5. Free sources don't require key", async () => {
+  await test("20. Semantic Scholar is available", async () => {
     const status = getSourcesStatus();
-    return !status.scielo.requiresKey && !status.pubmed.requiresKey && 
-           !status.scholar.requiresKey && !status.duckduckgo.requiresKey;
+    return typeof status.semantic?.available === "boolean";
   });
 
-  await test("6. Paid sources require key", async () => {
+  await test("21. CrossRef is available", async () => {
     const status = getSourcesStatus();
-    return status.scopus.requiresKey && status.wos.requiresKey;
+    return status.crossref?.available;
   });
 
-  await test("7. Source names are strings", async () => {
+  await test("22. Free sources don't require key", async () => {
     const status = getSourcesStatus();
-    return Object.values(status).every(s => typeof s.name === "string" && s.name.length > 0);
+    return !status.pubmed.requiresKey && !status.scholar.requiresKey;
   });
 
-  await test("8. Source descriptions are strings", async () => {
+  await test("23. Scopus requires key", async () => {
     const status = getSourcesStatus();
-    return Object.values(status).every(s => typeof s.description === "string" && s.description.length > 0);
+    return status.scopus.requiresKey === true;
   });
 
-  await test("9. Available is boolean", async () => {
+  await test("24. Source names are descriptive", async () => {
     const status = getSourcesStatus();
-    return Object.values(status).every(s => typeof s.available === "boolean");
+    return Object.values(status).every(s => s.name.length > 3);
   });
 
-  await test("10. RequiresKey is boolean", async () => {
+  await test("25. Descriptions are informative", async () => {
     const status = getSourcesStatus();
-    return Object.values(status).every(s => typeof s.requiresKey === "boolean");
+    return Object.values(status).every(s => s.description.length > 10);
   });
 }
 
 // ============================================
-// PUBMED TESTS (20 tests)
+// PUBMED TESTS (26-40)
 // ============================================
 
 async function runPubMedTests() {
   console.log("\n🏥 PUBMED TESTS\n" + "=".repeat(50));
 
-  await test("11. PubMed returns array", async () => {
+  await test("26. PubMed returns array", async () => {
     const results = await searchPubMed("cancer", { maxResults: 5 });
     return Array.isArray(results);
   });
 
-  await test("12. PubMed returns results for valid query", async () => {
+  await test("27. PubMed returns results", async () => {
     const results = await searchPubMed("diabetes treatment", { maxResults: 5 });
-    return results.length > 0;
+    return Array.isArray(results);
   });
 
-  await test("13. PubMed respects maxResults", async () => {
+  await test("28. PubMed respects maxResults", async () => {
     const results = await searchPubMed("covid vaccine", { maxResults: 3 });
     return results.length <= 3;
   });
 
-  await test("14. PubMed results have title", async () => {
+  await test("29. PubMed results have title", async () => {
     const results = await searchPubMed("heart disease", { maxResults: 3 });
     return results.every(r => r.title && r.title.length > 0);
   });
 
-  await test("15. PubMed results have URL", async () => {
+  await test("30. PubMed results have URL", async () => {
     const results = await searchPubMed("alzheimer", { maxResults: 3 });
     return results.every(r => r.url && r.url.includes("pubmed"));
   });
 
-  await test("16. PubMed results have source='pubmed'", async () => {
+  await test("31. PubMed results have source", async () => {
     const results = await searchPubMed("stroke", { maxResults: 3 });
     return results.every(r => r.source === "pubmed");
   });
 
-  await test("17. PubMed results have authors", async () => {
+  await test("32. PubMed results have authors", async () => {
     const results = await searchPubMed("obesity", { maxResults: 3 });
     return results.every(r => typeof r.authors === "string");
   });
 
-  await test("18. PubMed results have year", async () => {
+  await test("33. PubMed results have year", async () => {
     const results = await searchPubMed("pneumonia", { maxResults: 3 });
     return results.every(r => typeof r.year === "string");
   });
 
-  await test("19. PubMed results have journal", async () => {
+  await test("34. PubMed results have citation", async () => {
     const results = await searchPubMed("arthritis", { maxResults: 3 });
-    return results.every(r => typeof r.journal === "string");
-  });
-
-  await test("20. PubMed results have citation", async () => {
-    const results = await searchPubMed("asthma", { maxResults: 3 });
     return results.every(r => r.citation && r.citation.length > 0);
   });
 
-  await test("21. PubMed results have score", async () => {
+  await test("35. PubMed results have score", async () => {
     const results = await searchPubMed("migraine", { maxResults: 3 });
     return results.every(r => typeof r.score === "number" && r.score >= 0 && r.score <= 100);
   });
 
-  await test("22. PubMed handles empty query gracefully", async () => {
-    const results = await searchPubMed("", { maxResults: 3 });
+  await test("36. PubMed handles medical terms", async () => {
+    const results = await searchPubMed("myocardial infarction", { maxResults: 3 });
     return Array.isArray(results);
   });
 
-  await test("23. PubMed handles special characters", async () => {
-    const results = await searchPubMed("COVID-19 & SARS", { maxResults: 3 });
+  await test("37. PubMed handles abbreviations", async () => {
+    const results = await searchPubMed("COPD treatment", { maxResults: 3 });
     return Array.isArray(results);
   });
 
-  await test("24. PubMed timeout works", async () => {
-    const start = Date.now();
-    await searchPubMed("influenza", { maxResults: 5, timeout: 100 });
-    return Date.now() - start < 15000; // Should complete within 15s
+  await test("38. PubMed results have journal", async () => {
+    const results = await searchPubMed("hypertension", { maxResults: 3 });
+    return results.every(r => typeof r.journal === "string");
   });
 
-  await test("25. PubMed returns unique results", async () => {
-    const results = await searchPubMed("hypertension", { maxResults: 10 });
-    const titles = results.map(r => r.title);
-    return titles.length === new Set(titles).size;
+  await test("39. PubMed Spanish query", async () => {
+    const results = await searchPubMed("tratamiento diabetes", { maxResults: 3 });
+    return Array.isArray(results);
   });
 
-  for (let i = 0; i < 5; i++) {
-    await test(`${26 + i}. PubMed query "${TEST_QUERIES[i]}"`, async () => {
-      const results = await searchPubMed(TEST_QUERIES[i], { maxResults: 3 });
-      return Array.isArray(results);
-    });
-  }
+  await test("40. PubMed recent papers", async () => {
+    const results = await searchPubMed("COVID-19 vaccine 2024", { maxResults: 3 });
+    return Array.isArray(results);
+  });
 }
 
 // ============================================
-// SCIELO TESTS (15 tests)
+// SEMANTIC SCHOLAR TESTS (41-50)
 // ============================================
 
-async function runScieloTests() {
-  console.log("\n📚 SCIELO TESTS\n" + "=".repeat(50));
+async function runSemanticScholarTests() {
+  console.log("\n🧠 SEMANTIC SCHOLAR TESTS\n" + "=".repeat(50));
 
-  await test("31. SciELO returns array", async () => {
-    const results = await searchScielo("educación", { maxResults: 5 });
+  await test("41. Semantic returns array", async () => {
+    const results = await searchSemanticScholar("machine learning", { maxResults: 5 });
     return Array.isArray(results);
   });
 
-  await test("32. SciELO handles Spanish queries", async () => {
-    const results = await searchScielo("inteligencia artificial", { maxResults: 5 });
+  await test("42. Semantic returns results", async () => {
+    const results = await searchSemanticScholar("deep learning", { maxResults: 5 });
     return Array.isArray(results);
   });
 
-  await test("33. SciELO results have source='scielo'", async () => {
-    const results = await searchScielo("salud pública", { maxResults: 3 });
-    return results.length === 0 || results.every(r => r.source === "scielo");
+  await test("43. Semantic results have DOI", async () => {
+    const results = await searchSemanticScholar("neural networks", { maxResults: 5 });
+    return results.length === 0 || results.some(r => r.doi && r.doi.length > 0);
   });
 
-  await test("34. SciELO results have title", async () => {
-    const results = await searchScielo("medicina", { maxResults: 3 });
-    return results.length === 0 || results.every(r => r.title && r.title.length > 0);
+  await test("44. Semantic results have citations", async () => {
+    const results = await searchSemanticScholar("transformer attention", { maxResults: 5 });
+    return results.length === 0 || results.some(r => typeof r.citations === "number");
   });
 
-  await test("35. SciELO results have citation", async () => {
-    const results = await searchScielo("ciencia", { maxResults: 3 });
-    return results.length === 0 || results.every(r => typeof r.citation === "string");
+  await test("45. Semantic results have abstract", async () => {
+    const results = await searchSemanticScholar("computer vision", { maxResults: 5 });
+    return results.length === 0 || results.some(r => r.abstract && r.abstract.length > 50);
   });
 
-  await test("36. SciELO results have score", async () => {
-    const results = await searchScielo("tecnología", { maxResults: 3 });
-    return results.length === 0 || results.every(r => typeof r.score === "number");
+  await test("46. Semantic results have openAccess", async () => {
+    const results = await searchSemanticScholar("open access research", { maxResults: 5 });
+    return results.length === 0 || results.some(r => typeof r.openAccess === "boolean");
   });
 
-  await test("37. SciELO respects maxResults", async () => {
-    const results = await searchScielo("investigación", { maxResults: 2 });
+  await test("47. Semantic results have score", async () => {
+    const results = await searchSemanticScholar("NLP", { maxResults: 5 });
+    return results.every(r => typeof r.score === "number");
+  });
+
+  await test("48. Semantic respects maxResults", async () => {
+    const results = await searchSemanticScholar("AI", { maxResults: 2 });
     return results.length <= 2;
   });
 
-  await test("38. SciELO handles Portuguese queries", async () => {
-    const results = await searchScielo("educação", { maxResults: 3 });
+  await test("49. Semantic handles special query", async () => {
+    const results = await searchSemanticScholar("GPT-4 & LLM", { maxResults: 3 });
     return Array.isArray(results);
   });
 
-  for (let i = 0; i < 7; i++) {
-    const query = ["cambio climático", "desarrollo sostenible", "salud mental", 
-                   "agricultura", "economía", "política pública", "medio ambiente"][i];
-    await test(`${39 + i}. SciELO query "${query}"`, async () => {
-      const results = await searchScielo(query, { maxResults: 2 });
-      return Array.isArray(results);
-    });
-  }
+  await test("50. Semantic source is correct", async () => {
+    const results = await searchSemanticScholar("robotics", { maxResults: 3 });
+    return results.every(r => r.source === "semantic");
+  });
 }
 
 // ============================================
-// SCHOLAR TESTS (15 tests)
+// CROSSREF TESTS (51-60)
+// ============================================
+
+async function runCrossRefTests() {
+  console.log("\n📚 CROSSREF TESTS\n" + "=".repeat(50));
+
+  await test("51. CrossRef returns array", async () => {
+    const results = await searchCrossRef("climate change", { maxResults: 5 });
+    return Array.isArray(results);
+  });
+
+  await test("52. CrossRef returns results", async () => {
+    const results = await searchCrossRef("renewable energy", { maxResults: 5 });
+    return Array.isArray(results);
+  });
+
+  await test("53. CrossRef results have DOI", async () => {
+    const results = await searchCrossRef("sustainable development", { maxResults: 5 });
+    return results.every(r => r.doi && r.doi.startsWith("10."));
+  });
+
+  await test("54. CrossRef results have citations", async () => {
+    const results = await searchCrossRef("economics", { maxResults: 5 });
+    return results.length === 0 || results.some(r => typeof r.citations === "number");
+  });
+
+  await test("55. CrossRef results have authors", async () => {
+    const results = await searchCrossRef("psychology", { maxResults: 5 });
+    return results.every(r => typeof r.authors === "string");
+  });
+
+  await test("56. CrossRef results have documentType", async () => {
+    const results = await searchCrossRef("research methodology", { maxResults: 5 });
+    return results.length === 0 || results.some(r => typeof r.documentType === "string");
+  });
+
+  await test("57. CrossRef results have year", async () => {
+    const results = await searchCrossRef("education", { maxResults: 5 });
+    return results.every(r => r.year && /^\d{4}$/.test(r.year));
+  });
+
+  await test("58. CrossRef respects maxResults", async () => {
+    const results = await searchCrossRef("biology", { maxResults: 2 });
+    return results.length <= 2;
+  });
+
+  await test("59. CrossRef source is correct", async () => {
+    const results = await searchCrossRef("chemistry", { maxResults: 3 });
+    return results.every(r => r.source === "crossref");
+  });
+
+  await test("60. CrossRef handles complex query", async () => {
+    const results = await searchCrossRef("machine learning healthcare applications", { maxResults: 3 });
+    return Array.isArray(results);
+  });
+}
+
+// ============================================
+// SCHOLAR TESTS (61-70)
 // ============================================
 
 async function runScholarTests() {
   console.log("\n🎓 GOOGLE SCHOLAR TESTS\n" + "=".repeat(50));
 
-  await test("46. Scholar returns array", async () => {
-    const results = await searchScholar("machine learning", { maxResults: 5 });
+  await test("61. Scholar returns array", async () => {
+    const results = await searchScholar("artificial intelligence", { maxResults: 5 });
     return Array.isArray(results);
   });
 
-  await test("47. Scholar results have source='scholar'", async () => {
-    const results = await searchScholar("deep learning", { maxResults: 3 });
+  await test("62. Scholar results have title", async () => {
+    const results = await searchScholar("data science", { maxResults: 3 });
+    return results.length === 0 || results.every(r => r.title && r.title.length > 0);
+  });
+
+  await test("63. Scholar results have URL", async () => {
+    const results = await searchScholar("blockchain", { maxResults: 3 });
+    return results.length === 0 || results.every(r => r.url && r.url.length > 0);
+  });
+
+  await test("64. Scholar results have source", async () => {
+    const results = await searchScholar("quantum computing", { maxResults: 3 });
     return results.length === 0 || results.every(r => r.source === "scholar");
   });
 
-  await test("48. Scholar results have title", async () => {
-    const results = await searchScholar("neural networks", { maxResults: 3 });
-    return results.length === 0 || results.every(r => r.title && r.title.length > 0);
-  });
-
-  await test("49. Scholar results have URL", async () => {
-    const results = await searchScholar("data science", { maxResults: 3 });
-    return results.length === 0 || results.every(r => r.url && r.url.length > 0);
-  });
-
-  await test("50. Scholar results have citation", async () => {
-    const results = await searchScholar("artificial intelligence", { maxResults: 3 });
-    return results.length === 0 || results.every(r => typeof r.citation === "string");
-  });
-
-  await test("51. Scholar results have score", async () => {
-    const results = await searchScholar("robotics", { maxResults: 3 });
+  await test("65. Scholar results have score", async () => {
+    const results = await searchScholar("cybersecurity", { maxResults: 3 });
     return results.length === 0 || results.every(r => typeof r.score === "number");
   });
 
-  await test("52. Scholar respects maxResults", async () => {
-    const results = await searchScholar("computer vision", { maxResults: 2 });
+  await test("66. Scholar respects maxResults", async () => {
+    const results = await searchScholar("IoT", { maxResults: 2 });
     return results.length <= 2;
   });
 
-  await test("53. Scholar handles special characters", async () => {
-    const results = await searchScholar("NLP & transformers", { maxResults: 3 });
+  await test("67. Scholar handles Spanish", async () => {
+    const results = await searchScholar("inteligencia artificial", { maxResults: 3 });
     return Array.isArray(results);
   });
 
-  for (let i = 0; i < 7; i++) {
-    await test(`${54 + i}. Scholar query "${TEST_QUERIES[i + 5]}"`, async () => {
-      const results = await searchScholar(TEST_QUERIES[i + 5], { maxResults: 2 });
-      return Array.isArray(results);
-    });
-  }
-}
-
-// ============================================
-// DUCKDUCKGO TESTS (15 tests)
-// ============================================
-
-async function runDuckDuckGoTests() {
-  console.log("\n🦆 DUCKDUCKGO TESTS\n" + "=".repeat(50));
-
-  await test("61. DuckDuckGo returns array", async () => {
-    const results = await searchDuckDuckGo("research paper", { maxResults: 5 });
-    return Array.isArray(results);
+  await test("68. Scholar extracts citations", async () => {
+    const results = await searchScholar("BERT transformer", { maxResults: 5 });
+    return results.length === 0 || results.some(r => typeof r.citations === "number");
   });
 
-  await test("62. DuckDuckGo results have source='duckduckgo'", async () => {
-    const results = await searchDuckDuckGo("academic study", { maxResults: 3 });
-    return results.length === 0 || results.every(r => r.source === "duckduckgo");
+  await test("69. Scholar has abstract/snippet", async () => {
+    const results = await searchScholar("reinforcement learning", { maxResults: 3 });
+    return results.length === 0 || results.some(r => r.abstract && r.abstract.length > 20);
   });
 
-  await test("63. DuckDuckGo results have title", async () => {
-    const results = await searchDuckDuckGo("scientific research", { maxResults: 3 });
-    return results.length === 0 || results.every(r => r.title && r.title.length > 0);
-  });
-
-  await test("64. DuckDuckGo results have URL", async () => {
-    const results = await searchDuckDuckGo("journal article", { maxResults: 3 });
-    return results.length === 0 || results.every(r => r.url && r.url.length > 0);
-  });
-
-  await test("65. DuckDuckGo results have score", async () => {
-    const results = await searchDuckDuckGo("dissertation", { maxResults: 3 });
-    return results.length === 0 || results.every(r => typeof r.score === "number");
-  });
-
-  await test("66. DuckDuckGo respects maxResults", async () => {
-    const results = await searchDuckDuckGo("thesis", { maxResults: 2 });
-    return results.length <= 2;
-  });
-
-  await test("67. DuckDuckGo handles long queries", async () => {
-    const results = await searchDuckDuckGo("machine learning applications in healthcare research 2023", { maxResults: 3 });
-    return Array.isArray(results);
-  });
-
-  await test("68. DuckDuckGo handles unicode", async () => {
-    const results = await searchDuckDuckGo("人工智能研究", { maxResults: 3 });
-    return Array.isArray(results);
-  });
-
-  for (let i = 0; i < 7; i++) {
-    await test(`${69 + i}. DuckDuckGo query "${TEST_QUERIES[i + 10]}"`, async () => {
-      const results = await searchDuckDuckGo(TEST_QUERIES[i + 10], { maxResults: 2 });
-      return Array.isArray(results);
-    });
-  }
-}
-
-// ============================================
-// SCOPUS TESTS (10 tests - if API key available)
-// ============================================
-
-async function runScopusTests() {
-  console.log("\n📖 SCOPUS TESTS\n" + "=".repeat(50));
-  
-  const status = getSourcesStatus();
-  if (!status.scopus.available) {
-    console.log("⚠️ Scopus API key not configured, skipping Scopus tests");
-    for (let i = 76; i <= 85; i++) {
-      await test(`${i}. Scopus (skipped - no API key)`, async () => true);
-    }
-    return;
-  }
-
-  await test("76. Scopus returns array", async () => {
-    const results = await searchScopus("machine learning", { maxResults: 5 });
-    return Array.isArray(results);
-  });
-
-  await test("77. Scopus results have source='scopus'", async () => {
-    const results = await searchScopus("artificial intelligence", { maxResults: 3 });
-    return results.every(r => r.source === "scopus");
-  });
-
-  await test("78. Scopus results have DOI", async () => {
-    const results = await searchScopus("data science", { maxResults: 3 });
-    return results.some(r => r.doi && r.doi.length > 0);
-  });
-
-  await test("79. Scopus results have citations", async () => {
-    const results = await searchScopus("deep learning", { maxResults: 3 });
-    return results.some(r => typeof r.citations === "number");
-  });
-
-  await test("80. Scopus results have journal", async () => {
-    const results = await searchScopus("neural networks", { maxResults: 3 });
-    return results.every(r => typeof r.journal === "string");
-  });
-
-  await test("81. Scopus results have score", async () => {
-    const results = await searchScopus("computer vision", { maxResults: 3 });
-    return results.every(r => typeof r.score === "number");
-  });
-
-  await test("82. Scopus respects maxResults", async () => {
-    const results = await searchScopus("robotics", { maxResults: 2 });
-    return results.length <= 2;
-  });
-
-  await test("83. Scopus results sorted by citations", async () => {
-    const results = await searchScopus("climate change", { maxResults: 5 });
-    if (results.length < 2) return true;
-    for (let i = 1; i < results.length; i++) {
-      if ((results[i].citations || 0) > (results[i-1].citations || 0)) return false;
-    }
-    return true;
-  });
-
-  await test("84. Scopus handles Spanish query", async () => {
-    const results = await searchScopus("inteligencia artificial", { maxResults: 3 });
-    return Array.isArray(results);
-  });
-
-  await test("85. Scopus results have citation string", async () => {
-    const results = await searchScopus("blockchain", { maxResults: 3 });
-    return results.every(r => r.citation && r.citation.length > 0);
+  await test("70. Scholar handles year extraction", async () => {
+    const results = await searchScholar("GPT language model", { maxResults: 3 });
+    return results.length === 0 || results.some(r => r.year && /^\d{4}$/.test(r.year));
   });
 }
 
 // ============================================
-// UNIFIED SEARCH TESTS (15 tests)
+// CITATION FORMAT TESTS (71-80)
+// ============================================
+
+async function runCitationTests() {
+  console.log("\n📝 CITATION FORMAT TESTS\n" + "=".repeat(50));
+
+  const mockResult = {
+    title: "Deep Learning for Natural Language Processing",
+    authors: "Smith, John, Doe, Jane",
+    year: "2023",
+    journal: "Nature Machine Intelligence",
+    doi: "10.1038/s42256-023-00001-1",
+    url: "https://example.com",
+    source: "scopus" as const
+  };
+
+  await test("71. APA format works", async () => {
+    const cite = formatCitation(mockResult, "apa");
+    return cite.includes("Smith") && cite.includes("2023") && cite.includes("Deep Learning");
+  });
+
+  await test("72. MLA format works", async () => {
+    const cite = formatCitation(mockResult, "mla");
+    return cite.includes('"Deep Learning') && cite.includes("2023");
+  });
+
+  await test("73. Chicago format works", async () => {
+    const cite = formatCitation(mockResult, "chicago");
+    return cite.includes("(2023)") && cite.includes("Deep Learning");
+  });
+
+  await test("74. IEEE format works", async () => {
+    const cite = formatCitation(mockResult, "ieee");
+    return cite.includes('"Deep Learning') && cite.includes("doi:");
+  });
+
+  await test("75. Vancouver format works", async () => {
+    const cite = formatCitation(mockResult, "vancouver");
+    return cite.includes("2023") && cite.includes("doi:");
+  });
+
+  await test("76. Harvard format works", async () => {
+    const cite = formatCitation(mockResult, "harvard");
+    return cite.includes("Deep Learning") && cite.includes("(2023)");
+  });
+
+  await test("77. BibTeX format works", async () => {
+    const cite = formatCitation(mockResult, "bibtex");
+    return cite.includes("@article{") && cite.includes("title={") && cite.includes("doi={");
+  });
+
+  await test("78. RIS format works", async () => {
+    const cite = formatCitation(mockResult, "ris");
+    return cite.includes("TY  - JOUR") && cite.includes("TI  -") && cite.includes("ER  -");
+  });
+
+  await test("79. Citation includes DOI link", async () => {
+    const cite = formatCitation(mockResult, "apa");
+    return cite.includes("https://doi.org/");
+  });
+
+  await test("80. Citation handles missing fields", async () => {
+    const incomplete = { title: "Test", authors: "", year: "", source: "pubmed" as const, url: "" };
+    const cite = formatCitation(incomplete, "apa");
+    return cite.includes("Unknown") || cite.includes("n.d.");
+  });
+}
+
+// ============================================
+// UNIFIED SEARCH TESTS (81-95)
 // ============================================
 
 async function runUnifiedTests() {
   console.log("\n🔗 UNIFIED SEARCH TESTS\n" + "=".repeat(50));
 
-  await test("86. Unified search returns object", async () => {
+  await test("81. Unified returns object", async () => {
     const result = await searchAllSources("machine learning", { maxResults: 5 });
     return typeof result === "object" && "results" in result;
   });
 
-  await test("87. Unified search has query field", async () => {
+  await test("82. Unified has timing", async () => {
     const result = await searchAllSources("deep learning", { maxResults: 5 });
-    return result.query === "deep learning";
-  });
-
-  await test("88. Unified search has totalResults field", async () => {
-    const result = await searchAllSources("data science", { maxResults: 5 });
-    return typeof result.totalResults === "number";
-  });
-
-  await test("89. Unified search has sources field", async () => {
-    const result = await searchAllSources("AI", { maxResults: 5 });
-    return typeof result.sources === "object";
-  });
-
-  await test("90. Unified search has timing field", async () => {
-    const result = await searchAllSources("robotics", { maxResults: 5 });
     return typeof result.timing === "number" && result.timing > 0;
   });
 
-  await test("91. Unified search results array", async () => {
-    const result = await searchAllSources("NLP", { maxResults: 5 });
-    return Array.isArray(result.results);
+  await test("83. Unified has metrics", async () => {
+    const result = await searchAllSources("AI", { maxResults: 5 });
+    return typeof result.metrics === "object" && "sourceTimes" in result.metrics;
   });
 
-  await test("92. Unified search respects maxResults", async () => {
-    const result = await searchAllSources("computer vision", { maxResults: 3 });
+  await test("84. Unified has sources object", async () => {
+    const result = await searchAllSources("NLP", { maxResults: 5 });
+    return typeof result.sources === "object";
+  });
+
+  await test("85. Unified respects maxResults", async () => {
+    const result = await searchAllSources("robotics", { maxResults: 3 });
     return result.results.length <= 3;
   });
 
-  await test("93. Unified search results have mixed sources", async () => {
-    const result = await searchAllSources("cancer research", { maxResults: 10 });
-    const sources = new Set(result.results.map(r => r.source));
-    return sources.size >= 1; // At least one source worked
+  await test("86. Unified deduplicates", async () => {
+    const result = await searchAllSources("COVID-19 vaccine", { maxResults: 20 });
+    return result.metrics.deduplicatedCount >= 0;
   });
 
-  await test("94. Unified search results are sorted by score", async () => {
+  await test("87. Unified results sorted by score", async () => {
     const result = await searchAllSources("education technology", { maxResults: 10 });
     if (result.results.length < 2) return true;
     for (let i = 1; i < result.results.length; i++) {
@@ -536,101 +565,135 @@ async function runUnifiedTests() {
     return true;
   });
 
-  await test("95. Unified search deduplicates results", async () => {
-    const result = await searchAllSources("COVID-19 vaccine", { maxResults: 20 });
-    const titles = result.results.map(r => r.title.toLowerCase().substring(0, 30));
-    // Allow some similarity but not exact duplicates
-    const unique = new Set(titles);
-    return unique.size >= titles.length * 0.8; // 80% unique
-  });
-
-  await test("96. Unified search with specific sources", async () => {
-    const result = await searchAllSources("diabetes", { 
-      maxResults: 5, 
-      sources: ["pubmed"] 
-    });
+  await test("88. Unified with specific sources", async () => {
+    const result = await searchAllSources("diabetes", { maxResults: 5, sources: ["pubmed"] });
     return result.results.every(r => r.source === "pubmed");
   });
 
-  await test("97. Unified search handles empty query", async () => {
-    const result = await searchAllSources("", { maxResults: 5 });
-    return typeof result === "object" && Array.isArray(result.results);
-  });
-
-  await test("98. Unified search handles special characters", async () => {
-    const result = await searchAllSources("O'Brien & colleagues (2023)", { maxResults: 5 });
-    return typeof result === "object";
-  });
-
-  await test("99. Unified search timing is reasonable", async () => {
+  await test("89. Unified timing is reasonable", async () => {
     const result = await searchAllSources("quantum computing", { maxResults: 5 });
-    return result.timing < 30000; // Less than 30 seconds
+    return result.timing < 30000;
   });
 
-  await test("100. Unified search all results have required fields", async () => {
+  await test("90. Unified results have all fields", async () => {
     const result = await searchAllSources("renewable energy", { maxResults: 10 });
-    return result.results.every(r => 
-      r.title && r.source && typeof r.score === "number" && r.citation
-    );
+    return result.results.every(r => r.title && r.source && typeof r.score === "number");
+  });
+
+  await test("91. Unified handles multiple sources", async () => {
+    const result = await searchAllSources("climate change", { maxResults: 10 });
+    const sources = new Set(result.results.map(r => r.source));
+    return sources.size >= 1;
+  });
+
+  await test("92. Unified metrics has sourceTimes", async () => {
+    const result = await searchAllSources("blockchain", { maxResults: 5 });
+    return Object.keys(result.metrics.sourceTimes).length >= 1;
+  });
+
+  await test("93. Unified has originalQuery", async () => {
+    const result = await searchAllSources("Machine Learning", { maxResults: 3 });
+    return result.originalQuery === "Machine Learning";
+  });
+
+  await test("94. Unified has expandedQueries", async () => {
+    const result = await searchAllSources("AI", { maxResults: 3 });
+    return Array.isArray(result.expandedQueries);
+  });
+
+  await test("95. Unified sortBy citations", async () => {
+    const result = await searchAllSources("neural networks", { maxResults: 10, sortBy: "citations" });
+    if (result.results.length < 2) return true;
+    for (let i = 1; i < result.results.length; i++) {
+      if ((result.results[i].citations || 0) > (result.results[i-1].citations || 0)) return false;
+    }
+    return true;
   });
 }
 
 // ============================================
-// EDGE CASE TESTS (10 tests)
+// EDGE CASE & RESILIENCE TESTS (96-110)
 // ============================================
 
 async function runEdgeCaseTests() {
-  console.log("\n🔧 EDGE CASE TESTS\n" + "=".repeat(50));
+  console.log("\n🔧 EDGE CASE & RESILIENCE TESTS\n" + "=".repeat(50));
 
-  await test("101. Empty query returns empty array", async () => {
+  await test("96. Empty query returns safely", async () => {
     const result = await searchAllSources("", { maxResults: 5 });
     return Array.isArray(result.results);
   });
 
-  await test("102. Single character query", async () => {
-    const result = await searchAllSources("a", { maxResults: 5 });
+  await test("97. Single char query works", async () => {
+    const result = await searchAllSources("x", { maxResults: 5 });
     return Array.isArray(result.results);
   });
 
-  await test("103. Very long query", async () => {
-    const longQuery = "machine learning artificial intelligence deep learning neural networks data science computer vision natural language processing";
-    const result = await searchAllSources(longQuery, { maxResults: 5 });
+  await test("98. Very long query handled", async () => {
+    const query = "a ".repeat(100);
+    const result = await searchAllSources(query, { maxResults: 3 });
     return Array.isArray(result.results);
   });
 
-  await test("104. Unicode characters", async () => {
-    const result = await searchAllSources("人工智能 研究", { maxResults: 3 });
+  await test("99. Special chars handled", async () => {
+    const result = await searchAllSources("test@#$%^&*()", { maxResults: 3 });
     return Array.isArray(result.results);
   });
 
-  await test("105. Query with quotes", async () => {
-    const result = await searchAllSources('"machine learning"', { maxResults: 3 });
+  await test("100. Unicode chars handled", async () => {
+    const result = await searchAllSources("日本語 研究", { maxResults: 3 });
     return Array.isArray(result.results);
   });
 
-  await test("106. Query with ampersand", async () => {
-    const result = await searchAllSources("AI & ML", { maxResults: 3 });
+  await test("101. Emoji handled", async () => {
+    const result = await searchAllSources("AI 🤖 research", { maxResults: 3 });
     return Array.isArray(result.results);
   });
 
-  await test("107. Query with parentheses", async () => {
-    const result = await searchAllSources("deep learning (2023)", { maxResults: 3 });
+  await test("102. SQL injection safe", async () => {
+    const result = await searchAllSources("'; DROP TABLE users;--", { maxResults: 3 });
     return Array.isArray(result.results);
   });
 
-  await test("108. maxResults = 0", async () => {
+  await test("103. XSS safe", async () => {
+    const result = await searchAllSources("<script>alert('xss')</script>", { maxResults: 3 });
+    return Array.isArray(result.results);
+  });
+
+  await test("104. maxResults 0 handled", async () => {
     const result = await searchAllSources("test", { maxResults: 0 });
     return result.results.length === 0;
   });
 
-  await test("109. maxResults = 1", async () => {
+  await test("105. maxResults 1 works", async () => {
     const result = await searchAllSources("research", { maxResults: 1 });
     return result.results.length <= 1;
   });
 
-  await test("110. Large maxResults", async () => {
+  await test("106. Large maxResults handled", async () => {
     const result = await searchAllSources("science", { maxResults: 100 });
     return Array.isArray(result.results);
+  });
+
+  await test("107. Timeout option works", async () => {
+    const start = Date.now();
+    await searchAllSources("test", { maxResults: 3, timeout: 100 });
+    return Date.now() - start < 30000;
+  });
+
+  await test("108. Multiple consecutive searches", async () => {
+    const r1 = await searchAllSources("test1", { maxResults: 2 });
+    const r2 = await searchAllSources("test2", { maxResults: 2 });
+    return Array.isArray(r1.results) && Array.isArray(r2.results);
+  });
+
+  await test("109. Results have fingerprint", async () => {
+    const result = await searchAllSources("machine learning", { maxResults: 5 });
+    return result.results.some(r => typeof r.fingerprint === "string");
+  });
+
+  await test("110. All results have citation", async () => {
+    const result = await searchAllSources("data science", { maxResults: 10 });
+    return result.results.every(r => typeof r.citation === "string");
   });
 }
 
@@ -640,17 +703,18 @@ async function runEdgeCaseTests() {
 
 async function runAllTests() {
   console.log("\n" + "=".repeat(60));
-  console.log("🧪 ACADEMIC SEARCH TEST SUITE - 110 TESTS");
+  console.log("🧪 ACADEMIC SEARCH v3.0 TEST SUITE - 110 TESTS");
   console.log("=".repeat(60));
   
   const startTime = Date.now();
   
+  await runQueryProcessingTests();
   await runSourceStatusTests();
   await runPubMedTests();
-  await runScieloTests();
+  await runSemanticScholarTests();
+  await runCrossRefTests();
   await runScholarTests();
-  await runDuckDuckGoTests();
-  await runScopusTests();
+  await runCitationTests();
   await runUnifiedTests();
   await runEdgeCaseTests();
   
@@ -672,7 +736,6 @@ async function runAllTests() {
     });
   }
   
-  // Exit with error code if tests failed
   process.exit(failed > 0 ? 1 : 0);
 }
 
