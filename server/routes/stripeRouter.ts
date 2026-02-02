@@ -120,8 +120,10 @@ export function createStripeRouter() {
               priceMapping.price_go_monthly = price.id;
             } else if (amount === 1000 && interval === "month") {
               priceMapping.price_plus_monthly = price.id;
-            } else if (amount === 2000 && interval === "year") {
-              priceMapping.price_pro_yearly = price.id;
+            } else if (amount === 20000 && interval === "month") {
+              priceMapping.price_pro_monthly = price.id;
+            } else if (amount === 2500 && interval === "month") {
+              priceMapping.price_business_monthly = price.id;
             }
           }
         } catch (stripeError: any) {
