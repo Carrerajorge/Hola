@@ -6,6 +6,7 @@ import { storage } from "../storage";
 import { responseCache } from "./responseCache";
 import { generateEmbedding } from "../embeddingService";
 import { searchWeb, searchScholar, needsWebSearch, needsAcademicSearch } from "./webSearch";
+import { academicEngine, generateAPACitation, exportToExcel } from "./academicResearchEngine";
 import { routeMessage, runPipeline, ProgressUpdate, checkDomainPolicy, checkRateLimit, sanitizeUrl, isValidObjective, multiIntentManager, multiIntentPipeline } from "../agent";
 import type { PipelineResponse } from "../../shared/schemas/multiIntent";
 import { checkToolPolicy, logToolCall } from "./integrationPolicyService";
@@ -1558,28 +1559,62 @@ Responde de manera completa y profesional, adaptando el formato a lo que el usua
     if (!academicPolicyCheck.allowed) {
       console.log(`[ChatService:WebSearch] Academic search blocked by policy: ${academicPolicyCheck.reason}`);
     } else {
-      console.log(`[ChatService:WebSearch] Academic search triggered`);
+      console.log(`[ChatService:WebSearch] Academic search triggered - using Academic Research Engine v2.0`);
       const searchStartTime = Date.now();
       try {
-        const scholarResults = await searchScholar(lastUserMessage.content, 15);
-        await logToolCall(userId || "anonymous", "academic_search", "google_scholar",
-          { query: lastUserMessage.content }, { count: scholarResults.length }, "success", Date.now() - searchStartTime);
+        // Use the new Academic Research Engine for better results
+        const engineResult = await academicEngine.search({
+          query: lastUserMessage.content,
+          maxResults: 20,
+          yearFrom: 2020,
+          yearTo: new Date().getFullYear(),
+          sources: ["openalex", "semantic_scholar", "crossref"]
+        });
+        
+        await logToolCall(userId || "anonymous", "academic_search", "academic_engine",
+          { query: lastUserMessage.content }, { count: engineResult.papers.length, sources: engineResult.sources }, "success", Date.now() - searchStartTime);
 
-        if (scholarResults.length > 0) {
-          webSearchInfo = "\n\n**Artículos académicos encontrados en Google Scholar:**\n" +
-            scholarResults.map((r, i) =>
-              `[${i + 1}] Autores: ${r.authors || "No disponible"}\nAño: ${r.year || "No disponible"}\nTítulo: ${r.title}\nURL: ${r.url}\nResumen: ${r.snippet}\nCita sugerida: ${r.citation}`
+        if (engineResult.papers.length > 0) {
+          webSearchInfo = "\n\n**Artículos académicos encontrados (OpenAlex + Semantic Scholar + CrossRef):**\n" +
+            engineResult.papers.slice(0, 15).map((paper, i) =>
+              `[${i + 1}] Autores: ${paper.authors.map(a => a.name).join(", ") || "No disponible"}\nAño: ${paper.year || "No disponible"}\nTítulo: ${paper.title}\nJournal: ${paper.journal || "No disponible"}\nDOI: ${paper.doi || "No disponible"}\nURL: ${paper.url || paper.doi ? `https://doi.org/${paper.doi}` : "No disponible"}\nResumen: ${(paper.abstract || "No disponible").substring(0, 300)}...\nCita APA 7: ${generateAPACitation(paper)}`
             ).join("\n\n");
 
           // Capture web sources for citations
-          webSources = scholarResults
-            .filter(r => r.url)
-            .map(r => extractWebSource(r.url, r.title, r.snippet, r.year, r.imageUrl, r.siteName, r.canonicalUrl));
+          webSources = engineResult.papers
+            .filter(p => p.url || p.doi)
+            .map(p => extractWebSource(
+              p.url || `https://doi.org/${p.doi}`, 
+              p.title, 
+              p.abstract?.substring(0, 200) || "", 
+              p.year?.toString(), 
+              undefined, 
+              p.journal, 
+              p.doi ? `https://doi.org/${p.doi}` : undefined
+            ));
+            
+          console.log(`[ChatService:AcademicEngine] Found ${engineResult.papers.length} papers from ${engineResult.sources.map(s => s.name).join(", ")} in ${engineResult.searchTime}ms`);
         }
       } catch (error) {
-        await logToolCall(userId || "anonymous", "academic_search", "google_scholar",
+        await logToolCall(userId || "anonymous", "academic_search", "academic_engine",
           { query: lastUserMessage.content }, null, "error", Date.now() - searchStartTime, String(error));
-        console.error("Academic search error:", error);
+        console.error("Academic engine error, falling back to Google Scholar:", error);
+        
+        // Fallback to old Google Scholar search
+        try {
+          const scholarResults = await searchScholar(lastUserMessage.content, 15);
+          if (scholarResults.length > 0) {
+            webSearchInfo = "\n\n**Artículos académicos encontrados en Google Scholar:**\n" +
+              scholarResults.map((r, i) =>
+                `[${i + 1}] Autores: ${r.authors || "No disponible"}\nAño: ${r.year || "No disponible"}\nTítulo: ${r.title}\nURL: ${r.url}\nResumen: ${r.snippet}\nCita sugerida: ${r.citation}`
+              ).join("\n\n");
+            webSources = scholarResults
+              .filter(r => r.url)
+              .map(r => extractWebSource(r.url, r.title, r.snippet, r.year, r.imageUrl, r.siteName, r.canonicalUrl));
+          }
+        } catch (fallbackError) {
+          console.error("Google Scholar fallback also failed:", fallbackError);
+        }
       }
     }
   } else if (allowWebSearch && lastUserMessage && needsWebSearch(lastUserMessage.content) && shouldSearchWeb) {
