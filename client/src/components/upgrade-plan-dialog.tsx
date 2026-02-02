@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiFetch } from "@/lib/apiClient";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
     
     try {
       // First, get the actual price IDs from the backend
-      const priceResponse = await fetch("/api/stripe/price-ids");
+      const priceResponse = await apiFetch("/api/stripe/price-ids");
       const priceData = await priceResponse.json();
       
       const priceIdKey = PLAN_PRICE_IDS[planKey];
@@ -47,12 +48,12 @@ export function UpgradePlanDialog({ open, onOpenChange }: UpgradePlanDialogProps
         });
         
         // Trigger product creation
-        await fetch("/api/stripe/create-products", { method: "POST" });
+        await apiFetch("/api/stripe/create-products", { method: "POST" });
         return;
       }
       
       // Create checkout session
-      const checkoutResponse = await fetch("/api/checkout", {
+      const checkoutResponse = await apiFetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ priceId }),
