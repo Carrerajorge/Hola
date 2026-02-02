@@ -4955,6 +4955,45 @@ function ExcelManagerSection() {
 export default function AdminPage() {
   const [, setLocation] = useLocation();
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
+  
+  // Security: Verify admin role
+  const { data: currentUser, isLoading: isLoadingUser } = useQuery({
+    queryKey: ["/api/auth/user"],
+    queryFn: async () => {
+      const res = await fetch("/api/auth/user", { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    }
+  });
+
+  // Redirect non-admin users
+  useEffect(() => {
+    if (!isLoadingUser && currentUser && currentUser.role !== "admin") {
+      console.warn("[Admin] Access denied - user is not admin:", currentUser.email);
+      setLocation("/");
+    }
+  }, [currentUser, isLoadingUser, setLocation]);
+
+  // Show loading while checking auth
+  if (isLoadingUser) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // Block access if not admin
+  if (!currentUser || currentUser.role !== "admin") {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-background gap-4">
+        <Shield className="h-16 w-16 text-red-500" />
+        <h1 className="text-2xl font-bold">Acceso Denegado</h1>
+        <p className="text-muted-foreground">No tienes permisos de administrador.</p>
+        <Button onClick={() => setLocation("/")}>Volver al inicio</Button>
+      </div>
+    );
+  }
 
   const renderSection = () => {
     switch (activeSection) {
