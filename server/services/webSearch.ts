@@ -22,6 +22,7 @@ export interface WebSearchResponse {
 }
 
 const ACADEMIC_PATTERNS = [
+  // Citation requests
   /dame.*cita/i,
   /cita.*(apa|mla|chicago|harvard|ieee|vancouver)/i,
   /formato\s*(apa|mla|chicago|harvard|ieee|vancouver)/i,
@@ -29,22 +30,50 @@ const ACADEMIC_PATTERNS = [
   /normas?\s*apa/i,
   /estilo\s*(apa|mla)/i,
   /referencia.*bibliogr[áa]fica/i,
+  
+  // Scientific articles - Spanish
   /art[ií]culo.*cient[ií]fico/i,
+  /art[ií]culos?\s+cient[ií]ficos?/i,
   /investigaci[óo]n\s+(sobre|de|del)/i,
   /estudio.*cient[ií]fico/i,
   /publicaci[óo]n\s+acad[ée]mica/i,
   /paper\s+(sobre|de|del)/i,
   /tesis\s+(sobre|de|del)/i,
   /revista.*cient[ií]fica/i,
+  
+  // "buscame X articulos cientificos"
+  /buscame\s+\d+\s+art[ií]culos?/i,
+  /buscarme\s+\d+\s+art[ií]culos?/i,
+  /busca\s+\d+\s+art[ií]culos?/i,
+  /dame\s+\d+\s+art[ií]culos?/i,
+  /necesito\s+\d+\s+art[ií]culos?/i,
+  /encontrar\s+\d+\s+art[ií]culos?/i,
+  
+  // "articulos de/sobre"
+  /art[ií]culos?\s+(de|sobre|del)\s+/i,
+  /busca.*art[ií]culo.*cient[ií]fico/i,
+  /buscame.*art[ií]culo/i,
+  
+  // Academic sources
   /scholar/i,
+  /scopus/i,
+  /scielo/i,
+  /pubmed/i,
+  /web\s*of\s*science/i,
+  
+  // English patterns
   /academic\s+(article|paper|research)/i,
   /scientific\s+(article|paper|study)/i,
   /peer[\s-]?review/i,
   /bibliography/i,
   /citation\s+(in|for|style)/i,
-  /busca.*art[ií]culo.*cient[ií]fico/i,
+  /research\s+paper/i,
+  
+  // Additional Spanish patterns
   /necesito.*cita/i,
   /quiero.*cita/i,
+  /papers?\s+acad[ée]micos?/i,
+  /estudios?\s+acad[ée]micos?/i,
 ];
 
 const WEB_SEARCH_PATTERNS = [
