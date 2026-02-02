@@ -7,7 +7,19 @@ import { db } from "../db";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { getStripeClient } from "../stripeClient";
-import nodemailer from "nodemailer";
+
+// Dynamic import for nodemailer (optional dependency)
+let nodemailerModule: any = null;
+async function getNodemailer() {
+  if (!nodemailerModule) {
+    try {
+      nodemailerModule = await import("nodemailer");
+    } catch {
+      console.log("nodemailer not installed, email notifications disabled");
+    }
+  }
+  return nodemailerModule?.default || nodemailerModule;
+}
 
 // ============================================
 // TYPES
@@ -130,6 +142,12 @@ export async function notifyAdminOfPurchase(notification: PurchaseNotification):
 
 async function sendPurchaseEmail(notification: PurchaseNotification): Promise<boolean> {
   try {
+    const nodemailer = await getNodemailer();
+    if (!nodemailer) {
+      console.log("Email skipped: nodemailer not available");
+      return false;
+    }
+    
     // Create transporter (using environment variables)
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST || "smtp.gmail.com",
