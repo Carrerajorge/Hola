@@ -2670,17 +2670,23 @@ export function ChatInterface({
 
     // EMERGENCY BYPASS: For simple text messages without files, go directly to streaming API
     // This bypasses all the complex chat creation logic that's failing
-    if (hasInput && !hasFiles && !selectedTool && !selectedDocText) {
-      console.error("[EMERGENCY BYPASS] Simple text message - going direct to API");
+    // Also handle web search tool here
+    if (hasInput && !hasFiles && (!selectedTool || selectedTool === "web") && !selectedDocText) {
+      console.error("[EMERGENCY BYPASS] Simple text message - going direct to API", selectedTool === "web" ? "(with web search)" : "");
       const userInput = input.trim();
       setInput("");
+      
+      // Clear the web tool after use
+      if (selectedTool === "web") {
+        setSelectedTool(null);
+      }
       
       // Show user message immediately
       const userMsgId = `user-${Date.now()}`;
       const userMessage: Message = {
         id: userMsgId,
         role: "user",
-        content: userInput,
+        content: selectedTool === "web" ? `🌐 ${userInput}` : userInput,
         timestamp: new Date(),
         requestId: `req_${Date.now()}`
       };
@@ -2691,12 +2697,17 @@ export function ChatInterface({
       setStreamingContent("");
       
       try {
+        const isWebSearch = selectedTool === "web" || userInput.startsWith("🌐 ");
+        const cleanInput = userInput.replace(/^🌐\s*/, "");
+        
         const response = await fetch("/api/chat/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            messages: [{ role: "user", content: userInput }],
-            model: selectedModel || "grok-3"
+            messages: [{ role: "user", content: cleanInput }],
+            model: selectedModel || "grok-3",
+            forceWebSearch: isWebSearch,
+            webSearchAuto: isWebSearch
           })
         });
         

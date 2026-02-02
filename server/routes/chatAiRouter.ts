@@ -577,13 +577,46 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
     let claimedRun: any = null;
 
     try {
-      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool } = req.body;
+      const { messages: clientMessages, conversationId, runId, chatId, attachments, gptId, model, session_id, docTool, forceWebSearch, webSearchAuto } = req.body;
 
       // DEBUG: Log all incoming request parameters for docTool verification
-      console.log(`[Stream] 📥 REQUEST RECEIVED - docTool: ${JSON.stringify(docTool)}, chatId: ${chatId}, runId: ${runId}`);
+      console.log(`[Stream] 📥 REQUEST RECEIVED - docTool: ${JSON.stringify(docTool)}, chatId: ${chatId}, runId: ${runId}, forceWebSearch: ${forceWebSearch}`);
 
       if (!clientMessages || !Array.isArray(clientMessages)) {
         return res.status(400).json({ error: "Messages array is required" });
+      }
+
+      // WEB SEARCH MODE: If forceWebSearch is true, perform web search first
+      if (forceWebSearch || webSearchAuto) {
+        console.log(`[Stream] 🌐 WEB SEARCH MODE ACTIVATED`);
+        const lastUserMessage = [...clientMessages].reverse().find((m: any) => m.role === 'user');
+        const searchQuery = lastUserMessage?.content || '';
+        
+        if (searchQuery) {
+          try {
+            const { searchWeb } = await import('../services/webSearch');
+            const searchResults = await searchWeb(searchQuery, 5);
+            
+            if (searchResults.results.length > 0) {
+              // Format search results as context
+              const searchContext = searchResults.results
+                .map((r: any, i: number) => `[${i + 1}] ${r.title}\n${r.snippet}\nFuente: ${r.url}`)
+                .join('\n\n');
+              
+              // Add search results as system context
+              const systemMessage = {
+                role: 'system',
+                content: `El usuario ha solicitado búsqueda web. Aquí están los resultados de búsqueda para "${searchQuery}":\n\n${searchContext}\n\nUsa esta información para responder al usuario de forma útil y citando las fuentes cuando sea apropiado.`
+              };
+              
+              clientMessages.unshift(systemMessage);
+              console.log(`[Stream] 🌐 Web search found ${searchResults.results.length} results`);
+            }
+          } catch (searchError) {
+            console.error('[Stream] Web search error:', searchError);
+            // Continue without web search results
+          }
+        }
       }
 
       // CONTEXT FIX: Augment client messages with server-side history
