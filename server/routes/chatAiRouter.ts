@@ -623,6 +623,9 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
       const lastUserMsg = [...clientMessages].reverse().find((m: any) => m.role === 'user');
       const userQuery = lastUserMsg?.content || '';
       
+      // Store webSources for SSE response
+      let detectedWebSources: any[] = [];
+      
       // Always try to detect search needs, regardless of forceWebSearch/webSearchAuto flags
       if (userQuery) {
         try {
@@ -653,6 +656,19 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 };
                 
                 clientMessages.unshift(systemMessage);
+                
+                // Convert papers to webSources format for frontend cards
+                detectedWebSources = engineResult.papers.slice(0, 10).map(paper => ({
+                  url: paper.url || (paper.doi ? `https://doi.org/${paper.doi}` : ''),
+                  title: paper.title,
+                  snippet: paper.abstract?.substring(0, 200) || '',
+                  domain: paper.journal || 'Academic',
+                  favicon: null,
+                  imageUrl: null,
+                  siteName: paper.journal || engineResult.sources[0]?.name || 'Academic Source',
+                  publishedDate: paper.year ? `${paper.year}` : null
+                }));
+                
                 console.log(`[Stream] 🎓 Academic search found ${engineResult.papers.length} papers from ${engineResult.sources.length} sources`);
               }
             } catch (academicError) {
@@ -677,6 +693,19 @@ No uses markdown, emojis ni formatos especiales ya que tu respuesta será leída
                 };
                 
                 clientMessages.unshift(systemMessage);
+                
+                // Store webSources for frontend cards
+                detectedWebSources = searchResults.results.map((r: any) => ({
+                  url: r.url,
+                  title: r.title,
+                  snippet: r.snippet,
+                  domain: new URL(r.url).hostname.replace('www.', ''),
+                  favicon: r.favicon || null,
+                  imageUrl: r.imageUrl || null,
+                  siteName: r.siteName || new URL(r.url).hostname.replace('www.', ''),
+                  publishedDate: r.publishedDate || null
+                }));
+                
                 console.log(`[Stream] 🌐 Web search found ${searchResults.results.length} results`);
               }
             } catch (webError) {
@@ -1237,6 +1266,7 @@ ${attachmentContext}`;
         primaryAgent: unifiedContext?.requestSpec.primaryAgent,
         targetAgents: unifiedContext?.requestSpec.targetAgents,
         isAgenticMode: unifiedContext?.isAgenticMode,
+        webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
         timestamp: Date.now(),
         ...sessionMetadata
       });
