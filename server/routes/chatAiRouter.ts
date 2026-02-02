@@ -1380,6 +1380,15 @@ ${attachmentContext}`;
           }).catch(() => { });
         }
 
+        // Send done event with webSources for frontend NewsCards
+        writeSse(res, 'done', {
+          requestId,
+          runId: effectiveRunId,
+          assistantMessageId,
+          webSources: detectedWebSources.length > 0 ? detectedWebSources : undefined,
+          timestamp: Date.now()
+        });
+
         writeSse(res, 'complete', {
           requestId,
           runId: effectiveRunId,
