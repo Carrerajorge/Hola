@@ -4419,6 +4419,7 @@ IMPORTANTE:
             let lastSeq = -1; // Track last processed sequence for ordering
             let currentEventType = "chunk"; // Track current event type
             let streamComplete = false;
+            let streamWebSources: any[] | undefined = undefined; // Capture webSources from done event
 
             if (!reader) {
               throw new Error("No response body for SSE streaming");
@@ -4464,6 +4465,11 @@ IMPORTANTE:
                   // Handle completion events (done or complete)
                   if (currentEventType === 'complete' || currentEventType === 'done' || data.done === true) {
                     console.debug('[SSE] Stream complete event received');
+                    // Capture webSources from done event
+                    if (data.webSources && Array.isArray(data.webSources)) {
+                      streamWebSources = data.webSources;
+                      console.debug('[SSE] Captured webSources:', streamWebSources.length);
+                    }
                     streamComplete = true;
                     break;
                   }
@@ -4581,6 +4587,7 @@ IMPORTANTE:
                 userMessageId: userMsgId,
                 confidence: uncertainty.confidence,
                 uncertaintyReason: uncertainty.reason,
+                webSources: streamWebSources, // Include captured webSources for NewsCards
               };
               await onSendMessage(aiMsg);
             }
