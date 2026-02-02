@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,8 @@ import { Badge } from "@/components/ui/badge";
 import { IliaGPTLogo } from "@/components/iliagpt-logo";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { apiFetch } from "@/lib/apiClient";
+import { formatPeriodEndEs, shouldShowWorkspaceDeactivationBanner } from "@/lib/billing";
 
 type WorkspaceSection = "general" | "members" | "permissions" | "billing" | "gpt" | "apps" | "groups" | "analytics" | "identity";
 
@@ -55,9 +57,26 @@ export default function WorkspaceSettingsPage() {
   const searchString = useSearch();
   const [activeSection, setActiveSection] = useState<WorkspaceSection>("general");
   const [workspaceName, setWorkspaceName] = useState("Espacio de trabajo de Usuario");
-  
+
   const orgId = "org-jafx80c2QSREjgK800cnLCwe";
   const workspaceId = "09c512b0-ee54-4546-9016-b5f13fa0477a";
+
+  const [billingStatus, setBillingStatus] = useState<{
+    subscriptionStatus: string | null;
+    subscriptionPeriodEnd: string | null;
+    willDeactivate: boolean;
+  } | null>(null);
+
+  const deactivationDateLabel = useMemo(() => {
+    return formatPeriodEndEs(billingStatus?.subscriptionPeriodEnd ?? null);
+  }, [billingStatus?.subscriptionPeriodEnd]);
+
+  const showDeactivationBanner = useMemo(() => {
+    return shouldShowWorkspaceDeactivationBanner({
+      subscriptionStatus: billingStatus?.subscriptionStatus,
+      subscriptionPeriodEnd: billingStatus?.subscriptionPeriodEnd,
+    });
+  }, [billingStatus?.subscriptionStatus, billingStatus?.subscriptionPeriodEnd]);
 
   useEffect(() => {
     const params = new URLSearchParams(searchString);
@@ -66,6 +85,23 @@ export default function WorkspaceSettingsPage() {
       setActiveSection(section);
     }
   }, [searchString]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch("/api/billing/status");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setBillingStatus(data);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -1001,20 +1037,36 @@ export default function WorkspaceSettingsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex justify-end px-6 py-3">
-        <div className="inline-flex items-center gap-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2">
-          <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
-          <div className="text-sm">
-            <span className="font-medium">Este espacio de trabajo se desactivará.</span>
-            <span className="text-muted-foreground ml-1">
-              Tendrás acceso al espacio de trabajo hasta que finalice el ciclo de facturación el 28 de diciembre de 2025.
-            </span>
+      {showDeactivationBanner && (
+        <div className="flex justify-end px-6 py-3">
+          <div className="inline-flex items-center gap-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-4 py-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
+            <div className="text-sm">
+              <span className="font-medium">Este espacio de trabajo se desactivará.</span>
+              <span className="text-muted-foreground ml-1">
+                Tendrás acceso al espacio de trabajo hasta que finalice el ciclo de facturación{deactivationDateLabel ? ` el ${deactivationDateLabel}.` : "."}
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-2 flex-shrink-0"
+              data-testid="button-reactivate"
+              onClick={async () => {
+                try {
+                  const res = await apiFetch("/api/stripe/portal", { method: "POST" });
+                  const data = await res.json();
+                  if (data?.url) window.location.href = data.url;
+                } catch {
+                  // ignore
+                }
+              }}
+            >
+              Reactivar
+            </Button>
           </div>
-          <Button variant="outline" size="sm" className="ml-2 flex-shrink-0" data-testid="button-reactivate">
-            Reactivar
-          </Button>
         </div>
-      </div>
+      )}
 
       <div className="flex">
         <div className="w-64 border-r min-h-[calc(100vh-49px)] p-4">

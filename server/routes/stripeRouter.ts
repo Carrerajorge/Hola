@@ -477,6 +477,39 @@ export function createStripeRouter() {
     }
   });
 
+  router.get("/api/billing/status", async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const userId = user?.claims?.sub;
+
+      if (!userId) {
+        return res.status(401).json({ error: "Debes iniciar sesión" });
+      }
+
+      const [dbUser] = await db.select().from(users).where(eq(users.id, userId));
+      const subscriptionStatus = dbUser?.subscriptionStatus || null;
+      const subscriptionPeriodEnd = dbUser?.subscriptionPeriodEnd || null;
+
+      const now = Date.now();
+      const periodEndMs = subscriptionPeriodEnd ? new Date(subscriptionPeriodEnd).getTime() : null;
+
+      const willDeactivate =
+        !!subscriptionStatus &&
+        subscriptionStatus !== "active" &&
+        !!periodEndMs &&
+        periodEndMs > now;
+
+      res.json({
+        subscriptionStatus,
+        subscriptionPeriodEnd,
+        willDeactivate,
+      });
+    } catch (error: any) {
+      console.error("Billing status error:", error);
+      res.status(500).json({ error: "Failed to get billing status" });
+    }
+  });
+
   router.post("/api/stripe/portal", async (req, res) => {
     try {
       const user = (req as any).user;
