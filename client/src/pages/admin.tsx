@@ -344,7 +344,10 @@ function UsersSection() {
     queryFn: async () => {
       const res = await fetch("/api/admin/users", { credentials: "include" });
       const data = await res.json();
-      return Array.isArray(data) ? data : [];
+      // Handle both array response and paginated response
+      if (Array.isArray(data)) return data;
+      if (data?.users && Array.isArray(data.users)) return data.users;
+      return [];
     }
   });
 
